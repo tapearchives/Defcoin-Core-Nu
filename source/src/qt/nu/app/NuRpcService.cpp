@@ -299,6 +299,36 @@ QStringList explorerOutputAddresses(const QJsonObject& script)
     return out;
 }
 
+bool isLikelyBase58AddressText(const QString& value);
+
+QStringList recognizedExplorerAddresses(const QStringList& candidates)
+{
+    QStringList out;
+    for (const QString& candidate : candidates) {
+        const QString address = candidate.trimmed();
+        if (isLikelyBase58AddressText(address) && !out.contains(address)) out.push_back(address);
+    }
+    return out;
+}
+
+QString explorerAddressLinkHtml(const QString& address)
+{
+    const QString clean = address.trimmed();
+    if (!isLikelyBase58AddressText(clean)) return clean.toHtmlEscaped();
+    return QStringLiteral("<a href=\"nu://address/%1\">%2</a>")
+        .arg(QString::fromLatin1(QUrl::toPercentEncoding(clean)).toHtmlEscaped(),
+             clean.toHtmlEscaped());
+}
+
+QString explorerAddressLinksHtml(const QStringList& addresses)
+{
+    const QStringList clean_addresses = recognizedExplorerAddresses(addresses);
+    QStringList links;
+    links.reserve(clean_addresses.size());
+    for (const QString& address : clean_addresses) links.push_back(explorerAddressLinkHtml(address));
+    return links.join(QStringLiteral("<br>"));
+}
+
 bool walletDefaultDatExists(const QString& data_dir)
 {
     const QDir dir(data_dir);
@@ -1108,11 +1138,21 @@ bool isLikelyBase58AddressText(const QString& value)
 {
     const QString clean = value.trimmed();
     if (clean.size() < 26 || clean.size() > 64) return false;
-    for (const QChar ch : clean) {
-        if (ch.unicode() > 0x7f) return false;
-        if (!std::strchr(BASE58_ALPHABET, static_cast<char>(ch.toLatin1()))) return false;
+    QByteArray payload;
+    if (!decodeBase58CheckPayload(clean, &payload) || payload.size() != 21) return false;
+    const unsigned char version = static_cast<unsigned char>(payload.at(0));
+    switch (version) {
+    case 30:  // mainnet P2PKH, D...
+    case 50:  // mainnet canonical P2SH, M...
+    case 5:   // legacy P2SH, 3...
+    case 22:  // tool/BeerWallet-era P2SH, 9.../A...
+    case 111: // test/regtest P2PKH
+    case 196: // test/regtest legacy P2SH
+    case 58:  // test/regtest canonical P2SH
+        return true;
+    default:
+        return false;
     }
-    return true;
 }
 
 bool isSafeHttpUrl(const QUrl& url)
@@ -6473,17 +6513,14 @@ void NuRpcService::openTransactionInExplorer(const QString& txid)
         for (const QJsonValue& value : vout) {
             const QJsonObject out = value.toObject();
             const QJsonObject script = out.value(QStringLiteral("scriptPubKey")).toObject();
-            QString address;
-            const QJsonArray addresses = script.value(QStringLiteral("addresses")).toArray();
-            if (!addresses.isEmpty()) address = addresses.first().toString();
-            if (address.isEmpty()) address = script.value(QStringLiteral("address")).toString();
+            const QStringList addresses = recognizedExplorerAddresses(explorerOutputAddresses(script));
+            const QString address_html = explorerAddressLinksHtml(addresses);
             output_rows += QStringLiteral("<tr><td>%1</td><td>%2 DFC</td><td>%3</td></tr>")
                 .arg(QString::number(out.value(QStringLiteral("n")).toInt()).toHtmlEscaped(),
                      QString::number(out.value(QStringLiteral("value")).toDouble(), 'f', 8).toHtmlEscaped(),
-                     address.isEmpty()
+                     address_html.isEmpty()
                          ? QStringLiteral("Unknown or nonstandard").toHtmlEscaped()
-                         : QStringLiteral("<a href=\"nu://address/%1\">%2</a>")
-                            .arg(QString::fromLatin1(QUrl::toPercentEncoding(address)).toHtmlEscaped(), address.toHtmlEscaped()));
+                         : address_html);
         }
         const QString blockhash = tx.value(QStringLiteral("blockhash")).toString();
         const QString block_link = blockhash.isEmpty()
@@ -6521,7 +6558,7 @@ void NuRpcService::openAddressInExplorer(const QString& address)
     }
     if (!isLikelyBase58AddressText(clean_address)) {
         Q_EMIT userMessage(QStringLiteral("Address not opened"),
-                           QStringLiteral("Enter a Defcoin-style Base58 address before opening explorer details."));
+                           QStringLiteral("Enter a valid Defcoin Base58 address, such as D..., M..., legacy 3..., or compatibility 9.../A... before opening explorer details."));
         return;
     }
 
@@ -6732,7 +6769,7 @@ void NuRpcService::searchExplorer(const QString& query)
         return;
     }
     if (!isLikelyBase58AddressText(clean)) {
-        emitExplorerError(QStringLiteral("Explorer search"), QStringLiteral("Search input is not a recognized block height, hash, or Defcoin-style Base58 address."));
+        emitExplorerError(QStringLiteral("Explorer search"), QStringLiteral("Search input is not a recognized block height, block hash, transaction ID, or Defcoin Base58 address."));
         return;
     }
     openAddressInExplorer(clean);
@@ -7641,14 +7678,24 @@ void NuRpcService::requestTransactionDetails(const QString& txid)
         }
         const QJsonObject tx = result.toObject();
         const QJsonArray details = tx.value(QStringLiteral("details")).toArray();
-        QString address;
+        QStringList addresses;
         QString label;
         QString category;
-        if (!details.isEmpty()) {
-            const QJsonObject first = details.first().toObject();
-            address = first.value(QStringLiteral("address")).toString();
-            label = first.value(QStringLiteral("label")).toString();
-            category = first.value(QStringLiteral("category")).toString();
+        for (const QJsonValue& value : details) {
+            const QJsonObject detail = value.toObject();
+            if (label.isEmpty()) label = detail.value(QStringLiteral("label")).toString();
+            if (category.isEmpty()) category = detail.value(QStringLiteral("category")).toString();
+            const QString candidate = detail.value(QStringLiteral("address")).toString().trimmed();
+            if (isLikelyBase58AddressText(candidate) && !addresses.contains(candidate)) addresses.push_back(candidate);
+        }
+        const QJsonObject decoded = tx.value(QStringLiteral("decoded")).toObject();
+        const QJsonArray decoded_vout = decoded.value(QStringLiteral("vout")).toArray();
+        for (const QJsonValue& value : decoded_vout) {
+            const QJsonObject out = value.toObject();
+            const QStringList output_addresses = recognizedExplorerAddresses(explorerOutputAddresses(out.value(QStringLiteral("scriptPubKey")).toObject()));
+            for (const QString& candidate : output_addresses) {
+                if (!addresses.contains(candidate)) addresses.push_back(candidate);
+            }
         }
 
         auto localTime = [](const QJsonValue& value) {
@@ -7659,6 +7706,10 @@ void NuRpcService::requestTransactionDetails(const QString& txid)
             return QStringLiteral("<tr><th>%1</th><td>%2</td></tr>")
                 .arg(key.toHtmlEscaped(), value.toHtmlEscaped());
         };
+        auto rowHtmlRaw = [](const QString& key, const QString& value_html) {
+            return QStringLiteral("<tr><th>%1</th><td>%2</td></tr>")
+                .arg(key.toHtmlEscaped(), value_html);
+        };
 
         QString html = QStringLiteral("<h2>Transaction details</h2><table>");
         html += rowHtml(QStringLiteral("Status"), tx.value(QStringLiteral("confirmations")).toInt() > 0 ? QStringLiteral("Confirmed") : QStringLiteral("Unconfirmed"));
@@ -7667,7 +7718,7 @@ void NuRpcService::requestTransactionDetails(const QString& txid)
         html += rowHtml(QStringLiteral("Received by node"), localTime(tx.value(QStringLiteral("timereceived"))));
         if (!category.isEmpty()) html += rowHtml(QStringLiteral("Type"), category.left(1).toUpper() + category.mid(1));
         if (!label.isEmpty()) html += rowHtml(QStringLiteral("Label"), label);
-        if (!address.isEmpty()) html += rowHtml(QStringLiteral("Address"), address);
+        if (!addresses.isEmpty()) html += rowHtmlRaw(addresses.size() == 1 ? QStringLiteral("Address") : QStringLiteral("Addresses"), explorerAddressLinksHtml(addresses));
         html += rowHtml(QStringLiteral("Amount"), QString::number(tx.value(QStringLiteral("amount")).toDouble(), 'f', 8) + QStringLiteral(" DFC"));
         if (tx.contains(QStringLiteral("fee"))) {
             html += rowHtml(QStringLiteral("Fee"), QString::number(tx.value(QStringLiteral("fee")).toDouble(), 'f', 8) + QStringLiteral(" DFC"));
@@ -7680,25 +7731,29 @@ void NuRpcService::requestTransactionDetails(const QString& txid)
             html += QStringLiteral("<h3>Internal explorer</h3><p>Open cached SQLite-backed explorer views for:</p><ul>");
             html += QStringLiteral("<li>Transaction ID: <a href=\"nu://transaction/%1\" title=\"Open internal explorer window\">%2</a></li>")
                 .arg(QString::fromLatin1(QUrl::toPercentEncoding(clean_txid)).toHtmlEscaped(), clean_txid.toHtmlEscaped());
-            if (!address.isEmpty()) {
-                html += QStringLiteral("<li>Wallet Address: <a href=\"nu://address/%1\" title=\"Open internal explorer window\">%2</a></li>")
+            for (const QString& address : addresses) {
+                html += QStringLiteral("<li>Wallet address: <a href=\"nu://address/%1\" title=\"Open internal explorer window\">%2</a></li>")
                     .arg(QString::fromLatin1(QUrl::toPercentEncoding(address)).toHtmlEscaped(), address.toHtmlEscaped());
             }
             html += QStringLiteral("</ul>");
         }
 
         const QString tx_url = explorerUrlForTransaction(clean_txid);
-        const QString address_url = explorerUrlForAddress(address);
-        if (!tx_url.isEmpty() || !address_url.isEmpty()) {
+        QList<QPair<QString, QString>> address_links;
+        for (const QString& address : addresses) {
+            const QString address_url = explorerUrlForAddress(address);
+            if (!address_url.isEmpty()) address_links.push_back(qMakePair(address_url, address));
+        }
+        if (!tx_url.isEmpty() || !address_links.isEmpty()) {
             const QString host = QUrl(m_third_party_tx_url, QUrl::StrictMode).host();
             html += QStringLiteral("<h3>Explorer links</h3><p>Use %1 block explorer to open:</p><ul>").arg(host.toHtmlEscaped());
             if (!tx_url.isEmpty()) {
                 html += QStringLiteral("<li>Transaction ID: <a href=\"%1\" title=\"Open %1\">%2</a></li>")
                     .arg(tx_url.toHtmlEscaped(), clean_txid.toHtmlEscaped());
             }
-            if (!address_url.isEmpty()) {
-                html += QStringLiteral("<li>Wallet Address: <a href=\"%1\" title=\"Open %1\">%2</a></li>")
-                    .arg(address_url.toHtmlEscaped(), address.toHtmlEscaped());
+            for (const QPair<QString, QString>& link : address_links) {
+                html += QStringLiteral("<li>Wallet address: <a href=\"%1\" title=\"Open %1\">%2</a></li>")
+                    .arg(link.first.toHtmlEscaped(), link.second.toHtmlEscaped());
             }
             html += QStringLiteral("</ul>");
         }

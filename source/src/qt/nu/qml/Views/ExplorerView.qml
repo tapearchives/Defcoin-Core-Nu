@@ -42,7 +42,15 @@ ColumnLayout {
 
             Label {
                 Layout.fillWidth: true
-                text: "Search for a block height, block hash, transaction ID, or wallet address. Nu checks the local SQLite explorer cache first, then asks the connected backend when needed."
+                text: "Search blockchain"
+                color: NuTokens.textPrimary
+                font.pixelSize: NuTokens.fontBodyLarge
+                font.weight: Font.DemiBold
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: "Open anything the Defcoin explorer can identify: block height, block hash, transaction ID, or wallet address. Nu checks the local SQLite explorer cache first, then asks the connected backend when needed."
                 color: NuTokens.textSecondary
                 font.pixelSize: NuTokens.fontBody
                 wrapMode: Text.WordWrap
@@ -55,8 +63,12 @@ ColumnLayout {
                 NuTextField {
                     id: searchField
                     Layout.fillWidth: true
-                    placeholderText: "Block height, block hash, tx hash, or address"
-                    helpText: "Indexed block, transaction, and address data is read from the local SQLite cache. Missing transaction details fall back to backend RPC when connected."
+                    Layout.preferredHeight: 56
+                    font.pixelSize: NuTokens.fontBodyLarge
+                    topPadding: NuTokens.spaceMd
+                    bottomPadding: NuTokens.spaceMd
+                    placeholderText: "Block height, block hash, transaction ID, or address"
+                    helpText: "Search block heights, 64-character block or transaction hashes, and supported Defcoin Base58 address forms."
                     Keys.onPressed: (event) => {
                         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                             NuService.searchExplorer(searchField.text)
@@ -67,7 +79,8 @@ ColumnLayout {
 
                 NuActionButton {
                     text: "Search"
-                    Layout.preferredWidth: 128
+                    Layout.preferredWidth: 150
+                    Layout.preferredHeight: 56
                     primary: true
                     helpText: "Open the matching item in an independent internal explorer window."
                     onClicked: NuService.searchExplorer(searchField.text)
