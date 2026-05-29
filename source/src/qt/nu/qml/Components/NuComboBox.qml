@@ -1,13 +1,21 @@
 pragma ComponentBehavior: Bound
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Basic 2.15 as Basic
 
 import "../Theme"
 
-ComboBox {
+Basic.ComboBox {
     id: root
     property string helpText: ""
     property bool suppressToolTip: false
+    property var textFormatter: null
+
+    function formattedText(value) {
+        var raw = value === undefined || value === null ? "" : String(value)
+        return root.textFormatter ? root.textFormatter(raw) : raw
+    }
+
     font.family: NuTokens.bodyFont
     font.pixelSize: NuTokens.fontBody
     leftPadding: NuTokens.spaceMd
@@ -32,20 +40,54 @@ ComboBox {
     onActiveFocusChanged: if (!activeFocus) suppressToolTip = false
 
     contentItem: Text {
-        text: root.displayText
+        text: root.formattedText(root.currentText)
         color: NuTokens.textPrimary
         font: root.font
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
     }
 
-    indicator: Text {
+    indicator: Item {
+        width: 24
+        height: 24
         anchors.right: parent.right
-        anchors.rightMargin: NuTokens.spaceMd
+        anchors.rightMargin: NuTokens.spaceSm
         anchors.verticalCenter: parent.verticalCenter
-        text: "v"
-        color: NuTokens.textSecondary
-        font.pixelSize: NuTokens.fontBody
+
+        Canvas {
+            id: arrowCanvas
+            anchors.centerIn: parent
+            width: 18
+            height: 18
+
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.lineWidth = root.activeFocus ? 2.1 : 1.7
+                ctx.lineCap = "round"
+                ctx.lineJoin = "round"
+                ctx.strokeStyle = root.popup.visible || root.hovered || root.activeFocus ? NuTokens.textPrimary : NuTokens.textSecondary
+                ctx.beginPath()
+                ctx.moveTo(5.5, 7.5)
+                ctx.lineTo(9.0, 11.0)
+                ctx.lineTo(12.5, 7.5)
+                ctx.stroke()
+                ctx.fillStyle = root.popup.visible || root.hovered || root.activeFocus ? NuTokens.textPrimary : NuTokens.textSecondary
+                ctx.beginPath()
+                ctx.arc(9.0, 13.4, 1.15, 0, Math.PI * 2)
+                ctx.fill()
+            }
+
+            Connections {
+                target: root
+                function onActiveFocusChanged() { arrowCanvas.requestPaint() }
+                function onHoveredChanged() { arrowCanvas.requestPaint() }
+            }
+            Connections {
+                target: root.popup
+                function onVisibleChanged() { arrowCanvas.requestPaint() }
+            }
+        }
     }
 
     background: Rectangle {
@@ -55,34 +97,61 @@ ComboBox {
         radius: NuTokens.radiusSmall
     }
 
-    delegate: ItemDelegate {
+    delegate: Item {
         id: delegateRoot
+        required property int index
         required property string modelData
-        width: root.width
-        text: delegateRoot.modelData
-        font.pixelSize: NuTokens.fontBody
-        contentItem: Text {
-            text: delegateRoot.modelData
+        width: root.popup.width
+        implicitHeight: 34
+        height: 34
+
+        HoverHandler {
+            id: rowHover
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: rowHover.hovered || root.highlightedIndex === delegateRoot.index ? "#eeeeea" : NuTokens.panelBase
+        }
+
+        Text {
+            anchors.fill: parent
+            anchors.leftMargin: NuTokens.spaceMd
+            anchors.rightMargin: NuTokens.spaceXl
+            text: root.formattedText(delegateRoot.modelData)
             color: NuTokens.textPrimary
             font: root.font
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
+            clip: true
         }
-        background: Rectangle {
-            color: delegateRoot.highlighted ? "#eeeeea" : NuTokens.panelBase
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.currentIndex = delegateRoot.index
+                root.activated(delegateRoot.index)
+                root.popup.close()
+            }
         }
     }
 
-    popup: Popup {
+    popup: Basic.Popup {
         y: root.height + 2
-        width: root.width
-        implicitHeight: contentItem.implicitHeight
+        width: Math.max(root.width, 420)
+        implicitHeight: Math.min(contentItem.implicitHeight, 340)
         padding: 1
         contentItem: ListView {
+            id: popupList
             clip: true
-            implicitHeight: contentHeight
+            implicitHeight: Math.min(contentHeight, 340)
             model: root.popup.visible ? root.delegateModel : null
-            currentIndex: root.highlightedIndex
+            boundsBehavior: Flickable.StopAtBounds
+            Basic.ScrollBar.vertical: Basic.ScrollBar {
+                policy: popupList.contentHeight > popupList.height ? Basic.ScrollBar.AlwaysOn : Basic.ScrollBar.AsNeeded
+            }
         }
         background: Rectangle {
             color: NuTokens.panelBase

@@ -4500,7 +4500,7 @@ RPCConsole::RPCConsole(interfaces::Node& node, const PlatformStyle *_platformSty
         add_detail_row(20, tr("Node"), QStringLiteral("peerInspectorNode"));
         add_detail_row(21, tr("Port"), QStringLiteral("peerInspectorPort"));
         add_detail_row(22, tr("FQDN"), QStringLiteral("peerInspectorFqdn"), tr("Reverse DNS for this peer. [NA: LAN] is shown when no local DNS name is available."));
-        add_detail_row(23, tr("Domain Alias"), QStringLiteral("peerInspectorCustomHostname"), tr("Seed domain, custom host label, or LAN device name discovered through local naming tools."));
+        add_detail_row(23, tr("Known DNS Name"), QStringLiteral("peerInspectorCustomHostname"), tr("Known DNS name, configured seed, custom host label, or LAN device name associated with this peer."));
         add_detail_row(24, tr("Seed"), QStringLiteral("peerInspectorSeed"));
         add_detail_row(25, tr("Geo"), QStringLiteral("peerInspectorGeo"));
         add_detail_row(26, tr("City, St"), QStringLiteral("peerInspectorCityState"), tr("Best-effort location. Public peers use their IP address; local and LAN rows use this node's public WAN address."));

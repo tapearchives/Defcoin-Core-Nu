@@ -4,10 +4,15 @@
 
 #include <wallet/walletutil.h>
 
+#include <chainparams.h>
+#include <key_io.h>
 #include <logging.h>
 #include <util/system.h>
 
 #include <boost/version.hpp>
+
+#include <cassert>
+#include <stdexcept>
 
 bool ExistsBerkeleyDatabase(const fs::path& path);
 #ifdef USE_SQLITE
@@ -100,6 +105,51 @@ std::vector<fs::path> ListWalletDir()
     }
 
     return paths;
+}
+
+WalletDescriptor GenerateWalletDescriptor(const CExtPubKey& master_key, const OutputType& addr_type, bool internal)
+{
+    const int64_t creation_time = GetTime();
+    const std::string xpub = EncodeExtPubKey(master_key);
+
+    std::string desc_prefix;
+    std::string desc_suffix = "/*)";
+    switch (addr_type) {
+    case OutputType::LEGACY: {
+        desc_prefix = "pkh(" + xpub + "/44h";
+        break;
+    }
+    case OutputType::P2SH_SEGWIT: {
+        desc_prefix = "sh(wpkh(" + xpub + "/49h";
+        desc_suffix += ")";
+        break;
+    }
+    case OutputType::BECH32: {
+        desc_prefix = "wpkh(" + xpub + "/84h";
+        break;
+    }
+    case OutputType::MWEB: {
+        desc_prefix = "mweb(" + xpub + "/100h";
+        break;
+    }
+    } // no default case, so the compiler can warn about missing cases
+    assert(!desc_prefix.empty());
+
+    // Preserve the existing Litecoin-derived Defcoin descriptor path: mainnet
+    // uses coin type 2h, while test chains use 1h. This helper mirrors Bitcoin
+    // Core's descriptor scaffold but keeps Defcoin's current derivation policy.
+    desc_prefix += Params().IsTestChain() ? "/1h" : "/2h";
+
+    const std::string internal_path = internal ? "/1" : "/0";
+    const std::string desc_str = desc_prefix + "/0h" + internal_path + desc_suffix;
+
+    FlatSigningProvider keys;
+    std::string error;
+    std::unique_ptr<Descriptor> desc = Parse(desc_str, keys, error, false);
+    if (!desc) {
+        throw std::runtime_error("Error parsing generated wallet descriptor: " + error);
+    }
+    return WalletDescriptor(std::move(desc), creation_time, 0, 0, 0);
 }
 
 bool IsFeatureSupported(int wallet_version, int feature_version)

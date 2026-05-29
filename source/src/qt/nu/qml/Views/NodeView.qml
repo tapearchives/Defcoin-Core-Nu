@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Basic 2.15 as Basic
 import QtQuick.Layouts 1.15
 import Defcoin.Nu 1.0
 
@@ -14,7 +15,10 @@ ColumnLayout {
     property var frozenTrafficSamples: []
     property real trafficWindowStart: 0
     property real trafficWindowEnd: 1
-    readonly property int trafficMaxChartSeconds: 15 * 60
+    property string logFilterError: ""
+    property int shownLogLineCount: 0
+    property var logFilterPresetModel: []
+    readonly property int trafficMaxChartSeconds: 7 * 24 * 60 * 60
     property var simplePeerColumns: ["Node", "Dir", "IP Address: Port", "Ping", "Sent", "Rec'd", "User Agent"]
     property var simplePeerTypes: ["number", "text", "ipport", "duration", "bytes", "bytes", "text"]
     property var simplePeerWeights: [0.38, 0.24, 1.7, 0.42, 0.42, 0.42, 1.35]
@@ -29,7 +33,7 @@ ColumnLayout {
         "Total bytes received from this peer since the connection opened.",
         "Software name and version reported by the peer."
     ]
-    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "DNS Name", "Domain Alias", "Protocol\nVersion", "Magic", "Svcs", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Conn Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
+    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "Reverse\nDNS Name", "Known\nDNS Name", "Protocol\nVersion", "Magic", "Svcs", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
     property var detailedPeerTypes: ["number", "text", "ipport", "number", "text", "text", "number", "text", "text", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
     property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 1.05, 1.05, 0.5, 0.55, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
     property var detailedPeerMinimums: [44, 34, 128, 46, 90, 96, 62, 74, 54, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
@@ -39,8 +43,8 @@ ColumnLayout {
         "Connection direction: In means the peer connected to this wallet; Out means this wallet connected to the peer.",
         "Peer IP address without the port. IPv4 values use fixed-width octet spacing so dots align.",
         "Peer TCP port.",
-        "Best-effort reverse DNS name for the peer IP address. Blank means no DNS name has resolved yet.",
-        "Known configured seed domain associated with this peer address, when the address matches a Defcoin seed result.",
+        "Best-effort reverse DNS name for the peer IP address. Blank means no reverse DNS name has resolved yet.",
+        "Known seed/domain name or LAN workstation name associated with this peer address. LAN names are best-effort and appear as LAN:<machine name> when LAN discovery is enabled.",
         "P2P protocol version reported by the peer.",
         "Actual network message-start bytes selected for this peer, such as defc014e or fbc0b6db.",
         "Compact service flags advertised by the peer, such as N for NODE_NETWORK or W for witness support.",
@@ -71,26 +75,27 @@ ColumnLayout {
         if (minutes < 60) return remainder === 0 ? minutes + " min" : minutes + " min " + remainder + " sec"
         const hours = Math.floor(minutes / 60)
         const minuteRemainder = minutes % 60
+        if (hours >= 24) {
+            const days = Math.floor(hours / 24)
+            const hourRemainder = hours % 24
+            const dayText = days === 1 ? "1 day" : days + " days"
+            return hourRemainder === 0 ? dayText : dayText + " " + hourRemainder + " hr"
+        }
         return minuteRemainder === 0 ? hours + " hr" : hours + " hr " + minuteRemainder + " min"
     }
 
     function sampleRangeText() {
         var samples = root.trafficPaused ? root.frozenTrafficSamples : NuService.trafficSamples
         if (!samples || samples.length < 2) return "Waiting for samples"
-        var first = samples[0].seconds
-        var last = samples[samples.length - 1].seconds
-        var span = Math.max(1, last - first)
-        var startSeconds = first + span * root.trafficWindowStart
-        var endSeconds = first + span * root.trafficWindowEnd
         var firstTime = samples[0].timestampMs ? samples[0].timestampMs : Date.now()
-        var startDate = new Date(firstTime + (startSeconds - first) * 1000)
-        var endDate = new Date(firstTime + (endSeconds - first) * 1000)
-        var visibleSeconds = Math.max(0, endSeconds - startSeconds)
+        var lastTime = samples[samples.length - 1].timestampMs ? samples[samples.length - 1].timestampMs : firstTime
+        var spanMs = Math.max(1000, lastTime - firstTime)
+        var startDate = new Date(firstTime + spanMs * root.trafficWindowStart)
+        var endDate = new Date(firstTime + spanMs * root.trafficWindowEnd)
+        var visibleSeconds = Math.max(0, (endDate.getTime() - startDate.getTime()) / 1000)
         var text = startDate.toLocaleString() + " - " + endDate.toLocaleString()
         text += " | " + root.durationText(visibleSeconds) + " visible"
-        if (span >= root.trafficMaxChartSeconds - 2) {
-            text += " | Max chart length: " + root.durationText(root.trafficMaxChartSeconds)
-        }
+        text += " | Max. chart length: " + root.durationText(root.trafficMaxChartSeconds)
         return text
     }
 
@@ -102,7 +107,196 @@ ColumnLayout {
         return 0 // Status
     }
 
+    function logVerbosityName(level) {
+        const names = ["All details", "Standard", "Important", "Warnings"]
+        const index = Math.max(0, Math.min(3, Math.round(level)))
+        return names[index]
+    }
+
+    function safeLogRegex(pattern) {
+        const clean = String(pattern || "")
+        if (clean.length === 0) return null
+        if (clean.length > 160) {
+            root.logFilterError = "Regex filters are limited to 160 characters."
+            return false
+        }
+        try {
+            return new RegExp(clean, "i")
+        } catch (error) {
+            root.logFilterError = "Malformed regex: " + error.message
+            return false
+        }
+    }
+
+    function logLineBucket(line) {
+        const text = String(line || "").toLowerCase()
+
+        // Bucket numbers intentionally match the verbosity slider threshold:
+        // 0 = raw details, 1 = standard operational lines, 2 = important milestones,
+        // 3 = warnings/problems only.
+        if (text.indexOf("fatal") >= 0 || text.indexOf("crash") >= 0 || text.indexOf("error") >= 0
+                || text.indexOf("failed") >= 0 || text.indexOf("warning") >= 0
+                || text.indexOf("not defcoin-prefixed") >= 0 || text.indexOf("disconnecting before address relay") >= 0
+                || text.indexOf("disconnecting outbound peer") >= 0 || text.indexOf("old chain") >= 0
+                || text.indexOf("reject") >= 0 || text.indexOf("banned") >= 0 || text.indexOf("timeout") >= 0
+                || text.indexOf("orphan") >= 0 || text.indexOf("reorg") >= 0 || text.indexOf("stale") >= 0) {
+            return 3
+        }
+
+        if (text.indexOf("----- nu startup diagnostics") >= 0
+                || text.indexOf("nu startup: frontend application launched") >= 0
+                || text.indexOf("nu startup: network preferences") >= 0
+                || text.indexOf("nu startup: wallet selected") >= 0
+                || text.indexOf("nu startup: rpc credentials are available") >= 0
+                || text.indexOf("starting backend") >= 0
+                || text.indexOf("backend rpc is connected") >= 0
+                || text.indexOf("init message: done loading") >= 0
+                || text.indexOf("loaded best chain") >= 0
+                || text.indexOf("nbestheight") >= 0
+                || text.indexOf("leaving initialblockdownload") >= 0
+                || text.indexOf("new outbound peer connected") >= 0
+                || text.indexOf("addresses found from dns seeds") >= 0) {
+            return 2
+        }
+
+        if (text.indexOf("init message:") >= 0 || text.indexOf("wallet completed loading") >= 0
+                || text.indexOf("wallet file version") >= 0 || text.indexOf("keys:") >= 0
+                || text.indexOf("loading addresses from dns seed") >= 0
+                || text.indexOf("adding fixed seed nodes") >= 0
+                || text.indexOf("bound to ") >= 0 || text.indexOf("loaded ") >= 0
+                || text.indexOf("thread start") >= 0 || text.indexOf("thread exit") >= 0
+                || text.indexOf("updatetip:") >= 0 || text.indexOf("addtowallet") >= 0
+                || text.indexOf("submitting wtx") >= 0 || text.indexOf("setting") >= 0
+                || text.indexOf("traffic") >= 0 || text.indexOf("mempool") >= 0
+                || text.indexOf("p2p") >= 0 || text.indexOf("peer") >= 0
+                || text.indexOf("rpc") >= 0 || text.indexOf("connect") >= 0) {
+            return 1
+        }
+
+        return 0
+    }
+
+    function leftPadNumber(value, width) {
+        var out = String(value)
+        while (out.length < width) out = " " + out
+        return out
+    }
+
+    function numberedLogLine(lineNumber, width, line) {
+        const label = lineNumber > 0 ? root.leftPadNumber(lineNumber, width) : root.leftPadNumber("-", width)
+        return label + " \u2502 " + String(line || "")
+    }
+
+    function numberedLogText(lines) {
+        const out = []
+        var maxLineNumber = 1
+        for (let maxIndex = 0; maxIndex < lines.length; ++maxIndex) {
+            if (lines[maxIndex].lineNumber > maxLineNumber) maxLineNumber = lines[maxIndex].lineNumber
+        }
+        const width = String(maxLineNumber).length
+        for (let i = 0; i < lines.length; ++i) {
+            out.push(root.numberedLogLine(lines[i].lineNumber, width, lines[i].line))
+        }
+        return out.join("\n")
+    }
+
+    function logFilterPresets() {
+        const presets = [
+            "[type search term here]",
+            "Error",
+            "Warning",
+            "failed|timeout|disconnect",
+            "valid fork|stale|reorg|orphan",
+            "UpdateTip",
+            "seednode|dns seed|fixed seed",
+            "receive version message",
+            "version ",
+            "wallet|AddToWallet",
+            "RPC"
+        ]
+        const last = String(NuService.logLastSearchPattern || "").trim()
+        if (last.length > 0 && presets.indexOf(last) < 0) presets.push("Last: " + last)
+        return presets
+    }
+
+    function refreshLogFilterPresets() {
+        root.logFilterPresetModel = root.logFilterPresets()
+    }
+
+    function logPresetValue(label) {
+        const text = String(label || "")
+        if (text === "[type search term here]") return ""
+        if (text.indexOf("Last: ") === 0) return text.substring(6)
+        return text
+    }
+
+    function setLogSearchPattern(pattern) {
+        NuService.logSearchPattern = String(pattern || "").substring(0, 160)
+        root.refreshLogFilterPresets()
+    }
+
+    function findInLog(backward) {
+        const needle = String(logFindField.text || "")
+        if (needle.length === 0) return
+        const hay = launchLogText.text
+        const lowerHay = hay.toLowerCase()
+        const lowerNeedle = needle.toLowerCase()
+        var index = -1
+        if (backward) {
+            const startBack = Math.max(0, launchLogText.selectionStart - 1)
+            index = lowerHay.lastIndexOf(lowerNeedle, startBack)
+            if (index < 0) index = lowerHay.lastIndexOf(lowerNeedle)
+        } else {
+            const startForward = Math.max(0, launchLogText.selectionEnd)
+            index = lowerHay.indexOf(lowerNeedle, startForward)
+            if (index < 0) index = lowerHay.indexOf(lowerNeedle)
+        }
+        if (index >= 0) {
+            launchLogText.forceActiveFocus()
+            launchLogText.select(index, index + needle.length)
+            launchLogText.cursorPosition = index + needle.length
+        }
+    }
+
+    function filteredLogText() {
+        root.logFilterError = ""
+        const search = safeLogRegex(NuService.logSearchPattern)
+        const remove = safeLogRegex(NuService.logRemovePattern)
+        if (search === false || remove === false) {
+            root.shownLogLineCount = NuService.logLines.length
+            const allLines = []
+            for (let allIndex = 0; allIndex < NuService.logLines.length; ++allIndex) {
+                const allLineNumber = NuService.logLineNumbers && NuService.logLineNumbers.length > allIndex ? Number(NuService.logLineNumbers[allIndex]) : 0
+                allLines.push({ "lineNumber": allLineNumber, "line": NuService.logLines[allIndex] })
+            }
+            return root.numberedLogText(allLines)
+        }
+        const level = Math.max(0, Math.min(3, NuService.logVerbosity))
+        const out = []
+        for (let i = 0; i < NuService.logLines.length; ++i) {
+            const line = String(NuService.logLines[i])
+            if (level > 0 && root.logLineBucket(line) < level) continue
+            if (search && !search.test(line)) continue
+            if (remove && remove.test(line)) continue
+            const lineNumber = NuService.logLineNumbers && NuService.logLineNumbers.length > i ? Number(NuService.logLineNumbers[i]) : 0
+            out.push({ "lineNumber": lineNumber, "line": line })
+        }
+        root.shownLogLineCount = out.length
+        return root.numberedLogText(out)
+    }
+
     spacing: NuTokens.spaceLg
+
+    Component.onCompleted: root.refreshLogFilterPresets()
+
+    Shortcut {
+        sequences: [StandardKey.Find]
+        onActivated: {
+            tabs.currentIndex = 1
+            logFindField.forceActiveFocus()
+            logFindField.selectAll()
+        }
+    }
 
     NuPageHeader {
         Layout.fillWidth: true
@@ -128,9 +322,20 @@ ColumnLayout {
 
         NuDataTable {
             tableId: "nodeStatusMetrics"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             columns: ["Metric", "Value"]
+            columnTooltips: [
+                "Status metric reported by the local backend or Nu frontend.",
+                "Current value. Recent hashrate is estimated from getnetworkhashps over 120 blocks; difficulty comes from current chain state and can change at retarget boundaries."
+            ]
             columnTypes: ["text", "text"]
-            columnWeights: [1.0, 2.8]
+            columnWeights: [0.72, 3.6]
+            columnMinimums: [172, 360]
+            columnMaximums: [230, 1400]
+            autoFitOnRowsChanged: true
+            alwaysShowHorizontalScrollBar: false
+            restoreSavedColumnWidths: false
             rows: NuService.nodeMetrics
             emptyText: "Node status hydrates here."
         }
@@ -278,12 +483,185 @@ ColumnLayout {
                     NuActionButton {
                         text: "Open debug.log"
                         Layout.preferredWidth: 148
-                        helpText: "Open the backend debug.log file in the operating system's default log viewer. Nu startup diagnostics are shown only in this in-app launch log."
+                        helpText: "Open the backend debug.log file in the operating system's default log viewer. Nu startup diagnostics are written there with delimiter lines and mirrored here."
                         onClicked: NuService.openDebugLog()
                     }
                 }
 
-                ScrollView {
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceSm
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceSm
+
+                        Label {
+                            text: "Verbosity"
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                        }
+                        Basic.Slider {
+                            id: logVerbositySlider
+                            Layout.preferredWidth: 180
+                            from: 0
+                            to: 3
+                            stepSize: 1
+                            snapMode: Basic.Slider.SnapAlways
+                            value: NuService.logVerbosity
+                            ToolTip.visible: hovered || pressed
+                            ToolTip.text: root.logVerbosityName(value)
+                            ToolTip.delay: NuTokens.tooltipDelay
+                            onMoved: NuService.logVerbosity = Math.round(value)
+                            Connections {
+                                target: NuService
+                                function onSettingsChanged() { logVerbositySlider.value = NuService.logVerbosity }
+                            }
+                        }
+                        Label {
+                            text: root.logVerbosityName(NuService.logVerbosity)
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontSmall
+                        }
+                        Label {
+                            text: "Lines shown: " + root.shownLogLineCount
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.logFilterError
+                            color: NuTokens.stateWarning
+                            font.pixelSize: NuTokens.fontSmall
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceSm
+
+                        Label {
+                            Layout.preferredWidth: 62
+                            text: "Filter:"
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                        }
+                        Basic.ComboBox {
+                            id: logSearchFilter
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 280
+                            editable: true
+                            model: root.logFilterPresetModel
+                            currentIndex: 0
+                            font.family: NuTokens.bodyFont
+                            font.pixelSize: NuTokens.fontBody
+                            leftPadding: NuTokens.spaceMd
+                            rightPadding: 34
+                            ToolTip.visible: hovered || activeFocus
+                            ToolTip.text: "Show only matching log lines. Choose a useful regex preset or type your own. Examples: Error, seednode|dns seed, version ."
+                            ToolTip.delay: NuTokens.tooltipDelay
+                            Component.onCompleted: editText = NuService.logSearchPattern
+                            onAccepted: root.setLogSearchPattern(editText)
+                            onActivated: function(index) {
+                                const value = root.logPresetValue(root.logFilterPresetModel[index])
+                                editText = value
+                                root.setLogSearchPattern(value)
+                            }
+                            onActiveFocusChanged: if (!activeFocus) root.setLogSearchPattern(editText)
+                            Connections {
+                                target: NuService
+                                function onSettingsChanged() {
+                                    logSearchFilter.editText = NuService.logSearchPattern
+                                    root.refreshLogFilterPresets()
+                                }
+                            }
+                            delegate: ItemDelegate {
+                                width: logSearchFilter.popup.width
+                                text: modelData
+                                font.pixelSize: NuTokens.fontSmall
+                                contentItem: Text {
+                                    text: modelData
+                                    color: modelData === "[type search term here]" ? NuTokens.textMuted : NuTokens.textPrimary
+                                    font: logSearchFilter.font
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                            }
+                            popup: Basic.Popup {
+                                y: logSearchFilter.height + 2
+                                width: Math.max(logSearchFilter.width, 360)
+                                implicitHeight: Math.min(contentItem.implicitHeight, 320)
+                                contentItem: ListView {
+                                    clip: true
+                                    implicitHeight: Math.min(contentHeight, 320)
+                                    model: logSearchFilter.popup.visible ? logSearchFilter.delegateModel : null
+                                    Basic.ScrollBar.vertical: Basic.ScrollBar { policy: Basic.ScrollBar.AsNeeded }
+                                }
+                                background: Rectangle {
+                                    color: NuTokens.panelBase
+                                    border.color: NuTokens.lineStrong
+                                    radius: NuTokens.radiusSmall
+                                }
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceSm
+
+                        Label {
+                            Layout.preferredWidth: 62
+                            text: "Remove:"
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                        }
+                        NuTextField {
+                            id: logRemoveFilter
+                            Layout.fillWidth: true
+                            text: NuService.logRemovePattern
+                            maximumLength: 160
+                            placeholderText: "hide regex"
+                            helpText: "Hide matching lines after Filter is applied. Examples: ping|pong, RPC credentials, ThreadRPCServer."
+                            onEditingFinished: NuService.logRemovePattern = text
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceSm
+
+                        Label {
+                            Layout.preferredWidth: 62
+                            text: "Find:"
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                        }
+                        NuTextField {
+                            id: logFindField
+                            Layout.fillWidth: true
+                            maximumLength: 120
+                            placeholderText: "Cmd-F / Ctrl-F text search in shown log"
+                            helpText: "Find text within the currently shown log lines without changing the filter."
+                            onAccepted: root.findInLog(false)
+                        }
+                        NuActionButton {
+                            text: "Prev"
+                            Layout.preferredWidth: 72
+                            helpText: "Jump to the previous match in the shown log."
+                            onClicked: root.findInLog(true)
+                        }
+                        NuActionButton {
+                            text: "Next"
+                            Layout.preferredWidth: 72
+                            helpText: "Jump to the next match in the shown log."
+                            onClicked: root.findInLog(false)
+                        }
+                    }
+                }
+
+                Basic.ScrollView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
@@ -305,7 +683,7 @@ ColumnLayout {
                             const oldSelectionStart = selectionStart
                             const oldSelectionEnd = selectionEnd
                             const hadSelection = oldSelectionStart !== oldSelectionEnd
-                            text = NuService.logLines.join("\n")
+                            text = root.filteredLogText()
                             cursorPosition = Math.min(oldCursor, length)
                             if (hadSelection) {
                                 select(Math.min(oldSelectionStart, length), Math.min(oldSelectionEnd, length))
@@ -316,12 +694,20 @@ ColumnLayout {
                         Connections {
                             target: NuService
                             function onLogChanged() { launchLogText.updateLogText() }
+                            function onSettingsChanged() { launchLogText.updateLogText() }
                         }
 
                         Shortcut {
                             sequences: [StandardKey.Copy]
                             enabled: launchLogText.activeFocus && launchLogText.selectedText.length > 0
                             onActivated: NuService.copyText(launchLogText.selectedText)
+                        }
+                        Keys.onPressed: (event) => {
+                            if ((event.matches(StandardKey.Copy) || ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C)
+                                    || ((event.modifiers & Qt.MetaModifier) && event.key === Qt.Key_C)) && selectedText.length > 0) {
+                                NuService.copyText(selectedText)
+                                event.accepted = true
+                            }
                         }
                     }
                 }
@@ -403,7 +789,7 @@ ColumnLayout {
                     }
                 }
 
-                ScrollView {
+                Basic.ScrollView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true

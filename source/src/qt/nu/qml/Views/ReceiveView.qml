@@ -115,21 +115,16 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.fillHeight: true
         tableId: "receiveRequests"
-        columns: ["", "", "Date", "Label", "Address", "Amount"]
-        columnTypes: ["action", "delete", "date", "text", "address", "amount"]
-        columnWeights: [0.1, 0.1, 1.0, 1.2, 3.5, 1.0]
-        columnMinimums: [44, 44, 150, 140, 260, 130]
-        columnMaximums: [44, 44, 180, 360, 620, 180]
+        columns: ["", "Date", "Label", "Address", "Amount"]
+        columnTypes: ["action", "date", "text", "address", "amount"]
+        columnWeights: [0.1, 1.0, 1.2, 3.5, 1.0]
+        columnMinimums: [44, 150, 140, 260, 130]
+        columnMaximums: [44, 180, 360, 620, 180]
         rowSelectionEnabled: true
         rowKeyMetaField: "address"
         rows: NuService.receiveRequests
         emptyText: "Requested payments will appear here."
         onRowActivated: (row) => root.openRequestDetails(row)
-        onRowDeleteRequested: (row) => {
-            const meta = row && row.meta ? row.meta : ({})
-            NuService.deleteReceiveRequest(meta.address || "")
-            requestDetailsDialog.close()
-        }
     }
 
     NuDialog {
@@ -206,19 +201,24 @@ ColumnLayout {
                     background: Rectangle { color: NuTokens.backgroundBase; border.color: NuTokens.lineSubtle; radius: NuTokens.radiusSmall }
                 }
 
-                TextArea {
+                RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 72
-                    visible: NuService.explorerUrlForAddress(root.currentRequest.address || "").length > 0
-                    readOnly: true
-                    selectByMouse: true
-                    textFormat: TextEdit.RichText
-                    wrapMode: TextEdit.WordWrap
-                    text: "Explorer: <a href=\"" + NuService.explorerUrlForAddress(root.currentRequest.address || "") + "\">"
-                          + NuService.explorerUrlForAddress(root.currentRequest.address || "") + "</a>"
-                    color: NuTokens.textPrimary
-                    onLinkActivated: Qt.openUrlExternally(link)
-                    background: Rectangle { color: NuTokens.backgroundBase; border.color: NuTokens.lineSubtle; radius: NuTokens.radiusSmall }
+                    visible: (root.currentRequest.address || "").length > 0
+                    NuActionButton {
+                        text: "Inspect address"
+                        Layout.preferredWidth: 168
+                        helpText: "Open this address with the selected explorer behavior. Internal mode opens a Nu explorer window; external mode opens the configured browser explorer."
+                        onClicked: NuService.openAddressInExplorer(root.currentRequest.address || "")
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: NuService.explorerMode === "internal"
+                              ? "Opens in the internal SQLite-backed explorer."
+                              : NuService.explorerUrlForAddress(root.currentRequest.address || "")
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontSmall
+                        elide: Text.ElideMiddle
+                    }
                 }
             }
         }

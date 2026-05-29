@@ -6,6 +6,7 @@
 #define BITCOIN_WALLET_WALLETUTIL_H
 
 #include <fs.h>
+#include <outputtype.h>
 #include <script/descriptor.h>
 
 #include <vector>
@@ -102,5 +103,7 @@ public:
     WalletDescriptor() {}
     WalletDescriptor(std::shared_ptr<Descriptor> descriptor, uint64_t creation_time, int32_t range_start, int32_t range_end, int32_t next_index) : descriptor(descriptor), creation_time(creation_time), range_start(range_start), range_end(range_end), next_index(next_index) {}
 };
+
+WalletDescriptor GenerateWalletDescriptor(const CExtPubKey& master_key, const OutputType& addr_type, bool internal);
 
 #endif // BITCOIN_WALLET_WALLETUTIL_H

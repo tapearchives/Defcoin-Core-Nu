@@ -1,5 +1,53 @@
 # Defcoin Core Changelog
 
+## 26.5.1 Core Memories
+
+Defcoin Core Nu `26.5.1` adds modern SQLite descriptor wallet creation,
+recovery phrase support, a local mining helper, and additional diagnostics
+while keeping the existing Defcoin chain rules and peer compatibility policy.
+
+### Added
+
+- Added `Create Wallet with Recovery Phrase...` and `Restore Wallet from
+  Recovery Phrase...` flows. Creation uses 12-word English BIP39 phrases;
+  restore accepts 12, 15, 18, 21, and 24-word English BIP39 phrases.
+- Added Nu/Core HD restore mode for phrases created by Nu.
+- Added an advanced, preview-gated external BIP39/BIP32 scan mode for users
+  recovering phrases from another wallet standard.
+- Added a Coinomi/Ian Coleman Defcoin BIP44 preset and explicit Defcoin WIF
+  compatibility guidance for current `T...` private keys and legacy v0.22
+  `Q...` private-key references.
+- Added compatibility decoding for Defcoin `dfcp`/`dfcv` extended keys and
+  byte-22 `9...`/`A...` P2SH tool encodings while keeping generated P2SH
+  addresses canonical as `M...`.
+- Added a Mining view for selecting an external miner executable, configuring
+  Defcoin pool parameters, and monitoring miner output.
+- Added Diagnostics status rows for difficulty, 120-block estimated network
+  hash rate, chain-tip state, sync progress, and top sent/received P2P message
+  types.
+- Added prior-project acknowledgements in Build Notes.
+- Added Bitcoin Core v0.21-style SQLite descriptor wallet creation for new
+  wallets, starting with canonical legacy P2PKH Defcoin address descriptors.
+- Added Wallet table storage-format reporting, showing `BDB` for Berkeley DB
+  legacy wallets and `SQL` for SQLite descriptor wallets.
+- Bundled `defcoin-cli` next to `defcoind` in Nu desktop packages for advanced
+  support, scripting, and local RPC diagnostics.
+- Restored the historical Defcoin v1.0.x softfork boundaries for BIP34,
+  BIP65, BIP66, CSV, and SegWit. CSV and SegWit activate at block `903168`,
+  so Nu requests and stores post-activation blocks with witness data from
+  witness-capable peers.
+
+### Changed
+
+- Updated public documentation and release metadata to the `26.5.1` release
+  identity.
+- The standard Create Wallet flow defaults to modern SQL storage, while
+  existing BDB wallets remain loadable and selectable side by side.
+- Kept peer magic, seed, User-Agent, and network-pollution filtering behavior
+  aligned with the current Nu policy.
+- Stopped advertising inherited Litecoin MWEB services merely because witness
+  service is active; MWEB remains disabled on Defcoin mainnet.
+
 ## 26.3.1 Core Memories
 
 Defcoin Core Nu `26.3.1` is a cleanup release for the current Nu line.

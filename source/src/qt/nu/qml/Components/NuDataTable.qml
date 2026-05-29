@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Basic 2.15 as Basic
 import QtQuick.Layouts 1.15
 import Defcoin.Nu 1.0
 
@@ -25,7 +26,8 @@ Rectangle {
     property bool compact: false
     property int fontPixelSize: 0
     property bool sortable: true
-    property bool restoreSavedColumnWidths: true
+    property bool restoreSavedColumnWidths: false
+    property bool autoFitOnRowsChanged: false
     property bool alwaysShowHorizontalScrollBar: false
     property int defaultSortColumn: -1
     property bool defaultSortAscending: true
@@ -45,8 +47,13 @@ Rectangle {
     property int selectionStartColumn: 0
     property int selectionEndRow: -1
     property int selectionEndColumn: -1
-    readonly property bool hasSelection: selectionEndRow >= -1 && selectionEndColumn >= 0
+    property var selectedCellKeys: []
+    property int cellSelectionAnchorRow: -2
+    property int cellSelectionAnchorColumn: -1
+    readonly property bool hasRangeSelection: selectionEndRow >= -1 && selectionEndColumn >= 0
+    readonly property bool hasSelection: hasRangeSelection || selectedCellKeys.length > 0
     property bool rowSelectionEnabled: false
+    property bool plainClickSelectsRows: false
     property string rowKeyMetaField: "address"
     property var selectedRowKeys: []
     property int rowSelectionAnchor: -1
@@ -98,10 +105,10 @@ Rectangle {
         if (index >= 0 && index < columnMaximums.length && Number(columnMaximums[index]) > 0) return Number(columnMaximums[index])
         const type = columnType(index)
         if (type === "action" || type === "delete") return 44
-        if (type === "ipport") return 420
-        if (type === "address" || type === "hash") return 520
-        if (type === "text") return 360
-        return 260
+        if (type === "ipport") return 840
+        if (type === "address" || type === "hash") return 960
+        if (type === "text") return 1200
+        return 720
     }
 
     function isMonoColumn(index) {
@@ -121,12 +128,18 @@ Rectangle {
     function rightAlignColumn(index) {
         const type = columnType(index)
         const name = (index >= 0 && index < columns.length ? String(columns[index]) : "").toLowerCase()
+        if (type === "center") return false
         if (type === "bytes" || type === "amount" || type === "duration" || type === "number") return true
         return name === "dir." || name === "dir" || name.indexOf("direction") >= 0
-               || name === "ip" || name.indexOf("ip address") >= 0 || name === "port"
-               || name.indexOf("dns name") >= 0 || name.indexOf("domain alias") >= 0 || name === "fqdn"
+               || name === "port"
                || name.indexOf("magic") >= 0 || name.indexOf("protocol") >= 0
                || name === "version" || name === "svcs"
+    }
+
+    function centerAlignColumn(index) {
+        const type = columnType(index)
+        const name = (index >= 0 && index < columns.length ? String(columns[index]) : "").toLowerCase()
+        return type === "center" || name === "active"
     }
 
     function rowCells(row) {
@@ -235,6 +248,76 @@ Rectangle {
             toggleRowSelected(rowIndex)
             return true
         }
+        if (plainClickSelectsRows) {
+            const sorted = sortedRows()
+            if (rowIndex < 0 || rowIndex >= sorted.length) return false
+            const key = rowKey(sorted[rowIndex])
+            if (key.length === 0) return false
+            clearCellSelection()
+            rowSelectionAnchor = rowIndex
+            setSelectedKeys([key])
+            return true
+        }
+        return false
+    }
+
+    function cellKey(row, column) {
+        return row + ":" + column
+    }
+
+    function containsSelectedCell(row, column) {
+        return selectedCellKeys.indexOf(cellKey(row, column)) >= 0
+    }
+
+    function setSingleCellSelection(row, column) {
+        if (isActionColumn(column)) return
+        selectingRange = false
+        selectionEndRow = -1
+        selectionEndColumn = -1
+        selectedCellKeys = [cellKey(row, column)]
+        cellSelectionAnchorRow = row
+        cellSelectionAnchorColumn = column
+    }
+
+    function toggleCellSelection(row, column) {
+        if (isActionColumn(column)) return
+        selectingRange = false
+        selectionEndRow = -1
+        selectionEndColumn = -1
+        let next = selectedCellKeys.slice()
+        const key = cellKey(row, column)
+        const existing = next.indexOf(key)
+        if (existing >= 0) next.splice(existing, 1)
+        else next.push(key)
+        selectedCellKeys = next
+        cellSelectionAnchorRow = row
+        cellSelectionAnchorColumn = column
+    }
+
+    function selectCellRange(anchorRow, anchorColumn, row, column) {
+        if (isActionColumn(column)) return
+        selectedCellKeys = []
+        selectingRange = false
+        selectionStartRow = anchorRow
+        selectionStartColumn = anchorColumn
+        selectionEndRow = row
+        selectionEndColumn = column
+    }
+
+    function handleCellSelectionClick(row, column, modifiers) {
+        root.forceActiveFocus()
+        if ((modifiers & Qt.ShiftModifier) !== 0) {
+            if (cellSelectionAnchorRow < -1 || cellSelectionAnchorColumn < 0) {
+                cellSelectionAnchorRow = row
+                cellSelectionAnchorColumn = column
+            }
+            selectCellRange(cellSelectionAnchorRow, cellSelectionAnchorColumn, row, column)
+            return true
+        }
+        if ((modifiers & Qt.ControlModifier) !== 0 || (modifiers & Qt.MetaModifier) !== 0) {
+            toggleCellSelection(row, column)
+            return true
+        }
         return false
     }
 
@@ -289,7 +372,8 @@ Rectangle {
                 const row = rowCells(rows[r])
                 if (row && row.length > c) wanted = Math.max(wanted, roughTextWidth(row[c], c))
             }
-            out[c] = Math.max(columnMin(c), Math.min(columnMax(c), Math.ceil(wanted)))
+            const hardMax = isActionColumn(c) ? columnMax(c) : Math.max(columnMax(c), wanted)
+            out[c] = Math.max(columnMin(c), Math.min(hardMax, Math.ceil(wanted)))
         }
         return out
     }
@@ -362,18 +446,33 @@ Rectangle {
         return amount
     }
 
+    function isMissingSortValue(value) {
+        const text = String(value === undefined || value === null ? "" : value).trim().toLowerCase()
+        return text.length === 0 || text === "-" || text === "unknown" || text === "n/a"
+    }
+
     function dateValue(value) {
-        const raw = String(value === undefined || value === null ? "" : value).trim().replace(/\s+/g, "")
-        const compact = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/)
-        if (compact) {
-            let year = Number(compact[3])
-            if (year < 100) year += 2000
-            return new Date(year, Number(compact[1]) - 1, Number(compact[2]),
-                            Number(compact[4]), Number(compact[5]),
-                            compact[6] ? Number(compact[6]) : 0).getTime()
+        const text = String(value === undefined || value === null ? "" : value).trim().replace(/\s+/g, " ")
+        if (isMissingSortValue(text)) return null
+
+        const isoLocal = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s+[A-Za-z]{1,5})?$/)
+        if (isoLocal) {
+            return new Date(Number(isoLocal[1]), Number(isoLocal[2]) - 1, Number(isoLocal[3]),
+                            Number(isoLocal[4]), Number(isoLocal[5]),
+                            isoLocal[6] ? Number(isoLocal[6]) : 0).getTime()
         }
-        const parsed = Date.parse(raw)
-        return isNaN(parsed) ? 0 : parsed
+
+        const usLocal = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s+[A-Za-z]{1,5})?$/)
+        if (usLocal) {
+            let year = Number(usLocal[3])
+            if (year < 100) year += 2000
+            return new Date(year, Number(usLocal[1]) - 1, Number(usLocal[2]),
+                            Number(usLocal[4]), Number(usLocal[5]),
+                            usLocal[6] ? Number(usLocal[6]) : 0).getTime()
+        }
+
+        const parsed = Date.parse(text)
+        return isNaN(parsed) ? null : parsed
     }
 
     function ipSortKey(value) {
@@ -432,9 +531,23 @@ Rectangle {
         const av = valueAt(a, sortColumn)
         const bv = valueAt(b, sortColumn)
         let diff = 0
+        const aMissing = isMissingSortValue(av)
+        const bMissing = isMissingSortValue(bv)
+        if (aMissing || bMissing) {
+            if (aMissing && bMissing) return 0
+            return aMissing ? 1 : -1
+        }
         if (type === "number" || type === "duration") diff = numericValue(av) - numericValue(bv)
         else if (type === "bytes" || type === "amount") diff = bytesValue(av) - bytesValue(bv)
-        else if (type === "date") diff = dateValue(av) - dateValue(bv)
+        else if (type === "date") {
+            const ad = dateValue(av)
+            const bd = dateValue(bv)
+            if (ad === null || bd === null) {
+                if (ad === null && bd === null) return 0
+                return ad === null ? 1 : -1
+            }
+            diff = ad - bd
+        }
         else if (type === "ipport" || type === "address") diff = ipSortKey(av).localeCompare(ipSortKey(bv))
         else diff = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" })
         if (isNaN(diff)) diff = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" })
@@ -443,7 +556,15 @@ Rectangle {
 
     function sortedRows() {
         let out = rows ? rows.slice() : []
-        if (sortable && sortColumn >= 0 && sortColumn < columns.length) out.sort(compareRows)
+        if (sortable && sortColumn >= 0 && sortColumn < columns.length) {
+            let indexed = []
+            for (let i = 0; i < out.length; ++i) indexed.push({ row: out[i], index: i })
+            indexed.sort(function(a, b) {
+                const diff = compareRows(a.row, b.row)
+                return diff !== 0 ? diff : a.index - b.index
+            })
+            out = indexed.map(function(item) { return item.row })
+        }
         return out
     }
 
@@ -451,6 +572,9 @@ Rectangle {
         if (isActionColumn(column)) return
         root.forceActiveFocus()
         if (rowSelectionEnabled && selectedRowKeys.length > 0) clearRowSelection()
+        selectedCellKeys = []
+        cellSelectionAnchorRow = row
+        cellSelectionAnchorColumn = column
         selectingRange = true
         selectionDragged = false
         selectionStartRow = row
@@ -476,10 +600,13 @@ Rectangle {
         selectingRange = false
         selectionEndRow = -1
         selectionEndColumn = -1
+        selectedCellKeys = []
     }
 
     function isCellSelected(row, column) {
         if (!hasSelection || isActionColumn(column)) return false
+        if (containsSelectedCell(row, column)) return true
+        if (!hasRangeSelection) return false
         const minRow = Math.min(selectionStartRow, selectionEndRow)
         const maxRow = Math.max(selectionStartRow, selectionEndRow)
         const minColumn = Math.min(selectionStartColumn, selectionEndColumn)
@@ -487,8 +614,70 @@ Rectangle {
         return row >= minRow && row <= maxRow && column >= minColumn && column <= maxColumn
     }
 
+    function copyDelimiter() {
+        const style = String(NuService.tableCopyDelimiterStyle || "tsv").toLowerCase()
+        if (style === "csv") return ","
+        if (style === "pipe") return "|"
+        if (style === "semicolon") return ";"
+        if (style === "custom") return String(NuService.tableCopyCustomDelimiter || "|")
+        return "\t"
+    }
+
+    function copyValueText(value) {
+        const text = String(value === undefined || value === null ? "" : value).replace(/\s+/g, " ").trim()
+        const style = String(NuService.tableCopyDelimiterStyle || "tsv").toLowerCase()
+        if (style === "csv") {
+            if (text.indexOf(",") >= 0 || text.indexOf("\"") >= 0 || text.indexOf("\n") >= 0) {
+                return "\"" + text.replace(/"/g, "\"\"") + "\""
+            }
+        }
+        return text
+    }
+
+    function joinCopyValues(values) {
+        return values.map(function(value) { return copyValueText(value) }).join(copyDelimiter())
+    }
+
+    function selectedCellsText() {
+        if (selectedCellKeys.length === 0) return ""
+        const sorted = sortedRows()
+        let rowSet = []
+        let columnSet = []
+        for (let i = 0; i < selectedCellKeys.length; ++i) {
+            const parts = String(selectedCellKeys[i]).split(":")
+            if (parts.length !== 2) continue
+            const row = Number(parts[0])
+            const column = Number(parts[1])
+            if (isActionColumn(column)) continue
+            if (rowSet.indexOf(row) < 0) rowSet.push(row)
+            if (columnSet.indexOf(column) < 0) columnSet.push(column)
+        }
+        rowSet.sort(function(a, b) { return a - b })
+        columnSet.sort(function(a, b) { return a - b })
+        let lines = []
+        for (let rIndex = 0; rIndex < rowSet.length; ++rIndex) {
+            const r = rowSet[rIndex]
+            let values = []
+            for (let cIndex = 0; cIndex < columnSet.length; ++cIndex) {
+                const c = columnSet[cIndex]
+                if (!containsSelectedCell(r, c)) {
+                    values.push("")
+                } else if (r < 0) {
+                    values.push(columns[c] === undefined ? "" : columns[c])
+                } else if (r < sorted.length) {
+                    values.push(valueAt(sorted[r], c))
+                } else {
+                    values.push("")
+                }
+            }
+            lines.push(joinCopyValues(values))
+        }
+        return lines.join("\n")
+    }
+
     function selectionText() {
         if (!hasSelection) return ""
+        if (!hasRangeSelection) return selectedCellsText()
         const minRow = Math.min(selectionStartRow, selectionEndRow)
         const maxRow = Math.max(selectionStartRow, selectionEndRow)
         const minColumn = Math.min(selectionStartColumn, selectionEndColumn)
@@ -501,10 +690,10 @@ Rectangle {
         }
         if (selectedColumns.length === 0) return ""
         if (minRow <= -1) {
-            lines.push(selectedColumns.map(function(c) { return String(columns[c] === undefined ? "" : columns[c]) }).join("\t"))
+            lines.push(joinCopyValues(selectedColumns.map(function(c) { return columns[c] === undefined ? "" : columns[c] })))
         }
         for (let r = Math.max(0, minRow); r <= Math.min(maxRow, sorted.length - 1); ++r) {
-            lines.push(selectedColumns.map(function(c) { return String(valueAt(sorted[r], c)).replace(/\s+/g, " ").trim() }).join("\t"))
+            lines.push(joinCopyValues(selectedColumns.map(function(c) { return valueAt(sorted[r], c) })))
         }
         return lines.join("\n")
     }
@@ -521,7 +710,7 @@ Rectangle {
         for (let r = 0; r < sorted.length; ++r) {
             const key = rowKey(sorted[r])
             if (key.length === 0 || !containsSelectedRowKey(key)) continue
-            lines.push(selectedColumns.map(function(c) { return String(valueAt(sorted[r], c)).replace(/\s+/g, " ").trim() }).join("\t"))
+            lines.push(joinCopyValues(selectedColumns.map(function(c) { return valueAt(sorted[r], c) })))
         }
         return lines.join("\n")
     }
@@ -529,6 +718,16 @@ Rectangle {
     function copySelection() {
         const text = hasSelection ? selectionText() : selectedRowsText()
         if (text.length > 0) NuService.copyText(text)
+    }
+
+    function openCopyMenu(item, x, y, row, column) {
+        if (!hasSelection && column >= 0 && !isActionColumn(column)) {
+            setSingleCellSelection(row, column)
+        }
+        const point = item.mapToItem(root, x, y)
+        tableContextMenu.x = Math.max(0, Math.min(point.x, root.width - tableContextMenu.implicitWidth))
+        tableContextMenu.y = Math.max(0, Math.min(point.y, root.height - tableContextMenu.implicitHeight))
+        tableContextMenu.open()
     }
 
     function toggleSort(index) {
@@ -597,7 +796,7 @@ Rectangle {
     }
     onRowsChanged: {
         pruneSelectedRowKeys()
-        if (!userResizingColumns) scheduleResize(false)
+        if (!userResizingColumns) scheduleResize(root.autoFitOnRowsChanged)
     }
     onWidthChanged: {
         if (!userResizingColumns) scheduleResize(false)
@@ -619,19 +818,28 @@ Rectangle {
         onActivated: root.copySelection()
     }
 
+    Menu {
+        id: tableContextMenu
+        NuMenuItem {
+            text: "Copy"
+            enabled: root.hasSelection || root.selectedRowKeys.length > 0
+            onTriggered: root.copySelection()
+        }
+    }
+
     Item {
         anchors.fill: parent
         anchors.margins: root.compact ? NuTokens.spaceSm : NuTokens.spaceLg
 
-        ScrollView {
+        Basic.ScrollView {
             id: scroll
             anchors.fill: parent
             clip: true
             opacity: (root.tableReady || root.hasEverBeenReady) ? 1 : 0
             contentWidth: root.totalWidth()
             contentHeight: tableViewport.implicitHeight
-            ScrollBar.horizontal.policy: root.alwaysShowHorizontalScrollBar ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
-            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            Basic.ScrollBar.horizontal.policy: root.alwaysShowHorizontalScrollBar ? Basic.ScrollBar.AlwaysOn : Basic.ScrollBar.AsNeeded
+            Basic.ScrollBar.vertical.policy: Basic.ScrollBar.AsNeeded
 
             Column {
                 id: tableViewport
@@ -674,7 +882,8 @@ Rectangle {
                                 font.family: NuTokens.bodyFont
                                 font.pixelSize: root.cellFontSize()
                                 font.weight: Font.DemiBold
-                                horizontalAlignment: root.rightAlignColumn(headerCell.index) ? Text.AlignRight : Text.AlignLeft
+                                horizontalAlignment: root.centerAlignColumn(headerCell.index) ? Text.AlignHCenter
+                                                     : (root.rightAlignColumn(headerCell.index) ? Text.AlignRight : Text.AlignLeft)
                                 verticalAlignment: Text.AlignVCenter
                                 wrapMode: Text.WordWrap
                                 clip: true
@@ -722,11 +931,20 @@ Rectangle {
                             MouseArea {
                                 id: headerHover
                                 anchors.fill: parent
-                                acceptedButtons: Qt.LeftButton
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 hoverEnabled: true
                                 enabled: !root.isActionColumn(headerCell.index)
                                 property point startPoint: Qt.point(0, 0)
                                 onPressed: (mouse) => {
+                                    if (mouse.button === Qt.RightButton) {
+                                        root.openCopyMenu(headerCell, mouse.x, mouse.y, -1, headerCell.index)
+                                        mouse.accepted = true
+                                        return
+                                    }
+                                    if (root.handleCellSelectionClick(-1, headerCell.index, mouse.modifiers)) {
+                                        mouse.accepted = true
+                                        return
+                                    }
                                     startPoint = headerCell.mapToItem(tableViewport, mouse.x, mouse.y)
                                     root.beginRangeSelection(-1, headerCell.index, startPoint)
                                 }
@@ -735,7 +953,8 @@ Rectangle {
                                     if (Math.abs(point.x - startPoint.x) > 3 || Math.abs(point.y - startPoint.y) > 3) root.selectionDragged = true
                                     root.updateRangeSelection(point)
                                 }
-                                onReleased: {
+                                onReleased: (mouse) => {
+                                    if (mouse.button === Qt.RightButton) return
                                     root.finishRangeSelection()
                                     if (!root.selectionDragged) root.toggleSort(headerCell.index)
                                 }
@@ -762,7 +981,11 @@ Rectangle {
                                 onPositionChanged: (mouse) => {
                                     if (!pressed) return
                                     let widths = root.columnWidths.slice()
-                                    widths[headerCell.index] = Math.max(root.columnMin(headerCell.index), Math.min(root.columnMax(headerCell.index), startWidth + mouse.x - pressX))
+                                    const measuredMax = root.autoWidths()
+                                    const hardMax = root.isActionColumn(headerCell.index)
+                                                    ? root.columnMax(headerCell.index)
+                                                    : Math.max(root.columnMax(headerCell.index), measuredMax.length > headerCell.index ? measuredMax[headerCell.index] : 0)
+                                    widths[headerCell.index] = Math.max(root.columnMin(headerCell.index), Math.min(hardMax, startWidth + mouse.x - pressX))
                                     root.columnWidths = widths
                                 }
                                 onReleased: {
@@ -917,7 +1140,8 @@ Rectangle {
                                     font.family: root.isMonoColumn(bodyCell.index) ? NuTokens.monoFont : NuTokens.bodyFont
                                     font.pixelSize: root.cellFontSize()
                                     verticalAlignment: Text.AlignVCenter
-                                    horizontalAlignment: root.rightAlignColumn(bodyCell.index) ? Text.AlignRight : Text.AlignLeft
+                                    horizontalAlignment: root.centerAlignColumn(bodyCell.index) ? Text.AlignHCenter
+                                                         : (root.rightAlignColumn(bodyCell.index) ? Text.AlignRight : Text.AlignLeft)
                                     wrapMode: TextEdit.NoWrap
                                     clip: true
                                 }
@@ -925,11 +1149,20 @@ Rectangle {
                                 MouseArea {
                                     anchors.fill: parent
                                     visible: !root.isActionColumn(bodyCell.index)
-                                    acceptedButtons: Qt.LeftButton
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                                     cursorShape: Qt.IBeamCursor
                                     property point startPoint: Qt.point(0, 0)
                                     onPressed: (mouse) => {
+                                        if (mouse.button === Qt.RightButton) {
+                                            root.openCopyMenu(bodyCell, mouse.x, mouse.y, bodyRow.index, bodyCell.index)
+                                            mouse.accepted = true
+                                            return
+                                        }
                                         if (root.handleRowSelectionClick(bodyRow.index, mouse.modifiers)) {
+                                            mouse.accepted = true
+                                            return
+                                        }
+                                        if (root.handleCellSelectionClick(bodyRow.index, bodyCell.index, mouse.modifiers)) {
                                             mouse.accepted = true
                                             return
                                         }
@@ -941,7 +1174,22 @@ Rectangle {
                                         if (Math.abs(point.x - startPoint.x) > 3 || Math.abs(point.y - startPoint.y) > 3) root.selectionDragged = true
                                         root.updateRangeSelection(point)
                                     }
-                                    onReleased: root.finishRangeSelection()
+                                    onReleased: (mouse) => {
+                                        if (mouse.button !== Qt.RightButton) root.finishRangeSelection()
+                                    }
+                                    onDoubleClicked: (mouse) => {
+                                        if (mouse.button === Qt.RightButton) return
+                                        if (root.rowSelectionEnabled) {
+                                            const key = root.rowKey(bodyRow.modelData)
+                                            if (key.length > 0) {
+                                                root.clearCellSelection()
+                                                root.rowSelectionAnchor = bodyRow.index
+                                                root.setSelectedKeys([key])
+                                            }
+                                        }
+                                        root.rowActivated(bodyRow.modelData)
+                                        mouse.accepted = true
+                                    }
                                 }
                             }
                         }

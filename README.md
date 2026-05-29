@@ -5,17 +5,17 @@
 <h1 align="center">Defcoin Core Nu</h1>
 
 <p align="center">
-  <strong>Download a Defcoin wallet. Store DFC. Send and receive DFC on the Defcoin network.</strong>
+  <strong>Download a Defcoin wallet. Store DFC. Send and receive Defcoin on the Defcoin network.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/v26.3.1"><strong>Download Wallet</strong></a>
+  <a href="https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/v26.5.1"><strong>Download Wallet</strong></a>
   ·
   <a href="#build-from-source">Build from source</a>
   ·
   <a href="source/doc/defcoin-core-nu-technical-guide.md">Technical guide</a>
   ·
-  <a href="source/doc/release-notes/release-notes-26.3.1.md">Release notes</a>
+  <a href="source/doc/release-notes/release-notes-26.5.1.md">Release notes</a>
 </p>
 
 Defcoin is a Scrypt proof-of-work cryptocurrency with a long-running independent
@@ -23,23 +23,23 @@ chain. Defcoin Core Nu is the current full-node desktop wallet for holding DFC,
 sending and receiving payments, inspecting network peers, and participating in
 the Defcoin network.
 
-The `26.3.1` release, codename `Core Memories`, preserves Defcoin's historical
+The `26.5.1` release, codename `Core Memories`, preserves Defcoin's historical
 chain rules and wallet data while adding a focused Qt Quick desktop experience
 for modern macOS and Windows users.
 
 ## Get The Wallet
 
 Choose the package for your computer from
-[Defcoin Core Nu 26.3.1 "Core Memories"](https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/v26.3.1).
+[Defcoin Core Nu 26.5.1 "Core Memories"](https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/v26.5.1).
 
 | Platform | Package |
 | --- | --- |
-| macOS Apple Silicon | [DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.3.1/Defcoin-Core-Nu-v26.3.1-macOS-AppleSilicon.dmg) |
-| macOS Intel | [DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.3.1/Defcoin-Core-Nu-v26.3.1-macOS-Intel.dmg) |
-| Windows 11 x86_64 | [Installer](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.3.1/Defcoin-Core-Nu-v26.3.1-Windows11-x86_64-Setup.exe) |
-| Windows 11 x86_64 | [Portable ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.3.1/Defcoin-Core-Nu-v26.3.1-Windows11-x86_64-portable.zip) |
-| Optional bootstrap pack | [Bootstrap ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.3.1/Defcoin-bootstrap-mainnet-2332283.zip) · [SHA-256](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.3.1/Defcoin-bootstrap-mainnet-2332283.zip.sha256) |
-| Verification | [SHA256SUMS.txt](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.3.1/SHA256SUMS.txt) |
+| macOS Apple Silicon | [DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-Core-Nu-v26.5.1-macOS-AppleSilicon.dmg) |
+| macOS Intel | [DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-Core-Nu-v26.5.1-macOS-Intel.dmg) |
+| Windows 11 x86_64 | [Installer](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-Core-Nu-v26.5.1-Windows11-x86_64-Setup.exe) |
+| Windows 11 x86_64 | [Portable ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-Core-Nu-v26.5.1-Windows11-x86_64-portable.zip) |
+| Optional bootstrap pack | [Bootstrap ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-bootstrap-mainnet-2332283.zip) · [SHA-256](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-bootstrap-mainnet-2332283.zip.sha256) |
+| Verification | [SHA256SUMS.txt](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/SHA256SUMS.txt) |
 
 The macOS Intel build is provided for compatibility but has not yet been tested
 on Intel Mac hardware.
@@ -55,11 +55,25 @@ blocks normally.
 
 ## What Nu Adds
 
-- A Qt Quick desktop shell for Home, Send, Receive, Activity, Diagnostics, and
-  Settings.
+- A Qt Quick desktop shell for Home, Send, Receive, Transactions, Wallet,
+  Mining, Diagnostics, and Settings.
 - Managed local `defcoind` startup for packaged desktop builds.
+- Bundled `defcoin-cli` in packaged desktop builds for advanced local support
+  and RPC diagnostics.
+- Bitcoin Core-style wallet storage detection with side-by-side `BDB` legacy
+  wallets and modern `SQL` descriptor wallets. Defcoin Core Nu `26.5` and later
+  create SQL descriptor wallets by default while existing Berkeley DB wallets
+  remain loadable.
 - Peer diagnostics with actual observed magic bytes, protocol version, services,
   User-Agent, sync, and traffic details.
+- Network-health diagnostics for difficulty, estimated network hash rate,
+  chain-tip state, sync progress, and top P2P message traffic.
+- English BIP39 recovery phrase creation and restore workflows for Nu/Core HD
+  wallets, plus 12-24 word external scan support with Defcoin `T...` and
+  legacy `Q...` WIF compatibility guidance. Extended keys can be read as
+  `xpub`/`xprv` or `dfcp`/`dfcv`; generated P2SH addresses remain `M...`.
+- Local mining setup and monitoring helpers that let users select an external
+  miner executable rather than bundling mining code inside the wallet.
 - Dual-magic compatibility for the Defcoin network migration: upgraded peers use
   `defc014e`; compatibility mode can still accept legacy `fbc0b6db`.
 - Defcoin User-Agent filtering using the `/Defcoin` prefix rule to reduce

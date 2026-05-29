@@ -44,6 +44,13 @@ ColumnLayout {
         return out
     }
 
+    function selectedAddressBookAddress() {
+        if (addressBook.currentIndex <= 0)
+            return ""
+        var row = root.addressRows[addressBook.currentIndex - 1]
+        return row && row.length > 1 ? String(row[1]) : ""
+    }
+
     function loadUri(uri) {
         var text = String(uri === undefined || uri === null ? "" : uri).trim()
         if (text.length === 0)
@@ -84,16 +91,28 @@ ColumnLayout {
             columnSpacing: NuTokens.spaceLg
 
             Label { text: "Address book"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
-            NuComboBox {
-                id: addressBook
+            RowLayout {
                 Layout.fillWidth: true
-                model: root.addressBookModel()
-                helpText: "Pick a labeled wallet address or contact."
-                onActivated: function(index) {
-                    if (index <= 0) return
-                    var row = root.addressRows[index - 1]
-                    labelField.text = row[0] === "(no label)" ? "" : row[0]
-                    recipientField.text = row[1]
+
+                NuComboBox {
+                    id: addressBook
+                    Layout.fillWidth: true
+                    model: root.addressBookModel()
+                    helpText: "Pick a labeled wallet address or contact."
+                    onActivated: function(index) {
+                        if (index <= 0) return
+                        var row = root.addressRows[index - 1]
+                        labelField.text = row[0] === "(no label)" ? "" : row[0]
+                        recipientField.text = row[1]
+                    }
+                }
+
+                NuActionButton {
+                    text: "I"
+                    Layout.preferredWidth: 44
+                    enabled: root.selectedAddressBookAddress().length > 0
+                    helpText: "Inspect the selected address in the configured blockchain explorer."
+                    onClicked: NuService.openAddressInExplorer(root.selectedAddressBookAddress())
                 }
             }
 

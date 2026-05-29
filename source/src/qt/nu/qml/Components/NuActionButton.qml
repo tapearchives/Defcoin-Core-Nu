@@ -1,11 +1,16 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Basic 2.15 as Basic
 
 import "../Theme"
 
-Button {
+Basic.Button {
     id: root
     implicitHeight: 48
+    leftPadding: NuTokens.spaceMd
+    rightPadding: NuTokens.spaceMd
+    topPadding: NuTokens.spaceXs
+    bottomPadding: NuTokens.spaceXs
     font.pixelSize: NuTokens.fontBody
     font.weight: Font.DemiBold
     hoverEnabled: true
@@ -43,8 +48,14 @@ Button {
         text: root.text
         color: root.enabled ? (root.primary || root.danger ? NuTokens.textInverse : NuTokens.textPrimary) : NuTokens.textMuted
         font: root.font
+        minimumPixelSize: NuTokens.fontTiny
+        fontSizeMode: Text.HorizontalFit
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
+        wrapMode: Text.WordWrap
+        maximumLineCount: 2
+        elide: Text.ElideRight
+        clip: true
     }
 
     background: Rectangle {

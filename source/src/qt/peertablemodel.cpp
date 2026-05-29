@@ -120,8 +120,8 @@ QString seedDomainForAddress(const CAddress& address)
 {
     const QString ip = QString::fromStdString(address.ToStringIP());
     if (ip == QLatin1String("66.42.91.225")) return QStringLiteral("seed.defcoin.io");
-    if (ip == QLatin1String("73.52.182.204")) return QStringLiteral("seed.defcoin.mikej.tech");
-    if (ip == QLatin1String("50.116.19.40")) return QStringLiteral("seed.defcoin.dc903.org");
+    if (ip == QLatin1String("73.52.182.204")) return QStringLiteral("seed2.defcoin.io");
+    if (ip == QLatin1String("50.116.19.40")) return QStringLiteral("defcoin.dc903.org");
     return QString();
 }
 
@@ -443,6 +443,43 @@ QString normalizeDnsName(QString name)
 {
     if (name.endsWith('.')) name.chop(1);
     return name;
+}
+
+QString sanitizedLanHostName(QString value)
+{
+    value = normalizeDnsName(value);
+    const QStringList local_suffixes{
+        QStringLiteral(".localdomain"),
+        QStringLiteral(".local"),
+        QStringLiteral(".lan"),
+        QStringLiteral(".home")
+    };
+    for (const QString& suffix : local_suffixes) {
+        if (value.endsWith(suffix, Qt::CaseInsensitive)) {
+            value.chop(suffix.size());
+            break;
+        }
+    }
+    value = value.trimmed();
+    value.replace(QLatin1Char('.'), QLatin1Char('-'));
+    static const QRegularExpression valid(QStringLiteral(R"(^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$)"));
+    if (!valid.match(value).hasMatch()) return QString();
+
+    const QString upper = value.toUpper();
+    if (upper == QLatin1String("WORKGROUP") ||
+        upper == QLatin1String("LOCAL") ||
+        upper.startsWith(QLatin1Char('_'))) {
+        return QString();
+    }
+
+    return value;
+}
+
+QString lanAliasFromDnsName(const QString& value)
+{
+    const QString name = sanitizedLanHostName(value);
+    if (name.isEmpty()) return QString();
+    return QStringLiteral("LAN:%1").arg(name);
 }
 
 QString countryFlag(const QString& country_code)
@@ -1046,8 +1083,12 @@ public:
 
         const auto it = peer_lookup_cache.constFind(peerLookupKey(address));
         if (it == peer_lookup_cache.constEnd()) return QString();
-        if (!it->netbios_name.isEmpty()) return it->netbios_name;
-        if (!it->fqdn.isEmpty() && !isLanFqdnCandidate(it->fqdn)) return it->fqdn;
+        if (!it->netbios_name.isEmpty()) {
+            const QString lan_alias = lanAliasFromDnsName(it->netbios_name);
+            if (!lan_alias.isEmpty()) return lan_alias;
+        }
+        const QString lan_alias = lanAliasFromDnsName(it->fqdn);
+        if (!lan_alias.isEmpty()) return lan_alias;
         return QString();
     }
 
@@ -1208,11 +1249,11 @@ PeerTableModel::PeerTableModel(interfaces::Node& node, QObject* parent) :
     timer(nullptr)
 {
 #if ENABLE_DEFCOIN_FUN_UI
-    default_columns << tr("Node ID") << tr("IP Address: Port") << tr("Port") << tr("FQDN") << tr("Domain Alias") << tr("Version") << tr("Svcs") << tr("Avg Ping") << tr("Ping Time") << tr("Jitter") << tr("Traffic Health") << tr("Sent") << tr("Rec'd") << tr("User Agent") << tr("UA Count") << tr("Geo") << tr("City, St")
+    default_columns << tr("Node ID") << tr("IP Address: Port") << tr("Port") << tr("FQDN") << tr("Known DNS Name") << tr("Version") << tr("Svcs") << tr("Avg Ping") << tr("Ping Time") << tr("Jitter") << tr("Traffic Health") << tr("Sent") << tr("Rec'd") << tr("User Agent") << tr("UA Count") << tr("Geo") << tr("City, St")
                     << tr("Permissions") << tr("Direction") << tr("Start Height") << tr("Synced Headers") << tr("Synced Blocks") << tr("Connection Time") << tr("Last Send") << tr("Last Receive")
                     << tr("Ping Wait") << tr("Min. Ping") << tr("Time Offset") << tr("AS Number") << tr("AS Name") << tr("AS Hosting Company") << tr("Seed") << tr("UniqID");
 #else
-    default_columns << tr("Node ID") << tr("IP Address: Port") << tr("Port") << tr("FQDN") << tr("Domain Alias") << tr("Version") << tr("Svcs") << tr("Avg Ping") << tr("Ping Time") << tr("Jitter") << tr("Traffic Health") << tr("Sent") << tr("Rec'd") << tr("User Agent") << tr("UA Count") << tr("Geo") << tr("City, St")
+    default_columns << tr("Node ID") << tr("IP Address: Port") << tr("Port") << tr("FQDN") << tr("Known DNS Name") << tr("Version") << tr("Svcs") << tr("Avg Ping") << tr("Ping Time") << tr("Jitter") << tr("Traffic Health") << tr("Sent") << tr("Rec'd") << tr("User Agent") << tr("UA Count") << tr("Geo") << tr("City, St")
                     << tr("Permissions") << tr("Direction") << tr("Start Height") << tr("Synced Headers") << tr("Synced Blocks") << tr("Connection Time") << tr("Last Send") << tr("Last Receive")
                     << tr("Ping Wait") << tr("Min. Ping") << tr("Time Offset") << tr("AS Number") << tr("AS Name") << tr("AS Hosting Company") << tr("Seed");
 #endif
@@ -1658,7 +1699,7 @@ QVariant PeerTableModel::data(const QModelIndex &index, int role) const
     } else if (role == Qt::ToolTipRole && index.column() == Fqdn) {
         return tr("Reverse DNS for this peer. [NA: LAN] is shown when no local DNS name is available.");
     } else if (role == Qt::ToolTipRole && index.column() == CustomHostname) {
-        return tr("Seed domain, custom host label, or LAN device name discovered through local naming tools.");
+        return tr("Known DNS name, configured seed, custom host label, or LAN device name associated with this peer.");
     } else if (role == Qt::ToolTipRole && index.column() == Seed) {
         const QString seed_domain = seedDomainForAddress(rec->nodeStats.addr);
         return seed_domain.isEmpty() ? tr("This peer is not one of the configured seed domains.") : tr("Configured seed domain: %1").arg(seed_domain);

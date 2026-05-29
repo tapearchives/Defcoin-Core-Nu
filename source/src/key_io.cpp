@@ -105,7 +105,18 @@ CTxDestination DecodeDestination(const std::string& str, const CChainParams& par
         if (data.size() == hash.size() + script_prefix2.size() && std::equal(script_prefix2.begin(), script_prefix2.end(), data.begin())) {
             std::copy(data.begin() + script_prefix2.size(), data.end(), hash.begin());
             return ScriptHash(hash);
-        }        
+        }
+        // Decode-only compatibility for Defcoin tools that used the P2PKH+8
+        // convention and therefore emitted byte 22 script-hash addresses
+        // (usually displayed as 9... or A...). Nu still generates the
+        // canonical SCRIPT_ADDRESS2 / M... form above.
+        static const std::vector<unsigned char> defcoin_tool_script_prefix{22};
+        if (params.NetworkIDString() == CBaseChainParams::MAIN
+            && data.size() == hash.size() + defcoin_tool_script_prefix.size()
+            && std::equal(defcoin_tool_script_prefix.begin(), defcoin_tool_script_prefix.end(), data.begin())) {
+            std::copy(data.begin() + defcoin_tool_script_prefix.size(), data.end(), hash.begin());
+            return ScriptHash(hash);
+        }
     }
     data.clear();
     const auto dec = bech32::Decode(str);
@@ -202,8 +213,13 @@ CExtPubKey DecodeExtPubKey(const std::string& str)
     std::vector<unsigned char> data;
     if (DecodeBase58Check(str, data, 78)) {
         const std::vector<unsigned char>& prefix = Params().Base58Prefix(CChainParams::EXT_PUBLIC_KEY);
-        if (data.size() == BIP32_EXTKEY_SIZE + prefix.size() && std::equal(prefix.begin(), prefix.end(), data.begin())) {
-            key.Decode(data.data() + prefix.size());
+        static const std::vector<unsigned char> dfcp_prefix{0x02, 0xFA, 0x54, 0xD7};
+        const bool current_prefix = data.size() == BIP32_EXTKEY_SIZE + prefix.size()
+            && std::equal(prefix.begin(), prefix.end(), data.begin());
+        const bool defcoin_prefix = data.size() == BIP32_EXTKEY_SIZE + dfcp_prefix.size()
+            && std::equal(dfcp_prefix.begin(), dfcp_prefix.end(), data.begin());
+        if (current_prefix || defcoin_prefix) {
+            key.Decode(data.data() + (current_prefix ? prefix.size() : dfcp_prefix.size()));
         }
     }
     return key;
@@ -225,8 +241,13 @@ CExtKey DecodeExtKey(const std::string& str)
     std::vector<unsigned char> data;
     if (DecodeBase58Check(str, data, 78)) {
         const std::vector<unsigned char>& prefix = Params().Base58Prefix(CChainParams::EXT_SECRET_KEY);
-        if (data.size() == BIP32_EXTKEY_SIZE + prefix.size() && std::equal(prefix.begin(), prefix.end(), data.begin())) {
-            key.Decode(data.data() + prefix.size());
+        static const std::vector<unsigned char> dfcv_prefix{0x02, 0xFA, 0x54, 0xAD};
+        const bool current_prefix = data.size() == BIP32_EXTKEY_SIZE + prefix.size()
+            && std::equal(prefix.begin(), prefix.end(), data.begin());
+        const bool defcoin_prefix = data.size() == BIP32_EXTKEY_SIZE + dfcv_prefix.size()
+            && std::equal(dfcv_prefix.begin(), dfcv_prefix.end(), data.begin());
+        if (current_prefix || defcoin_prefix) {
+            key.Decode(data.data() + (current_prefix ? prefix.size() : dfcv_prefix.size()));
         }
     }
     return key;

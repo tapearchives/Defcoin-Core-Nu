@@ -1,9 +1,10 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Basic 2.15 as Basic
 
 import "../Theme"
 
-CheckBox {
+Basic.CheckBox {
     id: root
     spacing: NuTokens.spaceSm
     font.pixelSize: NuTokens.fontBody

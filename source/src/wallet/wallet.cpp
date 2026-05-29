@@ -39,6 +39,7 @@
 #include <univalue.h>
 
 #include <algorithm>
+#include <array>
 #include <assert.h>
 
 #include <boost/algorithm/string/replace.hpp>
@@ -259,9 +260,9 @@ std::shared_ptr<CWallet> CreateWallet(interfaces::Chain& chain, const std::strin
     const SecureString& passphrase = options.create_passphrase;
 
     if (wallet_creation_flags & WALLET_FLAG_DESCRIPTORS) {
-        error = Untranslated("Descriptor wallets not supported.") + Untranslated(" ") + error;
-        status = DatabaseStatus::FAILED_CREATE;
-        return nullptr;
+        // Follow Bitcoin Core's descriptor-wallet rule: descriptor wallets are
+        // SQLite wallets. Legacy BDB wallets continue to load unchanged.
+        options.require_format = DatabaseFormat::SQLITE;
     }
 
     // Indicate that the wallet is actually supposed to be blank and not just blank to make it encrypted
@@ -4478,8 +4479,12 @@ void CWallet::SetupDescriptorScriptPubKeyMans()
     CExtKey master_key;
     master_key.SetSeed(seed_key.begin(), seed_key.size());
 
+    // Defcoin SQL descriptor wallets start with canonical P2PKH descriptors.
+    // The inherited Litecoin descriptor set also includes MWEB, but that path
+    // requires a separate Defcoin-specific port before it is safe to enable.
+    static constexpr std::array<OutputType, 1> DEFAULT_DESCRIPTOR_OUTPUT_TYPES{OutputType::LEGACY};
     for (bool internal : {false, true}) {
-        for (OutputType t : OUTPUT_TYPES) {
+        for (OutputType t : DEFAULT_DESCRIPTOR_OUTPUT_TYPES) {
             auto spk_manager = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(*this, internal));
             if (IsCrypted()) {
                 if (IsLocked()) {

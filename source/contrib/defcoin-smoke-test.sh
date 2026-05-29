@@ -36,11 +36,18 @@ require_help_and_version() {
     "$path" --help >/dev/null
 }
 
-for bin in "$DEFCOIND" "$DEFCOIN_CLI" "$DEFCOIN_TX" "$DEFCOIN_WALLET" "$DEFCOIN_QT"; do
+for bin in "$DEFCOIND" "$DEFCOIN_CLI" "$DEFCOIN_TX" "$DEFCOIN_WALLET"; do
     require_file "$bin"
     require_arch "$bin"
     require_help_and_version "$bin"
 done
+
+if [[ -x "$DEFCOIN_QT" ]]; then
+    require_arch "$DEFCOIN_QT"
+    require_help_and_version "$DEFCOIN_QT"
+else
+    echo "skipping legacy Qt smoke executable: $DEFCOIN_QT"
+fi
 
 if [[ -x "$APP_BIN" ]]; then
     require_arch "$APP_BIN"
@@ -76,14 +83,33 @@ done
 
 "$DEFCOIN_CLI" -regtest -datadir="$TMPDIR_ROOT" -rpcport="$RPCPORT" getblockchaininfo >/dev/null
 NETWORK_INFO="$("$DEFCOIN_CLI" -regtest -datadir="$TMPDIR_ROOT" -rpcport="$RPCPORT" getnetworkinfo)"
-if ! grep -q '"/DefcoinCoreNu:26.3.1/"' <<<"$NETWORK_INFO"; then
-    echo "getnetworkinfo does not report the expected DefcoinCoreNu 26.3.1 user agent" >&2
+if ! grep -q '"/DefcoinCoreNu:26.5.1/"' <<<"$NETWORK_INFO"; then
+    echo "getnetworkinfo does not report the expected DefcoinCoreNu 26.5.1 user agent" >&2
     echo "$NETWORK_INFO" >&2
     exit 1
 fi
 
 if grep -R "Application Support/Litecoin" "$TMPDIR_ROOT" >/dev/null 2>&1; then
     echo "temporary datadir unexpectedly references Litecoin application data" >&2
+    exit 1
+fi
+
+SQL_WALLET="sql-smoke"
+"$DEFCOIN_CLI" -regtest -datadir="$TMPDIR_ROOT" -rpcport="$RPCPORT" -named createwallet wallet_name="$SQL_WALLET" load_on_startup=false >/tmp/defcoin-sql-smoke-create.json
+SQL_WALLET_INFO="$("$DEFCOIN_CLI" -regtest -datadir="$TMPDIR_ROOT" -rpcport="$RPCPORT" -rpcwallet="$SQL_WALLET" getwalletinfo)"
+if ! grep -q '"format": "sqlite"' <<<"$SQL_WALLET_INFO"; then
+    echo "createwallet default did not create a SQLite wallet" >&2
+    echo "$SQL_WALLET_INFO" >&2
+    exit 1
+fi
+if ! grep -q '"descriptors": true' <<<"$SQL_WALLET_INFO"; then
+    echo "createwallet default did not create a descriptor wallet" >&2
+    echo "$SQL_WALLET_INFO" >&2
+    exit 1
+fi
+"$DEFCOIN_CLI" -regtest -datadir="$TMPDIR_ROOT" -rpcport="$RPCPORT" -rpcwallet="$SQL_WALLET" getnewaddress >/dev/null
+if ! xxd -l 16 "$TMPDIR_ROOT/regtest/wallets/$SQL_WALLET/wallet.dat" | grep -q "SQLite format 3"; then
+    echo "created wallet.dat does not have a SQLite header" >&2
     exit 1
 fi
 

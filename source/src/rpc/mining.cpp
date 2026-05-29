@@ -594,8 +594,8 @@ static RPCHelpMan getblocktemplate()
                         {RPCResult::Type::STR, "mweb", /* optional */ true, "the MWEB block serialized as hex"}
                     }},
                 RPCExamples{
-                    HelpExampleCli("getblocktemplate", "'{\"rules\": [\"mweb\", \"segwit\"]}'")
-            + HelpExampleRpc("getblocktemplate", "{\"rules\": [\"mweb\", \"segwit\"]}")
+                    HelpExampleCli("getblocktemplate", "'{\"rules\": [\"segwit\"]}'")
+            + HelpExampleRpc("getblocktemplate", "{\"rules\": [\"segwit\"]}")
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -728,9 +728,15 @@ static RPCHelpMan getblocktemplate()
         // TODO: Maybe recheck connections/IBD and (if something wrong) send an expires-immediately template to stop miners?
     }
 
-    // GBT must be called with 'segwit' and 'mweb' sets in the rules
-    if (setClientRules.count("segwit") != 1 || setClientRules.count("mweb") != 1) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "getblocktemplate must be called with the segwit & mweb rule sets (call with {\"rules\": [\"mweb\", \"segwit\"]})");
+    const Consensus::Params& consensusParams = Params().GetConsensus();
+    const CBlockIndex* active_tip = ::ChainActive().Tip();
+    const bool segwit_required = active_tip != nullptr && active_tip->nHeight + 1 >= consensusParams.SegwitHeight;
+    const bool mweb_required = active_tip != nullptr && IsMWEBEnabled(active_tip, consensusParams);
+    if (segwit_required && setClientRules.count("segwit") != 1) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "getblocktemplate must be called with the segwit rule set (call with {\"rules\": [\"segwit\"]})");
+    }
+    if (mweb_required && setClientRules.count("mweb") != 1) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "getblocktemplate must be called with the mweb rule set (call with {\"rules\": [\"mweb\", \"segwit\"]})");
     }
 
     // Update block
@@ -759,8 +765,6 @@ static RPCHelpMan getblocktemplate()
     }
     CHECK_NONFATAL(pindexPrev);
     CBlock* pblock = &pblocktemplate->block; // pointer for convenience
-    const Consensus::Params& consensusParams = Params().GetConsensus();
-
     // Update nTime
     UpdateTime(pblock, consensusParams, pindexPrev);
     pblock->nNonce = 0;

@@ -65,6 +65,11 @@ static std::vector<uint256> GetFrozenMWEBOutputIDs()
     };
 }
 
+static constexpr int DEFCOIN_MAINNET_SEGWIT_HEIGHT = 903168;
+static constexpr int DEFCOIN_MAINNET_BIP34_HEIGHT = 828326;
+static constexpr int DEFCOIN_MAINNET_BIP65_BIP66_HEIGHT = 1828326;
+static constexpr int DEFCOIN_MAINNET_CSV_HEIGHT = 903168;
+
 /**
  * Main network
  */
@@ -75,15 +80,16 @@ public:
         consensus.signet_blocks = false;
         consensus.signet_challenge.clear();
         consensus.nSubsidyHalvingInterval = 840000;
-        // Defcoin mainnet preserves the historical chain. Do not enable newer
-        // Litecoin soft forks unless a deliberate Defcoin migration is planned.
+        // Defcoin mainnet preserves the historical v1.0.x softfork boundaries
+        // so Nu validates, requests, stores, and serves the same chain data
+        // expected by legacy Defcoin Core peers.
         consensus.BIP16Height = 0;
-        consensus.BIP34Height = 710000;
-        consensus.BIP34Hash = uint256{};
-        consensus.BIP65Height = std::numeric_limits<int>::max();
-        consensus.BIP66Height = std::numeric_limits<int>::max();
-        consensus.CSVHeight = std::numeric_limits<int>::max();
-        consensus.SegwitHeight = std::numeric_limits<int>::max();
+        consensus.BIP34Height = DEFCOIN_MAINNET_BIP34_HEIGHT;
+        consensus.BIP34Hash = uint256S("57bae90a3342fac0bae15eb2ac9a8924779984bc301ae67730dfda6df49b203c");
+        consensus.BIP65Height = DEFCOIN_MAINNET_BIP65_BIP66_HEIGHT;
+        consensus.BIP66Height = DEFCOIN_MAINNET_BIP65_BIP66_HEIGHT;
+        consensus.CSVHeight = DEFCOIN_MAINNET_CSV_HEIGHT;
+        consensus.SegwitHeight = DEFCOIN_MAINNET_SEGWIT_HEIGHT;
         // Defcoin mainnet preserves historical consensus rules and does not use BIP9 versionbits activation.
         consensus.MinBIP9WarningHeight = std::numeric_limits<int>::max();
         consensus.powLimit = uint256S("00000fffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");

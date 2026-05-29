@@ -1,4 +1,6 @@
 #include "NuRpcService.h"
+#include "NuPlatformIntegration.h"
+#include "NuVelopackUpdater.h"
 
 #include <QApplication>
 #include <QColor>
@@ -235,14 +237,34 @@ int main(int argc, char* argv[])
     const QString resourceRoot = QDir(appDir).filePath("nu");
     const QString deployedQmlRoot = QDir(appDir).filePath("qml");
 #endif
+    const QStringList arguments = app.arguments();
+    const bool buildSmokeTest = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_SMOKE_TEST");
+    const bool smokeTest = arguments.contains(QStringLiteral("--smoke-test")) ||
+        buildSmokeTest;
+    if (buildSmokeTest) {
+        return 0;
+    }
+
+    bool velopackHookLaunch = !qEnvironmentVariableIsEmpty("VELOPACK_FIRSTRUN") ||
+        !qEnvironmentVariableIsEmpty("VELOPACK_RESTART");
+    for (const QString& argument : arguments) {
+        if (argument.startsWith(QStringLiteral("--veloapp-"))) {
+            velopackHookLaunch = true;
+            break;
+        }
+    }
+    if (!smokeTest && velopackHookLaunch) {
+        NuVelopackUpdater::runStartupHook(appDir);
+    }
+
     QIcon appIcon;
     appIcon.addFile(resourceRoot + "/assets/brand/defcoin-nu-icon-1024.png", QSize(256, 256));
     appIcon.addFile(resourceRoot + "/assets/brand/defcoin-nu-icon-1024.png", QSize(1024, 1024));
     appIcon.addFile(resourceRoot + "/assets/brand/DefcoinCoreNu.ico");
     QApplication::setWindowIcon(appIcon);
 
-    const QStringList arguments = app.arguments();
     const bool forceRaise = arguments.contains(QStringLiteral("--raise"));
+    const int grabIndex = arguments.indexOf("--grab-screenshot");
     const QHash<QString, QString> buildInfo = readBuildInfoProperties(resourceRoot);
     const QString buildId = buildInfo.value(QStringLiteral("build_id"));
     const QString buildTimestamp = buildInfo.value(QStringLiteral("build_timestamp_utc"));
@@ -279,7 +301,11 @@ int main(int argc, char* argv[])
     }
 
     NuRpcService service;
+    NuPlatformIntegration platform;
+    platform.setService(&service);
+    platform.setTrayIcon(appIcon);
     qmlRegisterSingletonInstance("Defcoin.Nu", 1, 0, "NuService", &service);
+    qmlRegisterSingletonInstance("Defcoin.Nu", 1, 0, "NuPlatform", &platform);
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("NuBuildVersion"), QStringLiteral(DEFCOIN_NU_VERSION));
@@ -297,9 +323,19 @@ int main(int argc, char* argv[])
     }, Qt::QueuedConnection);
     engine.load(mainUrl);
 
+    if (smokeTest && grabIndex < 0) {
+        if (splash) {
+            splash->close();
+            splash->deleteLater();
+        }
+        return engine.rootObjects().isEmpty() ? 1 : 0;
+    }
+
     QQuickWindow* rootWindow = nullptr;
     if (!engine.rootObjects().isEmpty()) {
         QObject* rootObject = engine.rootObjects().constFirst();
+        platform.setRootObject(rootObject);
+        platform.installMacApplicationMenu();
         const int routeIndex = arguments.indexOf("--route");
         if (routeIndex >= 0 && routeIndex + 1 < arguments.size()) {
             rootObject->setProperty("currentRoute", arguments.at(routeIndex + 1));
@@ -333,6 +369,7 @@ int main(int argc, char* argv[])
         }
         if (auto* window = qobject_cast<QQuickWindow*>(rootObject)) {
             rootWindow = window;
+            platform.setMainWindow(rootWindow);
             rootWindow->setIcon(appIcon);
             activateWindowForUser(rootWindow);
             if (forceRaise) {
@@ -371,6 +408,7 @@ int main(int argc, char* argv[])
             auto* quickWindow = qobject_cast<QQuickWindow*>(window);
             if (!quickWindow) continue;
             rootWindow = quickWindow;
+            platform.setMainWindow(rootWindow);
             rootWindow->setIcon(appIcon);
             activateWindowForUser(rootWindow);
             if (splash) {
@@ -387,7 +425,6 @@ int main(int argc, char* argv[])
         QTimer::singleShot(4200, &app, [] { activateTopLevelWindowsForUser(); });
     }
 
-    const int grabIndex = arguments.indexOf("--grab-screenshot");
     if (grabIndex >= 0 && grabIndex + 1 < arguments.size()) {
         const QString outputPath = arguments.at(grabIndex + 1);
         int grabDelayMs = 1200;
@@ -410,10 +447,6 @@ int main(int argc, char* argv[])
             }
             QCoreApplication::quit();
         });
-    }
-
-    if (app.arguments().contains("--smoke-test") && grabIndex < 0) {
-        QTimer::singleShot(1000, &app, &QCoreApplication::quit);
     }
 
     return app.exec();

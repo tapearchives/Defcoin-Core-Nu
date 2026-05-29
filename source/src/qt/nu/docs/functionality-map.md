@@ -1,9 +1,9 @@
-# Defcoin Core Nu 26.3.1 Functionality Map
+# Defcoin Core Nu 26.5.1 Functionality Map
 
 This map is the release checklist for preserving useful Litecoin Core wallet
 capabilities while reorganizing them into the Nu interface. Nu does not copy
 the old tab order. It groups functions by user intent: hold, send, receive,
-review history, inspect the node, and configure the app.
+review history, manage wallets, inspect the node, and configure the app.
 
 ## Primary Nu Surfaces
 
@@ -14,8 +14,10 @@ review history, inspect the node, and configure the app.
 | Send | Address book, recipient, label, amount, fee intent, custom fee, subtract-fee option, optional custom change address, PSBT tools, review, broadcast | Irreversible money movement gets its own focused flow and final review. |
 | Receive | Payment request form, real receiving address, QR URI, request history | Incoming payments stay separate from send risk. |
 | Activity | Transaction history, date/type/search filters, CSV export | History is a retrieval task, not part of payment composition. |
+| Wallet | Wallet files, backup, BIP39 recovery, compatibility encoding tools, passphrase protection, message signing, and address book | Key and wallet maintenance are now first-class wallet tasks instead of being buried under Settings. |
+| Mining | External miner executable setup, pool presets, CPU thread/nice settings, and miner output | Mining helpers stay separate from wallet spending and node diagnostics. |
 | Diagnostics | Status, peers, traffic, debug log, local RPC console | Node transparency is preserved while keeping it out of the main wallet path. |
-| Settings | Wallet backup/address book, network controls, display, about | Less frequent maintenance actions live behind a single settings entry. Node diagnostics stay in Diagnostics. |
+| Settings | Network controls, display behavior, update checks, and background-close behavior | App preferences stay together; wallet operations live in Wallet. Node diagnostics stay in Diagnostics. |
 
 ## Litecoin Core Feature Mapping
 
@@ -27,7 +29,7 @@ review history, inspect the node, and configure the app.
 | Export transaction CSV | Activity | local CSV export | Direct UI | Explicit user file action. |
 | Send coins | Send | `sendtoaddress` | Direct UI | Dedicated payment path. |
 | Review before send | Send | local review dialog before RPC | Direct UI | Safety-first confirmation for irreversible actions. |
-| Address book/contact picker | Send, Settings > Wallet | `listlabels`, `getaddressesbylabel`, `listreceivedbyaddress`, `setlabel` | Direct UI | Contacts appear where they are used and remain visible in Wallet settings. |
+| Address book/contact picker | Send, Wallet | `listlabels`, `getaddressesbylabel`, `listreceivedbyaddress`, `setlabel` | Direct UI | Contacts appear where they are used and remain visible in Wallet. |
 | Label recipient address | Send | `setlabel` after send | Direct UI | Preserves wallet metadata. |
 | Open Defcoin URI | File > Open URI, Send recipient field | URI parsing before send | Direct UI | Preserves Litecoin Core's Open URI path while keeping final review in Send. |
 | Fee target | Send | `sendtoaddress` `conf_target` | Direct UI | Fee intent belongs with payment composition. |
@@ -43,14 +45,16 @@ review history, inspect the node, and configure the app.
 | Payment request label/amount/message | Receive | `getnewaddress`, local `defcoin:` URI | Direct UI | Classic request fields remain present. |
 | Receive QR | Receive | local QR generation from real URI | Direct UI | QR represents the generated address/request, not placeholder art. |
 | Requested payments history | Receive | current-session request rows | Direct UI | Generated requests are visible in the Receive workflow. |
-| Backup wallet | File menu, Settings > Wallet | `backupwallet` | Direct UI | Standard desktop convention plus settings location. |
-| Encrypt wallet | Settings > Wallet > Passphrase protection > Wallet security | `encryptwallet` | Direct UI | State-aware wallet security dialog encrypts unencrypted wallets. |
+| Backup wallet | File menu, Wallet | `backupwallet` | Direct UI | Standard desktop convention plus wallet maintenance location. |
+| Create/restore BIP39 wallet | File menu, Wallet | `createwallet`, `sethdseed`, `importdescriptors`, `deriveaddresses` | Direct UI | Recovery phrases are visible wallet operations with checksum validation and preview-gated external import. |
+| Convert extended keys / P2SH forms | Wallet | Local Base58Check conversion | Direct UI | Shows `xpub/xprv` and `dfcp/dfcv` equivalents, and canonical `M...` P2SH equivalents for old `3...` or tool `9/A...` forms. |
+| Encrypt wallet | Wallet > Passphrase protection > Wallet security | `encryptwallet` | Direct UI | State-aware wallet security dialog encrypts unencrypted wallets. |
 | Lock/unlock wallet | Diagnostics > Console | `walletlock`, `walletpassphrase` | Advanced RPC | Available without placing passphrase handling into QML forms. |
-| Change passphrase | Settings > Wallet > Passphrase protection > Wallet security | `walletpassphrasechange` | Direct UI | The same state-aware wallet security dialog changes passphrases for encrypted wallets; unencrypted wallets get an explanatory backend message if this path is reached. |
-| Remove wallet encryption | Settings > Wallet > Passphrase protection > Wallet security | Not supported by Core wallet RPC | Explanatory UI | Core wallets do not provide a safe in-place decrypt operation. The dialog explains that users must migrate to a new unencrypted wallet if they want to stop using passphrase protection. |
-| Sign message | Settings > Wallet > Message signing | `signmessage` | Direct UI | Legacy proof-of-address workflow is preserved but not mixed into payment sending. |
-| Verify message | Settings > Wallet > Message signing | `verifymessage` | Direct UI | Legacy proof verification is preserved near wallet maintenance tools. |
-| Unit selection | Settings > Wallet note, RPC console | display/RPC support | Minimal direct UI | Nu starts with DFC for clarity; backend units remain available. |
+| Change passphrase | Wallet > Passphrase protection > Wallet security | `walletpassphrasechange` | Direct UI | The same state-aware wallet security dialog changes passphrases for encrypted wallets; unencrypted wallets get an explanatory backend message if this path is reached. |
+| Remove wallet encryption | Wallet > Passphrase protection > Wallet security | Not supported by Core wallet RPC | Explanatory UI | Core wallets do not provide a safe in-place decrypt operation. The dialog explains that users must migrate to a new unencrypted wallet if they want to stop using passphrase protection. |
+| Sign message | Wallet > Message signing | `signmessage` | Direct UI | Legacy proof-of-address workflow is preserved but not mixed into payment sending. |
+| Verify message | Wallet > Message signing | `verifymessage` | Direct UI | Legacy proof verification is preserved near wallet maintenance tools. |
+| Unit selection | Wallet note, RPC console | display/RPC support | Minimal direct UI | Nu starts with DFC for clarity; backend units remain available. |
 | Third-party explorer links | Settings > Display, Activity/details dialogs | config/RPC data | Direct UI | Optional external links are shown only when explicitly enabled. |
 | Network active toggle | Settings > Network | `setnetworkactive` | Direct UI | Network control belongs with network state. |
 | Peer table | Diagnostics > Peers | `getpeerinfo` | Direct UI | Diagnostic transparency without the old inspector-heavy layout. Includes the actual P2P magic bytes selected from the peer packet header. |

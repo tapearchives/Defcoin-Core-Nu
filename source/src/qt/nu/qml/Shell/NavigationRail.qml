@@ -153,9 +153,27 @@ Rectangle {
                 },
                 {
                     route: "activity",
-                    label: "Activity",
+                    label: "Transactions",
                     icon: "../../assets/icons/activity.svg",
                     help: "Search, inspect, and export wallet transaction history."
+                },
+                {
+                    route: "wallet",
+                    label: "Wallet",
+                    icon: "../../assets/icons/wallet.svg",
+                    help: "Wallet files, recovery phrases, passphrases, signing, and addresses."
+                },
+                {
+                    route: "mining",
+                    label: "Mining",
+                    icon: "../../assets/icons/mining.svg",
+                    help: "Configure and monitor a local scrypt miner executable."
+                },
+                {
+                    route: "explorer",
+                    label: "Explorer",
+                    icon: "../../assets/icons/explorer.svg",
+                    help: "Search blocks, transactions, and wallet addresses with the local SQLite explorer cache."
                 },
                 {
                     route: "node",
@@ -167,7 +185,7 @@ Rectangle {
                     route: "settings",
                     label: "Settings",
                     icon: "../../assets/icons/settings.svg",
-                    help: "Wallet, network, display, advanced, and about settings."
+                    help: "Network, display, and update settings."
                 }
             ]
 

@@ -1,9 +1,10 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Basic 2.15 as Basic
 
 import "../Theme"
 
-TextField {
+Basic.TextField {
     id: root
     property string helpText: ""
     color: NuTokens.textPrimary

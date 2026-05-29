@@ -1,6 +1,6 @@
 # Defcoin Core Nu Build And Installer Runbook
 
-Last updated: 2026-05-19
+Last updated: 2026-05-29
 
 This runbook is public-safe. It intentionally avoids local workstation paths,
 mounted volume names, user names, and machine-specific details.
@@ -26,9 +26,9 @@ QT_WIN="$HOME/Qt/6.10.1/mingw_64"
 Finished deliverables should be staged outside source history:
 
 ```text
-$OUT/Nu-26.3.1/apple-silicon/
-$OUT/Nu-26.3.1/mac-intel/
-$OUT/Nu-26.3.1/windows11-x86_64/
+$OUT/Nu-26.5.1/apple-silicon/
+$OUT/Nu-26.5.1/mac-intel/
+$OUT/Nu-26.5.1/windows11-x86_64/
 ```
 
 ## macOS Qt Quick App
@@ -43,7 +43,8 @@ cmake -S src/qt/nu/app -B build/nu-qml-arm64 \
   -DCMAKE_PREFIX_PATH="$QT_MAC" \
   -DQt6_DIR="$QT_MAC/lib/cmake/Qt6" \
   -DDEFCOIN_NU_BACKEND_BINARY="$SRC/src/defcoind" \
-  -DDEFCOIN_NU_RELEASE_NAME="26.3.1" \
+  -DDEFCOIN_NU_CLI_BINARY="$SRC/src/defcoin-cli" \
+  -DDEFCOIN_NU_RELEASE_NAME="26.5.1" \
   -DDEFCOIN_NU_ENABLE_HELP=OFF
 
 cmake --build build/nu-qml-arm64 --target DefcoinCoreNuResources -- -j1
@@ -51,13 +52,20 @@ cmake --build build/nu-qml-arm64 --target DefcoinCoreNuResources -- -j1
 
 Use `x86_64` and a separate build directory for Intel macOS.
 
+The macOS build runs `macdeployqt`, then `repair_macos_qt_bundle.py`. The
+repair pass is intentional: Homebrew's modular Qt layout can leave Qt Quick
+frameworks unresolved even when `macdeployqt` exits successfully. The repair
+pass copies any missing Qt frameworks into `Contents/Frameworks`, normalizes Qt
+install names to the app bundle, prunes non-runtime framework headers/`.prl`
+metadata, and fails the build if a Qt framework would still be missing.
+
 Stage macOS bundles with the local staging helper:
 
 ```sh
 src/qt/nu/app/stage_macos_distribution.sh \
   "$SRC/build/nu-qml-arm64/DefcoinCoreNu.app" \
-  "$OUT/Nu-26.3.1/apple-silicon" \
-  "26.3.1" \
+  "$OUT/Nu-26.5.1/apple-silicon" \
+  "26.5.1" \
   "macOS-AppleSilicon"
 ```
 
@@ -92,7 +100,8 @@ cd "$SRC"
 cmake -S src/qt/nu/app -B build/nu-qml-win64 \
   -DCMAKE_TOOLCHAIN_FILE="$SRC/depends/cmake/mingw-w64-x86_64.cmake" \
   -DDEFCOIN_NU_BACKEND_BINARY="$WIN_SRC/src/defcoind.exe" \
-  -DDEFCOIN_NU_RELEASE_NAME="26.3.1" \
+  -DDEFCOIN_NU_CLI_BINARY="$WIN_SRC/src/defcoin-cli.exe" \
+  -DDEFCOIN_NU_RELEASE_NAME="26.5.1" \
   -DDEFCOIN_NU_ENABLE_HELP=OFF \
   -DQt6_DIR="$QT_WIN/lib/cmake/Qt6" \
   -DCMAKE_BUILD_TYPE=Release
@@ -109,6 +118,6 @@ directly from the finish page.
 - Do not commit app bundles, installers, DMGs, ZIPs, or generated build trees.
 - Do not commit private credentials, wallet files, RPC cookies, `.env` files,
   or workstation-specific paths.
-- Keep the visible release version as `26.3.1`.
+- Keep the visible release version as `26.5.1`.
 - Build IDs may include UTC timestamp, commit, and dirty/clean state, but
   should not expose local path or machine details.

@@ -124,14 +124,14 @@ rm -rf "$APP/Contents/Resources/themes" "$APP/Contents/Resources/custom_themes"
 if [ "$DEFCOIN_PACKAGE_THEMES" = "0" ]; then
   echo "  standard package: theme resources omitted"
   PRODUCT_NAME="Defcoin Core"
-  SHORT_VERSION="26.3.1"
-  GET_INFO_STRING="Defcoin Core 26.3.1"
+  SHORT_VERSION="26.5.1"
+  GET_INFO_STRING="Defcoin Core 26.5.1"
   VOLUME_NAME="Defcoin Core"
 else
   ditto "src/qt/res/themes" "$APP/Contents/Resources/themes"
   PRODUCT_NAME="Defcoin Core Special Edition"
-  SHORT_VERSION="26.3.1 Special Edition"
-  GET_INFO_STRING="Defcoin Core Special Edition 26.3.1"
+  SHORT_VERSION="26.5.1 Special Edition"
+  GET_INFO_STRING="Defcoin Core Special Edition 26.5.1"
   VOLUME_NAME="Defcoin Core Special Edition"
 fi
 

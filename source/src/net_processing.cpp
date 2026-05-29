@@ -37,6 +37,7 @@
 #include <memory>
 #include <set>
 #include <typeinfo>
+#include <vector>
 
 /** Expiration time for orphan transactions in seconds */
 static constexpr int64_t ORPHAN_TX_EXPIRE_TIME = 20 * 60;
@@ -119,6 +120,7 @@ static const unsigned int BLOCK_DOWNLOAD_WINDOW = 1024;
 static const int64_t BLOCK_DOWNLOAD_TIMEOUT_BASE = 1000000;
 /** Additional block download timeout per parallel downloading peer (i.e. 5 min) */
 static const int64_t BLOCK_DOWNLOAD_TIMEOUT_PER_PEER = 500000;
+
 /** Maximum number of headers to announce when relaying blocks with headers message.*/
 static const unsigned int MAX_BLOCKS_TO_ANNOUNCE = 8;
 /** Maximum number of unconnecting headers announcements before DoS score */
@@ -213,6 +215,18 @@ namespace {
             normalized.erase(normalized.begin());
         }
         return ToLower(normalized).rfind("defcoin", 0) == 0;
+    }
+
+    bool IsLocalP2PoolUserAgent(const std::string& clean_subver, const CNetAddr& addr)
+    {
+        if (!addr.IsLocal()) {
+            return false;
+        }
+        std::string normalized = clean_subver;
+        while (!normalized.empty() && normalized.front() == '/') {
+            normalized.erase(normalized.begin());
+        }
+        return ToLower(normalized).rfind("p2pool", 0) == 0;
     }
 
     bool IsLanDiscoveryAddress(const CNetAddr& addr)
@@ -1752,7 +1766,9 @@ void static ProcessGetBlockData(CNode& pfrom, const CChainParams& chainparams, c
                 nSendFlags |= fPeerWantsMWEB ? 0 : SERIALIZE_NO_MWEB;
 
                 if (CanDirectFetch(consensusParams) && pindex->nHeight >= ::ChainActive().Height() - MAX_CMPCTBLOCK_DEPTH) {
-                    if ((fPeerWantsWitness || !fWitnessesPresentInARecentCompactBlock) && (fPeerWantsMWEB || !fMWEBPresentInARecentCompactBlock) && a_recent_compact_block && a_recent_compact_block->header.GetHash() == pindex->GetBlockHash()) {
+                    if ((fPeerWantsWitness || !fWitnessesPresentInARecentCompactBlock) &&
+                        (fPeerWantsMWEB || !fMWEBPresentInARecentCompactBlock) &&
+                        a_recent_compact_block && a_recent_compact_block->header.GetHash() == pindex->GetBlockHash()) {
                         connman.PushMessage(&pfrom, msgMaker.Make(nSendFlags, NetMsgType::CMPCTBLOCK, *a_recent_compact_block));
                     } else {
                         CBlockHeaderAndShortTxIDs cmpctblock(*pblock, fPeerWantsWitness);
@@ -2691,7 +2707,9 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
             std::string strSubVer;
             vRecv >> LIMITED_STRING(strSubVer, MAX_SUBVERSION_LENGTH);
             cleanSubVer = SanitizeString(strSubVer);
-            if (GetOnlyDefcoinUserAgents() && !IsDefcoinPrefixedUserAgent(cleanSubVer)) {
+            if (GetOnlyDefcoinUserAgents()
+                && !IsDefcoinPrefixedUserAgent(cleanSubVer)
+                && !IsLocalP2PoolUserAgent(cleanSubVer, pfrom.addr)) {
                 LogPrintf("peer=%d user agent '%s' is not Defcoin-prefixed on %s connection; disconnecting before address relay\n", pfrom.GetId(), cleanSubVer, pfrom.ConnectionTypeAsString());
                 if (!pfrom.IsInboundConn()) {
                     m_connman.SetTryNewOutboundPeer(true);
@@ -2954,7 +2972,8 @@ void PeerManager::ProcessMessage(CNode& pfrom, const std::string& msg_type, CDat
     if (msg_type == NetMsgType::ADDR || msg_type == NetMsgType::ADDRV2) {
         if (GetOnlyDefcoinUserAgents()) {
             LOCK(pfrom.cs_SubVer);
-            if (!IsDefcoinPrefixedUserAgent(pfrom.cleanSubVer)) {
+            if (!IsDefcoinPrefixedUserAgent(pfrom.cleanSubVer)
+                && !IsLocalP2PoolUserAgent(pfrom.cleanSubVer, pfrom.addr)) {
                 LogPrintf("peer=%d user agent '%s' is not Defcoin-prefixed; ignoring %s addresses\n",
                           pfrom.GetId(), pfrom.cleanSubVer, SanitizeString(msg_type));
                 pfrom.fDisconnect = true;

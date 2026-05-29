@@ -55,7 +55,7 @@ ColumnLayout {
 
     NuPageHeader {
         Layout.fillWidth: true
-        title: "Activity"
+        title: "Transactions"
         detail: "Transactions, requests, and exported wallet records."
     }
 

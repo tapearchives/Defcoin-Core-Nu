@@ -889,6 +889,110 @@ static RPCHelpMan setonlydefcoinuseragents()
     };
 }
 
+static RPCHelpMan getacceptlegacymagic()
+{
+    return RPCHelpMan{"getacceptlegacymagic",
+                "\nReturns whether legacy Litecoin-compatible Defcoin message-start bytes are accepted.\n",
+                {},
+                RPCResult{RPCResult::Type::BOOL, "", "true when legacy magic is accepted"},
+                RPCExamples{
+                    HelpExampleCli("getacceptlegacymagic", "")
+            + HelpExampleRpc("getacceptlegacymagic", "")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    return GetAcceptLegacyMagic();
+},
+    };
+}
+
+static RPCHelpMan setacceptlegacymagic()
+{
+    return RPCHelpMan{"setacceptlegacymagic",
+                "\nEnable or disable temporary acceptance of legacy Litecoin-compatible Defcoin message-start bytes.\n",
+                {
+                    {"enabled", RPCArg::Type::BOOL, RPCArg::Optional::NO, "true to accept legacy magic in compatibility mode, false to accept only Defcoin magic"},
+                },
+                RPCResult{RPCResult::Type::BOOL, "", "The legacy-magic acceptance state after applying the request"},
+                RPCExamples{
+                    HelpExampleCli("setacceptlegacymagic", "true")
+            + HelpExampleRpc("setacceptlegacymagic", "true")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    SetAcceptLegacyMagic(request.params[0].get_bool());
+    return GetAcceptLegacyMagic();
+},
+    };
+}
+
+static RPCHelpMan getallowlannodediscovery()
+{
+    return RPCHelpMan{"getallowlannodediscovery",
+                "\nReturns whether LAN/private peer addresses may be learned from address relay.\n",
+                {},
+                RPCResult{RPCResult::Type::BOOL, "", "true when LAN node discovery/address learning is enabled"},
+                RPCExamples{
+                    HelpExampleCli("getallowlannodediscovery", "")
+            + HelpExampleRpc("getallowlannodediscovery", "")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    return GetAllowLanNodeDiscovery();
+},
+    };
+}
+
+static RPCHelpMan setallowlannodediscovery()
+{
+    return RPCHelpMan{"setallowlannodediscovery",
+                "\nEnable or disable learning LAN/private peer addresses from address relay.\n",
+                {
+                    {"enabled", RPCArg::Type::BOOL, RPCArg::Optional::NO, "true to allow LAN node discovery/address learning, false to discard relayed LAN/private addresses"},
+                },
+                RPCResult{RPCResult::Type::BOOL, "", "The LAN node discovery state after applying the request"},
+                RPCExamples{
+                    HelpExampleCli("setallowlannodediscovery", "true")
+            + HelpExampleRpc("setallowlannodediscovery", "true")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    const bool enabled = request.params[0].get_bool();
+    SetAllowLanNodeDiscovery(enabled);
+    fDiscover = enabled;
+    if (enabled) {
+        Discover();
+    }
+    return GetAllowLanNodeDiscovery();
+},
+    };
+}
+
+static RPCHelpMan setupnpportmapping()
+{
+    return RPCHelpMan{"setupnpportmapping",
+                "\nEnable or disable UPnP port mapping without restarting.\n",
+                {
+                    {"enabled", RPCArg::Type::BOOL, RPCArg::Optional::NO, "true to start UPnP port mapping, false to stop it"},
+                },
+                RPCResult{RPCResult::Type::BOOL, "", "The value that was passed in"},
+                RPCExamples{
+                    HelpExampleCli("setupnpportmapping", "true")
+            + HelpExampleRpc("setupnpportmapping", "true")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    if (request.params[0].get_bool()) {
+        StartMapPort();
+    } else {
+        InterruptMapPort();
+        StopMapPort();
+    }
+    return request.params[0].get_bool();
+},
+    };
+}
+
 static RPCHelpMan getnodeaddresses()
 {
     return RPCHelpMan{"getnodeaddresses",
@@ -1013,6 +1117,11 @@ static const CRPCCommand commands[] =
     { "network",            "setnetworkactive",       &setnetworkactive,       {"state"} },
     { "network",            "getonlydefcoinuseragents", &getonlydefcoinuseragents, {} },
     { "network",            "setonlydefcoinuseragents", &setonlydefcoinuseragents, {"enabled"} },
+    { "network",            "getacceptlegacymagic",   &getacceptlegacymagic,   {} },
+    { "network",            "setacceptlegacymagic",   &setacceptlegacymagic,   {"enabled"} },
+    { "network",            "getallowlannodediscovery", &getallowlannodediscovery, {} },
+    { "network",            "setallowlannodediscovery", &setallowlannodediscovery, {"enabled"} },
+    { "network",            "setupnpportmapping",     &setupnpportmapping,     {"enabled"} },
     { "network",            "getnodeaddresses",       &getnodeaddresses,       {"count"} },
     { "hidden",             "addconnection",          &addconnection,          {"address", "connection_type"} },
     { "hidden",             "addpeeraddress",         &addpeeraddress,         {"address", "port"} },

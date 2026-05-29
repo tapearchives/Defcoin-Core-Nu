@@ -1,10 +1,11 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Basic 2.15 as Basic
 import QtQuick.Layouts 1.15
 
 import "../Theme"
 
-Button {
+Basic.Button {
     id: root
     implicitHeight: 56
     font.pixelSize: NuTokens.fontBody

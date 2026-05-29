@@ -9,15 +9,19 @@
 #include <QObject>
 #include <QElapsedTimer>
 #include <QSet>
+#include <QStringList>
 #include <QUrl>
 #include <QVariantList>
+#include <QVariantMap>
 
 #include <functional>
 
 class QNetworkAccessManager;
 class QNetworkReply;
+class QFile;
 class QProcess;
 class QTimer;
+class NuVelopackUpdater;
 
 class NuRpcService final : public QObject
 {
@@ -29,18 +33,33 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString networkState READ networkState NOTIFY stateChanged)
     Q_PROPERTY(int peerCount READ peerCount NOTIFY stateChanged)
     Q_PROPERTY(int blockHeight READ blockHeight NOTIFY stateChanged)
+    Q_PROPERTY(int headerHeight READ headerHeight NOTIFY stateChanged)
+    Q_PROPERTY(bool syncing READ syncing NOTIFY stateChanged)
     Q_PROPERTY(QString syncState READ syncState NOTIFY stateChanged)
+    Q_PROPERTY(QString syncDetail READ syncDetail NOTIFY stateChanged)
+    Q_PROPERTY(QString syncEta READ syncEta NOTIFY stateChanged)
+    Q_PROPERTY(int syncProgressPercent READ syncProgressPercent NOTIFY stateChanged)
+    Q_PROPERTY(QString recentNetworkHashrate READ recentNetworkHashrate NOTIFY stateChanged)
+    Q_PROPERTY(QString networkDifficulty READ networkDifficulty NOTIFY stateChanged)
     Q_PROPERTY(bool walletLocked READ walletLocked NOTIFY stateChanged)
     Q_PROPERTY(bool walletEncrypted READ walletEncrypted NOTIFY walletChanged)
     Q_PROPERTY(QString totalBalance READ totalBalance NOTIFY walletChanged)
     Q_PROPERTY(QString availableBalance READ availableBalance NOTIFY walletChanged)
     Q_PROPERTY(QString pendingBalance READ pendingBalance NOTIFY walletChanged)
     Q_PROPERTY(QString immatureBalance READ immatureBalance NOTIFY walletChanged)
+    Q_PROPERTY(int walletTransactionCount READ walletTransactionCount NOTIFY walletChanged)
     Q_PROPERTY(QString receiveAddress READ receiveAddress NOTIFY walletChanged)
     Q_PROPERTY(QString receiveQrSource READ receiveQrSource NOTIFY walletChanged)
     Q_PROPERTY(QVariantList addressBook READ addressBook NOTIFY walletChanged)
     Q_PROPERTY(QVariantList receiveRequests READ receiveRequests NOTIFY walletChanged)
     Q_PROPERTY(QVariantList recentTransactions READ recentTransactions NOTIFY walletChanged)
+    Q_PROPERTY(QStringList availableWallets READ availableWallets NOTIFY walletChanged)
+    Q_PROPERTY(QStringList loadedWallets READ loadedWallets NOTIFY walletChanged)
+    Q_PROPERTY(QString currentWalletName READ currentWalletName NOTIFY walletChanged)
+    Q_PROPERTY(bool walletSelected READ walletSelected NOTIFY walletChanged)
+    Q_PROPERTY(int walletAddressCount READ walletAddressCount NOTIFY walletChanged)
+    Q_PROPERTY(int walletNonZeroAddressCount READ walletNonZeroAddressCount NOTIFY walletChanged)
+    Q_PROPERTY(QVariantList walletFileStats READ walletFileStats NOTIFY walletChanged)
     Q_PROPERTY(QVariantList peers READ peers NOTIFY peersChanged)
     Q_PROPERTY(QVariantList peerRowsSimple READ peerRowsSimple NOTIFY peersChanged)
     Q_PROPERTY(QVariantList peerRowsDetailed READ peerRowsDetailed NOTIFY peersChanged)
@@ -49,6 +68,7 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString trafficReceivedTotal READ trafficReceivedTotal NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficSentTotal READ trafficSentTotal NOTIFY trafficChanged)
     Q_PROPERTY(QStringList logLines READ logLines NOTIFY logChanged)
+    Q_PROPERTY(QVariantList logLineNumbers READ logLineNumbers NOTIFY logChanged)
     Q_PROPERTY(QString consoleOutput READ consoleOutput NOTIFY consoleChanged)
     Q_PROPERTY(bool feeEstimateAvailable READ feeEstimateAvailable NOTIFY feeEstimateChanged)
     Q_PROPERTY(QString feeEstimateStatus READ feeEstimateStatus NOTIFY feeEstimateChanged)
@@ -59,9 +79,59 @@ class NuRpcService final : public QObject
     Q_PROPERTY(bool onlyDefcoinMagicBytes READ onlyDefcoinMagicBytes WRITE setOnlyDefcoinMagicBytes NOTIFY settingsChanged)
     Q_PROPERTY(bool switchToDefcoinOnlyMagicStartingJuly2026 READ switchToDefcoinOnlyMagicStartingJuly2026 WRITE setSwitchToDefcoinOnlyMagicStartingJuly2026 NOTIFY settingsChanged)
     Q_PROPERTY(bool disallowLanNodeDiscovery READ disallowLanNodeDiscovery WRITE setDisallowLanNodeDiscovery NOTIFY settingsChanged)
+    Q_PROPERTY(bool lanNodeDiscoveryEnabled READ lanNodeDiscoveryEnabled WRITE setLanNodeDiscoveryEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(bool upnpConnectionsEnabled READ upnpConnectionsEnabled WRITE setUpnpConnectionsEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(bool showLanNodeDiscoveryNotice READ showLanNodeDiscoveryNotice NOTIFY settingsChanged)
+    Q_PROPERTY(bool automaticUpdateChecksEnabled READ automaticUpdateChecksEnabled WRITE setAutomaticUpdateChecksEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(QString tableCopyDelimiterStyle READ tableCopyDelimiterStyle WRITE setTableCopyDelimiterStyle NOTIFY settingsChanged)
+    Q_PROPERTY(QString tableCopyCustomDelimiter READ tableCopyCustomDelimiter WRITE setTableCopyCustomDelimiter NOTIFY settingsChanged)
+    Q_PROPERTY(int logVerbosity READ logVerbosity WRITE setLogVerbosity NOTIFY settingsChanged)
+    Q_PROPERTY(QString logSearchPattern READ logSearchPattern WRITE setLogSearchPattern NOTIFY settingsChanged)
+    Q_PROPERTY(QString logLastSearchPattern READ logLastSearchPattern NOTIFY settingsChanged)
+    Q_PROPERTY(QString logRemovePattern READ logRemovePattern WRITE setLogRemovePattern NOTIFY settingsChanged)
+    Q_PROPERTY(bool backgroundCloseEnabled READ backgroundCloseEnabled WRITE setBackgroundCloseEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(QString updateStatus READ updateStatus NOTIFY updateStatusChanged)
+    Q_PROPERTY(int updateDownloadProgress READ updateDownloadProgress NOTIFY updateStatusChanged)
+    Q_PROPERTY(bool recoveryActive READ recoveryActive NOTIFY recoveryChanged)
+    Q_PROPERTY(bool recoveryFinished READ recoveryFinished NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryStatus READ recoveryStatus NOTIFY recoveryChanged)
+    Q_PROPERTY(int recoveryProgress READ recoveryProgress NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryFoundAmount READ recoveryFoundAmount NOTIFY recoveryChanged)
+    Q_PROPERTY(int recoveryFoundAddressCount READ recoveryFoundAddressCount NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryRecentFoundAddress READ recoveryRecentFoundAddress NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryDetectedMethod READ recoveryDetectedMethod NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryCurrentMethod READ recoveryCurrentMethod NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryElapsed READ recoveryElapsed NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryEta READ recoveryEta NOTIFY recoveryChanged)
+    Q_PROPERTY(bool recoveryCancelable READ recoveryCancelable NOTIFY recoveryChanged)
+    Q_PROPERTY(QStringList bip39EnglishWords READ bip39EnglishWords CONSTANT)
+    Q_PROPERTY(QString minerExecutable READ minerExecutable NOTIFY minerChanged)
+    Q_PROPERTY(QString minerPoolUrl READ minerPoolUrl NOTIFY minerChanged)
+    Q_PROPERTY(QString minerPayoutAddress READ minerPayoutAddress NOTIFY minerChanged)
+    Q_PROPERTY(QString minerPassword READ minerPassword NOTIFY minerChanged)
+    Q_PROPERTY(int minerThreads READ minerThreads NOTIFY minerChanged)
+    Q_PROPERTY(int minerNiceLevel READ minerNiceLevel NOTIFY minerChanged)
+    Q_PROPERTY(QString minerStatus READ minerStatus NOTIFY minerChanged)
+    Q_PROPERTY(QString minerLog READ minerLog NOTIFY minerChanged)
+    Q_PROPERTY(bool minerRunning READ minerRunning NOTIFY minerChanged)
+    Q_PROPERTY(QString miningStateText READ miningStateText NOTIFY minerChanged)
+    Q_PROPERTY(QString miningMethodText READ miningMethodText NOTIFY minerChanged)
+    Q_PROPERTY(QString minerHashrateText READ minerHashrateText NOTIFY minerChanged)
+    Q_PROPERTY(int minerAcceptedShares READ minerAcceptedShares NOTIFY minerChanged)
+    Q_PROPERTY(int minerRejectedShares READ minerRejectedShares NOTIFY minerChanged)
+    Q_PROPERTY(QString minerSummaryText READ minerSummaryText NOTIFY minerChanged)
     Q_PROPERTY(bool maskBalances READ maskBalances WRITE setMaskBalances NOTIFY settingsChanged)
     Q_PROPERTY(bool thirdPartyTxUrlsEnabled READ thirdPartyTxUrlsEnabled WRITE setThirdPartyTxUrlsEnabled NOTIFY settingsChanged)
     Q_PROPERTY(QString thirdPartyTxUrl READ thirdPartyTxUrl WRITE setThirdPartyTxUrl NOTIFY settingsChanged)
+    Q_PROPERTY(QString explorerMode READ explorerMode NOTIFY settingsChanged)
+    Q_PROPERTY(QString explorerDatabasePath READ explorerDatabasePath NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList explorerRecentLookups READ explorerRecentLookups NOTIFY explorerChanged)
+    Q_PROPERTY(bool explorerIndexing READ explorerIndexing NOTIFY explorerChanged)
+    Q_PROPERTY(QString explorerIndexStatus READ explorerIndexStatus NOTIFY explorerChanged)
+    Q_PROPERTY(int explorerIndexHeight READ explorerIndexHeight NOTIFY explorerChanged)
+    Q_PROPERTY(int explorerIndexTip READ explorerIndexTip NOTIFY explorerChanged)
+    Q_PROPERTY(int explorerIndexedBlockCount READ explorerIndexedBlockCount NOTIFY explorerChanged)
+    Q_PROPERTY(int explorerIndexedOutputCount READ explorerIndexedOutputCount NOTIFY explorerChanged)
 
 public:
     explicit NuRpcService(QObject* parent = nullptr);
@@ -73,18 +143,33 @@ public:
     QString networkState() const { return m_network_state; }
     int peerCount() const { return m_peer_count; }
     int blockHeight() const { return m_block_height; }
+    int headerHeight() const { return m_header_height; }
+    bool syncing() const { return m_syncing; }
     QString syncState() const { return m_sync_state; }
+    QString syncDetail() const { return m_sync_detail; }
+    QString syncEta() const { return m_sync_eta; }
+    int syncProgressPercent() const { return m_sync_progress_percent; }
+    QString recentNetworkHashrate() const { return m_metric_network_hashrate; }
+    QString networkDifficulty() const { return m_metric_difficulty; }
     bool walletLocked() const { return m_wallet_locked; }
     bool walletEncrypted() const { return m_wallet_encrypted; }
     QString totalBalance() const { return m_mask_balances ? QStringLiteral("******** DFC") : m_total_balance; }
     QString availableBalance() const { return m_mask_balances ? QStringLiteral("********") : m_available_balance; }
     QString pendingBalance() const { return m_mask_balances ? QStringLiteral("********") : m_pending_balance; }
     QString immatureBalance() const { return m_mask_balances ? QStringLiteral("********") : m_immature_balance; }
+    int walletTransactionCount() const { return m_wallet_transaction_count; }
     QString receiveAddress() const { return m_receive_address; }
     QString receiveQrSource() const { return m_receive_qr_source; }
     QVariantList addressBook() const { return m_address_book; }
     QVariantList receiveRequests() const { return m_receive_requests; }
     QVariantList recentTransactions() const { return m_recent_transactions; }
+    QStringList availableWallets() const { return m_available_wallets; }
+    QStringList loadedWallets() const { return m_loaded_wallets; }
+    QString currentWalletName() const { return m_wallet_name; }
+    bool walletSelected() const { return m_wallet_selected; }
+    int walletAddressCount() const { return m_wallet_address_count; }
+    int walletNonZeroAddressCount() const { return m_wallet_nonzero_address_count; }
+    QVariantList walletFileStats() const { return m_wallet_file_stats; }
     QVariantList peers() const { return m_peers; }
     QVariantList peerRowsSimple() const { return m_peer_rows_simple; }
     QVariantList peerRowsDetailed() const { return m_peer_rows_detailed; }
@@ -93,6 +178,7 @@ public:
     QString trafficReceivedTotal() const { return m_traffic_received_total; }
     QString trafficSentTotal() const { return m_traffic_sent_total; }
     QStringList logLines() const { return m_log_lines; }
+    QVariantList logLineNumbers() const { return m_log_line_numbers; }
     QString consoleOutput() const { return m_console_output; }
     bool feeEstimateAvailable() const { return m_fee_estimate_available; }
     QString feeEstimateStatus() const { return m_fee_estimate_status; }
@@ -102,10 +188,61 @@ public:
     bool onlyDefcoinUserAgents() const { return m_only_defcoin_user_agents; }
     bool onlyDefcoinMagicBytes() const { return m_only_defcoin_magic_bytes; }
     bool switchToDefcoinOnlyMagicStartingJuly2026() const { return m_switch_to_defcoin_only_magic_starting_july_2026; }
-    bool disallowLanNodeDiscovery() const { return m_disallow_lan_node_discovery; }
+    bool disallowLanNodeDiscovery() const { return !m_lan_node_discovery_enabled; }
+    bool lanNodeDiscoveryEnabled() const { return m_lan_node_discovery_enabled; }
+    bool upnpConnectionsEnabled() const { return m_upnp_connections_enabled; }
+    bool showLanNodeDiscoveryNotice() const { return !m_lan_node_discovery_notice_acknowledged && !m_lan_node_discovery_enabled; }
+    bool automaticUpdateChecksEnabled() const { return m_automatic_update_checks_enabled; }
+    QString tableCopyDelimiterStyle() const { return m_table_copy_delimiter_style; }
+    QString tableCopyCustomDelimiter() const { return m_table_copy_custom_delimiter; }
+    int logVerbosity() const { return m_log_verbosity; }
+    QString logSearchPattern() const { return m_log_search_pattern; }
+    QString logLastSearchPattern() const { return m_log_last_search_pattern; }
+    QString logRemovePattern() const { return m_log_remove_pattern; }
+    bool backgroundCloseEnabled() const { return m_background_close_enabled; }
+    QString updateStatus() const { return m_update_status; }
+    int updateDownloadProgress() const { return m_update_download_progress; }
+    bool recoveryActive() const { return m_recovery_active; }
+    bool recoveryFinished() const { return m_recovery_finished; }
+    QString recoveryStatus() const { return m_recovery_status; }
+    int recoveryProgress() const { return m_recovery_progress; }
+    QString recoveryFoundAmount() const { return m_recovery_found_amount; }
+    int recoveryFoundAddressCount() const { return m_recovery_found_address_count; }
+    QString recoveryRecentFoundAddress() const { return m_recovery_recent_found_address; }
+    QString recoveryDetectedMethod() const { return m_recovery_detected_method; }
+    QString recoveryCurrentMethod() const { return m_recovery_current_method; }
+    QString recoveryElapsed() const { return m_recovery_elapsed; }
+    QString recoveryEta() const { return m_recovery_eta; }
+    bool recoveryCancelable() const { return m_recovery_cancelable; }
+    QStringList bip39EnglishWords() const;
+    QString minerExecutable() const { return m_miner_executable; }
+    QString minerPoolUrl() const { return m_miner_pool_url; }
+    QString minerPayoutAddress() const { return m_miner_payout_address; }
+    QString minerPassword() const { return m_miner_password; }
+    int minerThreads() const { return m_miner_threads; }
+    int minerNiceLevel() const { return m_miner_nice_level; }
+    QString minerStatus() const { return m_miner_status; }
+    QString minerLog() const { return m_miner_log; }
+    bool minerRunning() const;
+    QString miningStateText() const;
+    QString miningMethodText() const;
+    QString minerHashrateText() const { return m_miner_hashrate_text; }
+    int minerAcceptedShares() const { return m_miner_accepted_shares; }
+    int minerRejectedShares() const { return m_miner_rejected_shares; }
+    QString minerSummaryText() const;
+    QString walletMiningPayoutAddress() const;
     bool maskBalances() const { return m_mask_balances; }
     bool thirdPartyTxUrlsEnabled() const { return m_third_party_tx_urls_enabled; }
     QString thirdPartyTxUrl() const { return m_third_party_tx_url; }
+    QString explorerMode() const { return m_explorer_mode; }
+    QString explorerDatabasePath() const;
+    QVariantList explorerRecentLookups() const { return m_explorer_recent_lookups; }
+    bool explorerIndexing() const { return m_explorer_indexing; }
+    QString explorerIndexStatus() const { return m_explorer_index_status; }
+    int explorerIndexHeight() const { return m_explorer_index_height; }
+    int explorerIndexTip() const { return m_explorer_index_tip; }
+    int explorerIndexedBlockCount() const { return m_explorer_indexed_block_count; }
+    int explorerIndexedOutputCount() const { return m_explorer_indexed_output_count; }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void requestNewAddress(const QString& label = QString(), const QString& amount = QString(), const QString& message = QString());
@@ -131,8 +268,23 @@ public:
     Q_INVOKABLE void setNetworkActive(bool active);
     Q_INVOKABLE void pingPeers();
     Q_INVOKABLE void runRpcCommand(const QString& method, const QString& params_json, bool wallet_scoped);
+    Q_INVOKABLE QString walletDisplayName(const QString& name) const;
     Q_INVOKABLE void copyText(const QString& text);
     Q_INVOKABLE void backupWallet();
+    Q_INVOKABLE void refreshWalletStats();
+    Q_INVOKABLE void createWallet(const QString& name,
+                                  bool encrypt = false,
+                                  const QString& passphrase = QString(),
+                                  bool disable_private_keys = false,
+                                  bool blank = false,
+                                  bool descriptor_sql = true);
+    Q_INVOKABLE void setCurrentWallet(const QString& name);
+    Q_INVOKABLE void loadWallet(const QString& name);
+    Q_INVOKABLE void openWallets(const QVariantList& names);
+    Q_INVOKABLE void closeWallet(const QString& name = QString());
+    Q_INVOKABLE void closeAllWallets();
+    Q_INVOKABLE void renameWallet(const QString& old_name, const QString& new_name);
+    Q_INVOKABLE void deleteWallet(const QString& name);
     Q_INVOKABLE void encryptWallet(const QString& passphrase);
     Q_INVOKABLE void changeWalletPassphrase(const QString& old_passphrase, const QString& new_passphrase);
     Q_INVOKABLE void signMessage(const QString& address, const QString& message);
@@ -163,19 +315,68 @@ public:
     Q_INVOKABLE void saveCurrentPsbt();
     Q_INVOKABLE void clearCurrentPsbt();
     Q_INVOKABLE void requestTransactionDetails(const QString& txid);
+    Q_INVOKABLE void acknowledgeLanNodeDiscoveryNotice();
     Q_INVOKABLE QString receiveRequestQrSource(const QString& uri) const;
     Q_INVOKABLE QString explorerPresetUrl(int index) const;
     Q_INVOKABLE QString explorerUrlForTransaction(const QString& txid) const;
     Q_INVOKABLE QString explorerUrlForAddress(const QString& address) const;
+    Q_INVOKABLE void openTransactionInExplorer(const QString& txid);
+    Q_INVOKABLE void openAddressInExplorer(const QString& address);
+    Q_INVOKABLE void openBlockInExplorer(const QString& block_id);
+    Q_INVOKABLE void searchExplorer(const QString& query);
+    Q_INVOKABLE void openExplorerLink(const QString& link);
+    Q_INVOKABLE void refreshExplorerRecentLookups();
+    Q_INVOKABLE void startExplorerIndexing();
+    Q_INVOKABLE void stopExplorerIndexing();
+    Q_INVOKABLE void resetExplorerIndex();
+    Q_INVOKABLE void checkForUpdates(bool manual);
+    Q_INVOKABLE void downloadPendingUpdate();
+    Q_INVOKABLE void installDownloadedUpdate();
+    Q_INVOKABLE QString generateRecoveryPhrase();
+    Q_INVOKABLE QVariantMap validateRecoveryPhrase(const QString& phrase) const;
+    Q_INVOKABLE void previewRecoveryPhraseAddresses(const QString& phrase,
+                                                    const QString& derivation_path,
+                                                    const QString& wif_mode,
+                                                    int count);
+    Q_INVOKABLE void createWalletWithRecoveryPhrase(const QString& wallet_name,
+                                                    const QString& phrase);
+    Q_INVOKABLE void restoreWalletFromRecoveryPhrase(const QString& wallet_name,
+                                                     const QString& phrase,
+                                                     const QString& mode,
+                                                     const QString& derivation_path,
+                                                     const QString& wif_mode,
+                                                     int range);
+    Q_INVOKABLE void cancelRecovery();
+    Q_INVOKABLE QVariantMap convertCompatibilityEncoding(const QString& text) const;
+    Q_INVOKABLE void chooseMinerExecutable();
+    Q_INVOKABLE void useWalletReceiveAddressForMining();
+    Q_INVOKABLE void saveMinerConfiguration(const QString& pool_url,
+                                            const QString& payout_address,
+                                            const QString& password,
+                                            int threads,
+                                            int nice_level);
+    Q_INVOKABLE void startConfiguredMiner();
+    Q_INVOKABLE void stopMiner();
+    Q_INVOKABLE void clearMinerLog();
 
 public Q_SLOTS:
     void setOnlyDefcoinUserAgents(bool enabled);
     void setOnlyDefcoinMagicBytes(bool enabled);
     void setSwitchToDefcoinOnlyMagicStartingJuly2026(bool enabled);
     void setDisallowLanNodeDiscovery(bool enabled);
+    void setLanNodeDiscoveryEnabled(bool enabled);
+    void setUpnpConnectionsEnabled(bool enabled);
+    void setAutomaticUpdateChecksEnabled(bool enabled);
+    void setTableCopyDelimiterStyle(const QString& style);
+    void setTableCopyCustomDelimiter(const QString& delimiter);
+    void setLogVerbosity(int verbosity);
+    void setLogSearchPattern(const QString& pattern);
+    void setLogRemovePattern(const QString& pattern);
+    void setBackgroundCloseEnabled(bool enabled);
     void setMaskBalances(bool enabled);
     void setThirdPartyTxUrlsEnabled(bool enabled);
     void setThirdPartyTxUrl(const QString& url);
+    void setExplorerMode(const QString& mode);
 
 Q_SIGNALS:
     void stateChanged();
@@ -188,8 +389,16 @@ Q_SIGNALS:
     void feeEstimateChanged();
     void psbtChanged();
     void tableSettingsChanged();
+    void updateStatusChanged();
     void userMessage(const QString& title, const QString& message);
     void transactionDetailsReady(const QString& title, const QString& html);
+    void explorerWindowRequested(const QString& title, const QString& html);
+    void explorerChanged();
+    void updateAvailable(const QString& version, const QString& message);
+    void updateDownloaded(const QString& version, const QString& filePath, const QString& message);
+    void recoveryPhrasePreviewReady(const QVariantMap& preview, const QString& message);
+    void recoveryChanged();
+    void minerChanged();
 
 private:
     using RpcCallback = std::function<void(const QJsonValue&, const QString&)>;
@@ -197,6 +406,18 @@ private:
     struct PendingCall {
         QString method;
         RpcCallback callback;
+    };
+
+    struct PendingUpdate {
+        QString version;
+        QString tag;
+        QString releaseUrl;
+        QString assetName;
+        QString assetUrl;
+        QString checksumUrl;
+        QString filePath;
+        qint64 assetSize = 0;
+        bool velopackManaged = false;
     };
 
     void loadLocalSettings();
@@ -211,19 +432,33 @@ private:
     void appendLaunchDiagnostic(const QString& message);
     void appendDebugLogLineFromNu(const QString& message);
     void beginBackendDebugLogSection(bool write_to_debug_log);
+    void appendLogLine(const QString& line, int debug_log_line_number = 0);
+    void trimLogLines();
     QStringList backendRuntimeDiagnostics(const QString& binary) const;
+    bool walletAutoloadEntryExists(const QString& wallet_name) const;
+    void pruneCoreWalletAutoloadSettings(const QStringList& force_remove = {});
     bool shouldAutostartAfterTransportError(QNetworkReply* reply) const;
     void rpcCall(const QString& method, const QJsonArray& params, bool wallet_scoped, RpcCallback callback);
+    void rpcCallForWallet(const QString& method, const QJsonArray& params, const QString& wallet_name, RpcCallback callback);
     void handleReply(QNetworkReply* reply);
     QUrl rpcUrl(bool wallet_scoped) const;
+    QUrl rpcUrlForWallet(const QString& wallet_name) const;
+    QString walletRpcNameFor(const QString& wallet_name) const;
+    QString walletLoadNameFor(const QString& wallet_name) const;
     void setError(const QString& message);
     void clearError();
+    bool setCurrentWalletInternal(const QString& name, bool selected = true);
+    void clearWalletScopedState();
+    bool ensureCurrentWalletSelected(const QString& title);
 
     void refreshNode();
     void refreshWallet();
     void refreshAddressBook();
+    void refreshWalletList();
+    void updateWalletStatsEntry(const QString& wallet_name, const QVariantMap& updates);
     void refreshFeeEstimate();
     void schedulePeerNameLookups(const QString& host);
+    void scheduleLanPeerNameLookups(const QString& host);
     void scheduleConfiguredSeedAliasLookups();
     void sampleTraffic();
     void refreshDebugLog();
@@ -243,10 +478,62 @@ private:
     QString qrSourceForUri(const QString& uri) const;
     QString normalizedExplorerUrl(const QString& url) const;
     QString explorerAddressUrlTemplate(const QString& url) const;
+    bool usingInternalExplorer() const;
+    bool ensureExplorerDatabase(QString* error = nullptr) const;
+    void cacheExplorerLookup(const QString& type,
+                             const QString& id,
+                             const QString& title,
+                             const QString& summary,
+                             const QJsonValue& raw_json);
+    void loadExplorerRecentLookups();
+    int explorerHighestIndexedBlock() const;
+    int explorerIndexedBlockCountFromDb() const;
+    int explorerIndexedOutputCountFromDb() const;
+    QString explorerBlockHashAtHeight(int height) const;
+    QString explorerBlockHashForTransaction(const QString& txid) const;
+    QString explorerCachedBlockHtml(const QString& block_id, QJsonObject* raw_json = nullptr, bool* found = nullptr) const;
+    QString explorerIndexedTransactionHtml(const QString& txid, QJsonObject* raw_json = nullptr, bool* found = nullptr) const;
+    QString explorerIndexedAddressHtml(const QString& address, bool* found = nullptr) const;
+    bool explorerPruneFromHeight(int height, QString* error = nullptr);
+    bool storeExplorerBlock(const QJsonObject& block, QString* error = nullptr);
+    void scheduleExplorerIndexStep(int delay_ms = 120);
+    void explorerIndexStep();
+    QString explorerLookupHtml(const QString& title,
+                               const QString& summary_html,
+                               const QJsonValue& raw_json) const;
+    void emitExplorerError(const QString& title, const QString& detail);
     void rebuildNodeMetrics();
     QString helpManualPath(const QString& page) const;
     void loadPsbtPayload(const QByteArray& payload, const QString& source);
     void analyzeCurrentPsbt(const QString& source);
+    void handleUpdateReleaseReply(QNetworkReply* reply);
+    void handleUpdateAssetReply(QNetworkReply* reply);
+    void handleUpdateChecksumReply(QNetworkReply* reply);
+    void setUpdateStatus(const QString& status, int progress = -1);
+    void clearPendingUpdateDownload();
+    bool verifyDownloadedUpdate(const QByteArray& checksum_file, QString& error);
+    void continueWalletOpenQueue();
+    void appendMinerLog(const QString& line);
+    void parseMinerLogChunk(const QString& text);
+    void resetMinerRuntimeStats();
+    void setRecoveryState(bool active, const QString& status, int progress = -1);
+    void setRecoveryCurrentMethod(const QString& method);
+    void updateRecoveryTiming(int completed_work = -1, int estimated_total_work = -1);
+    void scheduleRecoveryScanPoll();
+    void importRecoveryDescriptorsWithRescan(const QVector<QPair<QString, QString>>& descriptors, int range);
+    void importRecoveryDescriptorsUntilEmpty(const QVector<QPair<QString, QString>>& descriptors, int empty_gap);
+    void summarizeCompletedRecoveryImport(int import_range, const QStringList& tried_methods = {});
+    QString currentNuVersion() const;
+    QString selectedUpdateAssetNeedle() const;
+    QString updateDownloadDirectory() const;
+    QString nuResourceRoot() const;
+    QStringList loadBip39Words() const;
+    bool validateMnemonic(const QString& phrase, QString* normalized = nullptr, QString* error = nullptr) const;
+    bool requireLocalRecoveryRpc(const QString& operation);
+    bool mnemonicMaterial(const QString& phrase, const QString& wif_mode, QString* wif, QString* xprv, QString* error) const;
+    QString descriptorForRecoveryPath(const QString& xprv, const QString& derivation_path, QString* error) const;
+    static QString normalizedVersionString(QString version);
+    static bool isVersionNewer(const QString& candidate, const QString& current);
 
     static QString formatAmount(const QJsonValue& value);
     static QString formatBytes(qint64 bytes);
@@ -256,6 +543,7 @@ private:
     static bool isDefcoinUserAgent(QString subver);
 
     QNetworkAccessManager* m_network = nullptr;
+    QNetworkAccessManager* m_update_network = nullptr;
     QTimer* m_refresh_timer = nullptr;
     QTimer* m_traffic_timer = nullptr;
     QElapsedTimer m_uptime;
@@ -269,16 +557,73 @@ private:
     QString m_rpc_user;
     QString m_rpc_password;
     QString m_wallet_name;
+    bool m_wallet_selected = false;
+    int m_wallet_refresh_generation = 0;
+    QStringList m_available_wallets;
+    QStringList m_loaded_wallets;
+    QHash<QString, QString> m_wallet_rpc_name_by_canonical;
+    QStringList m_wallet_open_queue;
+    bool m_wallet_open_queue_active = false;
+    QString m_wallet_open_queue_final_wallet;
+    int m_wallet_address_count = 0;
+    int m_wallet_nonzero_address_count = 0;
+    QVariantList m_wallet_file_stats;
     bool m_backend_start_attempted = false;
     bool m_backend_started_by_nu = false;
     qint64 m_backend_pid = 0;
     QProcess* m_backend_process = nullptr;
+    QProcess* m_miner_process = nullptr;
+    QString m_miner_executable;
+    QString m_miner_pool_url = QStringLiteral("stratum+tcp://defcoin.dc903.org:13372");
+    QString m_miner_payout_address;
+    QString m_miner_password = QStringLiteral("x");
+    int m_miner_threads = 4;
+    int m_miner_nice_level = 20;
+    QString m_miner_status = QStringLiteral("Miner not configured.");
+    QString m_miner_log;
+    QString m_miner_parse_buffer;
+    QString m_miner_hashrate_text = QStringLiteral("-");
+    int m_miner_accepted_shares = 0;
+    int m_miner_rejected_shares = 0;
     bool m_have_pending_network_active = false;
     bool m_pending_network_active = true;
     bool m_applying_pending_network_active = false;
     bool m_only_defcoin_magic_bytes = false;
     bool m_switch_to_defcoin_only_magic_starting_july_2026 = true;
-    bool m_disallow_lan_node_discovery = false;
+    bool m_lan_node_discovery_enabled = false;
+    bool m_upnp_connections_enabled = false;
+    bool m_lan_node_discovery_notice_acknowledged = false;
+    bool m_automatic_update_checks_enabled = true;
+    QString m_table_copy_delimiter_style = QStringLiteral("tsv");
+    QString m_table_copy_custom_delimiter = QStringLiteral("|");
+    int m_log_verbosity = 0;
+    QString m_log_search_pattern;
+    QString m_log_last_search_pattern;
+    QString m_log_remove_pattern;
+    bool m_background_close_enabled = false;
+    bool m_update_check_in_progress = false;
+    bool m_update_download_in_progress = false;
+    bool m_rpc_ready_logged = false;
+    int m_update_download_progress = 0;
+    QString m_update_status;
+    bool m_recovery_active = false;
+    bool m_recovery_finished = false;
+    bool m_recovery_cancel_requested = false;
+    bool m_recovery_cancelable = false;
+    bool m_recovery_poll_scheduled = false;
+    QString m_recovery_status;
+    int m_recovery_progress = 0;
+    QString m_recovery_found_amount;
+    int m_recovery_found_address_count = 0;
+    QString m_recovery_recent_found_address;
+    QString m_recovery_detected_method;
+    QString m_recovery_current_method;
+    QString m_recovery_elapsed = QStringLiteral("Not running");
+    QString m_recovery_eta = QStringLiteral("Unknown");
+    QElapsedTimer m_recovery_timer;
+    PendingUpdate m_pending_update;
+    QFile* m_update_download_file = nullptr;
+    NuVelopackUpdater* m_velopack_updater = nullptr;
 
     bool m_rpc_connected = false;
     QString m_connection_status = QStringLiteral("RPC not connected");
@@ -286,7 +631,15 @@ private:
     QString m_network_state = QStringLiteral("isolated");
     int m_peer_count = 0;
     int m_block_height = 0;
+    int m_header_height = 0;
+    bool m_syncing = false;
     QString m_sync_state = QStringLiteral("Unknown");
+    QString m_sync_detail = QStringLiteral("Waiting for backend status.");
+    QString m_sync_eta = QStringLiteral("Unknown");
+    int m_sync_progress_percent = 0;
+    double m_sync_last_progress = -1.0;
+    int m_sync_last_block_height = -1;
+    qint64 m_sync_last_sample_ms = 0;
     bool m_wallet_locked = true;
     bool m_wallet_encrypted = false;
     QString m_metric_network_active = QStringLiteral("Hydrating");
@@ -297,11 +650,17 @@ private:
     QString m_metric_blocks = QStringLiteral("Unknown");
     QString m_metric_headers = QStringLiteral("Unknown");
     QString m_metric_verification = QStringLiteral("Unknown");
+    QString m_metric_difficulty = QStringLiteral("Unknown");
+    QString m_metric_network_hashrate = QStringLiteral("Unknown");
+    QString m_metric_chain_tips = QStringLiteral("Unknown");
+    QString m_metric_peer_messages_sent = QStringLiteral("Unknown");
+    QString m_metric_peer_messages_received = QStringLiteral("Unknown");
     QString m_metric_traffic = QStringLiteral("0 B received / 0 B sent");
     QString m_total_balance = QStringLiteral("0.00000000 DFC");
     QString m_available_balance = QStringLiteral("0.00000000");
     QString m_pending_balance = QStringLiteral("0.00000000");
     QString m_immature_balance = QStringLiteral("0.00000000");
+    int m_wallet_transaction_count = 0;
     QString m_receive_address;
     QString m_receive_qr_source;
     QString m_receive_label;
@@ -312,8 +671,11 @@ private:
     QHash<QString, QString> m_peer_dns_name_by_host;
     QHash<QString, QString> m_peer_domain_alias_by_host;
     QHash<QString, int> m_peer_domain_alias_priority_by_host;
+    QHash<QString, QString> m_peer_lan_name_by_host;
     QSet<QString> m_peer_reverse_lookup_pending;
     QSet<QString> m_peer_reverse_lookup_attempted;
+    QSet<QString> m_peer_lan_lookup_pending;
+    QSet<QString> m_peer_lan_lookup_attempted;
     int m_address_book_refresh_generation = 0;
     QVariantList m_address_book;
     QVariantList m_receive_requests;
@@ -329,9 +691,11 @@ private:
     QString m_traffic_received_total = QStringLiteral("0 B");
     QString m_traffic_sent_total = QStringLiteral("0 B");
     QStringList m_log_lines;
+    QVariantList m_log_line_numbers;
     QString m_last_logged_error_message;
     QString m_debug_log_path;
     qint64 m_debug_log_offset = -1;
+    int m_debug_log_next_line_number = 1;
     bool m_debug_log_collecting_continuation = false;
     bool m_launch_diagnostics_section_started = false;
     bool m_backend_log_section_started = false;
@@ -345,6 +709,17 @@ private:
     bool m_mask_balances = false;
     bool m_third_party_tx_urls_enabled = false;
     QString m_third_party_tx_url;
+    QString m_explorer_mode = QStringLiteral("internal");
+    QVariantList m_explorer_recent_lookups;
+    bool m_explorer_indexing = false;
+    bool m_explorer_index_request_in_flight = false;
+    QString m_explorer_index_status = QStringLiteral("Index not running.");
+    int m_explorer_index_height = 0;
+    int m_explorer_index_tip = 0;
+    int m_explorer_indexed_block_count = 0;
+    int m_explorer_indexed_output_count = 0;
+    mutable QStringList m_bip39_words;
+    mutable QHash<QString, int> m_bip39_word_index;
 };
 
 #endif // DEFCOIN_NU_RPC_SERVICE_H

@@ -1,8 +1,10 @@
 #include "NuRpcService.h"
+#include "NuVelopackUpdater.h"
 
 #include <QApplication>
 #include <QAbstractSocket>
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDate>
 #include <QDateTime>
@@ -27,20 +29,31 @@
 #include <QPainter>
 #include <QPair>
 #include <QProcess>
+#include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QSettings>
 #include <QSet>
+#include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QTimeZone>
 #include <QTimer>
+#include <QThread>
 #include <QUrlQuery>
 #include <QVector>
+#include <QSysInfo>
+#include <QVersionNumber>
+#include <QUuid>
 
 #include <qrencode.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
+#include <cstring>
 #include <limits>
 #include <memory>
 #if defined(Q_OS_MACOS)
@@ -54,6 +67,133 @@
 
 namespace {
 constexpr int QR_IMAGE_SIZE = 512;
+constexpr int TRAFFIC_CHART_BUCKET_SECONDS = 60;
+constexpr int TRAFFIC_CHART_HISTORY_DAYS = 7;
+constexpr int TRAFFIC_CHART_MAX_SECONDS = TRAFFIC_CHART_HISTORY_DAYS * 24 * 60 * 60;
+constexpr int TRAFFIC_CHART_MAX_SAMPLES = TRAFFIC_CHART_MAX_SECONDS / TRAFFIC_CHART_BUCKET_SECONDS;
+constexpr qint64 TRAFFIC_CHART_BUCKET_MS = TRAFFIC_CHART_BUCKET_SECONDS * 1000;
+constexpr int RECOVERY_GAP_SCAN_BATCH_SIZE = 1024;
+constexpr int RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES = 65536;
+constexpr unsigned char DEFCOIN_CURRENT_WIF_PREFIX = 0xb0; // Defcoin v1.0.0+ private keys render as T...
+constexpr unsigned char DEFCOIN_LEGACY_WIF_PREFIX = 0x9e;  // Defcoin v0.22/Ian Coleman legacy entry renders as Q...
+constexpr char BASE58_ALPHABET[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+QByteArray doubleSha256(const QByteArray& bytes)
+{
+    return QCryptographicHash::hash(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256), QCryptographicHash::Sha256);
+}
+
+bool decodeBase58CheckPayload(const QString& text, QByteArray* payload)
+{
+    if (!payload) return false;
+    const QByteArray input = text.trimmed().toLatin1();
+    if (input.isEmpty()) return false;
+    for (char c : input) {
+        if (std::isspace(static_cast<unsigned char>(c))) return false;
+        if (!std::strchr(BASE58_ALPHABET, c)) return false;
+    }
+
+    int zeroes = 0;
+    while (zeroes < input.size() && input.at(zeroes) == '1') ++zeroes;
+    QVector<unsigned char> base256((input.size() - zeroes) * 733 / 1000 + 1);
+    int length = 0;
+    for (int i = zeroes; i < input.size(); ++i) {
+        const char* found = std::strchr(BASE58_ALPHABET, input.at(i));
+        if (!found) return false;
+        int carry = static_cast<int>(found - BASE58_ALPHABET);
+        int j = 0;
+        for (auto it = base256.rbegin(); (carry != 0 || j < length) && it != base256.rend(); ++it, ++j) {
+            carry += 58 * (*it);
+            *it = static_cast<unsigned char>(carry % 256);
+            carry /= 256;
+        }
+        if (carry != 0) return false;
+        length = j;
+    }
+
+    auto it = base256.begin() + (base256.size() - length);
+    while (it != base256.end() && *it == 0) ++it;
+    QByteArray decoded;
+    decoded.append(zeroes, '\0');
+    while (it != base256.end()) {
+        decoded.append(static_cast<char>(*it));
+        ++it;
+    }
+    if (decoded.size() < 4) return false;
+    const QByteArray body = decoded.left(decoded.size() - 4);
+    const QByteArray checksum = decoded.right(4);
+    if (doubleSha256(body).left(4) != checksum) return false;
+    *payload = body;
+    return true;
+}
+
+QString encodeBase58CheckPayload(const QByteArray& payload)
+{
+    QByteArray input = payload;
+    input.append(doubleSha256(payload).left(4));
+    int zeroes = 0;
+    while (zeroes < input.size() && input.at(zeroes) == '\0') ++zeroes;
+
+    QVector<unsigned char> base58((input.size() - zeroes) * 138 / 100 + 1);
+    int length = 0;
+    for (int i = zeroes; i < input.size(); ++i) {
+        int carry = static_cast<unsigned char>(input.at(i));
+        int j = 0;
+        for (auto it = base58.rbegin(); (carry != 0 || j < length) && it != base58.rend(); ++it, ++j) {
+            carry += 256 * (*it);
+            *it = static_cast<unsigned char>(carry % 58);
+            carry /= 58;
+        }
+        length = j;
+    }
+
+    auto it = base58.begin() + (base58.size() - length);
+    while (it != base58.end() && *it == 0) ++it;
+    QString result;
+    result.reserve(zeroes + static_cast<int>(std::distance(it, base58.end())));
+    for (int i = 0; i < zeroes; ++i) result.append(QLatin1Char('1'));
+    while (it != base58.end()) {
+        result.append(QLatin1Char(BASE58_ALPHABET[*it]));
+        ++it;
+    }
+    return result;
+}
+
+QByteArray bytes(std::initializer_list<unsigned char> values)
+{
+    QByteArray out;
+    out.reserve(static_cast<int>(values.size()));
+    for (unsigned char value : values) out.append(static_cast<char>(value));
+    return out;
+}
+
+bool hasPrefix(const QByteArray& payload, const QByteArray& prefix)
+{
+    return payload.size() >= prefix.size() && payload.left(prefix.size()) == prefix;
+}
+
+bool isValidBip39WordCount(int word_count)
+{
+    return word_count == 12 || word_count == 15 || word_count == 18 || word_count == 21 || word_count == 24;
+}
+
+int bip39EntropyBitsForWordCount(int word_count)
+{
+    if (!isValidBip39WordCount(word_count)) return 0;
+    return word_count * 11 * 32 / 33;
+}
+
+unsigned char recoveryWifPrefix(const QString& mode)
+{
+    return mode.compare(QStringLiteral("legacy"), Qt::CaseInsensitive) == 0 ? DEFCOIN_LEGACY_WIF_PREFIX : DEFCOIN_CURRENT_WIF_PREFIX;
+}
+
+QString recoveryWifLabel(const QString& mode)
+{
+    return mode.compare(QStringLiteral("legacy"), Qt::CaseInsensitive) == 0
+        ? QStringLiteral("Legacy Defcoin v0.22 / Ian Coleman reference, Q... WIF prefix 0x9e")
+        : QStringLiteral("Current Defcoin v1.0.0+ wallet-compatible, T... WIF prefix 0xb0");
+}
 
 QVariantList row(std::initializer_list<QVariant> values)
 {
@@ -77,6 +217,259 @@ QVariantList tableRowCells(const QVariant& value)
         return map.value(QStringLiteral("cells")).toList();
     }
     return value.toList();
+}
+
+bool isValidWalletMenuName(const QString& name)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty() || trimmed.size() > 128) return false;
+    if (trimmed == QLatin1String(".") || trimmed == QLatin1String("..")) return false;
+    if (trimmed.contains(QLatin1Char('/')) || trimmed.contains(QLatin1Char('\\')) || trimmed.contains(QLatin1Char(':'))) return false;
+    for (const QChar ch : trimmed) {
+        if (ch.unicode() < 0x20 || ch.unicode() == 0x7f) return false;
+    }
+    return true;
+}
+
+bool isLikelyLoadableWalletMenuName(const QString& name)
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) return true; // Core's legacy top-level wallet.dat is named "" over RPC.
+
+    QString leaf = trimmed;
+    const QString path = trimmed;
+    const QString normalized_path = path;
+    const QString slash_path = QString(normalized_path).replace(QLatin1Char('\\'), QLatin1Char('/'));
+    if (slash_path.startsWith(QStringLiteral("wallets/"))) {
+        leaf = slash_path.mid(QStringLiteral("wallets/").size());
+        if (leaf.contains(QLatin1Char('/'))) return false;
+    }
+
+    if (!isValidWalletMenuName(leaf)) return false;
+
+    const QString lower = trimmed.toLower();
+    if (lower.endsWith(QStringLiteral(".bak")) || lower.endsWith(QStringLiteral(".bkp"))) return false;
+    if (lower.endsWith(QStringLiteral(".dat")) && lower != QLatin1String("wallet.dat")) return false;
+    if (lower.contains(QStringLiteral("backup")) || lower.contains(QStringLiteral(" bkp")) || lower.contains(QStringLiteral(" copy "))) return false;
+    return true;
+}
+
+bool isLikelyCreatableWalletMenuName(const QString& name)
+{
+    return isValidWalletMenuName(name) && isLikelyLoadableWalletMenuName(name);
+}
+
+QString normalizedWalletListName(const QString& name)
+{
+    const QString trimmed = name.trimmed();
+    return trimmed == QLatin1String("wallet.dat") ? QString() : trimmed;
+}
+
+QString walletAmountText(double amount, bool with_unit = false)
+{
+    QString text = QString::number(amount, 'f', 8);
+    return with_unit ? text + QStringLiteral(" DFC") : text;
+}
+
+qint64 explorerAmountSats(const QJsonValue& value)
+{
+    return static_cast<qint64>(std::llround(value.toDouble() * 100000000.0));
+}
+
+QString explorerAmountText(qint64 sats, bool with_unit = true)
+{
+    const bool negative = sats < 0;
+    quint64 absolute = static_cast<quint64>(negative ? -sats : sats);
+    const QString whole = QString::number(absolute / 100000000);
+    const QString fractional = QString::number(absolute % 100000000).rightJustified(8, QLatin1Char('0'));
+    QString text = (negative ? QStringLiteral("-") : QString()) + whole + QLatin1Char('.') + fractional;
+    return with_unit ? text + QStringLiteral(" DFC") : text;
+}
+
+QStringList explorerOutputAddresses(const QJsonObject& script)
+{
+    QStringList out;
+    const QJsonArray addresses = script.value(QStringLiteral("addresses")).toArray();
+    for (const QJsonValue& value : addresses) {
+        const QString address = value.toString().trimmed();
+        if (!address.isEmpty() && !out.contains(address)) out.push_back(address);
+    }
+    const QString address = script.value(QStringLiteral("address")).toString().trimmed();
+    if (!address.isEmpty() && !out.contains(address)) out.push_back(address);
+    return out;
+}
+
+bool walletDefaultDatExists(const QString& data_dir)
+{
+    const QDir dir(data_dir);
+    return QFileInfo::exists(dir.filePath(QStringLiteral("wallet.dat"))) ||
+           QFileInfo::exists(dir.filePath(QStringLiteral("wallets/wallet.dat")));
+}
+
+QString walletStorageTypeFromFormat(const QString& format)
+{
+    const QString lower = format.trimmed().toLower();
+    if (lower == QLatin1String("sqlite")) return QStringLiteral("SQL");
+    if (lower == QLatin1String("bdb")) return QStringLiteral("BDB");
+    return QStringLiteral("Unknown");
+}
+
+QString walletStorageTypeFromFile(const QString& path)
+{
+    QFile file(path);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly)) return QStringLiteral("Unknown");
+
+    const QByteArray header = file.read(72);
+    if (header.size() >= 16 && header.left(16) == QByteArray("SQLite format 3", 16)) {
+        return QStringLiteral("SQL");
+    }
+
+    if (header.size() >= 16) {
+        const auto b12 = static_cast<unsigned char>(header.at(12));
+        const auto b13 = static_cast<unsigned char>(header.at(13));
+        const auto b14 = static_cast<unsigned char>(header.at(14));
+        const auto b15 = static_cast<unsigned char>(header.at(15));
+        const bool bdb_big_endian = b12 == 0x00 && b13 == 0x05 && b14 == 0x31 && b15 == 0x62;
+        const bool bdb_little_endian = b12 == 0x62 && b13 == 0x31 && b14 == 0x05 && b15 == 0x00;
+        if (bdb_big_endian || bdb_little_endian) return QStringLiteral("BDB");
+    }
+
+    return QStringLiteral("Unknown");
+}
+
+QString walletStorageTypeForName(const QString& data_dir, const QString& wallet_name)
+{
+    const QDir data(data_dir);
+    const QString normalized = normalizedWalletListName(wallet_name);
+    if (normalized.isEmpty()) {
+        const QString top_level = data.filePath(QStringLiteral("wallet.dat"));
+        const QString top_level_type = walletStorageTypeFromFile(top_level);
+        if (top_level_type != QLatin1String("Unknown")) return top_level_type;
+        return walletStorageTypeFromFile(data.filePath(QStringLiteral("wallets/wallet.dat")));
+    }
+
+    const QDir wallets(data.filePath(QStringLiteral("wallets")));
+    const QString direct = wallets.filePath(normalized);
+    const QFileInfo direct_info(direct);
+    if (direct_info.isFile()) {
+        return walletStorageTypeFromFile(direct);
+    }
+    return walletStorageTypeFromFile(QDir(direct).filePath(QStringLiteral("wallet.dat")));
+}
+
+QByteArray sha256Bytes(const QByteArray& data)
+{
+    return QCryptographicHash::hash(data, QCryptographicHash::Sha256);
+}
+
+QByteArray hash256Bytes(const QByteArray& data)
+{
+    return sha256Bytes(sha256Bytes(data));
+}
+
+QByteArray hmacSha512(const QByteArray& key, const QByteArray& message)
+{
+    constexpr int block_size = 128;
+    QByteArray normalized_key = key;
+    if (normalized_key.size() > block_size) normalized_key = QCryptographicHash::hash(normalized_key, QCryptographicHash::Sha512);
+    normalized_key.resize(block_size);
+
+    QByteArray outer(block_size, char(0x5c));
+    QByteArray inner(block_size, char(0x36));
+    for (int i = 0; i < block_size; ++i) {
+        outer[i] = char(outer.at(i) ^ normalized_key.at(i));
+        inner[i] = char(inner.at(i) ^ normalized_key.at(i));
+    }
+
+    const QByteArray inner_hash = QCryptographicHash::hash(inner + message, QCryptographicHash::Sha512);
+    return QCryptographicHash::hash(outer + inner_hash, QCryptographicHash::Sha512);
+}
+
+QByteArray pbkdf2HmacSha512(const QByteArray& password, const QByteArray& salt, int iterations, int output_size)
+{
+    QByteArray output;
+    for (int block = 1; output.size() < output_size; ++block) {
+        QByteArray block_salt = salt;
+        block_salt.append(char((block >> 24) & 0xff));
+        block_salt.append(char((block >> 16) & 0xff));
+        block_salt.append(char((block >> 8) & 0xff));
+        block_salt.append(char(block & 0xff));
+
+        QByteArray u = hmacSha512(password, block_salt);
+        QByteArray t = u;
+        for (int i = 1; i < iterations; ++i) {
+            u = hmacSha512(password, u);
+            for (int j = 0; j < t.size(); ++j) t[j] = char(t.at(j) ^ u.at(j));
+        }
+        output.append(t);
+    }
+    output.truncate(output_size);
+    return output;
+}
+
+int compareUnsignedBytes(const QByteArray& left, const QByteArray& right)
+{
+    const int size = std::min(left.size(), right.size());
+    for (int i = 0; i < size; ++i) {
+        const int a = static_cast<unsigned char>(left.at(i));
+        const int b = static_cast<unsigned char>(right.at(i));
+        if (a < b) return -1;
+        if (a > b) return 1;
+    }
+    if (left.size() < right.size()) return -1;
+    if (left.size() > right.size()) return 1;
+    return 0;
+}
+
+bool isValidSecp256k1Secret(const QByteArray& secret)
+{
+    static const QByteArray order = QByteArray::fromHex("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+    if (secret.size() != 32) return false;
+    bool non_zero = false;
+    for (const char byte : secret) {
+        if (byte != 0) {
+            non_zero = true;
+            break;
+        }
+    }
+    return non_zero && compareUnsignedBytes(secret, order) < 0;
+}
+
+QString encodeBase58Check(const QByteArray& payload)
+{
+    static constexpr char alphabet[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    const QByteArray data = payload + hash256Bytes(payload).left(4);
+
+    int zeroes = 0;
+    while (zeroes < data.size() && data.at(zeroes) == 0) ++zeroes;
+
+    QVector<unsigned char> b58((data.size() - zeroes) * 138 / 100 + 1);
+    int length = 0;
+    for (int i = zeroes; i < data.size(); ++i) {
+        int carry = static_cast<unsigned char>(data.at(i));
+        int j = 0;
+        for (auto it = b58.rbegin(); (carry != 0 || j < length) && it != b58.rend(); ++it, ++j) {
+            carry += 256 * (*it);
+            *it = carry % 58;
+            carry /= 58;
+        }
+        length = j;
+    }
+
+    QString result;
+    result.reserve(zeroes + length);
+    for (int i = 0; i < zeroes; ++i) result.append(QLatin1Char('1'));
+    auto it = b58.cbegin() + (b58.size() - length);
+    while (it != b58.cend()) {
+        result.append(QLatin1Char(alphabet[*it]));
+        ++it;
+    }
+    return result;
+}
+
+bool bitAt(const QByteArray& bytes, int bit)
+{
+    return (static_cast<unsigned char>(bytes.at(bit / 8)) >> (7 - (bit % 8))) & 1;
 }
 
 QPair<QString, QString> splitPeerAddressAndPort(QString raw)
@@ -176,6 +569,87 @@ QString reverseDnsNameForAddress(const QHostAddress& address)
     return QString();
 }
 
+bool isLikelyLanAddress(const QString& host)
+{
+    QHostAddress address;
+    if (!address.setAddress(host.trimmed()) || address.isLoopback()) return false;
+
+    if (address.protocol() == QAbstractSocket::IPv4Protocol) {
+        const quint32 value = address.toIPv4Address();
+        const quint8 a = static_cast<quint8>((value >> 24) & 0xff);
+        const quint8 b = static_cast<quint8>((value >> 16) & 0xff);
+        return a == 10
+            || (a == 172 && b >= 16 && b <= 31)
+            || (a == 192 && b == 168)
+            || (a == 169 && b == 254);
+    }
+
+    if (address.protocol() == QAbstractSocket::IPv6Protocol) {
+        const Q_IPV6ADDR bytes = address.toIPv6Address();
+        return (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80)
+            || (bytes[0] & 0xfe) == 0xfc;
+    }
+
+    return false;
+}
+
+QString sanitizedLanHostName(QString value)
+{
+    value = normalizeDnsName(value);
+    const QStringList local_suffixes{
+        QStringLiteral(".localdomain"),
+        QStringLiteral(".local"),
+        QStringLiteral(".lan"),
+        QStringLiteral(".home")
+    };
+    for (const QString& suffix : local_suffixes) {
+        if (value.endsWith(suffix, Qt::CaseInsensitive)) {
+            value.chop(suffix.size());
+            break;
+        }
+    }
+    value = value.trimmed();
+    value.replace(QLatin1Char('.'), QLatin1Char('-'));
+    static const QRegularExpression valid(QStringLiteral(R"(^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$)"));
+    if (!valid.match(value).hasMatch()) return QString();
+
+    const QString upper = value.toUpper();
+    if (upper == QLatin1String("WORKGROUP") ||
+        upper == QLatin1String("LOCAL") ||
+        upper.startsWith(QLatin1Char('_'))) {
+        return QString();
+    }
+
+    return value;
+}
+
+QString lanAliasFromDnsName(const QString& value)
+{
+    const QString name = sanitizedLanHostName(value);
+    if (name.isEmpty()) return QString();
+    if (isIpLiteral(name)) return QString();
+    return QStringLiteral("LAN:%1").arg(name);
+}
+
+QString parseLanPeerNameLookupOutput(const QString& output)
+{
+    static const QVector<QRegularExpression> patterns{
+        QRegularExpression(QStringLiteral(R"(NetBIOS\s+Name:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption),
+        QRegularExpression(QStringLiteral(R"(\bPTR\s+([A-Za-z0-9_.-]+\.local)\.?)"), QRegularExpression::CaseInsensitiveOption),
+        QRegularExpression(QStringLiteral(R"(^\s*(?:[0-9]{1,3}\.){3}[0-9]{1,3}\s+([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::MultilineOption),
+        QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+<00>\s+UNIQUE\b)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)
+    };
+
+    for (const QRegularExpression& pattern : patterns) {
+        const QRegularExpressionMatch match = pattern.match(output);
+        if (!match.hasMatch()) continue;
+        const QString name = sanitizedLanHostName(match.captured(1));
+        if (!name.isEmpty()) return name;
+    }
+
+    return QString();
+}
+
 QStringList configuredSeedDomains()
 {
     return {
@@ -234,8 +708,23 @@ QString peerDnsName(const QJsonObject& peer,
 
 QString peerDomainAlias(const QJsonObject& peer,
                         const QPair<QString, QString>& endpoint,
-                        const QHash<QString, QString>& alias_cache)
+                        const QHash<QString, QString>& dns_cache,
+                        const QHash<QString, QString>& alias_cache,
+                        const QHash<QString, QString>& lan_cache)
 {
+    const QString lan_name = lan_cache.value(normalizedPeerHost(endpoint.first));
+    if (!lan_name.isEmpty()) return QStringLiteral("LAN:%1").arg(lan_name);
+
+    if (isLikelyLanAddress(endpoint.first)) {
+        const QString explicit_dns = peer.value(QStringLiteral("dns_name")).toString(
+            peer.value(QStringLiteral("fqdn")).toString(peer.value(QStringLiteral("addr_name")).toString()));
+        const QString explicit_alias = lanAliasFromDnsName(explicit_dns);
+        if (!explicit_alias.isEmpty()) return explicit_alias;
+
+        const QString cached_alias = lanAliasFromDnsName(dns_cache.value(normalizedPeerHost(endpoint.first)));
+        if (!cached_alias.isEmpty()) return cached_alias;
+    }
+
     const QString explicit_alias = fallbackDash(peer.value(QStringLiteral("domain_alias")).toString(
         peer.value(QStringLiteral("seed_domain")).toString(peer.value(QStringLiteral("source_domain")).toString())));
     if (explicit_alias != QLatin1String("-")) return explicit_alias;
@@ -255,6 +744,76 @@ QString peerNumberText(const QJsonObject& peer, const QString& key)
     if (value.isDouble()) return QString::number(value.toVariant().toLongLong());
     if (value.isString()) return fallbackDash(value.toString());
     return QStringLiteral("-");
+}
+
+QString formatHashrateMetric(double value)
+{
+    static const QStringList units{
+        QStringLiteral("H/s"),
+        QStringLiteral("KH/s"),
+        QStringLiteral("MH/s"),
+        QStringLiteral("GH/s"),
+        QStringLiteral("TH/s"),
+        QStringLiteral("PH/s")
+    };
+    if (!std::isfinite(value) || value <= 0.0) return QStringLiteral("-");
+    int unit = 0;
+    while (value >= 1000.0 && unit + 1 < units.size()) {
+        value /= 1000.0;
+        ++unit;
+    }
+    return QStringLiteral("%1 %2").arg(value, 0, 'f', value >= 100.0 ? 0 : 2).arg(units.at(unit));
+}
+
+QString formatMinerHashrateText(const QString& amount, const QString& unit)
+{
+    QString normalized_unit = unit.trimmed().toUpper();
+    if (normalized_unit == QLatin1String("KH/S")) return QStringLiteral("%1 KH/s").arg(amount);
+    if (normalized_unit == QLatin1String("MH/S")) return QStringLiteral("%1 MH/s").arg(amount);
+    if (normalized_unit == QLatin1String("GH/S")) return QStringLiteral("%1 GH/s").arg(amount);
+    if (normalized_unit == QLatin1String("TH/S")) return QStringLiteral("%1 TH/s").arg(amount);
+    return QStringLiteral("%1 H/s").arg(amount);
+}
+
+QString formatSyncEtaSeconds(qint64 seconds)
+{
+    if (seconds <= 0) return QStringLiteral("<1 min");
+    const qint64 minutes = std::max<qint64>(1, (seconds + 59) / 60);
+    const qint64 days = minutes / (24 * 60);
+    const qint64 hours = (minutes % (24 * 60)) / 60;
+    const qint64 mins = minutes % 60;
+    if (days > 0) return QStringLiteral("%1d %2h %3m").arg(days).arg(hours, 2, 10, QLatin1Char('0')).arg(mins, 2, 10, QLatin1Char('0'));
+    if (hours > 0) return QStringLiteral("%1h %2m").arg(hours).arg(mins, 2, 10, QLatin1Char('0'));
+    return QStringLiteral("%1m").arg(mins);
+}
+
+QString formatMessageByteCount(qint64 bytes)
+{
+    double value = bytes;
+    QString unit = QStringLiteral("B");
+    if (value >= 1024.0) { value /= 1024.0; unit = QStringLiteral("KB"); }
+    if (value >= 1024.0) { value /= 1024.0; unit = QStringLiteral("MB"); }
+    return QStringLiteral("%1 %2").arg(value, 0, unit == QLatin1String("B") ? 'f' : 'f', unit == QLatin1String("B") ? 0 : 1).arg(unit);
+}
+
+QString orderedMessageTypeStats(const QHash<QString, qint64>& counts)
+{
+    static const QVector<QPair<QString, QStringList>> ordered{
+        {QStringLiteral("cmpctblock"), {QStringLiteral("cmpctblock")}},
+        {QStringLiteral("headers"), {QStringLiteral("headers")}},
+        {QStringLiteral("ping"), {QStringLiteral("ping")}},
+        {QStringLiteral("pong"), {QStringLiteral("pong")}},
+        {QStringLiteral("addr*"), {QStringLiteral("addr"), QStringLiteral("addrv2")}},
+    };
+
+    QStringList out;
+    out.reserve(ordered.size());
+    for (const auto& entry : ordered) {
+        qint64 total = 0;
+        for (const QString& key : entry.second) total += counts.value(key, 0);
+        out.push_back(QStringLiteral("%1: %2").arg(entry.first, formatMessageByteCount(total)));
+    }
+    return out.join(QStringLiteral(" | "));
 }
 
 QString peerSyncHeightText(const QJsonObject& peer, const QString& key)
@@ -312,11 +871,6 @@ void upsertAddressRow(QVariantList& rows, const QVariantList& candidate)
     rows.push_back(candidate);
 }
 
-QString percentEncodeWalletName(const QString& wallet_name)
-{
-    return QString::fromLatin1(QUrl::toPercentEncoding(wallet_name, QByteArrayLiteral("/")));
-}
-
 QString realHomePath()
 {
 #if defined(Q_OS_WIN)
@@ -370,6 +924,17 @@ QString formatLocalDebugLogLine(const QString& line)
     return localLogTimestamp(utc) + QStringLiteral(" ") + message;
 }
 
+QString formatDurationFromSeconds(qint64 seconds)
+{
+    if (seconds < 0) return QStringLiteral("Unknown");
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    const qint64 secs = seconds % 60;
+    if (hours > 0) return QStringLiteral("%1h %2m %3s").arg(hours).arg(minutes).arg(secs);
+    if (minutes > 0) return QStringLiteral("%1m %2s").arg(minutes).arg(secs);
+    return QStringLiteral("%1s").arg(secs);
+}
+
 QString variantColumnType(const QVariantList& column_types, const QVariantList& columns, int index)
 {
     if (index >= 0 && index < column_types.size()) {
@@ -408,10 +973,10 @@ double defaultColumnMinimum(const QString& type)
 double defaultColumnMaximum(const QString& type)
 {
     if (type == QLatin1String("action") || type == QLatin1String("delete")) return 44.0;
-    if (type == QLatin1String("ipport")) return 520.0;
-    if (type == QLatin1String("address") || type == QLatin1String("hash")) return 520.0;
-    if (type == QLatin1String("text")) return 360.0;
-    return 260.0;
+    if (type == QLatin1String("ipport")) return 840.0;
+    if (type == QLatin1String("address") || type == QLatin1String("hash")) return 960.0;
+    if (type == QLatin1String("text")) return 1200.0;
+    return 720.0;
 }
 
 bool monoColumnType(const QString& type, const QString& name = QString())
@@ -423,14 +988,187 @@ bool monoColumnType(const QString& type, const QString& name = QString())
         || lower.contains(QStringLiteral("version")) || lower == QLatin1String("svcs") || lower.contains(QStringLiteral("height"))
         || lower.contains(QStringLiteral("headers")) || lower.contains(QStringLiteral("blocks"));
 }
+
+QString shellQuoteForDisplay(const QString& value)
+{
+    if (value.isEmpty()) return QStringLiteral("''");
+    QString out = value;
+    out.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+    return QStringLiteral("'%1'").arg(out);
+}
+
+QString processCommandForDisplay(const QString& program, const QStringList& args)
+{
+    QStringList parts;
+    parts.push_back(shellQuoteForDisplay(program));
+    for (const QString& arg : args) parts.push_back(shellQuoteForDisplay(arg));
+    return parts.join(QLatin1Char(' '));
+}
+
+QString singleLineLimited(const QString& value, int max_chars)
+{
+    QString out;
+    out.reserve(std::min(value.size(), static_cast<qsizetype>(max_chars)));
+    for (const QChar ch : value.trimmed()) {
+        const ushort code = ch.unicode();
+        if (code < 0x20 || code == 0x7f) continue;
+        out.append(ch);
+        if (out.size() >= max_chars) break;
+    }
+    return out;
+}
+
+bool isSafeRpcMethodName(const QString& method)
+{
+    static const QRegularExpression method_re(QStringLiteral(R"(^[A-Za-z0-9_]{1,64}$)"));
+    return method_re.match(method).hasMatch();
+}
+
+bool rpcMethodTakesSensitiveInput(const QString& method)
+{
+    const QString lower = method.toLower();
+    static const QSet<QString> sensitive_methods{
+        QStringLiteral("encryptwallet"),
+        QStringLiteral("importdescriptors"),
+        QStringLiteral("importmulti"),
+        QStringLiteral("importprivkey"),
+        QStringLiteral("importwallet"),
+        QStringLiteral("sethdseed"),
+        QStringLiteral("signmessagewithprivkey"),
+        QStringLiteral("walletpassphrase"),
+        QStringLiteral("walletpassphrasechange")
+    };
+    return sensitive_methods.contains(lower)
+        || lower.contains(QStringLiteral("passphrase"))
+        || lower.contains(QStringLiteral("privkey"));
+}
+
+QString rpcPromptForDisplay(const QString& method, const QString& params_json)
+{
+    if (params_json.isEmpty()) return method;
+    if (rpcMethodTakesSensitiveInput(method)) return method + QStringLiteral(" [params redacted]");
+    return method + QStringLiteral(" ") + params_json;
+}
+
+QString processCommandForDisplayRedacted(const QString& program, const QStringList& args)
+{
+    QStringList redacted;
+    redacted.reserve(args.size());
+    bool redact_next = false;
+    for (const QString& arg : args) {
+        if (redact_next) {
+            redacted.push_back(QStringLiteral("[redacted]"));
+            redact_next = false;
+            continue;
+        }
+        if (arg == QLatin1String("-p") || arg == QLatin1String("--pass") || arg == QLatin1String("--password")) {
+            redacted.push_back(arg);
+            redact_next = true;
+            continue;
+        }
+        if (arg.startsWith(QStringLiteral("--pass=")) || arg.startsWith(QStringLiteral("--password="))) {
+            redacted.push_back(arg.left(arg.indexOf(QLatin1Char('=')) + 1) + QStringLiteral("[redacted]"));
+            continue;
+        }
+        redacted.push_back(arg);
+    }
+    return processCommandForDisplay(program, redacted);
+}
+
+bool isValidStratumUrl(const QString& pool_url)
+{
+    static const QRegularExpression stratum_re(QStringLiteral(
+        R"(^stratum\+(tcp|ssl)://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?::([0-9]{1,5}))?$)"));
+    const QRegularExpressionMatch match = stratum_re.match(pool_url);
+    if (!match.hasMatch()) return false;
+    if (pool_url.contains(QStringLiteral(".."))) return false;
+    const QString port_text = match.captured(3);
+    if (port_text.isEmpty()) return true;
+    bool ok = false;
+    const int port = port_text.toInt(&ok);
+    return ok && port > 0 && port <= 65535;
+}
+
+bool isHex256(const QString& value)
+{
+    static const QRegularExpression hash_re(QStringLiteral(R"(^[0-9A-Fa-f]{64}$)"));
+    return hash_re.match(value).hasMatch();
+}
+
+bool isNonNegativeBlockHeight(const QString& value)
+{
+    static const QRegularExpression height_re(QStringLiteral(R"(^[0-9]{1,10}$)"));
+    if (!height_re.match(value).hasMatch()) return false;
+    bool ok = false;
+    const qlonglong height = value.toLongLong(&ok);
+    return ok && height >= 0 && height <= std::numeric_limits<int>::max();
+}
+
+bool isLikelyBase58AddressText(const QString& value)
+{
+    const QString clean = value.trimmed();
+    if (clean.size() < 26 || clean.size() > 64) return false;
+    for (const QChar ch : clean) {
+        if (ch.unicode() > 0x7f) return false;
+        if (!std::strchr(BASE58_ALPHABET, static_cast<char>(ch.toLatin1()))) return false;
+    }
+    return true;
+}
+
+bool isSafeHttpUrl(const QUrl& url)
+{
+    const QString scheme = url.scheme().toLower();
+    return url.isValid()
+        && (scheme == QLatin1String("http") || scheme == QLatin1String("https"))
+        && !url.host().isEmpty()
+        && url.userInfo().isEmpty();
+}
+
+QString stripAnsiControlSequences(QString text)
+{
+    static const QRegularExpression ansi_re(QStringLiteral(R"(\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]))"));
+    text.remove(ansi_re);
+    return text;
+}
+
+QString resolvedCpuminerExecutable(const QString& selected_path, QString* note)
+{
+    const QFileInfo selected_info(selected_path);
+    if (note) note->clear();
+    if (selected_info.suffix().compare(QStringLiteral("sh"), Qt::CaseInsensitive) != 0) {
+        return selected_path;
+    }
+
+    const QString candidate = selected_info.dir().filePath(QStringLiteral("cpuminer"));
+    if (QFileInfo(candidate).isExecutable()) {
+        if (note) {
+            *note = QStringLiteral("Nu detected a shell wrapper script and will launch '%1' directly so the UI pool, payout, and thread settings apply.")
+                .arg(QDir::toNativeSeparators(candidate));
+        }
+        return candidate;
+    }
+
+    if (note) {
+        *note = QStringLiteral("The selected file is a shell wrapper script. Select the actual cpuminer executable instead, or place an executable named cpuminer beside the script.");
+    }
+    return selected_path;
+}
 } // namespace
 
 NuRpcService::NuRpcService(QObject* parent)
     : QObject(parent),
-      m_network(new QNetworkAccessManager(this))
+      m_network(new QNetworkAccessManager(this)),
+      m_update_network(new QNetworkAccessManager(this)),
+      m_velopack_updater(new NuVelopackUpdater(this))
 {
     m_app_launch_utc = QDateTime::currentDateTimeUtc();
     loadLocalSettings();
+    appendLaunchDiagnostic(QStringLiteral("Frontend application launched."));
+    appendLaunchDiagnostic(QStringLiteral("Network preferences: Defcoin-only magic=%1, /Defcoin user-agent filtering=%2, LAN discovery=%3, UPnP=%4.")
+        .arg(boolText(m_only_defcoin_magic_bytes),
+             boolText(m_only_defcoin_user_agents),
+             boolText(m_lan_node_discovery_enabled),
+             boolText(m_upnp_connections_enabled)));
     rebuildNodeMetrics();
     connect(m_network, &QNetworkAccessManager::finished, this, &NuRpcService::handleReply);
     m_uptime.start();
@@ -441,16 +1179,21 @@ NuRpcService::NuRpcService(QObject* parent)
     m_refresh_timer->start();
 
     m_traffic_timer = new QTimer(this);
+    // Poll once per second for live rates, but keep the chart as one-minute buckets.
     m_traffic_timer->setInterval(1000);
     connect(m_traffic_timer, &QTimer::timeout, this, &NuRpcService::sampleTraffic);
     m_traffic_timer->start();
 
     QTimer::singleShot(0, this, &NuRpcService::refresh);
     QTimer::singleShot(250, this, &NuRpcService::sampleTraffic);
+    QTimer::singleShot(6500, this, [this] {
+        if (m_automatic_update_checks_enabled) checkForUpdates(false);
+    });
 }
 
 NuRpcService::~NuRpcService()
 {
+    stopMiner();
     stopOwnedBackend();
 }
 
@@ -470,9 +1213,44 @@ void NuRpcService::loadLocalSettings()
         m_only_defcoin_magic_bytes = true;
         nu_settings.setValue(QStringLiteral("OnlyDefcoinMagicBytes"), true);
     }
-    m_disallow_lan_node_discovery = nu_settings.value(QStringLiteral("DisallowLanNodeDiscovery"), false).toBool();
+    m_lan_node_discovery_enabled = nu_settings.value(QStringLiteral("LanNodeDiscoveryEnabled"), false).toBool();
+    m_upnp_connections_enabled = nu_settings.value(QStringLiteral("UpnpConnectionsEnabled"), false).toBool();
+    m_lan_node_discovery_notice_acknowledged = nu_settings.value(QStringLiteral("LanNodeDiscoveryNoticeAcknowledged"), false).toBool();
+    m_automatic_update_checks_enabled = nu_settings.value(QStringLiteral("AutomaticUpdateChecksEnabled"), true).toBool();
+    m_table_copy_delimiter_style = nu_settings.value(QStringLiteral("TableCopyDelimiterStyle"), QStringLiteral("tsv")).toString().toLower();
+    if (!QStringList{QStringLiteral("csv"), QStringLiteral("tsv"), QStringLiteral("pipe"), QStringLiteral("semicolon"), QStringLiteral("custom")}.contains(m_table_copy_delimiter_style)) {
+        m_table_copy_delimiter_style = QStringLiteral("tsv");
+    }
+    m_table_copy_custom_delimiter = nu_settings.value(QStringLiteral("TableCopyCustomDelimiter"), QStringLiteral("|")).toString();
+    m_table_copy_custom_delimiter = m_table_copy_custom_delimiter.left(15);
+    if (m_table_copy_custom_delimiter.isEmpty()) m_table_copy_custom_delimiter = QStringLiteral("|");
+    m_log_verbosity = std::clamp(nu_settings.value(QStringLiteral("LogVerbosity"), 0).toInt(), 0, 3);
+    m_log_search_pattern = nu_settings.value(QStringLiteral("LogSearchPattern"), QString()).toString().left(160);
+    m_log_last_search_pattern = nu_settings.value(QStringLiteral("LogLastSearchPattern"), m_log_search_pattern).toString().left(160);
+    m_log_remove_pattern = nu_settings.value(QStringLiteral("LogRemovePattern"), QString()).toString().left(160);
+    m_background_close_enabled = nu_settings.value(QStringLiteral("KeepRunningWhenClosedEnabled"), false).toBool();
+    m_miner_executable = singleLineLimited(nu_settings.value(QStringLiteral("MinerExecutable"), QString()).toString(), 1024);
+    m_miner_pool_url = singleLineLimited(nu_settings.value(QStringLiteral("MinerPoolUrl"), m_miner_pool_url).toString(), 512);
+    m_miner_payout_address = singleLineLimited(nu_settings.value(QStringLiteral("MinerPayoutAddress"), QString()).toString(), 128);
+    m_miner_password = singleLineLimited(nu_settings.value(QStringLiteral("MinerPassword"), QStringLiteral("x")).toString(), 128);
+    if (m_miner_password.isEmpty()) m_miner_password = QStringLiteral("x");
+    m_miner_threads = std::clamp(nu_settings.value(QStringLiteral("MinerThreads"), 4).toInt(), 1, 256);
+    m_miner_nice_level = std::clamp(nu_settings.value(QStringLiteral("MinerNiceLevel"), 20).toInt(), 0, 20);
+    m_miner_status = m_miner_executable.isEmpty() ? QStringLiteral("Select a miner executable before starting.") : QStringLiteral("Miner configured.");
     m_third_party_tx_urls_enabled = nu_settings.value(QStringLiteral("ThirdPartyTxUrlsEnabled"), false).toBool();
     m_third_party_tx_url = normalizedExplorerUrl(nu_settings.value(QStringLiteral("ThirdPartyTxUrl"), legacy_explorer_url).toString());
+    m_explorer_mode = nu_settings.value(QStringLiteral("ExplorerMode"), QStringLiteral("internal")).toString().trimmed().toLower();
+    if (!QStringList{QStringLiteral("internal"), QStringLiteral("dc903"), QStringLiteral("legacy"), QStringLiteral("custom")}.contains(m_explorer_mode)) {
+        m_explorer_mode = QStringLiteral("internal");
+    }
+    if (m_explorer_mode == QLatin1String("internal")) {
+        m_third_party_tx_urls_enabled = false;
+    } else {
+        m_third_party_tx_urls_enabled = true;
+        if (m_explorer_mode == QLatin1String("dc903")) m_third_party_tx_url = explorerPresetUrl(1);
+        if (m_explorer_mode == QLatin1String("legacy")) m_third_party_tx_url = explorerPresetUrl(2);
+    }
+    loadExplorerRecentLookups();
 }
 
 QString NuRpcService::defaultDataDir() const
@@ -556,21 +1334,25 @@ QString NuRpcService::backendBinaryPath() const
 
 void NuRpcService::appendLaunchDiagnostic(const QString& message)
 {
-    if (message.trimmed().isEmpty()) return;
+    QString clean_message = message.trimmed();
+    if (clean_message.startsWith(QStringLiteral("Nu startup:"), Qt::CaseInsensitive)) {
+        clean_message = clean_message.mid(QStringLiteral("Nu startup:").size()).trimmed();
+    }
+    if (clean_message.isEmpty()) return;
     if (!m_launch_diagnostics_section_started) {
         const QString marker = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
             + QStringLiteral(" ----- Nu startup diagnostics -----");
-        m_log_lines.push_back(marker);
+        appendLogLine(marker);
         appendDebugLogLineFromNu(QStringLiteral("----- Nu startup diagnostics -----"));
         m_launch_diagnostics_section_started = true;
     }
     const QString line = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
-        + QStringLiteral(" Nu startup: ") + message;
+        + QStringLiteral(" Nu startup: ") + clean_message;
     if (m_log_lines.isEmpty() || m_log_lines.constLast() != line) {
-        m_log_lines.push_back(line);
+        appendLogLine(line);
     }
-    appendDebugLogLineFromNu(QStringLiteral("Nu startup: %1").arg(message));
-    while (m_log_lines.size() > 5000) m_log_lines.removeFirst();
+    appendDebugLogLineFromNu(QStringLiteral("Nu startup: %1").arg(clean_message));
+    trimLogLines();
     rebuildNodeMetrics();
     Q_EMIT logChanged();
     Q_EMIT stateChanged();
@@ -592,6 +1374,22 @@ void NuRpcService::appendDebugLogLineFromNu(const QString& message)
         << ' ' << message << '\n';
 }
 
+void NuRpcService::appendLogLine(const QString& line, int debug_log_line_number)
+{
+    m_log_lines.push_back(line);
+    m_log_line_numbers.push_back(debug_log_line_number > 0 ? QVariant(debug_log_line_number) : QVariant());
+}
+
+void NuRpcService::trimLogLines()
+{
+    while (m_log_lines.size() > 5000) {
+        m_log_lines.removeFirst();
+        if (!m_log_line_numbers.isEmpty()) m_log_line_numbers.removeFirst();
+    }
+    while (m_log_line_numbers.size() > m_log_lines.size()) m_log_line_numbers.removeLast();
+    while (m_log_line_numbers.size() < m_log_lines.size()) m_log_line_numbers.push_front(QVariant());
+}
+
 void NuRpcService::beginBackendDebugLogSection(bool write_to_debug_log)
 {
     if (m_backend_log_section_started) return;
@@ -599,7 +1397,7 @@ void NuRpcService::beginBackendDebugLogSection(bool write_to_debug_log)
     const QString marker = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
         + QStringLiteral(" ----- Backend debug.log -----");
     if (m_log_lines.isEmpty() || m_log_lines.constLast() != marker) {
-        m_log_lines.push_back(marker);
+        appendLogLine(marker);
     }
     if (write_to_debug_log) {
         appendDebugLogLineFromNu(QStringLiteral("----- Backend debug.log follows -----"));
@@ -612,6 +1410,15 @@ QStringList NuRpcService::backendRuntimeDiagnostics(const QString& binary) const
     QStringList diagnostics;
     const QDir backend_dir(QFileInfo(binary).absolutePath());
     diagnostics << QStringLiteral("Backend path: %1").arg(QDir::toNativeSeparators(binary));
+    const QString cli_name =
+#if defined(Q_OS_WIN)
+        QStringLiteral("defcoin-cli.exe");
+#else
+        QStringLiteral("defcoin-cli");
+#endif
+    const QString cli_path = backend_dir.filePath(cli_name);
+    diagnostics << QStringLiteral("CLI path: %1")
+        .arg(QFileInfo::exists(cli_path) ? QDir::toNativeSeparators(cli_path) : QStringLiteral("not bundled"));
     diagnostics << QStringLiteral("Backend working directory: %1").arg(QDir::toNativeSeparators(backend_dir.absolutePath()));
     diagnostics << QStringLiteral("Data directory: %1").arg(QDir::toNativeSeparators(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir));
     diagnostics << QStringLiteral("Debug log path: %1").arg(QDir::toNativeSeparators(QDir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir).filePath(QStringLiteral("debug.log"))));
@@ -648,6 +1455,7 @@ bool NuRpcService::ensureBackendStarted()
     }
 
     QDir().mkpath(m_data_dir);
+    pruneCoreWalletAutoloadSettings();
     for (const QString& diagnostic : backendRuntimeDiagnostics(binary)) {
         appendLaunchDiagnostic(diagnostic);
     }
@@ -685,17 +1493,60 @@ bool NuRpcService::ensureBackendStarted()
             : QStringLiteral("Defcoin backend -version preflight: %1").arg(output.section(QLatin1Char('\n'), 0, 0)));
     }
 
+    const bool listen_for_peers =
+#if defined(Q_OS_MACOS)
+        m_lan_node_discovery_enabled || m_upnp_connections_enabled;
+#else
+        true;
+#endif
+
     QStringList args;
     args << QStringLiteral("-datadir=%1").arg(QDir::toNativeSeparators(m_data_dir))
          << QStringLiteral("-debuglogfile=%1").arg(QDir::toNativeSeparators(QDir(m_data_dir).filePath(QStringLiteral("debug.log"))))
          << QStringLiteral("-server=1")
-         << QStringLiteral("-listen=1")
+         << QStringLiteral("-listen=%1").arg(listen_for_peers ? 1 : 0)
          << QStringLiteral("-networkactive=1")
          << QStringLiteral("-acceptlegacymagic=%1").arg(m_only_defcoin_magic_bytes ? 0 : 1)
-         << QStringLiteral("-allowlannodediscovery=%1").arg(m_disallow_lan_node_discovery ? 0 : 1)
+         << QStringLiteral("-allowlannodediscovery=%1").arg(m_lan_node_discovery_enabled ? 1 : 0)
+         << QStringLiteral("-upnp=%1").arg(m_upnp_connections_enabled ? 1 : 0)
          << QStringLiteral("-rpcport=%1").arg(m_rpc_port)
          << QStringLiteral("-rpcbind=127.0.0.1")
          << QStringLiteral("-rpcallowip=127.0.0.1");
+    appendLaunchDiagnostic(QStringLiteral("Historical Defcoin SegWit is active; post-activation blocks require witness-capable peers and stripped post-activation block data is rewound for clean redownload."));
+
+    const QFileInfo legacy_default_wallet(QDir(m_data_dir).filePath(QStringLiteral("wallet.dat")));
+    const QDir nested_wallets_dir(QDir(m_data_dir).filePath(QStringLiteral("wallets")));
+    if (legacy_default_wallet.isFile()) {
+        args << QStringLiteral("-walletdir=%1").arg(QDir::toNativeSeparators(m_data_dir))
+             << QStringLiteral("-wallet=");
+        appendLaunchDiagnostic(QStringLiteral("Legacy top-level wallet.dat detected; backend launch includes the old default wallet so balances remain visible after new wallets are created."));
+
+        if (nested_wallets_dir.exists()) {
+            const QFileInfoList wallet_entries = nested_wallets_dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
+            for (const QFileInfo& entry : wallet_entries) {
+                const QString leaf = entry.fileName();
+                if (!isValidWalletMenuName(leaf) || !isLikelyLoadableWalletMenuName(leaf)) continue;
+
+                bool looks_like_wallet = false;
+                if (entry.isDir()) {
+                    looks_like_wallet = QFileInfo(QDir(entry.absoluteFilePath()).filePath(QStringLiteral("wallet.dat"))).isFile();
+                } else if (entry.isFile()) {
+                    looks_like_wallet = leaf.compare(QStringLiteral("wallet.dat"), Qt::CaseInsensitive) == 0 || leaf.endsWith(QStringLiteral(".dat"), Qt::CaseInsensitive);
+                }
+                if (looks_like_wallet) {
+                    args << QStringLiteral("-wallet=wallets/%1").arg(leaf);
+                }
+            }
+        }
+    }
+
+    if (!m_lan_node_discovery_enabled) {
+        args << QStringLiteral("-discover=0");
+        appendLaunchDiagnostic(QStringLiteral("LAN node discovery is disabled; backend launch skips local interface peer discovery before networking starts."));
+    }
+    if (!listen_for_peers) {
+        appendLaunchDiagnostic(QStringLiteral("Inbound peer listening is disabled on macOS until LAN node discovery or UPnP is enabled, avoiding the Local Network permission prompt on first launch."));
+    }
 
     args << QStringLiteral("-seednode=seed.defcoin.io")
          << QStringLiteral("-seednode=seed.defcoin.mikej.tech")
@@ -726,6 +1577,7 @@ bool NuRpcService::ensureBackendStarted()
     m_backend_process->setWorkingDirectory(working_dir);
     m_backend_process->setProgram(binary);
     m_backend_process->setArguments(args);
+    appendLaunchDiagnostic(QStringLiteral("Backend launch arguments: %1").arg(args.join(QLatin1Char(' '))));
     m_backend_process->start();
     const bool started = m_backend_process->waitForStarted(5000);
     const qint64 pid = started ? m_backend_process->processId() : 0;
@@ -797,10 +1649,170 @@ QUrl NuRpcService::rpcUrl(bool wallet_scoped) const
     url.setScheme(QStringLiteral("http"));
     url.setHost(m_rpc_host);
     url.setPort(m_rpc_port);
-    if (wallet_scoped && !m_wallet_name.isEmpty()) {
-        url.setPath(QStringLiteral("/wallet/%1").arg(percentEncodeWalletName(m_wallet_name)));
+    if (wallet_scoped && m_wallet_selected) {
+        url.setPath(QStringLiteral("/wallet/") + walletRpcNameFor(m_wallet_name), QUrl::DecodedMode);
     }
     return url;
+}
+
+QUrl NuRpcService::rpcUrlForWallet(const QString& wallet_name) const
+{
+    QUrl url;
+    url.setScheme(QStringLiteral("http"));
+    url.setHost(m_rpc_host);
+    url.setPort(m_rpc_port);
+    url.setPath(QStringLiteral("/wallet/") + walletRpcNameFor(wallet_name), QUrl::DecodedMode);
+    return url;
+}
+
+QString NuRpcService::walletRpcNameFor(const QString& wallet_name) const
+{
+    const QString canonical = normalizedWalletListName(wallet_name);
+    if (m_wallet_rpc_name_by_canonical.contains(canonical)) {
+        return m_wallet_rpc_name_by_canonical.value(canonical);
+    }
+    if (canonical.isEmpty()) {
+        const QString data_dir = m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir;
+        const QDir dir(data_dir);
+        if (!QFileInfo::exists(dir.filePath(QStringLiteral("wallet.dat"))) &&
+            QFileInfo::exists(dir.filePath(QStringLiteral("wallets/wallet.dat")))) {
+            return QStringLiteral("wallet.dat");
+        }
+        return QString();
+    }
+    return wallet_name.trimmed();
+}
+
+QString NuRpcService::walletLoadNameFor(const QString& wallet_name) const
+{
+    const QString canonical = normalizedWalletListName(wallet_name);
+    if (canonical.isEmpty()) {
+        const QString data_dir = m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir;
+        const QDir dir(data_dir);
+        if (!QFileInfo::exists(dir.filePath(QStringLiteral("wallet.dat"))) &&
+            QFileInfo::exists(dir.filePath(QStringLiteral("wallets/wallet.dat")))) {
+            return QStringLiteral("wallet.dat");
+        }
+        return QString();
+    }
+    return wallet_name.trimmed();
+}
+
+bool NuRpcService::walletAutoloadEntryExists(const QString& wallet_name) const
+{
+    QString normalized = normalizedWalletListName(wallet_name);
+    normalized.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    const QString data_dir_path = m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir;
+    const QDir data_dir(data_dir_path);
+
+    if (normalized.isEmpty()) return walletDefaultDatExists(data_dir_path);
+    if (!isLikelyLoadableWalletMenuName(normalized)) return false;
+
+    QString leaf = normalized;
+    if (leaf.startsWith(QStringLiteral("wallets/"))) {
+        leaf = leaf.mid(QStringLiteral("wallets/").size());
+    }
+    if (!isLikelyLoadableWalletMenuName(leaf)) return false;
+
+    QStringList candidates;
+    if (normalized.startsWith(QStringLiteral("wallets/"))) {
+        candidates << data_dir.filePath(normalized);
+    } else {
+        candidates << data_dir.filePath(QStringLiteral("wallets/") + leaf)
+                   << data_dir.filePath(leaf);
+    }
+
+    for (const QString& candidate : candidates) {
+        const QFileInfo info(candidate);
+        if (info.isDir() && QFileInfo(QDir(candidate).filePath(QStringLiteral("wallet.dat"))).isFile()) {
+            return true;
+        }
+        if (info.isFile() && (leaf.compare(QStringLiteral("wallet.dat"), Qt::CaseInsensitive) == 0 ||
+                              leaf.endsWith(QStringLiteral(".dat"), Qt::CaseInsensitive))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void NuRpcService::pruneCoreWalletAutoloadSettings(const QStringList& force_remove)
+{
+    const QString data_dir_path = m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir;
+    const QString settings_path = QDir(data_dir_path).filePath(QStringLiteral("settings.json"));
+    QFile file(settings_path);
+    if (!file.exists()) return;
+    if (!file.open(QIODevice::ReadOnly)) {
+        appendLaunchDiagnostic(QStringLiteral("Core wallet startup settings could not be read for cleanup."));
+        return;
+    }
+
+    QJsonParseError parse_error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parse_error);
+    file.close();
+    if (parse_error.error != QJsonParseError::NoError || !document.isObject()) {
+        appendLaunchDiagnostic(QStringLiteral("Core wallet startup settings were not valid JSON; leaving them unchanged."));
+        return;
+    }
+
+    QJsonObject object = document.object();
+    const QJsonValue wallet_value = object.value(QStringLiteral("wallet"));
+    if (!wallet_value.isArray()) return;
+
+    QSet<QString> forced;
+    for (const QString& value : force_remove) forced.insert(normalizedWalletListName(value));
+
+    QJsonArray kept;
+    QSet<QString> seen;
+    int removed = 0;
+    const QJsonArray wallets = wallet_value.toArray();
+    for (const QJsonValue& value : wallets) {
+        if (!value.isString()) {
+            ++removed;
+            continue;
+        }
+        QString wallet = normalizedWalletListName(value.toString());
+        wallet.replace(QLatin1Char('\\'), QLatin1Char('/'));
+        const QString leaf = wallet.startsWith(QStringLiteral("wallets/"))
+            ? wallet.mid(QStringLiteral("wallets/").size())
+            : wallet;
+        const QString canonical = leaf == QLatin1String("wallet.dat") ? QString() : leaf;
+        if (forced.contains(wallet) || forced.contains(leaf) || forced.contains(canonical)) {
+            ++removed;
+            continue;
+        }
+        if (!walletAutoloadEntryExists(wallet)) {
+            ++removed;
+            continue;
+        }
+        if (seen.contains(canonical)) {
+            ++removed;
+            continue;
+        }
+        seen.insert(canonical);
+        kept.push_back(canonical);
+    }
+
+    if (removed == 0 && kept.size() == wallets.size()) return;
+    if (kept.isEmpty()) {
+        object.remove(QStringLiteral("wallet"));
+    } else {
+        object.insert(QStringLiteral("wallet"), kept);
+    }
+
+    QSaveFile save_file(settings_path);
+    if (!save_file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        appendLaunchDiagnostic(QStringLiteral("Core wallet startup settings could not be opened for cleanup."));
+        return;
+    }
+    save_file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+    if (!save_file.commit()) {
+        appendLaunchDiagnostic(QStringLiteral("Core wallet startup settings cleanup could not be saved."));
+        return;
+    }
+
+    appendLaunchDiagnostic(QStringLiteral("Pruned %1 stale wallet startup entr%2 from Core settings.")
+        .arg(removed)
+        .arg(removed == 1 ? QStringLiteral("y") : QStringLiteral("ies")));
 }
 
 void NuRpcService::rpcCall(const QString& method, const QJsonArray& params, bool wallet_scoped, RpcCallback callback)
@@ -818,6 +1830,30 @@ void NuRpcService::rpcCall(const QString& method, const QJsonArray& params, bool
     request_obj.insert(QStringLiteral("params"), params);
 
     QNetworkRequest request(rpcUrl(wallet_scoped));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    const QByteArray auth = QStringLiteral("%1:%2").arg(m_rpc_user, m_rpc_password).toUtf8().toBase64();
+    request.setRawHeader("Authorization", "Basic " + auth);
+
+    m_pending.insert(id, PendingCall{method, std::move(callback)});
+    QNetworkReply* reply = m_network->post(request, QJsonDocument(request_obj).toJson(QJsonDocument::Compact));
+    reply->setProperty("nuRpcId", id);
+}
+
+void NuRpcService::rpcCallForWallet(const QString& method, const QJsonArray& params, const QString& wallet_name, RpcCallback callback)
+{
+    if (!loadRpcSettings()) {
+        callback(QJsonValue(), m_last_error);
+        return;
+    }
+
+    const int id = m_next_id++;
+    QJsonObject request_obj;
+    request_obj.insert(QStringLiteral("jsonrpc"), QStringLiteral("1.0"));
+    request_obj.insert(QStringLiteral("id"), id);
+    request_obj.insert(QStringLiteral("method"), method);
+    request_obj.insert(QStringLiteral("params"), params);
+
+    QNetworkRequest request(rpcUrlForWallet(wallet_name));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     const QByteArray auth = QStringLiteral("%1:%2").arg(m_rpc_user, m_rpc_password).toUtf8().toBase64();
     request.setRawHeader("Authorization", "Basic " + auth);
@@ -871,6 +1907,11 @@ void NuRpcService::setError(const QString& message)
     m_rpc_connected = false;
     m_connection_status = QStringLiteral("RPC not connected");
     m_last_error = message;
+    m_syncing = false;
+    m_sync_state = QStringLiteral("Unknown");
+    m_sync_detail = QStringLiteral("Waiting for backend RPC.");
+    m_sync_eta = QStringLiteral("Unknown");
+    m_sync_progress_percent = 0;
     if (!message.isEmpty()) {
         rebuildNodeMetrics();
         m_node_metrics.push_front(row({"Detail", message}));
@@ -879,9 +1920,9 @@ void NuRpcService::setError(const QString& message)
     }
     const bool log_message = !message.startsWith(QStringLiteral("Starting Defcoin backend"));
     if (log_message && !message.isEmpty() && m_last_logged_error_message != message) {
-        m_log_lines.push_back(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t")) + QStringLiteral(" ") + message);
+        appendLogLine(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t")) + QStringLiteral(" ") + message);
         m_last_logged_error_message = message;
-        while (m_log_lines.size() > 5000) m_log_lines.removeFirst();
+        trimLogLines();
         Q_EMIT logChanged();
     }
     Q_EMIT stateChanged();
@@ -889,10 +1930,15 @@ void NuRpcService::setError(const QString& message)
 
 void NuRpcService::clearError()
 {
+    const bool was_connected = m_rpc_connected;
     m_rpc_connected = true;
     m_connection_status = QStringLiteral("RPC connected");
     m_last_error.clear();
     m_last_logged_error_message.clear();
+    if (!was_connected && !m_rpc_ready_logged) {
+        appendLaunchDiagnostic(QStringLiteral("RPC credentials are available; backend RPC is connected."));
+        m_rpc_ready_logged = true;
+    }
     Q_EMIT stateChanged();
     if (m_have_pending_network_active && !m_applying_pending_network_active) {
         m_applying_pending_network_active = true;
@@ -903,6 +1949,59 @@ void NuRpcService::clearError()
     }
 }
 
+void NuRpcService::clearWalletScopedState()
+{
+    ++m_wallet_refresh_generation;
+    m_wallet_locked = true;
+    m_wallet_encrypted = false;
+    m_total_balance = QStringLiteral("0.00000000 DFC");
+    m_available_balance = QStringLiteral("0.00000000");
+    m_pending_balance = QStringLiteral("0.00000000");
+    m_immature_balance = QStringLiteral("0.00000000");
+    m_wallet_transaction_count = 0;
+    m_wallet_address_count = 0;
+    m_wallet_nonzero_address_count = 0;
+    m_receive_address.clear();
+    m_receive_qr_source.clear();
+    m_receive_label.clear();
+    m_receive_amount.clear();
+    m_receive_message.clear();
+    m_loaded_receive_request_settings_key.clear();
+    m_address_book_refresh_generation++;
+    m_address_book.clear();
+    m_recent_transactions.clear();
+    m_receive_requests.clear();
+    m_current_psbt.clear();
+    m_current_psbt_final_hex.clear();
+    m_current_psbt_summary = QStringLiteral("No PSBT loaded.");
+}
+
+bool NuRpcService::setCurrentWalletInternal(const QString& name, bool selected)
+{
+    const QString wallet_name = name.trimmed();
+    if (m_wallet_selected == selected && m_wallet_name == wallet_name) return false;
+
+    m_wallet_name = wallet_name;
+    m_wallet_selected = selected;
+    clearWalletScopedState();
+    if (m_wallet_selected) {
+        appendLaunchDiagnostic(QStringLiteral("Wallet selected: %1").arg(walletDisplayName(m_wallet_name)));
+        loadReceiveRequests();
+    } else {
+        appendLaunchDiagnostic(QStringLiteral("No wallet is selected."));
+    }
+    Q_EMIT walletChanged();
+    Q_EMIT psbtChanged();
+    return true;
+}
+
+bool NuRpcService::ensureCurrentWalletSelected(const QString& title)
+{
+    if (m_wallet_selected) return true;
+    Q_EMIT userMessage(title, QStringLiteral("Open or create a wallet before using this wallet action."));
+    return false;
+}
+
 void NuRpcService::refresh()
 {
     refreshNode();
@@ -910,6 +2009,77 @@ void NuRpcService::refresh()
     refreshAddressBook();
     refreshFeeEstimate();
     refreshDebugLog();
+}
+
+void NuRpcService::refreshWalletList()
+{
+    rpcCall(QStringLiteral("listwallets"), {}, false, [this](const QJsonValue& result, const QString& error) {
+        if (!error.isEmpty() || !result.isArray()) return;
+        QStringList loaded;
+        QHash<QString, QString> rpc_names;
+        for (const QJsonValue& value : result.toArray()) {
+            const QString raw_wallet = value.toString();
+            const QString wallet = normalizedWalletListName(raw_wallet);
+            if (isLikelyLoadableWalletMenuName(wallet)) loaded.push_back(wallet);
+            if (isLikelyLoadableWalletMenuName(wallet) && !rpc_names.contains(wallet)) {
+                rpc_names.insert(wallet, raw_wallet);
+            }
+        }
+        loaded.removeDuplicates();
+        bool changed = false;
+        if (m_loaded_wallets != loaded) {
+            m_loaded_wallets = loaded;
+            changed = true;
+        }
+        if (m_wallet_rpc_name_by_canonical != rpc_names) {
+            m_wallet_rpc_name_by_canonical = rpc_names;
+            changed = true;
+        }
+        QStringList available = m_available_wallets;
+        for (const QString& wallet : loaded) {
+            if (!available.contains(wallet)) available.push_back(wallet);
+        }
+        if (walletDefaultDatExists(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir) && !available.contains(QString())) {
+            available.push_back(QString());
+        }
+        available.removeDuplicates();
+        available.sort(Qt::CaseInsensitive);
+        if (m_available_wallets != available) {
+            m_available_wallets = available;
+            changed = true;
+        }
+        if (loaded.isEmpty()) {
+            changed = setCurrentWalletInternal(QString(), false) || changed;
+        } else if (!m_wallet_selected || !loaded.contains(m_wallet_name)) {
+            changed = setCurrentWalletInternal(loaded.first()) || changed;
+        }
+        if (changed) {
+            Q_EMIT walletChanged();
+            refreshWalletStats();
+        }
+    });
+
+    rpcCall(QStringLiteral("listwalletdir"), {}, false, [this](const QJsonValue& result, const QString& error) {
+        if (!error.isEmpty() || !result.isObject()) return;
+        QStringList available;
+        const QJsonArray wallets = result.toObject().value(QStringLiteral("wallets")).toArray();
+        for (const QJsonValue& wallet_value : wallets) {
+            const QString wallet = normalizedWalletListName(wallet_value.toObject().value(QStringLiteral("name")).toString());
+            if (isLikelyLoadableWalletMenuName(wallet)) available.push_back(wallet);
+        }
+        if (walletDefaultDatExists(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir) && !available.contains(QString())) {
+            available.push_back(QString());
+        }
+        for (const QString& wallet : m_loaded_wallets) {
+            available.push_back(wallet);
+        }
+        available.removeDuplicates();
+        available.sort(Qt::CaseInsensitive);
+        if (m_available_wallets == available) return;
+        m_available_wallets = available;
+        Q_EMIT walletChanged();
+        refreshWalletStats();
+    });
 }
 
 void NuRpcService::schedulePeerNameLookups(const QString& host)
@@ -948,6 +2118,100 @@ void NuRpcService::schedulePeerNameLookups(const QString& host)
     dns->lookup();
 }
 
+void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
+{
+    if (!m_lan_node_discovery_enabled) return;
+    if (!isLikelyLanAddress(host)) return;
+
+    const QString key = normalizedPeerHost(host);
+    if (m_peer_lan_name_by_host.contains(key) ||
+        m_peer_lan_lookup_pending.contains(key) ||
+        m_peer_lan_lookup_attempted.contains(key)) {
+        return;
+    }
+
+    QHostAddress address;
+    if (!address.setAddress(host.trimmed())) return;
+
+    struct Command {
+        QString program;
+        QStringList arguments;
+    };
+
+    QVector<Command> commands;
+#if defined(Q_OS_MACOS)
+    const QString ptr_name = reverseDnsNameForAddress(address);
+    if (!ptr_name.isEmpty()) {
+        commands.push_back({QStringLiteral("/usr/bin/dns-sd"), {QStringLiteral("-q"), ptr_name, QStringLiteral("PTR")}});
+    }
+    commands.push_back({QStringLiteral("/usr/bin/smbutil"), {QStringLiteral("status"), QStringLiteral("-ae"), address.toString()}});
+#elif defined(Q_OS_WIN)
+    commands.push_back({QStringLiteral("nbtstat"), {QStringLiteral("-A"), address.toString()}});
+#else
+    commands.push_back({QStringLiteral("avahi-resolve-address"), {address.toString()}});
+    commands.push_back({QStringLiteral("nmblookup"), {QStringLiteral("-A"), address.toString()}});
+#endif
+    if (commands.isEmpty()) return;
+
+    m_peer_lan_lookup_pending.insert(key);
+    m_peer_lan_lookup_attempted.insert(key);
+
+    auto command_list = std::make_shared<QVector<Command>>(commands);
+    auto run_next = std::make_shared<std::function<void(int)>>();
+    *run_next = [this, key, command_list, run_next](int index) {
+        if (index >= command_list->size()) {
+            m_peer_lan_lookup_pending.remove(key);
+            return;
+        }
+
+        const Command command = command_list->at(index);
+        if (command.program.startsWith(QLatin1Char('/')) && !QFileInfo::exists(command.program)) {
+            (*run_next)(index + 1);
+            return;
+        }
+
+        QProcess* process = new QProcess(this);
+        QTimer* timeout = new QTimer(process);
+        timeout->setSingleShot(true);
+        auto completed = std::make_shared<bool>(false);
+
+        connect(timeout, &QTimer::timeout, process, [process] {
+            if (process->state() != QProcess::NotRunning) process->kill();
+        });
+
+        const auto finish = [this, process, timeout, key, run_next, index, completed] {
+            if (*completed) return;
+            *completed = true;
+            timeout->stop();
+
+            const QString output = QString::fromLocal8Bit(process->readAllStandardOutput())
+                + QLatin1Char('\n')
+                + QString::fromLocal8Bit(process->readAllStandardError());
+            const QString name = parseLanPeerNameLookupOutput(output);
+            if (!name.isEmpty()) {
+                m_peer_lan_name_by_host.insert(key, name);
+                m_peer_lan_lookup_pending.remove(key);
+                process->deleteLater();
+                refreshNode();
+                return;
+            }
+
+            process->deleteLater();
+            (*run_next)(index + 1);
+        };
+
+        connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                [finish](int, QProcess::ExitStatus) { finish(); });
+        connect(process, &QProcess::errorOccurred, this,
+                [finish](QProcess::ProcessError) { finish(); });
+
+        process->start(command.program, command.arguments);
+        timeout->start(2500);
+    };
+
+    (*run_next)(0);
+}
+
 void NuRpcService::scheduleConfiguredSeedAliasLookups()
 {
     if (m_seed_alias_lookups_started) return;
@@ -984,15 +2248,26 @@ void NuRpcService::refreshNode()
         }
     });
 
-    rpcCall(QStringLiteral("listwallets"), {}, false, [this](const QJsonValue& result, const QString& error) {
-        if (error.isEmpty() && result.isArray() && !result.toArray().isEmpty()) {
-            const QString wallet_name = result.toArray().first().toString();
-            if (m_wallet_name != wallet_name) {
-                m_wallet_name = wallet_name;
-                loadReceiveRequests();
+    rpcCall(QStringLiteral("getacceptlegacymagic"), {}, false, [this](const QJsonValue& result, const QString& error) {
+        if (error.isEmpty() && result.isBool()) {
+            const bool only_defcoin_magic = !result.toBool();
+            if (m_only_defcoin_magic_bytes != only_defcoin_magic) {
+                m_only_defcoin_magic_bytes = only_defcoin_magic;
+                QSettings().setValue(QStringLiteral("OnlyDefcoinMagicBytes"), only_defcoin_magic);
+                Q_EMIT settingsChanged();
             }
         }
     });
+
+    rpcCall(QStringLiteral("getallowlannodediscovery"), {}, false, [this](const QJsonValue& result, const QString& error) {
+        if (error.isEmpty() && result.isBool() && m_lan_node_discovery_enabled != result.toBool()) {
+            m_lan_node_discovery_enabled = result.toBool();
+            QSettings().setValue(QStringLiteral("LanNodeDiscoveryEnabled"), m_lan_node_discovery_enabled);
+            Q_EMIT settingsChanged();
+        }
+    });
+
+    refreshWalletList();
 
     rpcCall(QStringLiteral("getnetworkinfo"), {}, false, [this](const QJsonValue& result, const QString& error) {
         if (!error.isEmpty()) {
@@ -1018,11 +2293,102 @@ void NuRpcService::refreshNode()
         const QJsonObject chain = result.toObject();
         m_block_height = chain.value(QStringLiteral("blocks")).toInt();
         const int headers = chain.value(QStringLiteral("headers")).toInt();
+        m_header_height = headers;
         const bool ibd = chain.value(QStringLiteral("initialblockdownload")).toBool();
-        m_sync_state = ibd ? QStringLiteral("Syncing") : QStringLiteral("Up to date");
+        const double progress = std::clamp(chain.value(QStringLiteral("verificationprogress")).toDouble(), 0.0, 1.0);
+        const bool headers_ahead = headers > m_block_height;
+        const bool syncing = ibd || headers_ahead;
+        const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+        const int blocks_behind = std::max(0, headers - m_block_height);
+        m_syncing = syncing;
+        m_sync_progress_percent = qBound(0, int(std::round(progress * 100.0)), 100);
+        const QString progress_text = QString::number(progress * 100.0, 'f', progress >= 0.999 ? 3 : 2) + QStringLiteral("%");
+        if (syncing) {
+            QString eta = QStringLiteral("calculating");
+            if (m_sync_last_sample_ms > 0 && now_ms > m_sync_last_sample_ms) {
+                const double seconds = double(now_ms - m_sync_last_sample_ms) / 1000.0;
+                const double progress_delta = progress - m_sync_last_progress;
+                if (progress_delta > 0.0000001) {
+                    eta = formatSyncEtaSeconds(qint64(std::ceil((1.0 - progress) / (progress_delta / seconds))));
+                } else if (m_sync_last_block_height >= 0 && m_block_height > m_sync_last_block_height && blocks_behind > 0) {
+                    const double blocks_per_second = double(m_block_height - m_sync_last_block_height) / seconds;
+                    if (blocks_per_second > 0.0) eta = formatSyncEtaSeconds(qint64(std::ceil(blocks_behind / blocks_per_second)));
+                }
+            }
+            m_sync_eta = eta;
+            m_sync_state = QStringLiteral("Syncing | %1 done | Est. %2").arg(progress_text, eta);
+            m_sync_detail = QStringLiteral("%1 done. Block %2 of %3 headers. %4 block%5 behind. Estimated time remaining: %6.")
+                .arg(progress_text)
+                .arg(m_block_height)
+                .arg(headers)
+                .arg(blocks_behind)
+                .arg(blocks_behind == 1 ? QString() : QStringLiteral("s"))
+                .arg(eta);
+        } else {
+            m_sync_eta = QStringLiteral("0m");
+            m_sync_state = QStringLiteral("Up to Date");
+            m_sync_detail = QStringLiteral("Up to Date. Block %1 of %2 headers.").arg(m_block_height).arg(headers);
+        }
+        m_sync_last_progress = progress;
+        m_sync_last_block_height = m_block_height;
+        m_sync_last_sample_ms = now_ms;
         m_metric_blocks = QString::number(m_block_height);
         m_metric_headers = QString::number(headers);
-        m_metric_verification = QString::number(chain.value(QStringLiteral("verificationprogress")).toDouble() * 100.0, 'f', 2) + QStringLiteral("%");
+        m_metric_verification = progress_text;
+        m_metric_difficulty = chain.value(QStringLiteral("difficulty")).isDouble()
+            ? QString::number(chain.value(QStringLiteral("difficulty")).toDouble(), 'f', 8).remove(QRegularExpression(QStringLiteral("0+$"))).remove(QRegularExpression(QStringLiteral("\\.$")))
+            : QStringLiteral("Unknown");
+        rebuildNodeMetrics();
+        Q_EMIT stateChanged();
+    });
+
+    rpcCall(QStringLiteral("getnetworkhashps"), {120, -1}, false, [this](const QJsonValue& result, const QString& error) {
+        if (!error.isEmpty()) return;
+        m_metric_network_hashrate = formatHashrateMetric(result.toDouble());
+        rebuildNodeMetrics();
+        Q_EMIT stateChanged();
+    });
+
+    rpcCall(QStringLiteral("getchaintips"), {}, false, [this](const QJsonValue& result, const QString& error) {
+        if (!error.isEmpty() || !result.isArray()) return;
+        int active = 0;
+        int active_height = -1;
+        int valid_forks = 0;
+        int closest_valid_fork_height = -1;
+        int closest_valid_fork_branch_len = 0;
+        int headers_only = 0;
+        for (const QJsonValue& value : result.toArray()) {
+            const QJsonObject tip = value.toObject();
+            const QString status = tip.value(QStringLiteral("status")).toString();
+            const int height = tip.value(QStringLiteral("height")).toInt(-1);
+            if (status == QLatin1String("active")) {
+                ++active;
+                active_height = std::max(active_height, height);
+            } else if (status == QLatin1String("valid-fork")) {
+                ++valid_forks;
+                if (height > closest_valid_fork_height) {
+                    closest_valid_fork_height = height;
+                    closest_valid_fork_branch_len = tip.value(QStringLiteral("branchlen")).toInt();
+                }
+            }
+            else if (status == QLatin1String("headers-only")) ++headers_only;
+        }
+        QString fork_summary;
+        if (valid_forks > 0 && active_height >= 0 && closest_valid_fork_height >= 0) {
+            const int blocks_behind = std::max(0, active_height - closest_valid_fork_height);
+            fork_summary = QStringLiteral("%1 historical stale branch%2 (closest: %3-block branch, tip %4 blocks behind)")
+                .arg(valid_forks)
+                .arg(valid_forks == 1 ? QString() : QStringLiteral("s"))
+                .arg(closest_valid_fork_branch_len)
+                .arg(blocks_behind);
+        } else {
+            fork_summary = QStringLiteral("%1 historical stale branches").arg(valid_forks);
+        }
+        m_metric_chain_tips = QStringLiteral("%1 active, %2, %3 headers-only, %4 total")
+            .arg(active)
+            .arg(fork_summary)
+            .arg(headers_only)
+            .arg(result.toArray().size());
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
     });
@@ -1042,6 +2408,8 @@ void NuRpcService::refreshNode()
         if (!error.isEmpty()) return;
         QVariantList simple_rows;
         QVariantList detailed_rows;
+        QHash<QString, qint64> sent_message_bytes;
+        QHash<QString, qint64> received_message_bytes;
         for (const QJsonValue& peer_value : result.toArray()) {
             const QJsonObject peer = peer_value.toObject();
             const QString subver = trimUserAgent(peer.value(QStringLiteral("subver")).toString());
@@ -1049,6 +2417,7 @@ void NuRpcService::refreshNode()
             const QString raw_addr = peer.value(QStringLiteral("addr")).toString();
             const QPair<QString, QString> endpoint = splitPeerAddressAndPort(peer.value(QStringLiteral("addr")).toString());
             schedulePeerNameLookups(endpoint.first);
+            scheduleLanPeerNameLookups(endpoint.first);
             const QString node_id = QString::number(peer.value(QStringLiteral("id")).toInt());
             const QString direction = peer.value(QStringLiteral("inbound")).toBool() ? QStringLiteral("In") : QStringLiteral("Out");
             const QString ping = formatPing(peer.value(QStringLiteral("pingtime")));
@@ -1059,6 +2428,14 @@ void NuRpcService::refreshNode()
                 peer.value(QStringLiteral("magic")).toString(QStringLiteral("pending"))));
             const QString protocol_version = peerNumberText(peer, QStringLiteral("version"));
             const QString services = formatServices(peer.value(QStringLiteral("services")).toString());
+            const QJsonObject sent_per_msg = peer.value(QStringLiteral("bytessent_per_msg")).toObject();
+            for (auto it = sent_per_msg.constBegin(); it != sent_per_msg.constEnd(); ++it) {
+                sent_message_bytes[it.key()] += it.value().toVariant().toLongLong();
+            }
+            const QJsonObject recv_per_msg = peer.value(QStringLiteral("bytesrecv_per_msg")).toObject();
+            for (auto it = recv_per_msg.constBegin(); it != recv_per_msg.constEnd(); ++it) {
+                received_message_bytes[it.key()] += it.value().toVariant().toLongLong();
+            }
 
             simple_rows.push_back(row({
                 node_id,
@@ -1076,7 +2453,7 @@ void NuRpcService::refreshNode()
                 peerIpDisplay(endpoint),
                 fallbackDash(endpoint.second),
                 peerDnsName(peer, endpoint, m_peer_dns_name_by_host),
-                peerDomainAlias(peer, endpoint, m_peer_domain_alias_by_host),
+                peerDomainAlias(peer, endpoint, m_peer_dns_name_by_host, m_peer_domain_alias_by_host, m_peer_lan_name_by_host),
                 protocol_version,
                 magic,
                 services,
@@ -1105,6 +2482,9 @@ void NuRpcService::refreshNode()
         m_peer_rows_detailed = detailed_rows;
         m_peers = detailed_rows;
         m_peer_count = detailed_rows.size();
+        m_metric_peer_messages_sent = orderedMessageTypeStats(sent_message_bytes);
+        m_metric_peer_messages_received = orderedMessageTypeStats(received_message_bytes);
+        rebuildNodeMetrics();
         Q_EMIT peersChanged();
         Q_EMIT stateChanged();
     });
@@ -1112,7 +2492,14 @@ void NuRpcService::refreshNode()
 
 void NuRpcService::refreshWallet()
 {
-    rpcCall(QStringLiteral("getwalletinfo"), {}, true, [this](const QJsonValue& result, const QString& error) {
+    if (!m_wallet_selected) {
+        return;
+    }
+
+    const QString wallet_name = m_wallet_name;
+    const int generation = ++m_wallet_refresh_generation;
+    rpcCall(QStringLiteral("getwalletinfo"), {}, true, [this, wallet_name, generation](const QJsonValue& result, const QString& error) {
+        if (generation != m_wallet_refresh_generation || wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) {
             m_wallet_locked = true;
             Q_EMIT walletChanged();
@@ -1127,13 +2514,22 @@ void NuRpcService::refreshWallet()
         m_pending_balance = QString::number(pending, 'f', 8);
         m_immature_balance = QString::number(immature, 'f', 8);
         m_total_balance = QString::number(total, 'f', 8) + QStringLiteral(" DFC");
+        m_wallet_transaction_count = wallet.value(QStringLiteral("txcount")).toInt(0);
         const QJsonValue unlocked_until = wallet.value(QStringLiteral("unlocked_until"));
         m_wallet_encrypted = wallet.contains(QStringLiteral("unlocked_until"));
         m_wallet_locked = m_wallet_encrypted ? unlocked_until.toDouble() == 0 : false;
+        QVariantMap updates;
+        updates.insert(QStringLiteral("total"), m_total_balance);
+        updates.insert(QStringLiteral("available"), m_available_balance);
+        updates.insert(QStringLiteral("pending"), m_pending_balance);
+        updates.insert(QStringLiteral("immature"), m_immature_balance);
+        updates.insert(QStringLiteral("transactions"), QString::number(m_wallet_transaction_count));
+        updateWalletStatsEntry(wallet_name, updates);
         Q_EMIT walletChanged();
     });
 
-    rpcCall(QStringLiteral("listtransactions"), {QStringLiteral("*"), 25, 0, true}, true, [this](const QJsonValue& result, const QString& error) {
+    rpcCall(QStringLiteral("listtransactions"), {QStringLiteral("*"), 25, 0, true}, true, [this, wallet_name, generation](const QJsonValue& result, const QString& error) {
+        if (generation != m_wallet_refresh_generation || wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) return;
         QVariantList rows;
         for (const QJsonValue& tx_value : result.toArray()) {
@@ -1173,9 +2569,18 @@ void NuRpcService::refreshWallet()
 
 void NuRpcService::refreshAddressBook()
 {
+    if (!m_wallet_selected) {
+        if (!m_address_book.isEmpty()) {
+            m_address_book.clear();
+            Q_EMIT walletChanged();
+        }
+        return;
+    }
+
+    const QString wallet_name = m_wallet_name;
     const int generation = ++m_address_book_refresh_generation;
-    rpcCall(QStringLiteral("listreceivedbyaddress"), {0, true, true}, true, [this, generation](const QJsonValue& result, const QString& error) {
-        if (generation != m_address_book_refresh_generation) return;
+    rpcCall(QStringLiteral("listreceivedbyaddress"), {0, true, true}, true, [this, wallet_name, generation](const QJsonValue& result, const QString& error) {
+        if (generation != m_address_book_refresh_generation || wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) return;
         QVariantList receive_rows;
         for (const QJsonValue& value : result.toArray()) {
@@ -1188,12 +2593,33 @@ void NuRpcService::refreshAddressBook()
             }));
         }
 
-        rpcCall(QStringLiteral("listlabels"), {QStringLiteral("send")}, true, [this, receive_rows, generation](const QJsonValue& labels, const QString& label_error) {
-            if (generation != m_address_book_refresh_generation) return;
+        rpcCall(QStringLiteral("listlabels"), {QStringLiteral("send")}, true, [this, wallet_name, receive_rows, generation](const QJsonValue& labels, const QString& label_error) {
+            if (generation != m_address_book_refresh_generation || wallet_name != m_wallet_name) return;
             auto rows = std::make_shared<QVariantList>(receive_rows);
-            auto commit = [this, rows, generation]() {
-                if (generation != m_address_book_refresh_generation) return;
-                if (m_address_book == *rows) return;
+            auto commit = [this, wallet_name, rows, generation]() {
+                if (generation != m_address_book_refresh_generation || wallet_name != m_wallet_name) return;
+                int address_count = 0;
+                int nonzero_count = 0;
+                for (const QVariant& row_value : *rows) {
+                    const QVariantList cells = tableRowCells(row_value);
+                    if (cells.size() <= 1 || cells.at(1).toString().trimmed().isEmpty()) continue;
+                    ++address_count;
+                    if (cells.size() > 3) {
+                        const QString amount_text = cells.at(3).toString();
+                        const double amount = amount_text.left(amount_text.indexOf(QLatin1Char(' ')) >= 0 ? amount_text.indexOf(QLatin1Char(' ')) : amount_text.size()).toDouble();
+                        if (std::fabs(amount) > 0.000000005) ++nonzero_count;
+                    }
+                }
+                m_wallet_address_count = address_count;
+                m_wallet_nonzero_address_count = nonzero_count;
+                QVariantMap updates;
+                updates.insert(QStringLiteral("addressCount"), address_count);
+                updates.insert(QStringLiteral("nonZeroAddressCount"), nonzero_count);
+                updateWalletStatsEntry(wallet_name, updates);
+                if (m_address_book == *rows) {
+                    Q_EMIT walletChanged();
+                    return;
+                }
                 m_address_book = *rows;
                 Q_EMIT walletChanged();
             };
@@ -1212,8 +2638,8 @@ void NuRpcService::refreshAddressBook()
             auto pending = std::make_shared<int>(label_array.size());
             for (const QJsonValue& label_value : label_array) {
                 const QString label = label_value.toString();
-                rpcCall(QStringLiteral("getaddressesbylabel"), {label}, true, [this, label, rows, pending, commit, generation](const QJsonValue& addresses, const QString& address_error) {
-                    if (generation != m_address_book_refresh_generation) return;
+                rpcCall(QStringLiteral("getaddressesbylabel"), {label}, true, [this, wallet_name, label, rows, pending, commit, generation](const QJsonValue& addresses, const QString& address_error) {
+                    if (generation != m_address_book_refresh_generation || wallet_name != m_wallet_name) return;
                     if (address_error.isEmpty() && addresses.isObject()) {
                         const QJsonObject address_object = addresses.toObject();
                         for (auto it = address_object.constBegin(); it != address_object.constEnd(); ++it) {
@@ -1351,6 +2777,7 @@ void NuRpcService::sampleTraffic()
         if (!error.isEmpty()) return;
         const QJsonObject totals = result.toObject();
         const qint64 now_ms = m_uptime.elapsed();
+        const qint64 now_wall_ms = QDateTime::currentMSecsSinceEpoch();
         const qint64 recv = totals.value(QStringLiteral("totalbytesrecv")).toVariant().toLongLong();
         const qint64 sent = totals.value(QStringLiteral("totalbytessent")).toVariant().toLongLong();
         m_traffic_received_total = formatBytes(recv);
@@ -1370,15 +2797,22 @@ void NuRpcService::sampleTraffic()
 
         QVariantMap point;
         point.insert(QStringLiteral("seconds"), now_ms / 1000.0);
-        point.insert(QStringLiteral("timestampMs"), QDateTime::currentMSecsSinceEpoch());
+        point.insert(QStringLiteral("timestampMs"), now_wall_ms);
         point.insert(QStringLiteral("received"), recv_rate);
         point.insert(QStringLiteral("sent"), sent_rate);
-        const bool zero_sample = recv_rate == 0.0 && sent_rate == 0.0;
-        if (zero_sample && !m_traffic_samples.isEmpty()) {
+        point.insert(QStringLiteral("sampleCount"), 1);
+
+        const qint64 bucket_ms = now_wall_ms - (now_wall_ms % TRAFFIC_CHART_BUCKET_MS);
+        if (!m_traffic_samples.isEmpty()) {
             const QVariantMap last_point = m_traffic_samples.constLast().toMap();
-            const bool last_zero = last_point.value(QStringLiteral("received")).toDouble() == 0.0
-                && last_point.value(QStringLiteral("sent")).toDouble() == 0.0;
-            if (last_zero) {
+            const qint64 last_timestamp_ms = last_point.value(QStringLiteral("timestampMs")).toLongLong();
+            const qint64 last_bucket_ms = last_timestamp_ms - (last_timestamp_ms % TRAFFIC_CHART_BUCKET_MS);
+            if (last_bucket_ms == bucket_ms) {
+                const int sample_count = qMax(1, last_point.value(QStringLiteral("sampleCount")).toInt());
+                const int next_count = sample_count + 1;
+                point.insert(QStringLiteral("received"), ((last_point.value(QStringLiteral("received")).toDouble() * sample_count) + recv_rate) / next_count);
+                point.insert(QStringLiteral("sent"), ((last_point.value(QStringLiteral("sent")).toDouble() * sample_count) + sent_rate) / next_count);
+                point.insert(QStringLiteral("sampleCount"), next_count);
                 m_traffic_samples.last() = point;
             } else {
                 m_traffic_samples.push_back(point);
@@ -1386,7 +2820,12 @@ void NuRpcService::sampleTraffic()
         } else {
             m_traffic_samples.push_back(point);
         }
-        while (m_traffic_samples.size() > 900) {
+
+        const qint64 cutoff_ms = now_wall_ms - (static_cast<qint64>(TRAFFIC_CHART_MAX_SECONDS) * 1000);
+        while (!m_traffic_samples.isEmpty() && m_traffic_samples.constFirst().toMap().value(QStringLiteral("timestampMs")).toLongLong() < cutoff_ms) {
+            m_traffic_samples.removeFirst();
+        }
+        while (m_traffic_samples.size() > TRAFFIC_CHART_MAX_SAMPLES) {
             m_traffic_samples.removeFirst();
         }
         Q_EMIT trafficChanged();
@@ -1431,36 +2870,59 @@ void NuRpcService::refreshDebugLog()
     const qint64 size = file.size();
     constexpr qint64 INITIAL_READ_LIMIT = 2 * 1024 * 1024;
     constexpr qint64 INCREMENTAL_READ_LIMIT = 512 * 1024;
+    auto count_newlines_before = [&file](qint64 end) {
+        const qint64 original_pos = file.pos();
+        file.seek(0);
+        qint64 remaining = qMax<qint64>(0, end);
+        int count = 0;
+        while (remaining > 0) {
+            const QByteArray chunk = file.read(qMin<qint64>(remaining, 64 * 1024));
+            if (chunk.isEmpty()) break;
+            count += chunk.count('\n');
+            remaining -= chunk.size();
+        }
+        file.seek(original_pos);
+        return count;
+    };
     const bool reset_reader = (m_debug_log_path != path || m_debug_log_offset < 0 || m_debug_log_offset > size);
     QByteArray data;
     if (reset_reader) {
         const qint64 start = qMax<qint64>(0, size - INITIAL_READ_LIMIT);
+        m_debug_log_next_line_number = count_newlines_before(start) + 1;
         file.seek(start);
         data = file.read(size - start);
         if (start > 0) {
             const int first_newline = data.indexOf('\n');
-            if (first_newline >= 0) data.remove(0, first_newline + 1);
+            if (first_newline >= 0) {
+                data.remove(0, first_newline + 1);
+                ++m_debug_log_next_line_number;
+            }
         }
         m_debug_log_path = path;
         m_debug_log_collecting_continuation = false;
         if (m_log_lines.size() == 1 && m_log_lines.first().startsWith(QStringLiteral("No debug.log lines"))) {
             m_log_lines.clear();
+            m_log_line_numbers.clear();
         }
     } else {
         if (size == m_debug_log_offset) return;
         qint64 start = m_debug_log_offset;
         if (size - start > INCREMENTAL_READ_LIMIT) {
             start = size - INCREMENTAL_READ_LIMIT;
+            m_debug_log_next_line_number = count_newlines_before(start) + 1;
             m_debug_log_collecting_continuation = false;
             if (m_log_lines.isEmpty() || !m_log_lines.last().startsWith(QStringLiteral("... log gap"))) {
-                m_log_lines.push_back(QStringLiteral("... log gap omitted from in-app view. Use Open debug.log for the backend log file."));
+                appendLogLine(QStringLiteral("... log gap omitted from in-app view. Use Open debug.log for the backend log file."));
             }
         }
         file.seek(start);
         data = file.read(size - start);
         if (start != m_debug_log_offset) {
             const int first_newline = data.indexOf('\n');
-            if (first_newline >= 0) data.remove(0, first_newline + 1);
+            if (first_newline >= 0) {
+                data.remove(0, first_newline + 1);
+                ++m_debug_log_next_line_number;
+            }
         }
     }
     m_debug_log_offset = size;
@@ -1469,7 +2931,11 @@ void NuRpcService::refreshDebugLog()
     const QList<QByteArray> lines = data.split('\n');
     const QDateTime launch_floor = m_app_launch_utc.addSecs(-2);
     QStringList new_lines;
+    QVariantList new_line_numbers;
+    int current_debug_line_number = m_debug_log_next_line_number;
     for (int i = 0; i < lines.size(); ++i) {
+        if (i == lines.size() - 1 && lines.at(i).isEmpty()) continue;
+        const int source_line_number = current_debug_line_number++;
         const QString line = QString::fromUtf8(lines.at(i)).trimmed();
         if (line.isEmpty()) continue;
 
@@ -1482,31 +2948,46 @@ void NuRpcService::refreshDebugLog()
                 continue;
             }
             m_debug_log_collecting_continuation = utc >= launch_floor;
-            if (m_debug_log_collecting_continuation) new_lines.push_back(localLogTimestamp(utc) + QStringLiteral(" ") + message);
+            if (m_debug_log_collecting_continuation) {
+                new_lines.push_back(localLogTimestamp(utc) + QStringLiteral(" ") + message);
+                new_line_numbers.push_back(source_line_number);
+            }
             continue;
         }
 
-        if (m_debug_log_collecting_continuation) new_lines.push_back(line);
+        if (m_debug_log_collecting_continuation) {
+            new_lines.push_back(line);
+            new_line_numbers.push_back(source_line_number);
+        }
     }
+    m_debug_log_next_line_number = current_debug_line_number;
     if (new_lines.isEmpty() && m_log_lines.isEmpty()) {
         new_lines.push_back(QStringLiteral("No debug.log lines have been written since this Nu launch yet (%1).")
                                 .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))));
+        new_line_numbers.push_back(QVariant());
     }
     if (new_lines.isEmpty()) return;
     if (m_log_lines.size() == 1 && m_log_lines.first().startsWith(QStringLiteral("No debug.log lines"))) {
         m_log_lines.clear();
+        m_log_line_numbers.clear();
     }
     beginBackendDebugLogSection(false);
     m_log_lines.append(new_lines);
+    m_log_line_numbers.append(new_line_numbers);
     if (m_log_lines.size() > 5000) {
+        const int trim_count = m_log_lines.size() - 5000;
         m_log_lines = m_log_lines.mid(m_log_lines.size() - 5000);
+        m_log_line_numbers = m_log_line_numbers.mid(qMin(trim_count, m_log_line_numbers.size()));
         m_log_lines.push_front(QStringLiteral("... earlier current-launch log lines omitted from the in-app view. Use Open debug.log for the backend log file."));
+        m_log_line_numbers.push_front(QVariant());
     }
+    trimLogLines();
     Q_EMIT logChanged();
 }
 
 void NuRpcService::requestNewAddress(const QString& label, const QString& amount, const QString& message)
 {
+    if (!ensureCurrentWalletSelected(QStringLiteral("Address request failed"))) return;
     const QString clean_amount = amount.trimmed();
     if (!clean_amount.isEmpty()) {
         bool amount_ok = false;
@@ -1520,7 +3001,9 @@ void NuRpcService::requestNewAddress(const QString& label, const QString& amount
 
     QJsonArray params;
     params.push_back(label);
-    rpcCall(QStringLiteral("getnewaddress"), params, true, [this, label, amount, message](const QJsonValue& result, const QString& error) {
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("getnewaddress"), params, true, [this, wallet_name, label, amount, message](const QJsonValue& result, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) {
             Q_EMIT userMessage(QStringLiteral("Address request failed"), error);
             return;
@@ -1588,6 +3071,7 @@ void NuRpcService::sendCoins(const QString& address,
                              const QString& label,
                              const QString& custom_change_address)
 {
+    if (!ensureCurrentWalletSelected(QStringLiteral("Payment not sent"))) return;
     QString recipient = address.trimmed();
     QString effective_amount = amount.trimmed();
     QString effective_label = label.trimmed();
@@ -1628,6 +3112,7 @@ void NuRpcService::sendCoins(const QString& address,
     }
 
     const QString change_address = custom_change_address.trimmed();
+    const QString wallet_name = m_wallet_name;
     if (!change_address.isEmpty()) {
         QJsonObject outputs;
         outputs.insert(recipient, amount_value);
@@ -1648,7 +3133,8 @@ void NuRpcService::sendCoins(const QString& address,
         params.push_back(mode == QLatin1String("custom") ? QJsonValue(fee_rate) : QJsonValue(QJsonValue::Null));
         params.push_back(options);
 
-        rpcCall(QStringLiteral("send"), params, true, [this, recipient, effective_label](const QJsonValue& result, const QString& error) {
+        rpcCall(QStringLiteral("send"), params, true, [this, wallet_name, recipient, effective_label](const QJsonValue& result, const QString& error) {
+            if (wallet_name != m_wallet_name) return;
             if (!error.isEmpty()) {
                 Q_EMIT userMessage(QStringLiteral("Payment failed"), error);
                 return;
@@ -1687,7 +3173,8 @@ void NuRpcService::sendCoins(const QString& address,
     }
     params.push_back(false);
 
-    rpcCall(QStringLiteral("sendtoaddress"), params, true, [this, recipient, effective_label](const QJsonValue& result, const QString& error) {
+    rpcCall(QStringLiteral("sendtoaddress"), params, true, [this, wallet_name, recipient, effective_label](const QJsonValue& result, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) {
             Q_EMIT userMessage(QStringLiteral("Payment failed"), error);
             return;
@@ -1709,6 +3196,7 @@ void NuRpcService::createPsbt(const QString& address,
                               const QString& label,
                               const QString& custom_change_address)
 {
+    if (!ensureCurrentWalletSelected(QStringLiteral("PSBT not created"))) return;
     QString recipient = address.trimmed();
     QString effective_amount = amount.trimmed();
     QString effective_label = label.trimmed();
@@ -1776,7 +3264,9 @@ void NuRpcService::createPsbt(const QString& address,
     params.push_back(options);
     params.push_back(true);
 
-    rpcCall(QStringLiteral("walletcreatefundedpsbt"), params, true, [this, recipient, effective_label](const QJsonValue& result, const QString& error) {
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("walletcreatefundedpsbt"), params, true, [this, wallet_name, recipient, effective_label](const QJsonValue& result, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) {
             Q_EMIT userMessage(QStringLiteral("PSBT creation failed"), error);
             return;
@@ -1800,14 +3290,135 @@ void NuRpcService::createPsbt(const QString& address,
 
 void NuRpcService::setAddressLabel(const QString& address, const QString& label)
 {
+    if (!ensureCurrentWalletSelected(QStringLiteral("Label update failed"))) return;
     if (address.trimmed().isEmpty()) return;
-    rpcCall(QStringLiteral("setlabel"), {address.trimmed(), label.trimmed()}, true, [this](const QJsonValue&, const QString& error) {
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("setlabel"), {address.trimmed(), label.trimmed()}, true, [this, wallet_name](const QJsonValue&, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) {
             Q_EMIT userMessage(QStringLiteral("Label update failed"), error);
             return;
         }
         refreshAddressBook();
     });
+}
+
+QString NuRpcService::walletDisplayName(const QString& name) const
+{
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty() || trimmed == QLatin1String("wallet.dat")) return QStringLiteral("Default wallet (wallet.dat)");
+
+    QString normalized = trimmed;
+    normalized.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    if (normalized.startsWith(QStringLiteral("wallets/"))) {
+        const QString leaf = normalized.mid(QStringLiteral("wallets/").size());
+        if (!leaf.isEmpty() && !leaf.contains(QLatin1Char('/'))) return leaf;
+    }
+
+    return trimmed;
+}
+
+void NuRpcService::updateWalletStatsEntry(const QString& wallet_name, const QVariantMap& updates)
+{
+    const QString normalized = normalizedWalletListName(wallet_name);
+    bool changed = false;
+    for (int i = 0; i < m_wallet_file_stats.size(); ++i) {
+        QVariantMap item = m_wallet_file_stats.at(i).toMap();
+        if (item.value(QStringLiteral("name")).toString() != normalized) continue;
+        for (auto it = updates.constBegin(); it != updates.constEnd(); ++it) {
+            if (item.value(it.key()) == it.value()) continue;
+            item.insert(it.key(), it.value());
+            changed = true;
+        }
+        m_wallet_file_stats[i] = item;
+        if (m_wallet_selected && normalized == m_wallet_name) {
+            if (item.contains(QStringLiteral("addressCount"))) {
+                m_wallet_address_count = item.value(QStringLiteral("addressCount")).toInt();
+            }
+            if (item.contains(QStringLiteral("nonZeroAddressCount"))) {
+                m_wallet_nonzero_address_count = item.value(QStringLiteral("nonZeroAddressCount")).toInt();
+            }
+        }
+        break;
+    }
+    if (changed) Q_EMIT walletChanged();
+}
+
+void NuRpcService::refreshWalletStats()
+{
+    QStringList wallets = m_available_wallets;
+    for (const QString& wallet : m_loaded_wallets) wallets.push_back(normalizedWalletListName(wallet));
+    if (walletDefaultDatExists(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir)) wallets.push_back(QString());
+    wallets.removeDuplicates();
+    wallets.sort(Qt::CaseInsensitive);
+
+    QVariantList rows;
+    for (const QString& raw_name : wallets) {
+        const QString name = normalizedWalletListName(raw_name);
+        const bool loaded = m_loaded_wallets.contains(name);
+        const bool current = m_wallet_selected && name == m_wallet_name;
+        const QString storage_type = walletStorageTypeForName(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir, name);
+        QVariantMap item;
+        item.insert(QStringLiteral("name"), name);
+        item.insert(QStringLiteral("display"), walletDisplayName(name));
+        item.insert(QStringLiteral("active"), current);
+        item.insert(QStringLiteral("loaded"), loaded);
+        item.insert(QStringLiteral("state"), current ? QStringLiteral("Current") : (loaded ? QStringLiteral("Loaded") : QStringLiteral("Available")));
+        item.insert(QStringLiteral("type"), storage_type);
+        item.insert(QStringLiteral("total"), current ? m_total_balance : (loaded ? QStringLiteral("Loading") : QStringLiteral("Load to scan")));
+        item.insert(QStringLiteral("available"), current ? m_available_balance : (loaded ? QStringLiteral("Loading") : QStringLiteral("-")));
+        item.insert(QStringLiteral("pending"), current ? m_pending_balance : (loaded ? QStringLiteral("Loading") : QStringLiteral("-")));
+        item.insert(QStringLiteral("immature"), current ? m_immature_balance : (loaded ? QStringLiteral("Loading") : QStringLiteral("-")));
+        item.insert(QStringLiteral("transactions"), current ? QString::number(m_wallet_transaction_count) : (loaded ? QStringLiteral("Loading") : QStringLiteral("-")));
+        item.insert(QStringLiteral("addressCount"), current ? m_wallet_address_count : -1);
+        item.insert(QStringLiteral("nonZeroAddressCount"), current ? m_wallet_nonzero_address_count : -1);
+        rows.push_back(item);
+    }
+    m_wallet_file_stats = rows;
+    Q_EMIT walletChanged();
+
+    for (const QString& raw_name : wallets) {
+        const QString name = normalizedWalletListName(raw_name);
+        if (!m_loaded_wallets.contains(name)) continue;
+
+        rpcCallForWallet(QStringLiteral("getwalletinfo"), {}, name, [this, name](const QJsonValue& result, const QString& error) {
+            QVariantMap updates;
+            if (!error.isEmpty() || !result.isObject()) {
+                updates.insert(QStringLiteral("state"), QStringLiteral("Unavailable"));
+                updateWalletStatsEntry(name, updates);
+                return;
+            }
+            const QJsonObject wallet = result.toObject();
+            const double available = wallet.value(QStringLiteral("balance")).toDouble();
+            const double pending = wallet.value(QStringLiteral("unconfirmed_balance")).toDouble();
+            const double immature = wallet.value(QStringLiteral("immature_balance")).toDouble();
+            updates.insert(QStringLiteral("type"), walletStorageTypeFromFormat(wallet.value(QStringLiteral("format")).toString()));
+            updates.insert(QStringLiteral("descriptors"), wallet.value(QStringLiteral("descriptors")).toBool(false));
+            updates.insert(QStringLiteral("total"), walletAmountText(available + pending + immature, true));
+            updates.insert(QStringLiteral("available"), walletAmountText(available));
+            updates.insert(QStringLiteral("pending"), walletAmountText(pending));
+            updates.insert(QStringLiteral("immature"), walletAmountText(immature));
+            updates.insert(QStringLiteral("transactions"), QString::number(wallet.value(QStringLiteral("txcount")).toInt(0)));
+            updateWalletStatsEntry(name, updates);
+        });
+
+        rpcCallForWallet(QStringLiteral("listreceivedbyaddress"), {0, true, true}, name, [this, name](const QJsonValue& result, const QString& error) {
+            if (!error.isEmpty() || !result.isArray()) return;
+            int addresses = 0;
+            int nonzero = 0;
+            for (const QJsonValue& value : result.toArray()) {
+                const QJsonObject item = value.toObject();
+                const QString address = item.value(QStringLiteral("address")).toString().trimmed();
+                if (address.isEmpty()) continue;
+                ++addresses;
+                if (std::fabs(item.value(QStringLiteral("amount")).toDouble()) > 0.000000005) ++nonzero;
+            }
+            QVariantMap updates;
+            updates.insert(QStringLiteral("addressCount"), addresses);
+            updates.insert(QStringLiteral("nonZeroAddressCount"), nonzero);
+            updateWalletStatsEntry(name, updates);
+        });
+    }
 }
 
 void NuRpcService::setNetworkActive(bool active)
@@ -1848,21 +3459,35 @@ void NuRpcService::runRpcCommand(const QString& method, const QString& params_js
         Q_EMIT consoleChanged();
         return;
     }
+    if (!isSafeRpcMethodName(clean_method)) {
+        m_console_output += QStringLiteral("\n\n> %1\nRPC method names may contain only letters, numbers, and underscores, up to 64 characters.")
+            .arg(singleLineLimited(clean_method, 96));
+        Q_EMIT consoleChanged();
+        return;
+    }
 
     QJsonArray params;
     const QString clean_params = params_json.trimmed();
+    constexpr int max_rpc_params_chars = 32768;
+    if (clean_params.size() > max_rpc_params_chars) {
+        m_console_output += QStringLiteral("\n\n> %1 [params omitted]\nRPC parameters are too large for the Nu console. Keep JSON parameter input under %2 characters.")
+            .arg(clean_method, QString::number(max_rpc_params_chars));
+        Q_EMIT consoleChanged();
+        return;
+    }
     if (!clean_params.isEmpty()) {
         QJsonParseError parse_error;
         const QJsonDocument doc = QJsonDocument::fromJson(clean_params.toUtf8(), &parse_error);
         if (parse_error.error != QJsonParseError::NoError || !doc.isArray()) {
-            m_console_output += QStringLiteral("\n\n> %1 %2\nParameters must be a JSON array, for example: [\"address\", \"message\"]").arg(clean_method, clean_params);
+            m_console_output += QStringLiteral("\n\n> %1\nParameters must be a JSON array, for example: [\"address\", \"message\"]")
+                .arg(rpcPromptForDisplay(clean_method, clean_params));
             Q_EMIT consoleChanged();
             return;
         }
         params = doc.array();
     }
 
-    const QString prompt = clean_params.isEmpty() ? clean_method : clean_method + QStringLiteral(" ") + clean_params;
+    const QString prompt = rpcPromptForDisplay(clean_method, clean_params);
     rpcCall(clean_method, params, wallet_scoped, [this, clean_method, prompt](const QJsonValue& result, const QString& error) {
         QString rendered;
         if (!error.isEmpty()) {
@@ -1904,13 +3529,17 @@ void NuRpcService::rebuildNodeMetrics()
 {
     m_node_metrics = {
         row({"Network active", m_metric_network_active}),
-        row({"Connections", m_metric_connections}),
-        row({"Inbound", m_metric_inbound}),
-        row({"Outbound", m_metric_outbound}),
+        row({"Connections", QStringLiteral("Total: %1 | In: %2 | Out: %3")
+             .arg(m_metric_connections, m_metric_inbound, m_metric_outbound)}),
         row({"Version", m_metric_version}),
         row({"Blocks", m_metric_blocks}),
         row({"Headers", m_metric_headers}),
         row({"Verification", m_metric_verification}),
+        row({"Difficulty", m_metric_difficulty}),
+        row({"Network hashrate (120 blocks)", m_metric_network_hashrate}),
+        row({"Chain tips", m_metric_chain_tips}),
+        row({"Top sent P2P messages", m_metric_peer_messages_sent}),
+        row({"Top rec'd P2P messages", m_metric_peer_messages_received}),
         row({"Traffic", m_metric_traffic})
     };
 }
@@ -1934,10 +3563,16 @@ void NuRpcService::setOnlyDefcoinMagicBytes(bool enabled)
     QSettings settings;
     settings.setValue(QStringLiteral("OnlyDefcoinMagicBytes"), enabled);
     Q_EMIT settingsChanged();
-    if (m_backend_started_by_nu || m_rpc_connected) {
-        Q_EMIT userMessage(QStringLiteral("Restart required"),
-                           QStringLiteral("The Defcoin magic setting is applied when the Defcoin backend starts. Restart Defcoin Core Nu to use the new setting."));
-    }
+    if (!m_rpc_connected) return;
+    rpcCall(QStringLiteral("setacceptlegacymagic"), {!enabled}, false, [this, enabled](const QJsonValue&, const QString& error) {
+        if (!error.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Network setting not applied"),
+                               QStringLiteral("The setting was saved, but the running backend did not accept the live magic-byte update: %1").arg(error));
+            return;
+        }
+        m_only_defcoin_magic_bytes = enabled;
+        Q_EMIT settingsChanged();
+    });
 }
 
 void NuRpcService::setSwitchToDefcoinOnlyMagicStartingJuly2026(bool enabled)
@@ -1949,25 +3584,1653 @@ void NuRpcService::setSwitchToDefcoinOnlyMagicStartingJuly2026(bool enabled)
     if (enabled && QDate::currentDate() >= QDate(2026, 7, 1) && !m_only_defcoin_magic_bytes) {
         m_only_defcoin_magic_bytes = true;
         settings.setValue(QStringLiteral("OnlyDefcoinMagicBytes"), true);
+        if (!m_rpc_connected) {
+            Q_EMIT settingsChanged();
+            return;
+        }
+        rpcCall(QStringLiteral("setacceptlegacymagic"), {false}, false, [this](const QJsonValue&, const QString& error) {
+            if (!error.isEmpty()) {
+                Q_EMIT userMessage(QStringLiteral("Network setting not applied"),
+                                   QStringLiteral("The scheduled setting was saved, but the running backend did not accept the live magic-byte update: %1").arg(error));
+            }
+        });
     }
     Q_EMIT settingsChanged();
-    if (m_backend_started_by_nu || m_rpc_connected) {
-        Q_EMIT userMessage(QStringLiteral("Restart required"),
-                           QStringLiteral("The scheduled Defcoin-only magic setting is applied when the Defcoin backend starts. Restart Defcoin Core Nu to use the new setting."));
-    }
 }
 
 void NuRpcService::setDisallowLanNodeDiscovery(bool enabled)
 {
-    if (m_disallow_lan_node_discovery == enabled) return;
-    m_disallow_lan_node_discovery = enabled;
+    setLanNodeDiscoveryEnabled(!enabled);
+}
+
+void NuRpcService::setLanNodeDiscoveryEnabled(bool enabled)
+{
+    if (m_lan_node_discovery_enabled == enabled) return;
+    m_lan_node_discovery_enabled = enabled;
     QSettings settings;
-    settings.setValue(QStringLiteral("DisallowLanNodeDiscovery"), enabled);
-    Q_EMIT settingsChanged();
-    if (m_backend_started_by_nu || m_rpc_connected) {
-        Q_EMIT userMessage(QStringLiteral("Restart required"),
-                           QStringLiteral("The LAN node discovery setting is applied when the Defcoin backend starts. Restart Defcoin Core Nu to use the new setting."));
+    settings.setValue(QStringLiteral("LanNodeDiscoveryEnabled"), enabled);
+    if (!enabled) {
+        m_peer_lan_name_by_host.clear();
+        m_peer_lan_lookup_pending.clear();
+        m_peer_lan_lookup_attempted.clear();
     }
+    Q_EMIT settingsChanged();
+    if (!m_rpc_connected) return;
+    rpcCall(QStringLiteral("setallowlannodediscovery"), {enabled}, false, [this, enabled](const QJsonValue&, const QString& error) {
+        if (!error.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Network setting not applied"),
+                               QStringLiteral("The setting was saved, but the running backend did not accept the live LAN discovery update: %1").arg(error));
+            return;
+        }
+        m_lan_node_discovery_enabled = enabled;
+        Q_EMIT settingsChanged();
+        refreshNode();
+    });
+}
+
+void NuRpcService::setUpnpConnectionsEnabled(bool enabled)
+{
+    if (m_upnp_connections_enabled == enabled) return;
+    m_upnp_connections_enabled = enabled;
+    QSettings settings;
+    settings.setValue(QStringLiteral("UpnpConnectionsEnabled"), enabled);
+    Q_EMIT settingsChanged();
+    if (!m_rpc_connected) return;
+    rpcCall(QStringLiteral("setupnpportmapping"), {enabled}, false, [this, enabled](const QJsonValue&, const QString& error) {
+        if (!error.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Network setting not applied"),
+                               QStringLiteral("The setting was saved, but the running backend did not accept the live UPnP update: %1").arg(error));
+            return;
+        }
+        m_upnp_connections_enabled = enabled;
+        Q_EMIT settingsChanged();
+    });
+}
+
+void NuRpcService::acknowledgeLanNodeDiscoveryNotice()
+{
+    if (m_lan_node_discovery_notice_acknowledged) return;
+    m_lan_node_discovery_notice_acknowledged = true;
+    QSettings().setValue(QStringLiteral("LanNodeDiscoveryNoticeAcknowledged"), true);
+    Q_EMIT settingsChanged();
+}
+
+void NuRpcService::setAutomaticUpdateChecksEnabled(bool enabled)
+{
+    if (m_automatic_update_checks_enabled == enabled) return;
+    m_automatic_update_checks_enabled = enabled;
+    QSettings().setValue(QStringLiteral("AutomaticUpdateChecksEnabled"), enabled);
+    Q_EMIT settingsChanged();
+}
+
+void NuRpcService::setTableCopyDelimiterStyle(const QString& style)
+{
+    const QString normalized = style.toLower();
+    const QString value = QStringList{QStringLiteral("csv"), QStringLiteral("tsv"), QStringLiteral("pipe"), QStringLiteral("semicolon"), QStringLiteral("custom")}.contains(normalized)
+        ? normalized
+        : QStringLiteral("tsv");
+    if (m_table_copy_delimiter_style == value) return;
+    m_table_copy_delimiter_style = value;
+    QSettings().setValue(QStringLiteral("TableCopyDelimiterStyle"), value);
+    Q_EMIT settingsChanged();
+}
+
+void NuRpcService::setTableCopyCustomDelimiter(const QString& delimiter)
+{
+    const QString value = delimiter.isEmpty() ? QStringLiteral("|") : delimiter.left(15);
+    if (m_table_copy_custom_delimiter == value) return;
+    m_table_copy_custom_delimiter = value;
+    QSettings().setValue(QStringLiteral("TableCopyCustomDelimiter"), value);
+    Q_EMIT settingsChanged();
+}
+
+void NuRpcService::setLogVerbosity(int verbosity)
+{
+    const int value = std::clamp(verbosity, 0, 3);
+    if (m_log_verbosity == value) return;
+    m_log_verbosity = value;
+    QSettings().setValue(QStringLiteral("LogVerbosity"), value);
+    Q_EMIT settingsChanged();
+}
+
+void NuRpcService::setLogSearchPattern(const QString& pattern)
+{
+    const QString value = pattern.left(160);
+    if (m_log_search_pattern == value) return;
+    m_log_search_pattern = value;
+    QSettings settings;
+    settings.setValue(QStringLiteral("LogSearchPattern"), value);
+    if (!value.trimmed().isEmpty()) {
+        m_log_last_search_pattern = value;
+        settings.setValue(QStringLiteral("LogLastSearchPattern"), value);
+    }
+    Q_EMIT settingsChanged();
+}
+
+void NuRpcService::setLogRemovePattern(const QString& pattern)
+{
+    const QString value = pattern.left(160);
+    if (m_log_remove_pattern == value) return;
+    m_log_remove_pattern = value;
+    QSettings().setValue(QStringLiteral("LogRemovePattern"), value);
+    Q_EMIT settingsChanged();
+}
+
+void NuRpcService::setBackgroundCloseEnabled(bool enabled)
+{
+    if (m_background_close_enabled == enabled) return;
+    m_background_close_enabled = enabled;
+    QSettings().setValue(QStringLiteral("KeepRunningWhenClosedEnabled"), enabled);
+    Q_EMIT settingsChanged();
+}
+
+QString NuRpcService::currentNuVersion() const
+{
+    return QStringLiteral(DEFCOIN_NU_VERSION);
+}
+
+QString NuRpcService::nuResourceRoot() const
+{
+    const QString app_dir = QCoreApplication::applicationDirPath();
+#if defined(Q_OS_MACOS)
+    return QDir(app_dir).filePath(QStringLiteral("../Resources/nu"));
+#else
+    return QDir(app_dir).filePath(QStringLiteral("nu"));
+#endif
+}
+
+QStringList NuRpcService::loadBip39Words() const
+{
+    if (!m_bip39_words.isEmpty()) return m_bip39_words;
+
+    QFile file(QDir(nuResourceRoot()).filePath(QStringLiteral("assets/bip39/english.txt")));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QFile source_fallback(QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../assets/bip39/english.txt")));
+        if (!source_fallback.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
+        QTextStream stream(&source_fallback);
+        while (!stream.atEnd()) {
+            const QString word = stream.readLine().trimmed();
+            if (!word.isEmpty()) m_bip39_words.push_back(word);
+        }
+    } else {
+        QTextStream stream(&file);
+        while (!stream.atEnd()) {
+            const QString word = stream.readLine().trimmed();
+            if (!word.isEmpty()) m_bip39_words.push_back(word);
+        }
+    }
+
+    m_bip39_word_index.clear();
+    for (int i = 0; i < m_bip39_words.size(); ++i) {
+        m_bip39_word_index.insert(m_bip39_words.at(i), i);
+    }
+    return m_bip39_words;
+}
+
+QStringList NuRpcService::bip39EnglishWords() const
+{
+    return loadBip39Words();
+}
+
+bool NuRpcService::validateMnemonic(const QString& phrase, QString* normalized, QString* error) const
+{
+    const QStringList words = loadBip39Words();
+    if (words.size() != 2048) {
+        if (error) *error = QStringLiteral("The BIP39 English word list is not available in this build.");
+        return false;
+    }
+
+    const QString cleaned = phrase.toLower().simplified();
+    const QStringList parts = cleaned.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (!isValidBip39WordCount(parts.size())) {
+        if (error) *error = QStringLiteral("Enter 12, 15, 18, 21, or 24 BIP39 English words.");
+        return false;
+    }
+
+    const int entropy_bits = bip39EntropyBitsForWordCount(parts.size());
+    const int checksum_bits = parts.size() * 11 - entropy_bits;
+    QVector<bool> bits;
+    bits.reserve(parts.size() * 11);
+    for (const QString& word : parts) {
+        const auto it = m_bip39_word_index.constFind(word);
+        if (it == m_bip39_word_index.constEnd()) {
+            if (error) *error = QStringLiteral("\"%1\" is not in the BIP39 English word list.").arg(word);
+            return false;
+        }
+        const int index = it.value();
+        for (int bit = 10; bit >= 0; --bit) bits.push_back((index >> bit) & 1);
+    }
+
+    QByteArray entropy(entropy_bits / 8, char(0));
+    for (int i = 0; i < entropy_bits; ++i) {
+        if (bits.at(i)) entropy[i / 8] = char(static_cast<unsigned char>(entropy.at(i / 8)) | (1 << (7 - (i % 8))));
+    }
+    const QByteArray checksum = sha256Bytes(entropy);
+    for (int i = 0; i < checksum_bits; ++i) {
+        if (bits.at(entropy_bits + i) != bitAt(checksum, i)) {
+            if (error) *error = QStringLiteral("The words are in the BIP39 list, but the checksum does not match.");
+            entropy.fill(0);
+            return false;
+        }
+    }
+
+    if (normalized) *normalized = parts.join(QLatin1Char(' '));
+    entropy.fill(0);
+    return true;
+}
+
+QVariantMap NuRpcService::validateRecoveryPhrase(const QString& phrase) const
+{
+    QString normalized;
+    QString error;
+    const bool valid = validateMnemonic(phrase, &normalized, &error);
+    QVariantMap result;
+    result.insert(QStringLiteral("valid"), valid);
+    result.insert(QStringLiteral("normalized"), normalized);
+    result.insert(QStringLiteral("message"), valid ? QStringLiteral("Recovery phrase checksum is valid.") : error);
+    return result;
+}
+
+QString NuRpcService::generateRecoveryPhrase()
+{
+    const QStringList words = loadBip39Words();
+    if (words.size() != 2048) return QString();
+
+    QByteArray entropy(16, char(0));
+    for (int i = 0; i < entropy.size(); ++i) entropy[i] = char(QRandomGenerator::system()->generate() & 0xff);
+    const QByteArray checksum = sha256Bytes(entropy);
+
+    QVector<bool> bits;
+    bits.reserve(132);
+    for (int i = 0; i < 128; ++i) bits.push_back(bitAt(entropy, i));
+    for (int i = 0; i < 4; ++i) bits.push_back(bitAt(checksum, i));
+
+    QStringList phrase;
+    for (int word = 0; word < 12; ++word) {
+        int index = 0;
+        for (int bit = 0; bit < 11; ++bit) {
+            index = (index << 1) | (bits.at(word * 11 + bit) ? 1 : 0);
+        }
+        phrase.push_back(words.at(index));
+    }
+    entropy.fill(0);
+    return phrase.join(QLatin1Char(' '));
+}
+
+bool NuRpcService::mnemonicMaterial(const QString& phrase, const QString& wif_mode, QString* wif, QString* xprv, QString* error) const
+{
+    QString normalized;
+    if (!validateMnemonic(phrase, &normalized, error)) return false;
+
+    QByteArray seed = pbkdf2HmacSha512(normalized.toUtf8(), QByteArrayLiteral("mnemonic"), 2048, 64);
+    QByteArray master = hmacSha512(QByteArrayLiteral("Bitcoin seed"), seed);
+    QByteArray secret = master.left(32);
+    const QByteArray chain_code = master.mid(32, 32);
+    if (!isValidSecp256k1Secret(secret)) {
+        if (error) *error = QStringLiteral("The recovery phrase produced an invalid BIP32 master key.");
+        master.fill(0);
+        seed.fill(0);
+        secret.fill(0);
+        return false;
+    }
+
+    QByteArray wif_payload;
+    if (wif) {
+        wif_payload.append(char(recoveryWifPrefix(wif_mode)));
+        wif_payload.append(secret);
+        wif_payload.append(char(1)); // compressed key marker
+        *wif = encodeBase58Check(wif_payload);
+    }
+
+    QByteArray xprv_payload;
+    xprv_payload.append(QByteArray::fromHex("0488ade4")); // Defcoin currently uses the Bitcoin/Litecoin xprv prefix.
+    xprv_payload.append(char(0)); // depth
+    xprv_payload.append(QByteArray(4, char(0))); // parent fingerprint
+    xprv_payload.append(QByteArray(4, char(0))); // child number
+    xprv_payload.append(chain_code);
+    xprv_payload.append(char(0));
+    xprv_payload.append(secret);
+    if (xprv) *xprv = encodeBase58Check(xprv_payload);
+
+    if (!wif_payload.isEmpty()) wif_payload.fill(0);
+    xprv_payload.fill(0);
+    master.fill(0);
+    seed.fill(0);
+    secret.fill(0);
+    return true;
+}
+
+QString NuRpcService::descriptorForRecoveryPath(const QString& xprv, const QString& derivation_path, QString* error) const
+{
+    QString path = derivation_path.trimmed();
+    if (path.isEmpty()) path = QStringLiteral("m/44'/0'/0'/0/*");
+    if (!path.startsWith(QStringLiteral("m/"))) {
+        if (error) *error = QStringLiteral("Derivation paths must start with m/.");
+        return QString();
+    }
+    if (!path.endsWith(QStringLiteral("/*"))) {
+        if (error) *error = QStringLiteral("Use a ranged derivation path ending in /*.");
+        return QString();
+    }
+    static const QRegularExpression allowed_path(QStringLiteral(R"(^m(/[0-9]+(['hH])?)*(/\*)$)"));
+    if (!allowed_path.match(path).hasMatch()) {
+        if (error) *error = QStringLiteral("Use numeric BIP32 path segments, for example m/44'/2'/0'/0/*.");
+        return QString();
+    }
+
+    QString suffix = path.mid(1); // keep the slash after m.
+    suffix.replace(QLatin1Char('\''), QLatin1Char('h'));
+    suffix.replace(QLatin1Char('H'), QLatin1Char('h'));
+    return QStringLiteral("pkh(%1%2)").arg(xprv, suffix);
+}
+
+bool NuRpcService::requireLocalRecoveryRpc(const QString& operation)
+{
+    if (!loadRpcSettings()) {
+        Q_EMIT userMessage(operation, m_last_error);
+        return false;
+    }
+
+    const QString host = m_rpc_host.trimmed();
+    QHostAddress address;
+    const bool loopback_address = address.setAddress(host) && address.isLoopback();
+    const bool loopback_name = host.compare(QStringLiteral("localhost"), Qt::CaseInsensitive) == 0;
+    if (loopback_address || loopback_name) return true;
+
+    Q_EMIT userMessage(operation,
+                       QStringLiteral("Recovery phrase operations are allowed only with a local Defcoin backend RPC connection. Current RPC host is '%1'. Switch back to localhost before previewing or restoring from a phrase.")
+                           .arg(host.isEmpty() ? QStringLiteral("(empty)") : host));
+    return false;
+}
+
+bool NuRpcService::minerRunning() const
+{
+    return m_miner_process && m_miner_process->state() != QProcess::NotRunning;
+}
+
+QString NuRpcService::miningStateText() const
+{
+    return minerRunning() ? QStringLiteral("Running via CPU") : QStringLiteral("Stopped");
+}
+
+QString NuRpcService::miningMethodText() const
+{
+    return QStringLiteral("CPU");
+}
+
+QString NuRpcService::minerSummaryText() const
+{
+    if (!minerRunning()) return QString();
+    return QStringLiteral("%1 | %2 | A: %3 | R: %4")
+        .arg(miningStateText(),
+             m_miner_hashrate_text.isEmpty() ? QStringLiteral("-") : m_miner_hashrate_text,
+             QString::number(m_miner_accepted_shares),
+             QString::number(m_miner_rejected_shares));
+}
+
+QString NuRpcService::walletMiningPayoutAddress() const
+{
+    if (!m_receive_address.trimmed().isEmpty()) return m_receive_address.trimmed();
+    for (const QVariant& row_value : m_address_book) {
+        const QVariantList cells = tableRowCells(row_value);
+        if (cells.size() < 3) continue;
+        const QString address = cells.at(1).toString().trimmed();
+        const QString purpose = cells.at(2).toString();
+        if (!address.isEmpty() && purpose.contains(QStringLiteral("receive"), Qt::CaseInsensitive)) {
+            return address;
+        }
+    }
+    return QString();
+}
+
+void NuRpcService::resetMinerRuntimeStats()
+{
+    m_miner_hashrate_text = QStringLiteral("-");
+    m_miner_accepted_shares = 0;
+    m_miner_rejected_shares = 0;
+    m_miner_parse_buffer.clear();
+}
+
+void NuRpcService::parseMinerLogChunk(const QString& text)
+{
+    const QString clean = stripAnsiControlSequences(text);
+    static const QRegularExpression hashrate_re(
+        QStringLiteral(R"(\bHash rate\s+([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?H/s)\b)"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression ttf_hashrate_re(
+        QStringLiteral(R"(\bTTF\s*@\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?H/s)\b)"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression accepted_re(
+        QStringLiteral(R"(\bAccepted\s+(\d+)\s+S\d+\s+R(\d+)\s+B\d+\b)"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression rejected_re(
+        QStringLiteral(R"(\bA(\d+)\s+S\d+\s+Rejected\s+(\d+)\s+B\d+\b)"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression periodic_accepted_re(
+        QStringLiteral(R"(^Accepted\s+\d+\s+(\d+)\b)"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression periodic_rejected_re(
+        QStringLiteral(R"(^Rejected\s+\d+\s+(\d+)\b)"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    QString combined = m_miner_parse_buffer + clean;
+    combined.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    combined.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    QStringList lines = combined.split(QLatin1Char('\n'));
+    if (!combined.endsWith(QLatin1Char('\n'))) {
+        m_miner_parse_buffer = lines.takeLast();
+        if (m_miner_parse_buffer.size() > 4096) m_miner_parse_buffer.clear();
+    } else {
+        m_miner_parse_buffer.clear();
+    }
+
+    for (const QString& raw_line : lines) {
+        const QString line = raw_line.trimmed();
+        if (line.isEmpty()) continue;
+
+        const QRegularExpressionMatch hashrate_match = hashrate_re.match(line);
+        if (hashrate_match.hasMatch()) {
+            m_miner_hashrate_text = formatMinerHashrateText(hashrate_match.captured(1), hashrate_match.captured(2));
+        }
+
+        const QRegularExpressionMatch ttf_hashrate_match = ttf_hashrate_re.match(line);
+        if (ttf_hashrate_match.hasMatch()) {
+            m_miner_hashrate_text = formatMinerHashrateText(ttf_hashrate_match.captured(1), ttf_hashrate_match.captured(2));
+        }
+
+        const QRegularExpressionMatch accepted_match = accepted_re.match(line);
+        if (accepted_match.hasMatch()) {
+            m_miner_accepted_shares = std::max(m_miner_accepted_shares, accepted_match.captured(1).toInt());
+            m_miner_rejected_shares = std::max(m_miner_rejected_shares, accepted_match.captured(2).toInt());
+            continue;
+        }
+
+        const QRegularExpressionMatch rejected_match = rejected_re.match(line);
+        if (rejected_match.hasMatch()) {
+            m_miner_accepted_shares = std::max(m_miner_accepted_shares, rejected_match.captured(1).toInt());
+            m_miner_rejected_shares = std::max(m_miner_rejected_shares, rejected_match.captured(2).toInt());
+            continue;
+        }
+
+        const QRegularExpressionMatch periodic_accepted_match = periodic_accepted_re.match(line);
+        if (periodic_accepted_match.hasMatch()) {
+            m_miner_accepted_shares = std::max(m_miner_accepted_shares, periodic_accepted_match.captured(1).toInt());
+            continue;
+        }
+
+        const QRegularExpressionMatch periodic_rejected_match = periodic_rejected_re.match(line);
+        if (periodic_rejected_match.hasMatch()) {
+            m_miner_rejected_shares = std::max(m_miner_rejected_shares, periodic_rejected_match.captured(1).toInt());
+        }
+    }
+}
+
+void NuRpcService::appendMinerLog(const QString& line)
+{
+    if (line.trimmed().isEmpty()) return;
+    const QString clean = stripAnsiControlSequences(line);
+    parseMinerLogChunk(clean);
+    m_miner_log += clean;
+    if (!m_miner_log.endsWith(QLatin1Char('\n'))) m_miner_log += QLatin1Char('\n');
+    constexpr int max_chars = 2 * 1024 * 1024;
+    if (m_miner_log.size() > max_chars) m_miner_log = m_miner_log.right(max_chars);
+    Q_EMIT minerChanged();
+}
+
+void NuRpcService::setRecoveryState(bool active, const QString& status, int progress)
+{
+    const int clean_progress = progress < 0 ? -1 : std::clamp(progress, 0, 100);
+    const bool starting = active && !m_recovery_active;
+    const bool finished = !active && clean_progress >= 100;
+    if (starting) {
+        m_recovery_timer.restart();
+        m_recovery_cancel_requested = false;
+        m_recovery_cancelable = true;
+        m_recovery_poll_scheduled = false;
+        m_recovery_finished = false;
+        m_recovery_found_amount = QStringLiteral("Checking after the chain rescan completes.");
+        m_recovery_found_address_count = 0;
+        m_recovery_recent_found_address = QStringLiteral("No address hits reported yet.");
+        m_recovery_detected_method = QStringLiteral("Checking recovery options.");
+        m_recovery_current_method = QStringLiteral("Starting recovery.");
+        m_recovery_elapsed = QStringLiteral("0s");
+        m_recovery_eta = QStringLiteral("Estimating after the first scan step.");
+    }
+    if (active) {
+        m_recovery_finished = false;
+        updateRecoveryTiming();
+        scheduleRecoveryScanPoll();
+    } else {
+        m_recovery_cancelable = false;
+        m_recovery_poll_scheduled = false;
+        if (m_recovery_timer.isValid()) m_recovery_elapsed = formatDurationFromSeconds(m_recovery_timer.elapsed() / 1000);
+        if (finished) m_recovery_eta = QStringLiteral("Complete");
+    }
+    if (m_recovery_active == active &&
+        m_recovery_finished == finished &&
+        m_recovery_status == status &&
+        m_recovery_progress == clean_progress) {
+        return;
+    }
+    m_recovery_active = active;
+    m_recovery_finished = finished;
+    m_recovery_status = status;
+    m_recovery_progress = clean_progress;
+    Q_EMIT recoveryChanged();
+}
+
+void NuRpcService::setRecoveryCurrentMethod(const QString& method)
+{
+    if (m_recovery_current_method == method) return;
+    m_recovery_current_method = method;
+    updateRecoveryTiming();
+    Q_EMIT recoveryChanged();
+}
+
+void NuRpcService::updateRecoveryTiming(int completed_work, int estimated_total_work)
+{
+    if (!m_recovery_timer.isValid()) {
+        m_recovery_elapsed = QStringLiteral("Not running");
+        m_recovery_eta = QStringLiteral("Unknown");
+        return;
+    }
+
+    const qint64 elapsed_seconds = std::max<qint64>(0, m_recovery_timer.elapsed() / 1000);
+    m_recovery_elapsed = formatDurationFromSeconds(elapsed_seconds);
+    if (completed_work > 0 && estimated_total_work > completed_work) {
+        const double seconds_per_unit = static_cast<double>(elapsed_seconds) / static_cast<double>(completed_work);
+        const qint64 remaining = std::max<qint64>(0, std::llround(seconds_per_unit * static_cast<double>(estimated_total_work - completed_work)));
+        m_recovery_eta = formatDurationFromSeconds(remaining);
+    } else if (m_recovery_progress >= 0 && m_recovery_progress < 100 && m_recovery_progress > 0) {
+        const qint64 remaining = std::max<qint64>(0, std::llround(static_cast<double>(elapsed_seconds) * (100.0 - m_recovery_progress) / std::max(1, m_recovery_progress)));
+        m_recovery_eta = formatDurationFromSeconds(remaining);
+    } else if (m_recovery_active) {
+        m_recovery_eta = QStringLiteral("Estimating from scan progress.");
+    }
+}
+
+void NuRpcService::scheduleRecoveryScanPoll()
+{
+    if (!m_recovery_active || m_recovery_poll_scheduled) return;
+    m_recovery_poll_scheduled = true;
+    QTimer::singleShot(2500, this, [this] {
+        m_recovery_poll_scheduled = false;
+        if (!m_recovery_active) return;
+
+        rpcCall(QStringLiteral("getwalletinfo"), {}, true, [this](const QJsonValue& result, const QString&) {
+            if (!m_recovery_active) return;
+            if (result.isObject()) {
+                const QJsonValue scanning_value = result.toObject().value(QStringLiteral("scanning"));
+                if (scanning_value.isObject()) {
+                    const QJsonObject scanning = scanning_value.toObject();
+                    const double scan_progress = scanning.value(QStringLiteral("progress")).toDouble(-1.0);
+                    if (scan_progress >= 0.0) {
+                        m_recovery_progress = std::clamp(40 + static_cast<int>(std::llround(scan_progress * 50.0)), 40, 90);
+                    }
+                    const int duration = scanning.value(QStringLiteral("duration")).toInt(-1);
+                    if (duration >= 0) {
+                        m_recovery_elapsed = formatDurationFromSeconds(duration);
+                    } else {
+                        updateRecoveryTiming();
+                    }
+                    const double clamped = std::clamp(scan_progress, 0.0, 0.999);
+                    if (clamped > 0.0 && duration > 0) {
+                        const qint64 eta = std::max<qint64>(0, std::llround(static_cast<double>(duration) * (1.0 - clamped) / clamped));
+                        m_recovery_eta = formatDurationFromSeconds(eta);
+                    }
+                    Q_EMIT recoveryChanged();
+                } else {
+                    updateRecoveryTiming();
+                    Q_EMIT recoveryChanged();
+                }
+            }
+            scheduleRecoveryScanPoll();
+        });
+    });
+}
+
+void NuRpcService::cancelRecovery()
+{
+    if (!m_recovery_active) return;
+    m_recovery_cancel_requested = true;
+    setRecoveryCurrentMethod(QStringLiteral("Cancel requested."));
+    setRecoveryState(true, QStringLiteral("Cancel requested. Asking the backend to abort the active rescan..."), -1);
+    rpcCall(QStringLiteral("abortrescan"), {}, true, [this](const QJsonValue&, const QString& error) {
+        if (!error.isEmpty() && !error.contains(QStringLiteral("not currently rescanning"), Qt::CaseInsensitive)) {
+            appendLaunchDiagnostic(QStringLiteral("Recovery cancel: abortrescan returned: %1").arg(error));
+        }
+    });
+}
+
+void NuRpcService::importRecoveryDescriptorsWithRescan(const QVector<QPair<QString, QString>>& descriptors, int range)
+{
+    const int import_range = std::clamp(range, 1, 1000);
+    if (descriptors.isEmpty()) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                           QStringLiteral("No recovery descriptors were available to import."));
+        return;
+    }
+
+    setRecoveryState(true,
+                     descriptors.size() == 1
+                         ? QStringLiteral("Preparing address import and chain rescan...")
+                         : QStringLiteral("Preparing auto recovery across %1 common derivation options...").arg(descriptors.size()),
+                     35);
+    setRecoveryCurrentMethod(descriptors.size() == 1 ? descriptors.first().first : QStringLiteral("Fixed scan across %1 methods").arg(descriptors.size()));
+
+    auto pending = std::make_shared<int>(descriptors.size());
+    auto requests = std::make_shared<QJsonArray>();
+    auto labels = std::make_shared<QStringList>();
+    auto errors = std::make_shared<QStringList>();
+
+    for (const auto& descriptor_item : descriptors) {
+        const QString label = descriptor_item.first;
+        const QString descriptor = descriptor_item.second;
+        rpcCall(QStringLiteral("getdescriptorinfo"), {descriptor}, false, [this, import_range, label, descriptor, pending, requests, labels, errors](const QJsonValue& result, const QString& descriptor_error) {
+            if (m_recovery_cancel_requested) {
+                --(*pending);
+                if (*pending == 0) setRecoveryState(false, QStringLiteral("Recovery canceled before import."), 0);
+                return;
+            }
+            if (!descriptor_error.isEmpty() || !result.isObject()) {
+                errors->push_back(descriptor_error.isEmpty()
+                                      ? QStringLiteral("%1: backend did not return descriptor details").arg(label)
+                                      : QStringLiteral("%1: %2").arg(label, descriptor_error));
+            } else {
+                const QString checksum = result.toObject().value(QStringLiteral("checksum")).toString();
+                if (checksum.isEmpty()) {
+                    errors->push_back(QStringLiteral("%1: backend did not return a descriptor checksum").arg(label));
+                } else {
+                    const QString checked_descriptor = descriptor.section(QLatin1Char('#'), 0, 0) + QStringLiteral("#") + checksum;
+                    QJsonObject request;
+                    request.insert(QStringLiteral("desc"), checked_descriptor);
+                    request.insert(QStringLiteral("timestamp"), 0);
+                    request.insert(QStringLiteral("label"), label);
+                    QJsonArray request_range;
+                    request_range << 0 << (import_range - 1);
+                    request.insert(QStringLiteral("range"), request_range);
+                    requests->append(request);
+                    labels->push_back(label);
+                }
+            }
+
+            --(*pending);
+            if (*pending > 0) return;
+
+            if (requests->isEmpty()) {
+                setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                                   errors->isEmpty() ? QStringLiteral("No recovery descriptor could be prepared.") : errors->join(QStringLiteral("\n")));
+                return;
+            }
+
+            QJsonObject options;
+            options.insert(QStringLiteral("rescan"), true);
+            setRecoveryState(true,
+                             labels->size() == 1
+                                 ? QStringLiteral("Recovering %1 external addresses and rescanning the chain. This can take several minutes.").arg(import_range)
+                                 : QStringLiteral("Auto recovery is scanning %1 common methods with %2 addresses each. This can take several minutes.").arg(labels->size()).arg(import_range),
+                             -1);
+            QJsonArray params;
+            params << *requests << options;
+            rpcCall(QStringLiteral("importmulti"), params, true, [this, import_range, labels](const QJsonValue&, const QString& import_error) {
+                if (m_recovery_cancel_requested) {
+                    setRecoveryState(false, QStringLiteral("Recovery canceled. Partial imports may remain in the new wallet."), 0);
+                    Q_EMIT userMessage(QStringLiteral("Recovery canceled"),
+                                       QStringLiteral("The active rescan was canceled. Some derived addresses may already have been imported into the new wallet."));
+                    return;
+                }
+                if (!import_error.isEmpty()) {
+                    setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                    Q_EMIT userMessage(QStringLiteral("Wallet not restored"), import_error);
+                    return;
+                }
+                summarizeCompletedRecoveryImport(import_range, *labels);
+            });
+        });
+    }
+}
+
+void NuRpcService::importRecoveryDescriptorsUntilEmpty(const QVector<QPair<QString, QString>>& descriptors, int empty_gap)
+{
+    struct RecoveryGapMethod {
+        QString label;
+        QString checked_descriptor;
+        int next_index = 0;
+        int max_found_index = -1;
+        int imported_end = -1;
+        bool active = true;
+    };
+
+    const int gap_limit = std::clamp(empty_gap, 20, 1024);
+    if (descriptors.isEmpty()) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                           QStringLiteral("No recovery descriptors were available to import."));
+        return;
+    }
+
+    setRecoveryState(true,
+                     QStringLiteral("Preparing auto-until-empty recovery. Each method stops after %1 empty addresses in a row.").arg(gap_limit),
+                     35);
+    setRecoveryCurrentMethod(QStringLiteral("Preparing %1 recovery methods.").arg(descriptors.size()));
+
+    auto states = std::make_shared<QVector<RecoveryGapMethod>>();
+    auto pending = std::make_shared<int>(descriptors.size());
+    auto errors = std::make_shared<QStringList>();
+    auto completed_batches = std::make_shared<int>(0);
+    auto cumulative_amount = std::make_shared<double>(0.0);
+    auto cumulative_funded_addresses = std::make_shared<int>(0);
+    auto amount_by_label = std::make_shared<QHash<QString, double>>();
+    auto run_batch = std::make_shared<std::function<void()>>();
+
+    *run_batch = [this,
+                  states,
+                  errors,
+                  completed_batches,
+                  cumulative_amount,
+                  cumulative_funded_addresses,
+                  amount_by_label,
+                  run_batch,
+                  gap_limit]() {
+        if (m_recovery_cancel_requested) {
+            setRecoveryState(false, QStringLiteral("Recovery canceled. Partial imports may remain in the new wallet."), 0);
+            Q_EMIT userMessage(QStringLiteral("Recovery canceled"),
+                               QStringLiteral("Recovery was canceled. Some derived addresses may already have been imported into the new wallet."));
+            return;
+        }
+
+        QVector<int> active_indices;
+        int max_imported = 0;
+        QStringList labels;
+        for (int i = 0; i < states->size(); ++i) {
+            RecoveryGapMethod& state = (*states)[i];
+            labels.push_back(state.label);
+            max_imported = std::max(max_imported, state.imported_end + 1);
+            if (state.active) active_indices.push_back(i);
+        }
+
+        if (active_indices.isEmpty()) {
+            setRecoveryCurrentMethod(QStringLiteral("All methods reached the %1-empty-address stop rule.").arg(gap_limit));
+            summarizeCompletedRecoveryImport(std::max(1, max_imported), labels);
+            return;
+        }
+
+        auto request_array = std::make_shared<QJsonArray>();
+        auto address_lookup = std::make_shared<QHash<QString, QPair<int, int>>>();
+        auto derive_pending = std::make_shared<int>(active_indices.size());
+        auto derive_errors = std::make_shared<QStringList>();
+
+        const int first_state = active_indices.first();
+        const int first_start = (*states)[first_state].next_index;
+        const int first_end = std::min(first_start + RECOVERY_GAP_SCAN_BATCH_SIZE - 1, RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES - 1);
+        setRecoveryCurrentMethod(QStringLiteral("Auto-until-empty batch %1-%2 across %3 active methods.").arg(first_start).arg(first_end).arg(active_indices.size()));
+        setRecoveryState(true,
+                         QStringLiteral("Auto recovery is importing the next address batch, then rescanning. A method stops only after %1 consecutive empty derived addresses.").arg(gap_limit),
+                         -1);
+
+        for (const int state_index : active_indices) {
+            const RecoveryGapMethod& state = (*states)[state_index];
+            const int start = state.next_index;
+            const int end = std::min(start + RECOVERY_GAP_SCAN_BATCH_SIZE - 1, RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES - 1);
+            QJsonArray range;
+            range << start << end;
+            rpcCall(QStringLiteral("deriveaddresses"), {state.checked_descriptor, range}, false, [this, states, state_index, start, end, address_lookup, request_array, derive_pending, derive_errors, completed_batches, cumulative_amount, cumulative_funded_addresses, amount_by_label, run_batch, gap_limit](const QJsonValue& result, const QString& error) {
+                if (!error.isEmpty() || !result.isArray()) {
+                    derive_errors->push_back(error.isEmpty()
+                                                 ? QStringLiteral("%1: backend did not derive addresses").arg((*states)[state_index].label)
+                                                 : QStringLiteral("%1: %2").arg((*states)[state_index].label, error));
+                    (*states)[state_index].active = false;
+                } else {
+                    int index = start;
+                    for (const QJsonValue& address_value : result.toArray()) {
+                        const QString address = address_value.toString();
+                        if (!address.isEmpty()) address_lookup->insert(address, qMakePair(state_index, index));
+                        ++index;
+                    }
+                    QJsonObject request;
+                    request.insert(QStringLiteral("desc"), (*states)[state_index].checked_descriptor);
+                    request.insert(QStringLiteral("timestamp"), 0);
+                    request.insert(QStringLiteral("label"), (*states)[state_index].label);
+                    QJsonArray import_range;
+                    import_range << start << end;
+                    request.insert(QStringLiteral("range"), import_range);
+                    request_array->append(request);
+                }
+
+                --(*derive_pending);
+                if (*derive_pending > 0) return;
+
+                if (m_recovery_cancel_requested) {
+                    setRecoveryState(false, QStringLiteral("Recovery canceled before the next import batch."), 0);
+                    return;
+                }
+                if (request_array->isEmpty()) {
+                    setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                    Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                                       derive_errors->isEmpty() ? QStringLiteral("No recovery address batch could be derived.") : derive_errors->join(QStringLiteral("\n")));
+                    return;
+                }
+
+                QJsonObject options;
+                options.insert(QStringLiteral("rescan"), true);
+                QJsonArray params;
+                params << *request_array << options;
+                rpcCall(QStringLiteral("importmulti"), params, true, [this, states, address_lookup, completed_batches, cumulative_amount, cumulative_funded_addresses, amount_by_label, run_batch, gap_limit](const QJsonValue&, const QString& import_error) {
+                    if (m_recovery_cancel_requested) {
+                        setRecoveryState(false, QStringLiteral("Recovery canceled. Partial imports may remain in the new wallet."), 0);
+                        Q_EMIT userMessage(QStringLiteral("Recovery canceled"),
+                                           QStringLiteral("The active rescan was canceled. Some derived addresses may already have been imported into the new wallet."));
+                        return;
+                    }
+                    if (!import_error.isEmpty()) {
+                        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                        Q_EMIT userMessage(QStringLiteral("Wallet not restored"), import_error);
+                        return;
+                    }
+
+                    rpcCall(QStringLiteral("listreceivedbyaddress"), {0, true, true}, true, [this, states, address_lookup, completed_batches, cumulative_amount, cumulative_funded_addresses, amount_by_label, run_batch, gap_limit](const QJsonValue& received_result, const QString&) {
+                        int batch_hits = 0;
+                        double batch_amount = 0.0;
+                        QString recent_hit = m_recovery_recent_found_address.isEmpty()
+                            ? QStringLiteral("No address hits reported yet.")
+                            : m_recovery_recent_found_address;
+
+                        if (received_result.isArray()) {
+                            for (const QJsonValue& value : received_result.toArray()) {
+                                const QJsonObject item = value.toObject();
+                                const double amount = item.value(QStringLiteral("amount")).toDouble();
+                                if (amount <= 0.0) continue;
+                                const QString address = item.value(QStringLiteral("address")).toString();
+                                const auto found = address_lookup->constFind(address);
+                                if (found == address_lookup->constEnd()) continue;
+                                const int state_index = found.value().first;
+                                const int derived_index = found.value().second;
+                                if (state_index < 0 || state_index >= states->size()) continue;
+                                RecoveryGapMethod& state = (*states)[state_index];
+                                if (derived_index > state.max_found_index) state.max_found_index = derived_index;
+                                ++batch_hits;
+                                batch_amount += amount;
+                                (*amount_by_label)[state.label] += amount;
+                                recent_hit = QStringLiteral("%1 index %2 received %3 DFC")
+                                    .arg(address)
+                                    .arg(derived_index)
+                                    .arg(QString::number(amount, 'f', 8));
+                            }
+                        }
+
+                        for (RecoveryGapMethod& state : *states) {
+                            if (!state.active) continue;
+                            const int end = std::min(state.next_index + RECOVERY_GAP_SCAN_BATCH_SIZE - 1, RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES - 1);
+                            state.imported_end = end;
+                            state.next_index = end + 1;
+                            const int empty_after_last_hit = state.max_found_index < 0 ? state.next_index : state.imported_end - state.max_found_index;
+                            if (empty_after_last_hit >= gap_limit || state.next_index >= RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES) {
+                                state.active = false;
+                            }
+                        }
+
+                        ++(*completed_batches);
+                        if (batch_hits > 0) {
+                            *cumulative_amount += batch_amount;
+                            *cumulative_funded_addresses += batch_hits;
+                            m_recovery_found_amount = QStringLiteral("%1 DFC received in discovered addresses so far")
+                                .arg(QString::number(*cumulative_amount, 'f', 8));
+                            m_recovery_found_address_count = *cumulative_funded_addresses;
+                            m_recovery_recent_found_address = recent_hit;
+                            double best_amount = -1.0;
+                            QString best_label;
+                            for (auto it = amount_by_label->constBegin(); it != amount_by_label->constEnd(); ++it) {
+                                if (it.value() > best_amount) {
+                                    best_amount = it.value();
+                                    best_label = it.key();
+                                }
+                            }
+                            if (!best_label.isEmpty()) m_recovery_detected_method = best_label;
+                        }
+
+                        updateRecoveryTiming(*completed_batches, *completed_batches + 1);
+                        if (m_recovery_active && !m_recovery_eta.startsWith(QStringLiteral("at least"), Qt::CaseInsensitive)) {
+                            m_recovery_eta = QStringLiteral("at least %1").arg(m_recovery_eta);
+                        }
+                        Q_EMIT recoveryChanged();
+                        QTimer::singleShot(0, this, [run_batch] { (*run_batch)(); });
+                    });
+                });
+            });
+        }
+    };
+
+    for (const auto& descriptor_item : descriptors) {
+        const QString label = descriptor_item.first;
+        const QString descriptor = descriptor_item.second;
+        rpcCall(QStringLiteral("getdescriptorinfo"), {descriptor}, false, [this, label, descriptor, pending, states, errors, run_batch](const QJsonValue& result, const QString& descriptor_error) {
+            if (!descriptor_error.isEmpty() || !result.isObject()) {
+                errors->push_back(descriptor_error.isEmpty()
+                                      ? QStringLiteral("%1: backend did not return descriptor details").arg(label)
+                                      : QStringLiteral("%1: %2").arg(label, descriptor_error));
+            } else {
+                const QString checksum = result.toObject().value(QStringLiteral("checksum")).toString();
+                if (checksum.isEmpty()) {
+                    errors->push_back(QStringLiteral("%1: backend did not return a descriptor checksum").arg(label));
+                } else {
+                    RecoveryGapMethod state;
+                    state.label = label;
+                    state.checked_descriptor = descriptor.section(QLatin1Char('#'), 0, 0) + QStringLiteral("#") + checksum;
+                    states->push_back(state);
+                }
+            }
+
+            --(*pending);
+            if (*pending > 0) return;
+
+            if (states->isEmpty()) {
+                setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                                   errors->isEmpty() ? QStringLiteral("No recovery descriptor could be prepared.") : errors->join(QStringLiteral("\n")));
+                return;
+            }
+            QTimer::singleShot(0, this, [run_batch] { (*run_batch)(); });
+        });
+    }
+}
+
+void NuRpcService::summarizeCompletedRecoveryImport(int import_range, const QStringList& tried_methods)
+{
+    setRecoveryState(true, QStringLiteral("Rescan complete. Checking recovered wallet balance and matching addresses..."), 92);
+
+    rpcCall(QStringLiteral("listreceivedbyaddress"), {0, true, true}, true, [this, import_range, tried_methods](const QJsonValue& received_result, const QString&) {
+        int funded_addresses = 0;
+        double total_received = 0.0;
+        QString recent_hit = QStringLiteral("No received coins found in the imported range.");
+        QString detected_method = tried_methods.size() > 1
+            ? QStringLiteral("No matching method found yet.")
+            : (tried_methods.isEmpty() ? QStringLiteral("Manual recovery scan.") : tried_methods.first());
+        QHash<QString, double> amount_by_label;
+
+        if (received_result.isArray()) {
+            for (const QJsonValue& value : received_result.toArray()) {
+                const QJsonObject item = value.toObject();
+                const double amount = item.value(QStringLiteral("amount")).toDouble();
+                if (amount <= 0.0) continue;
+                ++funded_addresses;
+                total_received += amount;
+                const QString label = item.value(QStringLiteral("label")).toString();
+                if (!label.isEmpty()) amount_by_label[label] += amount;
+                recent_hit = QStringLiteral("%1 received %2 DFC")
+                    .arg(item.value(QStringLiteral("address")).toString(),
+                         QString::number(amount, 'f', 8));
+            }
+        }
+
+        if (!amount_by_label.isEmpty()) {
+            double best_amount = -1.0;
+            for (auto it = amount_by_label.constBegin(); it != amount_by_label.constEnd(); ++it) {
+                if (it.value() > best_amount) {
+                    best_amount = it.value();
+                    detected_method = it.key();
+                }
+            }
+        } else if (!tried_methods.isEmpty()) {
+            detected_method = tried_methods.size() == 1
+                ? QStringLiteral("%1 (no received coins found)").arg(tried_methods.first())
+                : QStringLiteral("No received coins found in the %1 methods tried.").arg(tried_methods.size());
+        }
+
+        rpcCall(QStringLiteral("getwalletinfo"), {}, true, [this, import_range, funded_addresses, total_received, recent_hit, detected_method](const QJsonValue& wallet_result, const QString&) {
+            QString balance_text = QStringLiteral("No spendable balance found yet.");
+            if (wallet_result.isObject()) {
+                const QJsonObject wallet = wallet_result.toObject();
+                const double available = wallet.value(QStringLiteral("balance")).toDouble();
+                const double pending = wallet.value(QStringLiteral("unconfirmed_balance")).toDouble();
+                const double immature = wallet.value(QStringLiteral("immature_balance")).toDouble();
+                const double total = available + pending + immature;
+                balance_text = QStringLiteral("%1 DFC").arg(QString::number(total, 'f', 8));
+                if (pending > 0.0 || immature > 0.0) {
+                    balance_text += QStringLiteral(" (%1 available, %2 pending, %3 immature)")
+                        .arg(QString::number(available, 'f', 8),
+                             QString::number(pending, 'f', 8),
+                             QString::number(immature, 'f', 8));
+                }
+            } else if (total_received > 0.0) {
+                balance_text = QStringLiteral("%1 DFC received on imported addresses").arg(QString::number(total_received, 'f', 8));
+            }
+
+            m_recovery_found_amount = balance_text;
+            m_recovery_found_address_count = funded_addresses;
+            m_recovery_recent_found_address = recent_hit;
+            m_recovery_detected_method = detected_method;
+            refresh();
+            setRecoveryState(false,
+                             QStringLiteral("Recovery complete. Imported up to %1 addresses per method and completed the chain rescan. No extra rescan action is needed.").arg(import_range),
+                             100);
+            Q_EMIT userMessage(QStringLiteral("Wallet restored"),
+                               QStringLiteral("The wallet was created, up to %1 external recovery addresses were imported per method, and the chain rescan completed. Detected method: %2. No extra recovery action is required; review the wallet balance, Transactions, and Wallet > Addresses.")
+                                   .arg(import_range)
+                                   .arg(detected_method));
+        });
+    });
+}
+
+void NuRpcService::chooseMinerExecutable()
+{
+    const QString selected = QFileDialog::getOpenFileName(nullptr,
+        QStringLiteral("Select miner executable"),
+        m_miner_executable.isEmpty() ? QDir::homePath() : QFileInfo(m_miner_executable).absolutePath());
+    if (selected.isEmpty()) return;
+    m_miner_executable = selected;
+    QSettings().setValue(QStringLiteral("MinerExecutable"), selected);
+    m_miner_status = QStringLiteral("Miner executable selected.");
+    Q_EMIT minerChanged();
+}
+
+void NuRpcService::useWalletReceiveAddressForMining()
+{
+    if (!ensureCurrentWalletSelected(QStringLiteral("Mining payout address unavailable"))) return;
+
+    const QString existing = walletMiningPayoutAddress();
+    if (!existing.isEmpty()) {
+        m_miner_payout_address = existing;
+        QSettings().setValue(QStringLiteral("MinerPayoutAddress"), m_miner_payout_address);
+        m_miner_status = QStringLiteral("Using wallet receive address for mining payout.");
+        Q_EMIT minerChanged();
+        return;
+    }
+
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("getnewaddress"), {QStringLiteral("Mining payout")}, true, [this, wallet_name](const QJsonValue& result, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
+        if (!error.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Mining payout address unavailable"), error);
+            return;
+        }
+        m_receive_address = result.toString().trimmed();
+        m_receive_label = QStringLiteral("Mining payout");
+        m_receive_amount.clear();
+        m_receive_message.clear();
+        m_miner_payout_address = m_receive_address;
+        QSettings().setValue(QStringLiteral("MinerPayoutAddress"), m_miner_payout_address);
+        updateReceiveQr();
+        refreshAddressBook();
+        m_miner_status = QStringLiteral("Generated wallet receive address for mining payout.");
+        Q_EMIT minerChanged();
+        Q_EMIT walletChanged();
+    });
+}
+
+void NuRpcService::saveMinerConfiguration(const QString& pool_url,
+                                          const QString& payout_address,
+                                          const QString& password,
+                                          int threads,
+                                          int nice_level)
+{
+    const QString clean_pool_url = singleLineLimited(pool_url, 512);
+    const QString clean_payout_address = singleLineLimited(payout_address, 128);
+    const QString clean_password = singleLineLimited(password, 128);
+    if (!isValidStratumUrl(clean_pool_url)) {
+        Q_EMIT userMessage(QStringLiteral("Mining configuration not saved"),
+                           QStringLiteral("Pool URL must be a stratum+tcp:// or stratum+ssl:// URL with a valid host and optional port."));
+        return;
+    }
+    if (!isLikelyBase58AddressText(clean_payout_address)) {
+        Q_EMIT userMessage(QStringLiteral("Mining configuration not saved"),
+                           QStringLiteral("Enter a Defcoin payout address before saving the mining configuration."));
+        return;
+    }
+
+    m_miner_pool_url = clean_pool_url;
+    m_miner_payout_address = clean_payout_address;
+    m_miner_password = clean_password.isEmpty() ? QStringLiteral("x") : clean_password;
+    m_miner_threads = std::clamp(threads, 1, 256);
+    m_miner_nice_level = std::clamp(nice_level, 0, 20);
+    QSettings settings;
+    settings.setValue(QStringLiteral("MinerPoolUrl"), m_miner_pool_url);
+    settings.setValue(QStringLiteral("MinerPayoutAddress"), m_miner_payout_address);
+    settings.setValue(QStringLiteral("MinerPassword"), m_miner_password);
+    settings.setValue(QStringLiteral("MinerThreads"), m_miner_threads);
+    settings.setValue(QStringLiteral("MinerNiceLevel"), m_miner_nice_level);
+    m_miner_status = QStringLiteral("Mining configuration saved.");
+    Q_EMIT minerChanged();
+}
+
+void NuRpcService::startConfiguredMiner()
+{
+    if (minerRunning()) return;
+    if (m_miner_executable.isEmpty() || !QFileInfo(m_miner_executable).isExecutable()) {
+        Q_EMIT userMessage(QStringLiteral("Miner not started"), QStringLiteral("Select a miner executable before starting local mining."));
+        return;
+    }
+    if (m_miner_pool_url.trimmed().isEmpty() || m_miner_payout_address.trimmed().isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Miner not started"), QStringLiteral("Enter a stratum pool URL and payout address before starting local mining."));
+        return;
+    }
+    if (!isValidStratumUrl(singleLineLimited(m_miner_pool_url, 512))) {
+        Q_EMIT userMessage(QStringLiteral("Miner not started"),
+                           QStringLiteral("Pool URL must be a stratum+tcp:// or stratum+ssl:// URL with a valid host and optional port."));
+        return;
+    }
+    if (!isLikelyBase58AddressText(singleLineLimited(m_miner_payout_address, 128))) {
+        Q_EMIT userMessage(QStringLiteral("Miner not started"),
+                           QStringLiteral("Enter a valid Defcoin payout address before starting local mining."));
+        return;
+    }
+
+    QString wrapper_note;
+    const QString miner_program = resolvedCpuminerExecutable(m_miner_executable, &wrapper_note);
+    if (QFileInfo(miner_program).suffix().compare(QStringLiteral("sh"), Qt::CaseInsensitive) == 0) {
+        Q_EMIT userMessage(QStringLiteral("Miner not started"), wrapper_note);
+        return;
+    }
+    if (!QFileInfo(miner_program).isExecutable()) {
+        Q_EMIT userMessage(QStringLiteral("Miner not started"),
+                           QStringLiteral("Nu could not find an executable cpuminer binary at:\n%1").arg(QDir::toNativeSeparators(miner_program)));
+        return;
+    }
+
+    QStringList miner_args{
+        QStringLiteral("-a"), QStringLiteral("scrypt"),
+        QStringLiteral("-o"), m_miner_pool_url,
+        QStringLiteral("-u"), m_miner_payout_address,
+        QStringLiteral("-p"), m_miner_password.isEmpty() ? QStringLiteral("x") : m_miner_password,
+        QStringLiteral("-t"), QString::number(m_miner_threads)
+    };
+    QString program = miner_program;
+    QStringList process_args = miner_args;
+#if defined(Q_OS_MACOS)
+    if (m_miner_nice_level > 0 && QFileInfo::exists(QStringLiteral("/usr/bin/taskpolicy"))) {
+        program = QStringLiteral("/usr/bin/taskpolicy");
+        process_args = {QStringLiteral("-b"), QStringLiteral("nice"), QStringLiteral("-n"), QString::number(m_miner_nice_level), miner_program};
+        process_args.append(miner_args);
+    }
+#elif !defined(Q_OS_WIN)
+    if (m_miner_nice_level > 0 && QFileInfo::exists(QStringLiteral("/usr/bin/nice"))) {
+        program = QStringLiteral("/usr/bin/nice");
+        process_args = {QStringLiteral("-n"), QString::number(m_miner_nice_level), miner_program};
+        process_args.append(miner_args);
+    }
+#endif
+
+    m_miner_process = new QProcess(this);
+    m_miner_process->setProgram(program);
+    m_miner_process->setWorkingDirectory(QFileInfo(miner_program).absolutePath());
+    m_miner_process->setArguments(process_args);
+    connect(m_miner_process, &QProcess::readyReadStandardOutput, this, [this] {
+        appendMinerLog(QString::fromLocal8Bit(m_miner_process->readAllStandardOutput()));
+    });
+    connect(m_miner_process, &QProcess::readyReadStandardError, this, [this] {
+        appendMinerLog(QString::fromLocal8Bit(m_miner_process->readAllStandardError()));
+    });
+    connect(m_miner_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int exit_code, QProcess::ExitStatus) {
+        m_miner_status = QStringLiteral("Miner stopped with exit code %1.").arg(exit_code);
+        m_miner_process->deleteLater();
+        m_miner_process = nullptr;
+        Q_EMIT minerChanged();
+    });
+    resetMinerRuntimeStats();
+    m_miner_log.clear();
+    if (!wrapper_note.isEmpty()) appendMinerLog(wrapper_note);
+    appendMinerLog(QStringLiteral("Nu launch command: %1").arg(processCommandForDisplayRedacted(program, process_args)));
+    m_miner_status = QStringLiteral("Starting miner...");
+    Q_EMIT minerChanged();
+    m_miner_process->start();
+    if (!m_miner_process->waitForStarted(2500)) {
+        const QString start_error = m_miner_process->errorString();
+        m_miner_process->deleteLater();
+        m_miner_process = nullptr;
+        m_miner_status = QStringLiteral("Miner failed to start.");
+        Q_EMIT minerChanged();
+        Q_EMIT userMessage(QStringLiteral("Miner not started"), start_error);
+        return;
+    }
+    m_miner_status = QStringLiteral("Miner running.");
+    Q_EMIT minerChanged();
+}
+
+void NuRpcService::stopMiner()
+{
+    if (!m_miner_process) return;
+    m_miner_process->terminate();
+    if (!m_miner_process->waitForFinished(3000)) m_miner_process->kill();
+}
+
+void NuRpcService::clearMinerLog()
+{
+    m_miner_log.clear();
+    Q_EMIT minerChanged();
+}
+
+QString NuRpcService::normalizedVersionString(QString version)
+{
+    version = version.trimmed();
+    if (version.startsWith(QLatin1Char('v'), Qt::CaseInsensitive)) version.remove(0, 1);
+    const QRegularExpression version_re(QStringLiteral(R"((\d+(?:\.\d+)+))"));
+    const QRegularExpressionMatch match = version_re.match(version);
+    return match.hasMatch() ? match.captured(1) : version;
+}
+
+bool NuRpcService::isVersionNewer(const QString& candidate, const QString& current)
+{
+    const QVersionNumber candidate_version = QVersionNumber::fromString(normalizedVersionString(candidate));
+    const QVersionNumber current_version = QVersionNumber::fromString(normalizedVersionString(current));
+    if (!candidate_version.isNull() && !current_version.isNull()) {
+        return QVersionNumber::compare(candidate_version, current_version) > 0;
+    }
+    return normalizedVersionString(candidate) > normalizedVersionString(current);
+}
+
+QString NuRpcService::selectedUpdateAssetNeedle() const
+{
+#if defined(Q_OS_MACOS)
+    const QString architecture = QSysInfo::currentCpuArchitecture().toLower();
+    return architecture.contains(QStringLiteral("arm")) || architecture.contains(QStringLiteral("aarch64"))
+        ? QStringLiteral("osx-arm64-setup.pkg")
+        : QStringLiteral("osx-x64-setup.pkg");
+#elif defined(Q_OS_WIN)
+    return QStringLiteral("win-x64-setup.exe");
+#else
+    return QString();
+#endif
+}
+
+QString NuRpcService::updateDownloadDirectory() const
+{
+    QString downloads = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    if (downloads.isEmpty()) downloads = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QDir dir(downloads);
+    if (!dir.exists(QStringLiteral("Defcoin Core Nu Updates"))) {
+        dir.mkpath(QStringLiteral("Defcoin Core Nu Updates"));
+    }
+    return dir.filePath(QStringLiteral("Defcoin Core Nu Updates"));
+}
+
+void NuRpcService::setUpdateStatus(const QString& status, int progress)
+{
+    bool changed = false;
+    if (m_update_status != status) {
+        m_update_status = status;
+        changed = true;
+    }
+    if (progress >= 0 && m_update_download_progress != progress) {
+        m_update_download_progress = progress;
+        changed = true;
+    }
+    if (changed) Q_EMIT updateStatusChanged();
+}
+
+void NuRpcService::clearPendingUpdateDownload()
+{
+    if (!m_update_download_file) return;
+    if (m_update_download_file->isOpen()) m_update_download_file->close();
+    m_update_download_file->deleteLater();
+    m_update_download_file = nullptr;
+}
+
+void NuRpcService::checkForUpdates(bool manual)
+{
+    if (m_update_check_in_progress) {
+        if (manual) Q_EMIT userMessage(QStringLiteral("Update check already running"), QStringLiteral("Defcoin Core Nu is already checking for updates."));
+        return;
+    }
+
+    m_update_check_in_progress = true;
+    setUpdateStatus(QStringLiteral("Checking for Defcoin Core Nu updates..."), 0);
+
+    QString velopack_error;
+    if (m_velopack_updater) {
+        NuVelopackUpdateDetails velopack_details;
+        const NuVelopackUpdater::CheckState velopack_state = m_velopack_updater->checkForUpdates(velopack_details);
+        if (velopack_state == NuVelopackUpdater::CheckState::UpdateAvailable) {
+            m_update_check_in_progress = false;
+            m_pending_update = PendingUpdate{};
+            m_pending_update.version = velopack_details.version;
+            m_pending_update.assetName = velopack_details.packageName.isEmpty() ? QStringLiteral("Velopack package") : velopack_details.packageName;
+            m_pending_update.assetSize = qint64(velopack_details.size);
+            m_pending_update.velopackManaged = true;
+            const QString size = m_pending_update.assetSize > 0 ? formatBytes(m_pending_update.assetSize) : QStringLiteral("managed by Velopack");
+            const QString action = velopack_details.pendingRestart ? QStringLiteral("Apply this update now?") : QStringLiteral("Download this update now?");
+            const QString message = QStringLiteral("Defcoin Core Nu %1 is available through Velopack.\n\nCurrent version: %2\nPackage: %3 (%4)\n\n%5")
+                .arg(m_pending_update.version, currentNuVersion(), m_pending_update.assetName, size, action);
+            setUpdateStatus(QStringLiteral("Defcoin Core Nu %1 is available through Velopack.").arg(m_pending_update.version), 0);
+            Q_EMIT updateAvailable(m_pending_update.version, message);
+            return;
+        }
+        if (velopack_state == NuVelopackUpdater::CheckState::NoUpdate) {
+            m_update_check_in_progress = false;
+            const QString message = QStringLiteral("Defcoin Core Nu is up to date. Current version: %1.").arg(currentNuVersion());
+            setUpdateStatus(message, 0);
+            if (manual) Q_EMIT userMessage(QStringLiteral("No update available"), message);
+            return;
+        }
+        if (velopack_state == NuVelopackUpdater::CheckState::Error && m_velopack_updater->isManagerAvailable()) {
+            velopack_error = QStringLiteral("Velopack could not check for updates: %1").arg(m_velopack_updater->lastError());
+            setUpdateStatus(QStringLiteral("Velopack update feed unavailable; checking GitHub releases..."), 0);
+        }
+    }
+
+    setUpdateStatus(QStringLiteral("Checking GitHub for Defcoin Core Nu updates..."), 0);
+
+    QNetworkRequest request(QUrl(QStringLiteral("https://api.github.com/repos/defcoincore/Defcoin-Core-Nu/releases/latest")));
+    request.setRawHeader("Accept", "application/vnd.github+json");
+    request.setRawHeader("User-Agent", "DefcoinCoreNu/" DEFCOIN_NU_VERSION);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+
+    QNetworkReply* reply = m_update_network->get(request);
+    reply->setProperty("manual", manual);
+    reply->setProperty("velopackError", velopack_error);
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        handleUpdateReleaseReply(reply);
+    });
+}
+
+void NuRpcService::handleUpdateReleaseReply(QNetworkReply* reply)
+{
+    const bool manual = reply->property("manual").toBool();
+    const QString velopack_error = reply->property("velopackError").toString();
+    m_update_check_in_progress = false;
+
+    const auto finish = [reply] {
+        reply->deleteLater();
+    };
+
+    if (reply->error() != QNetworkReply::NoError) {
+        QString message = QStringLiteral("Could not check GitHub releases: %1").arg(reply->errorString());
+        if (!velopack_error.isEmpty()) {
+            message = QStringLiteral("%1\n\n%2").arg(velopack_error, message);
+        }
+        setUpdateStatus(message);
+        if (manual) Q_EMIT userMessage(QStringLiteral("Update check failed"), message);
+        finish();
+        return;
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+    const QJsonObject release = document.object();
+    const QString tag = release.value(QStringLiteral("tag_name")).toString();
+    const QString latest_version = normalizedVersionString(tag);
+    const QString release_url = release.value(QStringLiteral("html_url")).toString(QStringLiteral("https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest"));
+
+    if (latest_version.isEmpty()) {
+        const QString message = QStringLiteral("GitHub did not return a usable Defcoin Core Nu release tag.");
+        setUpdateStatus(message);
+        if (manual) Q_EMIT userMessage(QStringLiteral("Update check failed"), message);
+        finish();
+        return;
+    }
+
+    if (!isVersionNewer(latest_version, currentNuVersion())) {
+        const QString message = QStringLiteral("Defcoin Core Nu is up to date. Current version: %1. Latest release: %2.")
+            .arg(currentNuVersion(), latest_version);
+        setUpdateStatus(message, 0);
+        if (manual) Q_EMIT userMessage(QStringLiteral("No update available"), message);
+        finish();
+        return;
+    }
+
+    const QString asset_needle = selectedUpdateAssetNeedle();
+    if (asset_needle.isEmpty()) {
+        const QString message = QStringLiteral("Defcoin Core Nu %1 is available, but automatic package selection is not supported on this platform. Open %2 to download it manually.")
+            .arg(latest_version, release_url);
+        setUpdateStatus(message);
+        if (manual) Q_EMIT userMessage(QStringLiteral("Update available"), message);
+        finish();
+        return;
+    }
+
+    QString checksum_url;
+    QJsonObject selected_asset;
+    const QJsonArray assets = release.value(QStringLiteral("assets")).toArray();
+    for (const QJsonValue& value : assets) {
+        const QJsonObject asset = value.toObject();
+        const QString name = asset.value(QStringLiteral("name")).toString();
+        if (name.compare(QStringLiteral("SHA256SUMS.txt"), Qt::CaseInsensitive) == 0) {
+            checksum_url = asset.value(QStringLiteral("browser_download_url")).toString();
+        }
+        if (name.toLower().contains(asset_needle)) {
+            selected_asset = asset;
+        }
+    }
+
+    if (selected_asset.isEmpty()) {
+        const QString message = QStringLiteral("Defcoin Core Nu %1 is available, but no matching package was found for this computer. Open %2 to download it manually.")
+            .arg(latest_version, release_url);
+        setUpdateStatus(message);
+        if (manual) Q_EMIT userMessage(QStringLiteral("Update available"), message);
+        finish();
+        return;
+    }
+
+    m_pending_update = PendingUpdate{};
+    m_pending_update.version = latest_version;
+    m_pending_update.tag = tag;
+    m_pending_update.releaseUrl = release_url;
+    m_pending_update.assetName = selected_asset.value(QStringLiteral("name")).toString();
+    m_pending_update.assetUrl = selected_asset.value(QStringLiteral("browser_download_url")).toString();
+    m_pending_update.assetSize = selected_asset.value(QStringLiteral("size")).toVariant().toLongLong();
+    m_pending_update.checksumUrl = checksum_url;
+
+    const QString size = m_pending_update.assetSize > 0 ? formatBytes(m_pending_update.assetSize) : QStringLiteral("unknown size");
+    const QString message = QStringLiteral("Defcoin Core Nu %1 is available.\n\nCurrent version: %2\nPackage: %3 (%4)\n\nDownload and verify this update now?")
+        .arg(m_pending_update.version, currentNuVersion(), m_pending_update.assetName, size);
+    setUpdateStatus(QStringLiteral("Defcoin Core Nu %1 is available.").arg(m_pending_update.version), 0);
+    Q_EMIT updateAvailable(m_pending_update.version, message);
+    finish();
+}
+
+void NuRpcService::downloadPendingUpdate()
+{
+    if (m_pending_update.assetUrl.isEmpty() || m_pending_update.assetName.isEmpty()) {
+        if (!m_pending_update.velopackManaged) {
+            Q_EMIT userMessage(QStringLiteral("No update selected"), QStringLiteral("Check for updates before downloading an installer."));
+            return;
+        }
+    }
+    if (m_update_download_in_progress) {
+        Q_EMIT userMessage(QStringLiteral("Download already running"), QStringLiteral("Defcoin Core Nu is already downloading an update."));
+        return;
+    }
+    if (m_pending_update.velopackManaged) {
+        m_update_download_in_progress = true;
+        setUpdateStatus(QStringLiteral("Downloading Velopack update..."), 0);
+        QThread* thread = QThread::create([this] {
+            const bool ok = m_velopack_updater && m_velopack_updater->downloadPendingUpdate([this](int progress) {
+                QMetaObject::invokeMethod(this, [this, progress] {
+                    setUpdateStatus(QStringLiteral("Downloading Velopack update..."), progress);
+                }, Qt::QueuedConnection);
+            });
+            const QString error = m_velopack_updater ? m_velopack_updater->lastError() : QStringLiteral("Velopack is not available.");
+            QMetaObject::invokeMethod(this, [this, ok, error] {
+                m_update_download_in_progress = false;
+                if (!ok) {
+                    setUpdateStatus(error, 0);
+                    Q_EMIT userMessage(QStringLiteral("Download failed"), error);
+                    return;
+                }
+                const QString message = QStringLiteral("Defcoin Core Nu %1 was downloaded and prepared by Velopack.\n\nClose Defcoin Core Nu and apply the update now?")
+                    .arg(m_pending_update.version);
+                setUpdateStatus(QStringLiteral("Defcoin Core Nu %1 downloaded and ready to apply.").arg(m_pending_update.version), 100);
+                Q_EMIT updateDownloaded(m_pending_update.version, QStringLiteral("Velopack managed update"), message);
+            }, Qt::QueuedConnection);
+        });
+        connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+        thread->start();
+        return;
+    }
+    if (m_pending_update.checksumUrl.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Update cannot be verified"),
+                           QStringLiteral("The GitHub release does not include SHA256SUMS.txt, so Nu will not auto-install it. Download from GitHub manually instead."));
+        return;
+    }
+
+    QDir dir(updateDownloadDirectory());
+    if (!dir.exists()) dir.mkpath(QStringLiteral("."));
+    const QString target_path = dir.filePath(m_pending_update.assetName);
+    if (QFileInfo::exists(target_path)) QFile::remove(target_path);
+
+    clearPendingUpdateDownload();
+    m_update_download_file = new QFile(target_path, this);
+    if (!m_update_download_file->open(QIODevice::WriteOnly)) {
+        const QString message = QStringLiteral("Could not write update package to %1.").arg(target_path);
+        clearPendingUpdateDownload();
+        Q_EMIT userMessage(QStringLiteral("Download failed"), message);
+        setUpdateStatus(message);
+        return;
+    }
+
+    m_pending_update.filePath = target_path;
+    m_update_download_in_progress = true;
+    setUpdateStatus(QStringLiteral("Downloading %1...").arg(m_pending_update.assetName), 0);
+
+    QNetworkRequest request(QUrl(m_pending_update.assetUrl));
+    request.setRawHeader("User-Agent", "DefcoinCoreNu/" DEFCOIN_NU_VERSION);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    QNetworkReply* reply = m_update_network->get(request);
+    connect(reply, &QNetworkReply::readyRead, this, [this, reply] {
+        if (m_update_download_file) m_update_download_file->write(reply->readAll());
+    });
+    connect(reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
+        const int progress = total > 0 ? qBound(0, int((received * 100) / total), 100) : 0;
+        setUpdateStatus(QStringLiteral("Downloading %1...").arg(m_pending_update.assetName), progress);
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        handleUpdateAssetReply(reply);
+    });
+}
+
+void NuRpcService::handleUpdateAssetReply(QNetworkReply* reply)
+{
+    if (m_update_download_file) {
+        m_update_download_file->write(reply->readAll());
+        m_update_download_file->flush();
+        m_update_download_file->close();
+    }
+
+    if (reply->error() != QNetworkReply::NoError) {
+        const QString message = QStringLiteral("Could not download update: %1").arg(reply->errorString());
+        QFile::remove(m_pending_update.filePath);
+        clearPendingUpdateDownload();
+        m_update_download_in_progress = false;
+        setUpdateStatus(message, 0);
+        Q_EMIT userMessage(QStringLiteral("Download failed"), message);
+        reply->deleteLater();
+        return;
+    }
+
+    clearPendingUpdateDownload();
+    setUpdateStatus(QStringLiteral("Verifying update checksum..."), 100);
+
+    QNetworkRequest request(QUrl(m_pending_update.checksumUrl));
+    request.setRawHeader("User-Agent", "DefcoinCoreNu/" DEFCOIN_NU_VERSION);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    QNetworkReply* checksum_reply = m_update_network->get(request);
+    connect(checksum_reply, &QNetworkReply::finished, this, [this, checksum_reply] {
+        handleUpdateChecksumReply(checksum_reply);
+    });
+    reply->deleteLater();
+}
+
+bool NuRpcService::verifyDownloadedUpdate(const QByteArray& checksum_file, QString& error)
+{
+    QFile file(m_pending_update.filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        error = QStringLiteral("Could not reopen downloaded update package for verification.");
+        return false;
+    }
+    QCryptographicHash hasher(QCryptographicHash::Sha256);
+    while (!file.atEnd()) {
+        hasher.addData(file.read(1024 * 1024));
+    }
+    const QByteArray actual_hash = hasher.result().toHex();
+
+    const QString checksums = QString::fromUtf8(checksum_file);
+    const QStringList lines = checksums.split(QLatin1Char('\n'));
+    const QRegularExpression line_re(QStringLiteral(R"(^\s*([A-Fa-f0-9]{64})\s+\*?(.+?)\s*$)"));
+    QString expected_hash;
+    for (const QString& line : lines) {
+        const QRegularExpressionMatch match = line_re.match(line);
+        if (!match.hasMatch()) continue;
+        const QString file_name = QFileInfo(match.captured(2).trimmed()).fileName();
+        if (file_name == m_pending_update.assetName) {
+            expected_hash = match.captured(1).toLower();
+            break;
+        }
+    }
+
+    if (expected_hash.isEmpty()) {
+        error = QStringLiteral("SHA256SUMS.txt does not include %1.").arg(m_pending_update.assetName);
+        return false;
+    }
+    if (actual_hash != expected_hash.toUtf8()) {
+        error = QStringLiteral("Downloaded update checksum did not match SHA256SUMS.txt.");
+        return false;
+    }
+    return true;
+}
+
+void NuRpcService::handleUpdateChecksumReply(QNetworkReply* reply)
+{
+    m_update_download_in_progress = false;
+
+    if (reply->error() != QNetworkReply::NoError) {
+        const QString message = QStringLiteral("Could not download SHA256SUMS.txt: %1").arg(reply->errorString());
+        QFile::remove(m_pending_update.filePath);
+        setUpdateStatus(message, 0);
+        Q_EMIT userMessage(QStringLiteral("Verification failed"), message);
+        reply->deleteLater();
+        return;
+    }
+
+    QString error;
+    if (!verifyDownloadedUpdate(reply->readAll(), error)) {
+        QFile::remove(m_pending_update.filePath);
+        setUpdateStatus(error, 0);
+        Q_EMIT userMessage(QStringLiteral("Verification failed"), error);
+        reply->deleteLater();
+        return;
+    }
+
+    const QString message = QStringLiteral("Defcoin Core Nu %1 was downloaded and verified.\n\nPackage: %2\n\nClose Defcoin Core Nu and start the installer now?")
+        .arg(m_pending_update.version, m_pending_update.filePath);
+    setUpdateStatus(QStringLiteral("Defcoin Core Nu %1 downloaded and verified.").arg(m_pending_update.version), 100);
+    Q_EMIT updateDownloaded(m_pending_update.version, m_pending_update.filePath, message);
+    reply->deleteLater();
+}
+
+void NuRpcService::installDownloadedUpdate()
+{
+    if (m_pending_update.velopackManaged) {
+        if (!m_velopack_updater || !m_velopack_updater->applyPendingUpdate(true)) {
+            const QString error = m_velopack_updater ? m_velopack_updater->lastError() : QStringLiteral("Velopack is not available.");
+            Q_EMIT userMessage(QStringLiteral("Update failed"), error);
+            setUpdateStatus(error, 0);
+            return;
+        }
+        setUpdateStatus(QStringLiteral("Velopack updater launched. Quitting Defcoin Core Nu..."), 100);
+        QTimer::singleShot(700, [] {
+            QCoreApplication::quit();
+        });
+        return;
+    }
+
+    if (m_pending_update.filePath.isEmpty() || !QFileInfo::exists(m_pending_update.filePath)) {
+        Q_EMIT userMessage(QStringLiteral("Installer not found"), QStringLiteral("The downloaded update package could not be found. Check for updates again."));
+        return;
+    }
+
+#if defined(Q_OS_WIN)
+    const bool launched = QProcess::startDetached(m_pending_update.filePath, {});
+#else
+    const bool launched = QDesktopServices::openUrl(QUrl::fromLocalFile(m_pending_update.filePath));
+#endif
+    if (!launched) {
+        Q_EMIT userMessage(QStringLiteral("Installer launch failed"), QStringLiteral("Nu could not open the downloaded update package. Open it manually from:\n%1").arg(m_pending_update.filePath));
+        return;
+    }
+
+    setUpdateStatus(QStringLiteral("Update installer launched. Quitting Defcoin Core Nu..."), 100);
+    QTimer::singleShot(700, [] {
+        QCoreApplication::quit();
+    });
 }
 
 void NuRpcService::setMaskBalances(bool enabled)
@@ -1983,6 +5246,10 @@ void NuRpcService::setThirdPartyTxUrlsEnabled(bool enabled)
 {
     if (m_third_party_tx_urls_enabled == enabled) return;
     m_third_party_tx_urls_enabled = enabled;
+    if (!enabled && m_explorer_mode != QLatin1String("internal")) {
+        m_explorer_mode = QStringLiteral("internal");
+        QSettings().setValue(QStringLiteral("ExplorerMode"), m_explorer_mode);
+    }
     QSettings settings;
     settings.setValue(QStringLiteral("ThirdPartyTxUrlsEnabled"), enabled);
     QSettings(QStringLiteral("Defcoin"), QStringLiteral("Defcoin-Qt")).setValue(QStringLiteral("ThirdPartyTxUrlsEnabled"), enabled);
@@ -1992,6 +5259,11 @@ void NuRpcService::setThirdPartyTxUrlsEnabled(bool enabled)
 void NuRpcService::setThirdPartyTxUrl(const QString& url)
 {
     const QString normalized = normalizedExplorerUrl(url);
+    if (!url.trimmed().isEmpty() && normalized.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Explorer URL not saved"),
+                           QStringLiteral("Explorer URL must be a valid http:// or https:// URL without embedded credentials."));
+        return;
+    }
     if (m_third_party_tx_url == normalized) return;
     m_third_party_tx_url = normalized;
     QSettings settings;
@@ -2000,14 +5272,44 @@ void NuRpcService::setThirdPartyTxUrl(const QString& url)
     Q_EMIT settingsChanged();
 }
 
+void NuRpcService::setExplorerMode(const QString& mode)
+{
+    QString clean = mode.trimmed().toLower();
+    if (!QStringList{QStringLiteral("internal"), QStringLiteral("dc903"), QStringLiteral("legacy"), QStringLiteral("custom")}.contains(clean)) {
+        clean = QStringLiteral("internal");
+    }
+    if (m_explorer_mode == clean) return;
+    m_explorer_mode = clean;
+    if (clean == QLatin1String("internal")) {
+        m_third_party_tx_urls_enabled = false;
+    } else {
+        m_third_party_tx_urls_enabled = true;
+        if (clean == QLatin1String("dc903")) m_third_party_tx_url = explorerPresetUrl(1);
+        if (clean == QLatin1String("legacy")) m_third_party_tx_url = explorerPresetUrl(2);
+    }
+    QSettings settings;
+    settings.setValue(QStringLiteral("ExplorerMode"), m_explorer_mode);
+    settings.setValue(QStringLiteral("ThirdPartyTxUrlsEnabled"), m_third_party_tx_urls_enabled);
+    if (clean != QLatin1String("custom")) settings.setValue(QStringLiteral("ThirdPartyTxUrl"), m_third_party_tx_url);
+    Q_EMIT settingsChanged();
+}
+
+bool NuRpcService::usingInternalExplorer() const
+{
+    return m_explorer_mode == QLatin1String("internal");
+}
+
 QString NuRpcService::normalizedExplorerUrl(const QString& url) const
 {
-    QString clean = url.trimmed();
+    QString clean = singleLineLimited(url, 1024);
     if (clean.isEmpty()) return QString();
     if (!clean.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive) &&
         !clean.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
         clean.prepend(QStringLiteral("https://"));
     }
+    QString parse_text = clean;
+    parse_text.replace(QStringLiteral("%s"), QStringLiteral("defcoin-placeholder"));
+    if (!isSafeHttpUrl(QUrl(parse_text, QUrl::StrictMode))) return QString();
     return clean;
 }
 
@@ -2024,6 +5326,1052 @@ QString NuRpcService::explorerAddressUrlTemplate(const QString& url) const
     out.replace(QStringLiteral("/tx/%s"), QStringLiteral("/address/%s"), Qt::CaseInsensitive);
     out.replace(QStringLiteral("/transaction/%s"), QStringLiteral("/address/%s"), Qt::CaseInsensitive);
     return out;
+}
+
+QString NuRpcService::explorerDatabasePath() const
+{
+    const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
+    return data_dir.filePath(QStringLiteral("nu-explorer/explorer.sqlite"));
+}
+
+bool NuRpcService::ensureExplorerDatabase(QString* error) const
+{
+    const QFileInfo db_info(explorerDatabasePath());
+    if (!QDir().mkpath(db_info.absolutePath())) {
+        if (error) *error = QStringLiteral("Could not create explorer index directory:\n%1").arg(db_info.absolutePath());
+        return false;
+    }
+
+    const QString connection_name = QStringLiteral("nu_explorer_init_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(db_info.absoluteFilePath());
+        ok = db.open();
+        if (!ok) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery query(db);
+            query.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+            query.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+            query.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+            ok = query.exec(QStringLiteral(
+                "CREATE TABLE IF NOT EXISTS explorer_lookups ("
+                "type TEXT NOT NULL,"
+                "id TEXT NOT NULL,"
+                "title TEXT NOT NULL,"
+                "summary TEXT NOT NULL,"
+                "raw_json TEXT NOT NULL,"
+                "cached_at INTEGER NOT NULL,"
+                "PRIMARY KEY(type, id))"));
+            if (!ok) local_error = query.lastError().text();
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_lookups_cached_at ON explorer_lookups(cached_at DESC)"));
+            if (ok) {
+                ok = query.exec(QStringLiteral(
+                    "CREATE TABLE IF NOT EXISTS explorer_meta ("
+                    "key TEXT PRIMARY KEY,"
+                    "value TEXT NOT NULL)"));
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                ok = query.exec(QStringLiteral(
+                    "CREATE TABLE IF NOT EXISTS explorer_blocks ("
+                    "height INTEGER PRIMARY KEY,"
+                    "hash TEXT NOT NULL UNIQUE,"
+                    "time INTEGER NOT NULL,"
+                    "tx_count INTEGER NOT NULL,"
+                    "raw_json TEXT NOT NULL,"
+                    "indexed_at INTEGER NOT NULL)"));
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                ok = query.exec(QStringLiteral(
+                    "CREATE TABLE IF NOT EXISTS explorer_block_transactions ("
+                    "block_height INTEGER NOT NULL,"
+                    "tx_index INTEGER NOT NULL,"
+                    "txid TEXT NOT NULL,"
+                    "PRIMARY KEY(block_height, tx_index))"));
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_block_transactions_txid ON explorer_block_transactions(txid)"));
+            if (ok) {
+                ok = query.exec(QStringLiteral(
+                    "CREATE TABLE IF NOT EXISTS explorer_tx_outputs ("
+                    "txid TEXT NOT NULL,"
+                    "vout INTEGER NOT NULL,"
+                    "block_height INTEGER NOT NULL,"
+                    "address TEXT NOT NULL,"
+                    "value_sats INTEGER NOT NULL,"
+                    "value_text TEXT NOT NULL,"
+                    "script_type TEXT,"
+                    "spent_by_txid TEXT,"
+                    "spent_in_height INTEGER,"
+                    "spent_vin INTEGER,"
+                    "PRIMARY KEY(txid, vout, address))"));
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_address ON explorer_tx_outputs(address, block_height DESC)"));
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_block ON explorer_tx_outputs(block_height)"));
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_spent_by ON explorer_tx_outputs(spent_by_txid)"));
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok && error) *error = QStringLiteral("SQLite explorer index unavailable: %1").arg(local_error);
+    return ok;
+}
+
+void NuRpcService::cacheExplorerLookup(const QString& type,
+                                       const QString& id,
+                                       const QString& title,
+                                       const QString& summary,
+                                       const QJsonValue& raw_json)
+{
+    QString error;
+    if (!ensureExplorerDatabase(&error)) {
+        appendLaunchDiagnostic(error);
+        return;
+    }
+    const QString connection_name = QStringLiteral("nu_explorer_write_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        ok = db.open();
+        if (ok) {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral(
+                "INSERT INTO explorer_lookups(type, id, title, summary, raw_json, cached_at) "
+                "VALUES(?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(type, id) DO UPDATE SET "
+                "title=excluded.title, summary=excluded.summary, raw_json=excluded.raw_json, cached_at=excluded.cached_at"));
+            query.addBindValue(type);
+            query.addBindValue(id);
+            query.addBindValue(title);
+            query.addBindValue(summary);
+            query.addBindValue(QString::fromUtf8(QJsonDocument(raw_json.toObject()).toJson(QJsonDocument::Compact)));
+            query.addBindValue(QDateTime::currentSecsSinceEpoch());
+            ok = query.exec();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (ok) loadExplorerRecentLookups();
+}
+
+void NuRpcService::loadExplorerRecentLookups()
+{
+    QVariantList rows;
+    QString error;
+    if (ensureExplorerDatabase(&error)) {
+        const QString connection_name = QStringLiteral("nu_explorer_read_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+            db.setDatabaseName(explorerDatabasePath());
+            if (db.open()) {
+                QSqlQuery query(db);
+                if (query.exec(QStringLiteral("SELECT type, id, title, summary, cached_at FROM explorer_lookups ORDER BY cached_at DESC LIMIT 50"))) {
+                    while (query.next()) {
+                        const QDateTime cached_at = QDateTime::fromSecsSinceEpoch(query.value(4).toLongLong()).toLocalTime();
+                        rows.push_back(QVariantMap{
+                            {QStringLiteral("type"), query.value(0).toString()},
+                            {QStringLiteral("id"), query.value(1).toString()},
+                            {QStringLiteral("title"), query.value(2).toString()},
+                            {QStringLiteral("summary"), query.value(3).toString()},
+                            {QStringLiteral("cached"), cached_at.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))},
+                            {QStringLiteral("cells"), QVariantList{
+                                query.value(0).toString(),
+                                query.value(1).toString(),
+                                query.value(2).toString(),
+                                cached_at.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))}},
+                            {QStringLiteral("meta"), QVariantMap{{QStringLiteral("type"), query.value(0).toString()}, {QStringLiteral("id"), query.value(1).toString()}}}
+                        });
+                    }
+                }
+            }
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connection_name);
+    }
+    m_explorer_recent_lookups = rows;
+    Q_EMIT explorerChanged();
+}
+
+void NuRpcService::refreshExplorerRecentLookups()
+{
+    loadExplorerRecentLookups();
+    m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
+    m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
+    if (!m_explorer_indexing) {
+        const int highest = explorerHighestIndexedBlock();
+        m_explorer_index_height = highest < 0 ? 0 : highest + 1;
+        if (m_explorer_indexed_block_count > 0) {
+            m_explorer_index_status = QStringLiteral("Index paused at block %1 with %2 blocks cached.")
+                .arg(QString::number(highest), QString::number(m_explorer_indexed_block_count));
+        }
+    }
+    Q_EMIT explorerChanged();
+}
+
+int NuRpcService::explorerHighestIndexedBlock() const
+{
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return -1;
+    int highest = -1;
+    const QString connection_name = QStringLiteral("nu_explorer_highest_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            if (query.exec(QStringLiteral("SELECT MAX(height) FROM explorer_blocks")) && query.next() && !query.value(0).isNull()) {
+                highest = query.value(0).toInt();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    return highest;
+}
+
+int NuRpcService::explorerIndexedBlockCountFromDb() const
+{
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return 0;
+    int count = 0;
+    const QString connection_name = QStringLiteral("nu_explorer_count_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            if (query.exec(QStringLiteral("SELECT COUNT(*) FROM explorer_blocks")) && query.next()) {
+                count = query.value(0).toInt();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    return count;
+}
+
+int NuRpcService::explorerIndexedOutputCountFromDb() const
+{
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return 0;
+    int count = 0;
+    const QString connection_name = QStringLiteral("nu_explorer_output_count_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            if (query.exec(QStringLiteral("SELECT COUNT(*) FROM explorer_tx_outputs")) && query.next()) {
+                count = query.value(0).toInt();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    return count;
+}
+
+QString NuRpcService::explorerBlockHashAtHeight(int height) const
+{
+    if (height < 0) return QString();
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return QString();
+    QString hash;
+    const QString connection_name = QStringLiteral("nu_explorer_height_hash_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral("SELECT hash FROM explorer_blocks WHERE height = ?"));
+            query.addBindValue(height);
+            if (query.exec() && query.next()) hash = query.value(0).toString();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    return hash;
+}
+
+QString NuRpcService::explorerBlockHashForTransaction(const QString& txid) const
+{
+    const QString clean_txid = txid.trimmed();
+    if (clean_txid.isEmpty()) return QString();
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return QString();
+    QString block_hash;
+    const QString connection_name = QStringLiteral("nu_explorer_txblock_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral(
+                "SELECT b.hash FROM explorer_blocks b "
+                "JOIN explorer_block_transactions t ON t.block_height = b.height "
+                "WHERE t.txid = ? ORDER BY b.height DESC LIMIT 1"));
+            query.addBindValue(clean_txid);
+            if (query.exec() && query.next()) {
+                block_hash = query.value(0).toString();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    return block_hash;
+}
+
+QString NuRpcService::explorerCachedBlockHtml(const QString& block_id, QJsonObject* raw_json, bool* found) const
+{
+    if (found) *found = false;
+    if (raw_json) *raw_json = QJsonObject();
+    const QString clean = block_id.trimmed();
+    if (clean.isEmpty()) return QString();
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return QString();
+
+    bool is_height = false;
+    const int requested_height = clean.toInt(&is_height);
+    int height = -1;
+    QString hash;
+    qint64 block_time = 0;
+    int tx_count = 0;
+    QJsonObject raw;
+    QString tx_rows;
+
+    const QString connection_name = QStringLiteral("nu_explorer_cached_block_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery block_query(db);
+            block_query.prepare(is_height
+                ? QStringLiteral("SELECT height, hash, time, tx_count, raw_json FROM explorer_blocks WHERE height = ?")
+                : QStringLiteral("SELECT height, hash, time, tx_count, raw_json FROM explorer_blocks WHERE hash = ?"));
+            block_query.addBindValue(is_height ? QVariant(requested_height) : QVariant(clean));
+            if (block_query.exec() && block_query.next()) {
+                height = block_query.value(0).toInt();
+                hash = block_query.value(1).toString();
+                block_time = block_query.value(2).toLongLong();
+                tx_count = block_query.value(3).toInt();
+                raw = QJsonDocument::fromJson(block_query.value(4).toString().toUtf8()).object();
+            }
+
+            if (height >= 0) {
+                QSqlQuery tx_query(db);
+                tx_query.prepare(QStringLiteral("SELECT tx_index, txid FROM explorer_block_transactions WHERE block_height = ? ORDER BY tx_index ASC LIMIT 25"));
+                tx_query.addBindValue(height);
+                if (tx_query.exec()) {
+                    while (tx_query.next()) {
+                        const QString txid = tx_query.value(1).toString();
+                        tx_rows += QStringLiteral("<tr><td>%1</td><td><a href=\"nu://transaction/%2\">%3</a></td></tr>")
+                            .arg(QString::number(tx_query.value(0).toInt()).toHtmlEscaped(),
+                                 QString::fromLatin1(QUrl::toPercentEncoding(txid)).toHtmlEscaped(),
+                                 txid.toHtmlEscaped());
+                    }
+                }
+            }
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+
+    if (height < 0) return QString();
+    if (found) *found = true;
+    if (raw_json) *raw_json = raw;
+    if (tx_rows.isEmpty()) tx_rows = QStringLiteral("<tr><td colspan=\"2\">No indexed transactions available.</td></tr>");
+    if (tx_count > 25) {
+        tx_rows += QStringLiteral("<tr><td colspan=\"2\">%1 more transactions omitted from the compact cached view.</td></tr>")
+            .arg(QString::number(tx_count - 25).toHtmlEscaped());
+    }
+
+    return QStringLiteral(
+        "<table>"
+        "<tr><th>Height</th><td>%1</td></tr>"
+        "<tr><th>Hash</th><td>%2</td></tr>"
+        "<tr><th>Time</th><td>%3</td></tr>"
+        "<tr><th>Transactions</th><td>%4</td></tr>"
+        "<tr><th>Source</th><td>Local SQLite explorer index</td></tr>"
+        "</table>"
+        "<h3>Indexed transactions</h3><table><tr><th>N</th><th>Transaction ID</th></tr>%5</table>")
+        .arg(QString::number(height).toHtmlEscaped(),
+             hash.toHtmlEscaped(),
+             QDateTime::fromSecsSinceEpoch(block_time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t")).toHtmlEscaped(),
+             QString::number(tx_count).toHtmlEscaped(),
+             tx_rows);
+}
+
+QString NuRpcService::explorerIndexedTransactionHtml(const QString& txid, QJsonObject* raw_json, bool* found) const
+{
+    if (found) *found = false;
+    if (raw_json) *raw_json = QJsonObject();
+    const QString clean_txid = txid.trimmed();
+    if (clean_txid.isEmpty()) return QString();
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return QString();
+
+    int height = -1;
+    int tx_index = -1;
+    QString block_hash;
+    QString output_rows;
+    qint64 output_total_sats = 0;
+    int output_count = 0;
+
+    const QString connection_name = QStringLiteral("nu_explorer_indexed_tx_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery tx_query(db);
+            tx_query.prepare(QStringLiteral(
+                "SELECT t.block_height, t.tx_index, b.hash "
+                "FROM explorer_block_transactions t JOIN explorer_blocks b ON b.height = t.block_height "
+                "WHERE t.txid = ? ORDER BY t.block_height DESC LIMIT 1"));
+            tx_query.addBindValue(clean_txid);
+            if (tx_query.exec() && tx_query.next()) {
+                height = tx_query.value(0).toInt();
+                tx_index = tx_query.value(1).toInt();
+                block_hash = tx_query.value(2).toString();
+            }
+
+            if (height >= 0) {
+                QSqlQuery out_query(db);
+                out_query.prepare(QStringLiteral(
+                    "SELECT vout, address, value_sats, spent_by_txid "
+                    "FROM explorer_tx_outputs WHERE txid = ? "
+                    "ORDER BY vout ASC, address ASC LIMIT 200"));
+                out_query.addBindValue(clean_txid);
+                if (out_query.exec()) {
+                    while (out_query.next()) {
+                        const QString address = out_query.value(1).toString();
+                        const qint64 value_sats = out_query.value(2).toLongLong();
+                        const QString spent_by = out_query.value(3).toString();
+                        ++output_count;
+                        output_total_sats += value_sats;
+                        output_rows += QStringLiteral("<tr><td>%1</td><td>%2</td><td><a href=\"nu://address/%3\">%4</a></td><td>%5</td></tr>")
+                            .arg(QString::number(out_query.value(0).toInt()).toHtmlEscaped(),
+                                 explorerAmountText(value_sats).toHtmlEscaped(),
+                                 QString::fromLatin1(QUrl::toPercentEncoding(address)).toHtmlEscaped(),
+                                 address.toHtmlEscaped(),
+                                 spent_by.isEmpty()
+                                    ? QStringLiteral("Unspent").toHtmlEscaped()
+                                    : QStringLiteral("<a href=\"nu://transaction/%1\">Spent</a>").arg(QString::fromLatin1(QUrl::toPercentEncoding(spent_by)).toHtmlEscaped()));
+                    }
+                }
+            }
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+
+    if (height < 0) return QString();
+    if (found) *found = true;
+    QJsonObject raw;
+    raw.insert(QStringLiteral("txid"), clean_txid);
+    raw.insert(QStringLiteral("source"), QStringLiteral("local SQLite explorer index"));
+    raw.insert(QStringLiteral("blockHeight"), height);
+    raw.insert(QStringLiteral("blockHash"), block_hash);
+    raw.insert(QStringLiteral("txIndex"), tx_index);
+    if (raw_json) *raw_json = raw;
+    if (output_rows.isEmpty()) output_rows = QStringLiteral("<tr><td colspan=\"4\">No standard address outputs indexed for this transaction.</td></tr>");
+
+    const QString block_link = QStringLiteral("<a href=\"nu://block/%1\">%2</a>")
+        .arg(QString::fromLatin1(QUrl::toPercentEncoding(block_hash)).toHtmlEscaped(), block_hash.toHtmlEscaped());
+    return QStringLiteral(
+        "<table>"
+        "<tr><th>Transaction ID</th><td>%1</td></tr>"
+        "<tr><th>Block</th><td>%2</td></tr>"
+        "<tr><th>Block height</th><td>%3</td></tr>"
+        "<tr><th>Block tx index</th><td>%4</td></tr>"
+        "<tr><th>Indexed output total</th><td>%5</td></tr>"
+        "<tr><th>Source</th><td>Local SQLite explorer index</td></tr>"
+        "</table>"
+        "<p>This cached view is compact. Connect the backend for full raw transaction JSON and input details.</p>"
+        "<h3>Indexed outputs</h3><table><tr><th>N</th><th>Value</th><th>Address</th><th>Status</th></tr>%6</table>")
+        .arg(clean_txid.toHtmlEscaped(),
+             block_link,
+             QString::number(height).toHtmlEscaped(),
+             QString::number(tx_index).toHtmlEscaped(),
+             explorerAmountText(output_total_sats).toHtmlEscaped(),
+             output_rows);
+}
+
+QString NuRpcService::explorerIndexedAddressHtml(const QString& address, bool* found) const
+{
+    if (found) *found = false;
+    const QString clean_address = address.trimmed();
+    if (clean_address.isEmpty()) return QString();
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return QString();
+
+    qint64 received_sats = 0;
+    qint64 spent_sats = 0;
+    int output_count = 0;
+    int spent_output_count = 0;
+    int tx_count = 0;
+    int first_height = -1;
+    int last_height = -1;
+    QString rows;
+
+    const QString connection_name = QStringLiteral("nu_explorer_address_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery summary(db);
+            summary.prepare(QStringLiteral(
+                "SELECT COUNT(*), COUNT(DISTINCT txid), "
+                "COALESCE(SUM(value_sats), 0), "
+                "COALESCE(SUM(CASE WHEN spent_by_txid IS NOT NULL THEN value_sats ELSE 0 END), 0), "
+                "COALESCE(SUM(CASE WHEN spent_by_txid IS NOT NULL THEN 1 ELSE 0 END), 0), "
+                "MIN(block_height), MAX(block_height) "
+                "FROM explorer_tx_outputs WHERE address = ?"));
+            summary.addBindValue(clean_address);
+            if (summary.exec() && summary.next()) {
+                output_count = summary.value(0).toInt();
+                tx_count = summary.value(1).toInt();
+                received_sats = summary.value(2).toLongLong();
+                spent_sats = summary.value(3).toLongLong();
+                spent_output_count = summary.value(4).toInt();
+                if (!summary.value(5).isNull()) first_height = summary.value(5).toInt();
+                if (!summary.value(6).isNull()) last_height = summary.value(6).toInt();
+            }
+
+            if (output_count > 0) {
+                QSqlQuery detail(db);
+                detail.prepare(QStringLiteral(
+                    "SELECT block_height, txid, vout, value_sats, spent_by_txid "
+                    "FROM explorer_tx_outputs WHERE address = ? "
+                    "ORDER BY block_height DESC, txid DESC, vout ASC LIMIT 200"));
+                detail.addBindValue(clean_address);
+                if (detail.exec()) {
+                    while (detail.next()) {
+                        const QString txid = detail.value(1).toString();
+                        const QString spent_by = detail.value(4).toString();
+                        rows += QStringLiteral("<tr><td>%1</td><td><a href=\"nu://transaction/%2\">%3</a></td><td>%4</td><td>%5</td><td>%6</td></tr>")
+                            .arg(QString::number(detail.value(0).toInt()).toHtmlEscaped(),
+                                 QString::fromLatin1(QUrl::toPercentEncoding(txid)).toHtmlEscaped(),
+                                 txid.toHtmlEscaped(),
+                                 QString::number(detail.value(2).toInt()).toHtmlEscaped(),
+                                 explorerAmountText(detail.value(3).toLongLong()).toHtmlEscaped(),
+                                 spent_by.isEmpty()
+                                    ? QStringLiteral("Unspent").toHtmlEscaped()
+                                    : QStringLiteral("<a href=\"nu://transaction/%1\">Spent</a>").arg(QString::fromLatin1(QUrl::toPercentEncoding(spent_by)).toHtmlEscaped()));
+                    }
+                }
+            }
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+
+    if (output_count <= 0) return QString();
+    if (found) *found = true;
+
+    const qint64 balance_sats = received_sats - spent_sats;
+    QString coverage = QStringLiteral("Indexed outputs from block %1 to %2.")
+        .arg(QString::number(first_height), QString::number(last_height));
+    const int highest = explorerHighestIndexedBlock();
+    if (highest >= 0) {
+        coverage += QStringLiteral(" Local index currently reaches block %1.").arg(QString::number(highest));
+    }
+    if (rows.isEmpty()) rows = QStringLiteral("<tr><td colspan=\"5\">No recent outputs available.</td></tr>");
+
+    return QStringLiteral(
+        "<table>"
+        "<tr><th>Address</th><td>%1</td></tr>"
+        "<tr><th>Total received</th><td>%2</td></tr>"
+        "<tr><th>Spent outputs</th><td>%3 across %4 outputs</td></tr>"
+        "<tr><th>Indexed balance</th><td>%5</td></tr>"
+        "<tr><th>Transactions</th><td>%6 indexed txs / %7 outputs</td></tr>"
+        "<tr><th>Coverage</th><td>%8</td></tr>"
+        "</table>"
+        "<p>This is chain-index data from the local SQLite cache. It is complete only through the indexed block height shown above.</p>"
+        "<h3>Recent indexed outputs</h3>"
+        "<table><tr><th>Height</th><th>Transaction ID</th><th>Vout</th><th>Value</th><th>Status</th></tr>%9</table>")
+        .arg(clean_address.toHtmlEscaped(),
+             explorerAmountText(received_sats).toHtmlEscaped(),
+             explorerAmountText(spent_sats).toHtmlEscaped(),
+             QString::number(spent_output_count).toHtmlEscaped(),
+             explorerAmountText(balance_sats).toHtmlEscaped(),
+             QString::number(tx_count).toHtmlEscaped(),
+             QString::number(output_count).toHtmlEscaped(),
+             coverage.toHtmlEscaped(),
+             rows);
+}
+
+bool NuRpcService::explorerPruneFromHeight(int height, QString* error)
+{
+    const int prune_height = std::max(0, height);
+    QString db_error;
+    if (!ensureExplorerDatabase(&db_error)) {
+        if (error) *error = db_error;
+        return false;
+    }
+
+    const QString connection_name = QStringLiteral("nu_explorer_prune_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        ok = db.open();
+        if (!ok) {
+            local_error = db.lastError().text();
+        } else {
+            ok = db.transaction();
+            if (!ok) local_error = db.lastError().text();
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("UPDATE explorer_tx_outputs SET spent_by_txid = NULL, spent_in_height = NULL, spent_vin = NULL WHERE spent_in_height >= ?"));
+                query.addBindValue(prune_height);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("DELETE FROM explorer_tx_outputs WHERE block_height >= ?"));
+                query.addBindValue(prune_height);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("DELETE FROM explorer_block_transactions WHERE block_height >= ?"));
+                query.addBindValue(prune_height);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("DELETE FROM explorer_blocks WHERE height >= ?"));
+                query.addBindValue(prune_height);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('last_indexed_height', ?)"));
+                query.addBindValue(QString::number(prune_height - 1));
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                ok = db.commit();
+                if (!ok) local_error = db.lastError().text();
+            } else {
+                db.rollback();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok && error) *error = local_error;
+    return ok;
+}
+
+bool NuRpcService::storeExplorerBlock(const QJsonObject& block, QString* error)
+{
+    const int height = block.value(QStringLiteral("height")).toInt(-1);
+    const QString hash = block.value(QStringLiteral("hash")).toString();
+    const QJsonArray txs = block.value(QStringLiteral("tx")).toArray();
+    QJsonArray compact_txs;
+    for (const QJsonValue& value : txs) {
+        QString txid = value.toString();
+        if (txid.isEmpty()) txid = value.toObject().value(QStringLiteral("txid")).toString();
+        if (!txid.isEmpty()) compact_txs.append(txid);
+    }
+    QJsonObject compact_block = block;
+    compact_block.insert(QStringLiteral("tx"), compact_txs);
+    if (height < 0 || hash.isEmpty()) {
+        if (error) *error = QStringLiteral("Block JSON did not include a height and hash.");
+        return false;
+    }
+    QString db_error;
+    if (!ensureExplorerDatabase(&db_error)) {
+        if (error) *error = db_error;
+        return false;
+    }
+
+    const QString connection_name = QStringLiteral("nu_explorer_block_write_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        ok = db.open();
+        if (!ok) {
+            local_error = db.lastError().text();
+        } else {
+            ok = db.transaction();
+            if (!ok) local_error = db.lastError().text();
+            if (ok) {
+                QSqlQuery block_query(db);
+                block_query.prepare(QStringLiteral(
+                    "INSERT INTO explorer_blocks(height, hash, time, tx_count, raw_json, indexed_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(height) DO UPDATE SET "
+                    "hash=excluded.hash, time=excluded.time, tx_count=excluded.tx_count, raw_json=excluded.raw_json, indexed_at=excluded.indexed_at"));
+                block_query.addBindValue(height);
+                block_query.addBindValue(hash);
+                block_query.addBindValue(block.value(QStringLiteral("time")).toVariant().toLongLong());
+                block_query.addBindValue(static_cast<int>(compact_txs.size()));
+                block_query.addBindValue(QString::fromUtf8(QJsonDocument(compact_block).toJson(QJsonDocument::Compact)));
+                block_query.addBindValue(QDateTime::currentSecsSinceEpoch());
+                ok = block_query.exec();
+                if (!ok) local_error = block_query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery delete_query(db);
+                delete_query.prepare(QStringLiteral("DELETE FROM explorer_block_transactions WHERE block_height = ?"));
+                delete_query.addBindValue(height);
+                ok = delete_query.exec();
+                if (!ok) local_error = delete_query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery delete_query(db);
+                delete_query.prepare(QStringLiteral("DELETE FROM explorer_tx_outputs WHERE block_height = ?"));
+                delete_query.addBindValue(height);
+                ok = delete_query.exec();
+                if (!ok) local_error = delete_query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery tx_query(db);
+                tx_query.prepare(QStringLiteral("INSERT INTO explorer_block_transactions(block_height, tx_index, txid) VALUES(?, ?, ?)"));
+                for (int i = 0; i < txs.size(); ++i) {
+                    QString txid = txs.at(i).toString();
+                    if (txid.isEmpty()) txid = txs.at(i).toObject().value(QStringLiteral("txid")).toString();
+                    if (txid.isEmpty()) continue;
+                    tx_query.bindValue(0, height);
+                    tx_query.bindValue(1, i);
+                    tx_query.bindValue(2, txid);
+                    ok = tx_query.exec();
+                    if (!ok) {
+                        local_error = tx_query.lastError().text();
+                        break;
+                    }
+                }
+            }
+            if (ok) {
+                QSqlQuery output_query(db);
+                output_query.prepare(QStringLiteral(
+                    "INSERT OR REPLACE INTO explorer_tx_outputs("
+                    "txid, vout, block_height, address, value_sats, value_text, script_type, spent_by_txid, spent_in_height, spent_vin) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)"));
+                QSqlQuery spend_query(db);
+                spend_query.prepare(QStringLiteral(
+                    "UPDATE explorer_tx_outputs "
+                    "SET spent_by_txid = ?, spent_in_height = ?, spent_vin = ? "
+                    "WHERE txid = ? AND vout = ?"));
+                for (int tx_index = 0; tx_index < txs.size(); ++tx_index) {
+                    const QJsonObject tx = txs.at(tx_index).toObject();
+                    const QString txid = tx.value(QStringLiteral("txid")).toString();
+                    if (txid.isEmpty()) continue;
+
+                    const QJsonArray vout = tx.value(QStringLiteral("vout")).toArray();
+                    for (const QJsonValue& out_value : vout) {
+                        const QJsonObject out = out_value.toObject();
+                        const int n = out.value(QStringLiteral("n")).toInt(-1);
+                        if (n < 0) continue;
+                        const qint64 value_sats = explorerAmountSats(out.value(QStringLiteral("value")));
+                        const QString value_text = explorerAmountText(value_sats, false);
+                        const QJsonObject script = out.value(QStringLiteral("scriptPubKey")).toObject();
+                        const QString script_type = script.value(QStringLiteral("type")).toString();
+                        const QStringList addresses = explorerOutputAddresses(script);
+                        for (const QString& address : addresses) {
+                            output_query.bindValue(0, txid);
+                            output_query.bindValue(1, n);
+                            output_query.bindValue(2, height);
+                            output_query.bindValue(3, address);
+                            output_query.bindValue(4, value_sats);
+                            output_query.bindValue(5, value_text);
+                            output_query.bindValue(6, script_type);
+                            ok = output_query.exec();
+                            if (!ok) {
+                                local_error = output_query.lastError().text();
+                                break;
+                            }
+                        }
+                        if (!ok) break;
+                    }
+                    if (!ok) break;
+
+                    const QJsonArray vin = tx.value(QStringLiteral("vin")).toArray();
+                    for (int vin_index = 0; vin_index < vin.size(); ++vin_index) {
+                        const QJsonObject in = vin.at(vin_index).toObject();
+                        const QString prev_txid = in.value(QStringLiteral("txid")).toString();
+                        const int prev_vout = in.value(QStringLiteral("vout")).toInt(-1);
+                        if (prev_txid.isEmpty() || prev_vout < 0) continue;
+                        spend_query.bindValue(0, txid);
+                        spend_query.bindValue(1, height);
+                        spend_query.bindValue(2, vin_index);
+                        spend_query.bindValue(3, prev_txid);
+                        spend_query.bindValue(4, prev_vout);
+                        ok = spend_query.exec();
+                        if (!ok) {
+                            local_error = spend_query.lastError().text();
+                            break;
+                        }
+                    }
+                    if (!ok) break;
+                }
+            }
+            if (ok) {
+                QSqlQuery meta_query(db);
+                meta_query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES(?, ?)"));
+                meta_query.addBindValue(QStringLiteral("last_indexed_height"));
+                meta_query.addBindValue(QString::number(height));
+                ok = meta_query.exec();
+                if (!ok) local_error = meta_query.lastError().text();
+            }
+            if (ok) {
+                ok = db.commit();
+                if (!ok) local_error = db.lastError().text();
+            } else {
+                db.rollback();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok && error) *error = local_error;
+    return ok;
+}
+
+void NuRpcService::startExplorerIndexing()
+{
+    if (m_explorer_indexing) return;
+    if (!m_rpc_connected) {
+        Q_EMIT userMessage(QStringLiteral("Explorer index not started"),
+                           QStringLiteral("Connect to the local Defcoin backend before building the internal explorer index."));
+        return;
+    }
+    QString error;
+    if (!ensureExplorerDatabase(&error)) {
+        Q_EMIT userMessage(QStringLiteral("Explorer index unavailable"), error);
+        return;
+    }
+
+    m_explorer_indexing = true;
+    m_explorer_index_request_in_flight = false;
+    m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
+    m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
+    m_explorer_index_status = QStringLiteral("Reading current chain height...");
+    Q_EMIT explorerChanged();
+
+    rpcCall(QStringLiteral("getblockcount"), {}, false, [this](const QJsonValue& result, const QString& error) {
+        if (!m_explorer_indexing) return;
+        if (!error.isEmpty()) {
+            m_explorer_indexing = false;
+            m_explorer_index_status = QStringLiteral("Index stopped: %1").arg(error);
+            Q_EMIT explorerChanged();
+            return;
+        }
+        m_explorer_index_tip = result.toInt();
+        const int highest = explorerHighestIndexedBlock();
+        if (highest < 0) {
+            m_explorer_index_height = 0;
+            scheduleExplorerIndexStep(0);
+            return;
+        }
+        rpcCall(QStringLiteral("getblockhash"), {highest}, false, [this, highest](const QJsonValue& hash_result, const QString& hash_error) {
+            if (!m_explorer_indexing) return;
+            const QString cached_hash = explorerBlockHashAtHeight(highest);
+            if (!hash_error.isEmpty() || cached_hash.isEmpty() || hash_result.toString() != cached_hash) {
+                QString prune_error;
+                if (!explorerPruneFromHeight(highest, &prune_error)) {
+                    m_explorer_indexing = false;
+                    m_explorer_index_status = QStringLiteral("Index repair failed at block %1: %2")
+                        .arg(QString::number(highest), prune_error);
+                    Q_EMIT explorerChanged();
+                    return;
+                }
+                m_explorer_index_height = highest;
+                m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
+                m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
+                m_explorer_index_status = QStringLiteral("Detected stale indexed tip. Pruned back to block %1 and resuming.")
+                    .arg(QString::number(std::max(0, highest - 1)));
+                Q_EMIT explorerChanged();
+                scheduleExplorerIndexStep(0);
+                return;
+            }
+            m_explorer_index_height = highest + 1;
+            if (m_explorer_index_height > m_explorer_index_tip) {
+                m_explorer_indexing = false;
+                m_explorer_index_status = QStringLiteral("Index is current at block %1.").arg(QString::number(m_explorer_index_tip));
+                Q_EMIT explorerChanged();
+                return;
+            }
+            scheduleExplorerIndexStep(0);
+        });
+    });
+}
+
+void NuRpcService::stopExplorerIndexing()
+{
+    if (!m_explorer_indexing) return;
+    m_explorer_indexing = false;
+    m_explorer_index_request_in_flight = false;
+    m_explorer_index_status = QStringLiteral("Index paused at block %1 with %2 blocks cached.")
+        .arg(QString::number(std::max(0, m_explorer_index_height - 1)),
+             QString::number(m_explorer_indexed_block_count));
+    Q_EMIT explorerChanged();
+}
+
+void NuRpcService::resetExplorerIndex()
+{
+    stopExplorerIndexing();
+    QString error;
+    if (!ensureExplorerDatabase(&error)) {
+        Q_EMIT userMessage(QStringLiteral("Explorer index unavailable"), error);
+        return;
+    }
+    const QString connection_name = QStringLiteral("nu_explorer_reset_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        ok = db.open();
+        if (ok) {
+            QSqlQuery query(db);
+            ok = query.exec(QStringLiteral("DELETE FROM explorer_tx_outputs"));
+            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_block_transactions"));
+            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_blocks"));
+            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_meta WHERE key IN ('last_indexed_height', 'tip_height')"));
+            if (!ok) local_error = query.lastError().text();
+        } else {
+            local_error = db.lastError().text();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok) {
+        Q_EMIT userMessage(QStringLiteral("Explorer index reset failed"), local_error);
+        return;
+    }
+    m_explorer_index_height = 0;
+    m_explorer_index_tip = 0;
+    m_explorer_indexed_block_count = 0;
+    m_explorer_indexed_output_count = 0;
+    m_explorer_index_status = QStringLiteral("Index reset. Cached lookups were kept; block index tables were cleared.");
+    Q_EMIT explorerChanged();
+}
+
+void NuRpcService::scheduleExplorerIndexStep(int delay_ms)
+{
+    if (!m_explorer_indexing || m_explorer_index_request_in_flight) return;
+    QTimer::singleShot(std::max(0, delay_ms), this, [this] {
+        explorerIndexStep();
+    });
+}
+
+void NuRpcService::explorerIndexStep()
+{
+    if (!m_explorer_indexing || m_explorer_index_request_in_flight) return;
+    if (m_explorer_index_height > m_explorer_index_tip) {
+        m_explorer_indexing = false;
+        m_explorer_index_status = QStringLiteral("Index is current at block %1 with %2 blocks cached.")
+            .arg(QString::number(m_explorer_index_tip), QString::number(m_explorer_indexed_block_count));
+        Q_EMIT explorerChanged();
+        return;
+    }
+
+    const int height = m_explorer_index_height;
+    m_explorer_index_request_in_flight = true;
+    const double pct = m_explorer_index_tip > 0 ? (100.0 * static_cast<double>(height) / static_cast<double>(m_explorer_index_tip)) : 0.0;
+    m_explorer_index_status = QStringLiteral("Indexing block %1 of %2 (%3%).")
+        .arg(QString::number(height),
+             QString::number(m_explorer_index_tip),
+             QString::number(pct, 'f', 2));
+    Q_EMIT explorerChanged();
+
+    rpcCall(QStringLiteral("getblockhash"), {height}, false, [this, height](const QJsonValue& hash_result, const QString& hash_error) {
+        if (!m_explorer_indexing) {
+            m_explorer_index_request_in_flight = false;
+            return;
+        }
+        if (!hash_error.isEmpty()) {
+            m_explorer_indexing = false;
+            m_explorer_index_request_in_flight = false;
+            m_explorer_index_status = QStringLiteral("Index stopped at block %1: %2").arg(QString::number(height), hash_error);
+            Q_EMIT explorerChanged();
+            return;
+        }
+        const QString hash = hash_result.toString();
+        rpcCall(QStringLiteral("getblock"), {hash, 2}, false, [this, height](const QJsonValue& block_result, const QString& block_error) {
+            m_explorer_index_request_in_flight = false;
+            if (!m_explorer_indexing) return;
+            if (!block_error.isEmpty()) {
+                m_explorer_indexing = false;
+                m_explorer_index_status = QStringLiteral("Index stopped at block %1: %2").arg(QString::number(height), block_error);
+                Q_EMIT explorerChanged();
+                return;
+            }
+            const QJsonObject block = block_result.toObject();
+            const QString previous_hash = block.value(QStringLiteral("previousblockhash")).toString();
+            if (height > 0 && previous_hash != explorerBlockHashAtHeight(height - 1)) {
+                QString prune_error;
+                if (!explorerPruneFromHeight(height - 1, &prune_error)) {
+                    m_explorer_indexing = false;
+                    m_explorer_index_status = QStringLiteral("Index repair failed near block %1: %2").arg(QString::number(height), prune_error);
+                    Q_EMIT explorerChanged();
+                    return;
+                }
+                m_explorer_index_height = height - 1;
+                m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
+                m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
+                m_explorer_index_status = QStringLiteral("Detected a chain reorg near block %1. Pruned one block and will retry.").arg(QString::number(height));
+                Q_EMIT explorerChanged();
+                scheduleExplorerIndexStep(0);
+                return;
+            }
+            QString store_error;
+            if (!storeExplorerBlock(block, &store_error)) {
+                m_explorer_indexing = false;
+                m_explorer_index_status = QStringLiteral("Index storage failed at block %1: %2").arg(QString::number(height), store_error);
+                Q_EMIT explorerChanged();
+                return;
+            }
+            ++m_explorer_index_height;
+            ++m_explorer_indexed_block_count;
+            if (height % 100 == 0) {
+                m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
+                m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
+            }
+            const double pct = m_explorer_index_tip > 0 ? (100.0 * static_cast<double>(m_explorer_index_height) / static_cast<double>(m_explorer_index_tip)) : 0.0;
+            m_explorer_index_status = QStringLiteral("Indexed through block %1 of %2 (%3%). %4 blocks and %5 standard outputs cached.")
+                .arg(QString::number(height),
+                     QString::number(m_explorer_index_tip),
+                     QString::number(std::min(100.0, pct), 'f', 2),
+                     QString::number(m_explorer_indexed_block_count),
+                     QString::number(m_explorer_indexed_output_count));
+            Q_EMIT explorerChanged();
+            scheduleExplorerIndexStep(120);
+        });
+    });
+}
+
+QString NuRpcService::explorerLookupHtml(const QString& title,
+                                         const QString& summary_html,
+                                         const QJsonValue& raw_json) const
+{
+    return QStringLiteral("<h2>%1</h2>%2<h3>Source JSON</h3><pre>%3</pre>")
+        .arg(title.toHtmlEscaped(),
+             summary_html,
+             QString::fromUtf8(QJsonDocument(raw_json.toObject()).toJson(QJsonDocument::Indented)).toHtmlEscaped());
+}
+
+void NuRpcService::emitExplorerError(const QString& title, const QString& detail)
+{
+    Q_EMIT explorerWindowRequested(title, QStringLiteral("<h2>%1</h2><p>%2</p>")
+        .arg(title.toHtmlEscaped(), detail.toHtmlEscaped()));
 }
 
 QString NuRpcService::explorerUrlForTransaction(const QString& txid) const
@@ -2046,6 +6394,377 @@ QString NuRpcService::explorerUrlForAddress(const QString& address) const
     return out;
 }
 
+void NuRpcService::openTransactionInExplorer(const QString& txid)
+{
+    const QString clean_txid = txid.trimmed();
+    if (clean_txid.isEmpty()) {
+        emitExplorerError(QStringLiteral("Transaction not opened"), QStringLiteral("This item does not include a transaction ID."));
+        return;
+    }
+    if (!isHex256(clean_txid)) {
+        emitExplorerError(QStringLiteral("Transaction not opened"), QStringLiteral("Transaction IDs must be 64 hexadecimal characters."));
+        return;
+    }
+    if (!usingInternalExplorer()) {
+        const QString url = explorerUrlForTransaction(clean_txid);
+        if (url.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Explorer link unavailable"),
+                               QStringLiteral("Choose a Defcoin explorer URL in Settings before opening external transaction links."));
+            return;
+        }
+        const QUrl external_url(url, QUrl::StrictMode);
+        if (!isSafeHttpUrl(external_url)) {
+            Q_EMIT userMessage(QStringLiteral("Explorer link blocked"),
+                               QStringLiteral("External explorer links must use a valid http:// or https:// URL without embedded credentials."));
+            return;
+        }
+        QDesktopServices::openUrl(external_url);
+        return;
+    }
+    if (!m_rpc_connected) {
+        bool indexed_found = false;
+        QJsonObject indexed_raw;
+        const QString indexed_summary = explorerIndexedTransactionHtml(clean_txid, &indexed_raw, &indexed_found);
+        if (indexed_found) {
+            Q_EMIT explorerWindowRequested(QStringLiteral("Transaction %1").arg(clean_txid.left(12)),
+                                           explorerLookupHtml(QStringLiteral("Transaction"), indexed_summary, indexed_raw));
+            return;
+        }
+        emitExplorerError(QStringLiteral("Internal explorer unavailable"),
+                          QStringLiteral("Connect to the local Defcoin backend before using the internal explorer."));
+        return;
+    }
+
+    QJsonArray raw_tx_params;
+    raw_tx_params.append(clean_txid);
+    raw_tx_params.append(true);
+    const QString indexed_block_hash = explorerBlockHashForTransaction(clean_txid);
+    if (!indexed_block_hash.isEmpty()) raw_tx_params.append(indexed_block_hash);
+    rpcCall(QStringLiteral("getrawtransaction"), raw_tx_params, false, [this, clean_txid](const QJsonValue& result, const QString& error) {
+        if (!error.isEmpty()) {
+            bool indexed_found = false;
+            QJsonObject indexed_raw;
+            const QString indexed_summary = explorerIndexedTransactionHtml(clean_txid, &indexed_raw, &indexed_found);
+            if (indexed_found) {
+                Q_EMIT explorerWindowRequested(QStringLiteral("Transaction %1").arg(clean_txid.left(12)),
+                                               explorerLookupHtml(QStringLiteral("Transaction"), indexed_summary, indexed_raw));
+                return;
+            }
+            rpcCall(QStringLiteral("gettransaction"), {clean_txid, true}, true, [this, clean_txid](const QJsonValue& wallet_result, const QString& wallet_error) {
+                if (!wallet_error.isEmpty()) {
+                    emitExplorerError(QStringLiteral("Transaction not found"),
+                                      QStringLiteral("The internal explorer could not retrieve this transaction from the node or the active wallet:\n%1").arg(wallet_error));
+                    return;
+                }
+                const QJsonObject tx = wallet_result.toObject();
+                const QString summary = QStringLiteral("<table><tr><th>Transaction ID</th><td>%1</td></tr><tr><th>Confirmations</th><td>%2</td></tr><tr><th>Amount</th><td>%3 DFC</td></tr></table>")
+                    .arg(clean_txid.toHtmlEscaped(),
+                         QString::number(tx.value(QStringLiteral("confirmations")).toInt()).toHtmlEscaped(),
+                         QString::number(tx.value(QStringLiteral("amount")).toDouble(), 'f', 8).toHtmlEscaped());
+                cacheExplorerLookup(QStringLiteral("transaction"), clean_txid, QStringLiteral("Transaction"), clean_txid, wallet_result);
+                Q_EMIT explorerWindowRequested(QStringLiteral("Transaction %1").arg(clean_txid.left(12)), explorerLookupHtml(QStringLiteral("Transaction"), summary, wallet_result));
+            });
+            return;
+        }
+        const QJsonObject tx = result.toObject();
+        const QJsonArray vin = tx.value(QStringLiteral("vin")).toArray();
+        const QJsonArray vout = tx.value(QStringLiteral("vout")).toArray();
+        QString output_rows;
+        for (const QJsonValue& value : vout) {
+            const QJsonObject out = value.toObject();
+            const QJsonObject script = out.value(QStringLiteral("scriptPubKey")).toObject();
+            QString address;
+            const QJsonArray addresses = script.value(QStringLiteral("addresses")).toArray();
+            if (!addresses.isEmpty()) address = addresses.first().toString();
+            if (address.isEmpty()) address = script.value(QStringLiteral("address")).toString();
+            output_rows += QStringLiteral("<tr><td>%1</td><td>%2 DFC</td><td>%3</td></tr>")
+                .arg(QString::number(out.value(QStringLiteral("n")).toInt()).toHtmlEscaped(),
+                     QString::number(out.value(QStringLiteral("value")).toDouble(), 'f', 8).toHtmlEscaped(),
+                     address.isEmpty()
+                         ? QStringLiteral("Unknown or nonstandard").toHtmlEscaped()
+                         : QStringLiteral("<a href=\"nu://address/%1\">%2</a>")
+                            .arg(QString::fromLatin1(QUrl::toPercentEncoding(address)).toHtmlEscaped(), address.toHtmlEscaped()));
+        }
+        const QString blockhash = tx.value(QStringLiteral("blockhash")).toString();
+        const QString block_link = blockhash.isEmpty()
+            ? QStringLiteral("Unconfirmed")
+            : QStringLiteral("<a href=\"nu://block/%1\">%2</a>").arg(QString::fromLatin1(QUrl::toPercentEncoding(blockhash)).toHtmlEscaped(), blockhash.toHtmlEscaped());
+        const QString summary = QStringLiteral(
+            "<table>"
+            "<tr><th>Transaction ID</th><td>%1</td></tr>"
+            "<tr><th>Confirmations</th><td>%2</td></tr>"
+            "<tr><th>Block</th><td>%3</td></tr>"
+            "<tr><th>Inputs</th><td>%4</td></tr>"
+            "<tr><th>Outputs</th><td>%5</td></tr>"
+            "<tr><th>Size</th><td>%6 bytes</td></tr>"
+            "</table>"
+            "<h3>Outputs</h3><table><tr><th>N</th><th>Value</th><th>Address</th></tr>%7</table>")
+            .arg(clean_txid.toHtmlEscaped(),
+                 QString::number(tx.value(QStringLiteral("confirmations")).toInt()).toHtmlEscaped(),
+                 block_link,
+                 QString::number(vin.size()).toHtmlEscaped(),
+                 QString::number(vout.size()).toHtmlEscaped(),
+                 QString::number(tx.value(QStringLiteral("size")).toInt()).toHtmlEscaped(),
+                 output_rows);
+        cacheExplorerLookup(QStringLiteral("transaction"), clean_txid, QStringLiteral("Transaction"), clean_txid, result);
+        Q_EMIT explorerWindowRequested(QStringLiteral("Transaction %1").arg(clean_txid.left(12)), explorerLookupHtml(QStringLiteral("Transaction"), summary, result));
+    });
+}
+
+void NuRpcService::openAddressInExplorer(const QString& address)
+{
+    const QString clean_address = address.trimmed();
+    if (clean_address.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Address not opened"),
+                           QStringLiteral("This row does not include an address to inspect."));
+        return;
+    }
+    if (!isLikelyBase58AddressText(clean_address)) {
+        Q_EMIT userMessage(QStringLiteral("Address not opened"),
+                           QStringLiteral("Enter a Defcoin-style Base58 address before opening explorer details."));
+        return;
+    }
+
+    if (usingInternalExplorer()) {
+        bool indexed_found = false;
+        const QString indexed_summary = explorerIndexedAddressHtml(clean_address, &indexed_found);
+        if (indexed_found) {
+            QJsonObject raw;
+            raw.insert(QStringLiteral("address"), clean_address);
+            raw.insert(QStringLiteral("source"), QStringLiteral("local SQLite explorer index"));
+            raw.insert(QStringLiteral("indexedThroughBlock"), explorerHighestIndexedBlock());
+            cacheExplorerLookup(QStringLiteral("address"), clean_address, QStringLiteral("Address"), clean_address, raw);
+            Q_EMIT explorerWindowRequested(QStringLiteral("Address %1").arg(clean_address.left(12)),
+                                           explorerLookupHtml(QStringLiteral("Address"), indexed_summary, raw));
+            return;
+        }
+
+        if (!m_rpc_connected) {
+            emitExplorerError(QStringLiteral("Internal explorer unavailable"),
+                              QStringLiteral("This address is not in the local explorer index yet. Connect to the local Defcoin backend, build the Explorer index, or switch Settings to an external explorer."));
+            return;
+        }
+        rpcCall(QStringLiteral("getaddressinfo"), {clean_address}, true, [this, clean_address](const QJsonValue& result, const QString& error) {
+            if (!error.isEmpty()) {
+                emitExplorerError(QStringLiteral("Address not found"),
+                                  QStringLiteral("The internal explorer could not retrieve this address from the active wallet:\n%1").arg(error));
+                return;
+            }
+            const QJsonObject info = result.toObject();
+            QString summary = QStringLiteral(
+                "<table>"
+                "<tr><th>Address</th><td>%1</td></tr>"
+                "<tr><th>Known to active wallet</th><td>%2</td></tr>"
+                "<tr><th>Mine</th><td>%3</td></tr>"
+                "<tr><th>Watch only</th><td>%4</td></tr>"
+                "<tr><th>Solvable</th><td>%5</td></tr>"
+                "<tr><th>Label</th><td>%6</td></tr>"
+                "</table>")
+                .arg(clean_address.toHtmlEscaped(),
+                     info.value(QStringLiteral("isvalid")).toBool() ? QStringLiteral("Yes") : QStringLiteral("No"),
+                     info.value(QStringLiteral("ismine")).toBool() ? QStringLiteral("Yes") : QStringLiteral("No"),
+                     info.value(QStringLiteral("iswatchonly")).toBool() ? QStringLiteral("Yes") : QStringLiteral("No"),
+                     info.value(QStringLiteral("solvable")).toBool() ? QStringLiteral("Yes") : QStringLiteral("No"),
+                     info.value(QStringLiteral("label")).toString().toHtmlEscaped());
+            summary += QStringLiteral("<p>This address was not found in the chain index yet, so Nu is showing active-wallet metadata. Build the Explorer background index to enable chain-wide received/spent summaries.</p>");
+            cacheExplorerLookup(QStringLiteral("address"), clean_address, QStringLiteral("Address"), clean_address, result);
+            Q_EMIT explorerWindowRequested(QStringLiteral("Address %1").arg(clean_address.left(12)), explorerLookupHtml(QStringLiteral("Address"), summary, result));
+        });
+        return;
+    }
+
+    const QString url = explorerUrlForAddress(clean_address);
+    if (url.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Explorer link unavailable"),
+                           QStringLiteral("Choose a Defcoin explorer URL in Settings before opening external address links."));
+        return;
+    }
+
+    const QUrl external_url(url, QUrl::StrictMode);
+    if (!isSafeHttpUrl(external_url)) {
+        Q_EMIT userMessage(QStringLiteral("Explorer link blocked"),
+                           QStringLiteral("External explorer links must use a valid http:// or https:// URL without embedded credentials."));
+        return;
+    }
+    QDesktopServices::openUrl(external_url);
+}
+
+void NuRpcService::openBlockInExplorer(const QString& block_id)
+{
+    const QString clean = block_id.trimmed();
+    if (clean.isEmpty()) {
+        emitExplorerError(QStringLiteral("Block not opened"), QStringLiteral("Enter a block height or block hash."));
+        return;
+    }
+    if (!isNonNegativeBlockHeight(clean) && !isHex256(clean)) {
+        emitExplorerError(QStringLiteral("Block not opened"), QStringLiteral("Block lookups must use a non-negative height or a 64-character hexadecimal block hash."));
+        return;
+    }
+    if (!usingInternalExplorer()) {
+        Q_EMIT userMessage(QStringLiteral("External block links unavailable"),
+                           QStringLiteral("This explorer setting only defines transaction and address URL templates. Switch to the internal explorer for block lookups."));
+        return;
+    }
+    if (!m_rpc_connected) {
+        bool cached_found = false;
+        QJsonObject cached_raw;
+        const QString cached_summary = explorerCachedBlockHtml(clean, &cached_raw, &cached_found);
+        if (cached_found) {
+            Q_EMIT explorerWindowRequested(QStringLiteral("Block %1").arg(cached_raw.value(QStringLiteral("height")).toInt()),
+                                           explorerLookupHtml(QStringLiteral("Block"), cached_summary, cached_raw));
+            return;
+        }
+        emitExplorerError(QStringLiteral("Internal explorer unavailable"),
+                          QStringLiteral("Connect to the local Defcoin backend before using the internal explorer."));
+        return;
+    }
+
+    auto fetch_block = [this](const QString& hash_or_height, const QString& hash) {
+        rpcCall(QStringLiteral("getblock"), {hash, 2}, false, [this, hash_or_height, hash](const QJsonValue& result, const QString& error) {
+            if (!error.isEmpty()) {
+                bool cached_found = false;
+                QJsonObject cached_raw;
+                QString cached_summary = explorerCachedBlockHtml(hash_or_height, &cached_raw, &cached_found);
+                if (!cached_found) cached_summary = explorerCachedBlockHtml(hash, &cached_raw, &cached_found);
+                if (cached_found) {
+                    Q_EMIT explorerWindowRequested(QStringLiteral("Block %1").arg(cached_raw.value(QStringLiteral("height")).toInt()),
+                                                   explorerLookupHtml(QStringLiteral("Block"), cached_summary, cached_raw));
+                    return;
+                }
+                emitExplorerError(QStringLiteral("Block not found"), error);
+                return;
+            }
+            const QJsonObject block = result.toObject();
+            const QJsonArray tx = block.value(QStringLiteral("tx")).toArray();
+            QString tx_rows;
+            const int tx_limit = std::min(static_cast<int>(tx.size()), 25);
+            for (int i = 0; i < tx_limit; ++i) {
+                QString txid = tx.at(i).toObject().value(QStringLiteral("txid")).toString();
+                if (txid.isEmpty()) txid = tx.at(i).toString();
+                tx_rows += QStringLiteral("<tr><td>%1</td><td><a href=\"nu://transaction/%2\">%3</a></td></tr>")
+                    .arg(QString::number(i).toHtmlEscaped(),
+                         QString::fromLatin1(QUrl::toPercentEncoding(txid)).toHtmlEscaped(),
+                         txid.toHtmlEscaped());
+            }
+            if (tx.size() > tx_limit) {
+                tx_rows += QStringLiteral("<tr><td colspan=\"2\">%1 more transactions omitted from the compact view.</td></tr>")
+                    .arg(QString::number(tx.size() - tx_limit).toHtmlEscaped());
+            }
+            const QString summary = QStringLiteral(
+                "<table>"
+                "<tr><th>Height</th><td>%1</td></tr>"
+                "<tr><th>Hash</th><td>%2</td></tr>"
+                "<tr><th>Confirmations</th><td>%3</td></tr>"
+                "<tr><th>Time</th><td>%4</td></tr>"
+                "<tr><th>Transactions</th><td>%5</td></tr>"
+                "<tr><th>Difficulty</th><td>%6</td></tr>"
+                "</table>"
+                "<h3>Transactions</h3><table><tr><th>N</th><th>Transaction ID</th></tr>%7</table>")
+                .arg(QString::number(block.value(QStringLiteral("height")).toInt()).toHtmlEscaped(),
+                     hash.toHtmlEscaped(),
+                     QString::number(block.value(QStringLiteral("confirmations")).toInt()).toHtmlEscaped(),
+                     QDateTime::fromSecsSinceEpoch(block.value(QStringLiteral("time")).toVariant().toLongLong()).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t")).toHtmlEscaped(),
+                     QString::number(tx.size()).toHtmlEscaped(),
+                     QString::number(block.value(QStringLiteral("difficulty")).toDouble(), 'f', 8).toHtmlEscaped(),
+                     tx_rows);
+            cacheExplorerLookup(QStringLiteral("block"), hash_or_height, QStringLiteral("Block"), hash, result);
+            Q_EMIT explorerWindowRequested(QStringLiteral("Block %1").arg(block.value(QStringLiteral("height")).toInt()), explorerLookupHtml(QStringLiteral("Block"), summary, result));
+        });
+    };
+
+    bool is_height = false;
+    const int height = clean.toInt(&is_height);
+    if (is_height && height >= 0) {
+        rpcCall(QStringLiteral("getblockhash"), {height}, false, [this, clean, fetch_block](const QJsonValue& result, const QString& error) {
+            if (!error.isEmpty()) {
+                emitExplorerError(QStringLiteral("Block not found"), error);
+                return;
+            }
+            fetch_block(clean, result.toString());
+        });
+    } else {
+        fetch_block(clean, clean);
+    }
+}
+
+void NuRpcService::searchExplorer(const QString& query)
+{
+    const QString clean = query.trimmed();
+    if (clean.isEmpty()) {
+        emitExplorerError(QStringLiteral("Explorer search"), QStringLiteral("Enter a block height, block hash, transaction ID, or wallet address."));
+        return;
+    }
+    if (clean.size() > 128) {
+        emitExplorerError(QStringLiteral("Explorer search"), QStringLiteral("Search input is too long. Enter a block height, 64-character hash, or Defcoin address."));
+        return;
+    }
+    bool is_height = false;
+    clean.toInt(&is_height);
+    if (is_height && !isNonNegativeBlockHeight(clean)) {
+        emitExplorerError(QStringLiteral("Explorer search"), QStringLiteral("Block height must be a non-negative whole number."));
+        return;
+    }
+    if (clean.size() == 64 && !isHex256(clean)) {
+        emitExplorerError(QStringLiteral("Explorer search"), QStringLiteral("64-character lookups must be hexadecimal block or transaction hashes."));
+        return;
+    }
+    if (is_height || clean.size() == 64) {
+        if (clean.size() == 64) {
+            if (usingInternalExplorer() && !m_rpc_connected) {
+                bool cached_block_found = false;
+                QJsonObject cached_block_raw;
+                const QString cached_block_summary = explorerCachedBlockHtml(clean, &cached_block_raw, &cached_block_found);
+                if (cached_block_found) {
+                    Q_EMIT explorerWindowRequested(QStringLiteral("Block %1").arg(cached_block_raw.value(QStringLiteral("height")).toInt()),
+                                                   explorerLookupHtml(QStringLiteral("Block"), cached_block_summary, cached_block_raw));
+                    return;
+                }
+                openTransactionInExplorer(clean);
+                return;
+            }
+            rpcCall(QStringLiteral("getblock"), {clean, 0}, false, [this, clean](const QJsonValue&, const QString& error) {
+                if (error.isEmpty()) openBlockInExplorer(clean);
+                else openTransactionInExplorer(clean);
+            });
+        } else {
+            openBlockInExplorer(clean);
+        }
+        return;
+    }
+    if (!isLikelyBase58AddressText(clean)) {
+        emitExplorerError(QStringLiteral("Explorer search"), QStringLiteral("Search input is not a recognized block height, hash, or Defcoin-style Base58 address."));
+        return;
+    }
+    openAddressInExplorer(clean);
+}
+
+void NuRpcService::openExplorerLink(const QString& link)
+{
+    const QString clean_link = singleLineLimited(link, 2048);
+    const QUrl url(clean_link, QUrl::StrictMode);
+    if (url.scheme() != QLatin1String("nu")) {
+        if (!isSafeHttpUrl(url)) {
+            Q_EMIT userMessage(QStringLiteral("Explorer link blocked"),
+                               QStringLiteral("Nu blocked an explorer link that was not a valid http://, https://, or internal nu:// link."));
+            return;
+        }
+        QDesktopServices::openUrl(url);
+        return;
+    }
+    const QString kind = url.host();
+    const QString value = QUrl::fromPercentEncoding(url.path().mid(1).toUtf8());
+    if (kind == QLatin1String("transaction") || kind == QLatin1String("tx")) {
+        openTransactionInExplorer(value);
+    } else if (kind == QLatin1String("address")) {
+        openAddressInExplorer(value);
+    } else if (kind == QLatin1String("block")) {
+        openBlockInExplorer(value);
+    } else {
+        Q_EMIT userMessage(QStringLiteral("Explorer link blocked"),
+                           QStringLiteral("Nu did not recognize this internal explorer link type."));
+    }
+}
+
 void NuRpcService::copyText(const QString& text)
 {
     QApplication::clipboard()->setText(text);
@@ -2053,16 +6772,762 @@ void NuRpcService::copyText(const QString& text)
 
 void NuRpcService::backupWallet()
 {
+    if (!ensureCurrentWalletSelected(QStringLiteral("Wallet backup failed"))) return;
     const QString path = QFileDialog::getSaveFileName(nullptr, QStringLiteral("Backup Wallet"), QDir(realHomePath()).filePath(QStringLiteral("wallet.dat")));
     if (path.isEmpty()) return;
-    rpcCall(QStringLiteral("backupwallet"), {path}, true, [this](const QJsonValue&, const QString& error) {
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("backupwallet"), {path}, true, [this, wallet_name](const QJsonValue&, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         Q_EMIT userMessage(error.isEmpty() ? QStringLiteral("Wallet backup complete") : QStringLiteral("Wallet backup failed"),
                            error.isEmpty() ? QStringLiteral("The wallet backup was written successfully.") : error);
     });
 }
 
+void NuRpcService::createWallet(const QString& name,
+                                bool encrypt,
+                                const QString& passphrase,
+                                bool disable_private_keys,
+                                bool blank,
+                                bool descriptor_sql)
+{
+    const QString wallet_name = name.trimmed();
+    if (wallet_name.size() > 128) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not created"),
+                           QStringLiteral("Wallet names can be up to 128 characters. Shorten this name before creating the wallet."));
+        return;
+    }
+    if (!isLikelyCreatableWalletMenuName(wallet_name)) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not created"),
+                           QStringLiteral("Enter a wallet directory name without slashes, colons, control characters, path segments, backup suffixes, or copy labels."));
+        return;
+    }
+    const QString clean_passphrase = passphrase;
+    if (encrypt && clean_passphrase.size() < 8) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not created"),
+                           QStringLiteral("Enter a wallet encryption passphrase of at least 8 characters, or turn off Encrypt Wallet."));
+        return;
+    }
+    if (disable_private_keys && encrypt) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not created"),
+                           QStringLiteral("A watch-only wallet with private keys disabled cannot be encrypted because it will not contain private keys."));
+        return;
+    }
+
+    QJsonArray params;
+    params << wallet_name
+           << disable_private_keys
+           << blank
+           << (encrypt ? QJsonValue(clean_passphrase) : QJsonValue())
+           << false
+           << descriptor_sql
+           << true;
+
+    rpcCall(QStringLiteral("createwallet"), params, false, [this, wallet_name, descriptor_sql](const QJsonValue&, const QString& error) {
+        if (error.isEmpty()) {
+            setCurrentWalletInternal(wallet_name);
+            refresh();
+        }
+        Q_EMIT userMessage(error.isEmpty() ? QStringLiteral("Wallet created") : QStringLiteral("Wallet not created"),
+                           error.isEmpty()
+                               ? QStringLiteral("The %1 wallet was created and loaded. Wallet data is stored in the shared Defcoin data directory.")
+                                     .arg(descriptor_sql ? QStringLiteral("SQL descriptor") : QStringLiteral("BDB legacy"))
+                               : error);
+    });
+}
+
+void NuRpcService::createWalletWithRecoveryPhrase(const QString& wallet_name, const QString& phrase)
+{
+    restoreWalletFromRecoveryPhrase(wallet_name, phrase, QStringLiteral("core"), QString(), QStringLiteral("current"), 0);
+}
+
+void NuRpcService::previewRecoveryPhraseAddresses(const QString& phrase,
+                                                  const QString& derivation_path,
+                                                  const QString& wif_mode,
+                                                  int count)
+{
+    QVariantMap preview;
+    if (!requireLocalRecoveryRpc(QStringLiteral("Recovery preview blocked"))) {
+        Q_EMIT recoveryPhrasePreviewReady(preview, QStringLiteral("Recovery phrase preview requires a local backend RPC connection."));
+        return;
+    }
+
+    count = std::clamp(count, 1, 50);
+    QString xprv;
+    QString error;
+    QString normalized_phrase;
+    if (!validateMnemonic(phrase, &normalized_phrase, &error)) {
+        Q_EMIT recoveryPhrasePreviewReady(preview, error);
+        return;
+    }
+    if (!mnemonicMaterial(normalized_phrase, wif_mode, nullptr, &xprv, &error)) {
+        Q_EMIT recoveryPhrasePreviewReady(preview, error);
+        return;
+    }
+
+    const QString descriptor = descriptorForRecoveryPath(xprv, derivation_path, &error);
+    xprv.clear();
+    if (descriptor.isEmpty()) {
+        Q_EMIT recoveryPhrasePreviewReady(preview, error);
+        return;
+    }
+
+    const QString effective_path = derivation_path.trimmed().isEmpty() ? QStringLiteral("m/44'/0'/0'/0/*") : derivation_path.trimmed();
+    const int word_count = normalized_phrase.split(QLatin1Char(' '), Qt::SkipEmptyParts).size();
+    const int entropy_bits = bip39EntropyBitsForWordCount(word_count);
+    const QString wif_label = recoveryWifLabel(wif_mode);
+
+    rpcCall(QStringLiteral("getdescriptorinfo"), {descriptor}, false, [this, descriptor, count, effective_path, word_count, entropy_bits, wif_label](const QJsonValue& result, const QString& error) {
+        QVariantMap preview;
+        if (!error.isEmpty() || !result.isObject()) {
+            Q_EMIT recoveryPhrasePreviewReady(preview, error.isEmpty() ? QStringLiteral("The backend did not return descriptor details.") : error);
+            return;
+        }
+        const QJsonObject descriptor_info = result.toObject();
+        const QString checksum = descriptor_info.value(QStringLiteral("checksum")).toString();
+        if (checksum.isEmpty()) {
+            Q_EMIT recoveryPhrasePreviewReady(preview, QStringLiteral("The backend did not return a descriptor checksum."));
+            return;
+        }
+        const QString checked_descriptor = descriptor.section(QLatin1Char('#'), 0, 0) + QStringLiteral("#") + checksum;
+        const QString public_descriptor = descriptor_info.value(QStringLiteral("descriptor")).toString();
+        const QString descriptor_hash = QString::fromLatin1(QCryptographicHash::hash(checked_descriptor.toUtf8(), QCryptographicHash::Sha256).toHex());
+
+        QVariantList details;
+        details.push_back(tableRow({QStringLiteral("BIP39 words"), QStringLiteral("%1 words, %2-bit entropy, checksum valid").arg(word_count).arg(entropy_bits)}, {}));
+        details.push_back(tableRow({QStringLiteral("Derivation path"), effective_path}, {}));
+        details.push_back(tableRow({QStringLiteral("WIF reference"), wif_label}, {}));
+        details.push_back(tableRow({QStringLiteral("Address script"), QStringLiteral("P2PKH / pkh(...) Defcoin addresses")}, {}));
+        details.push_back(tableRow({QStringLiteral("Descriptor checksum"), checksum}, {}));
+        details.push_back(tableRow({QStringLiteral("Descriptor fingerprint"), descriptor_hash.left(24)}, {}));
+        details.push_back(tableRow({QStringLiteral("Public descriptor"), public_descriptor.isEmpty() ? QStringLiteral("Backend did not return a public descriptor.") : public_descriptor}, {}));
+        details.push_back(tableRow({QStringLiteral("Private material"), QStringLiteral("Hidden. Nu uses it locally only for preview/import and does not display the phrase, xprv, or private keys here.")}, {}));
+
+        preview.insert(QStringLiteral("details"), details);
+        preview.insert(QStringLiteral("path"), effective_path);
+        preview.insert(QStringLiteral("count"), count);
+        QJsonArray range;
+        range << 0 << (count - 1);
+        rpcCall(QStringLiteral("deriveaddresses"), {checked_descriptor, range}, false, [this, preview](const QJsonValue& result, const QString& error) mutable {
+            QVariantList rows;
+            if (!error.isEmpty()) {
+                preview.insert(QStringLiteral("addresses"), rows);
+                Q_EMIT recoveryPhrasePreviewReady(preview, error);
+                return;
+            }
+            int index = 0;
+            for (const QJsonValue& value : result.toArray()) {
+                QVariantMap row;
+                row.insert(QStringLiteral("index"), index++);
+                row.insert(QStringLiteral("address"), value.toString());
+                rows.push_back(row);
+            }
+            preview.insert(QStringLiteral("addresses"), rows);
+            Q_EMIT recoveryPhrasePreviewReady(preview, rows.isEmpty() ? QStringLiteral("No preview addresses were derived.") : QStringLiteral("Preview addresses derived. Verify these before importing."));
+        });
+    });
+}
+
+void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
+                                                   const QString& phrase,
+                                                   const QString& mode,
+                                                   const QString& derivation_path,
+                                                   const QString& wif_mode,
+                                                   int range)
+{
+    if (!requireLocalRecoveryRpc(QStringLiteral("Wallet not restored"))) return;
+
+    const QString clean_wallet_name = wallet_name.trimmed();
+    if (clean_wallet_name.size() > 128) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                           QStringLiteral("Wallet names can be up to 128 characters. Shorten this name before restoring the wallet."));
+        return;
+    }
+    if (!isLikelyCreatableWalletMenuName(clean_wallet_name)) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                           QStringLiteral("Enter a new wallet directory name without slashes, colons, control characters, path segments, backup suffixes, or copy labels."));
+        return;
+    }
+    if (m_available_wallets.contains(clean_wallet_name) || m_loaded_wallets.contains(clean_wallet_name)) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                           QStringLiteral("Choose a new wallet name. Recovery never overwrites an existing wallet."));
+        return;
+    }
+
+    const bool auto_mode = mode.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0;
+    const bool external_mode = mode.compare(QStringLiteral("external"), Qt::CaseInsensitive) == 0;
+    const bool descriptor_scan_mode = auto_mode || external_mode;
+    const bool gap_scan_mode = descriptor_scan_mode && range < 0;
+    setRecoveryState(true,
+                     auto_mode ? QStringLiteral("Validating recovery phrase for auto scan...")
+                               : (external_mode ? QStringLiteral("Validating external recovery phrase...") : QStringLiteral("Validating recovery phrase...")),
+                     5);
+    QString wif;
+    QString xprv;
+    QString error;
+    const QString effective_wif_mode = external_mode ? wif_mode : QStringLiteral("current");
+    if (!mnemonicMaterial(phrase, effective_wif_mode, descriptor_scan_mode ? nullptr : &wif, descriptor_scan_mode ? &xprv : nullptr, &error)) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"), error);
+        return;
+    }
+
+    QVector<QPair<QString, QString>> descriptors;
+    if (descriptor_scan_mode) {
+        setRecoveryState(true, auto_mode ? QStringLiteral("Preparing common recovery descriptors...") : QStringLiteral("Preparing external recovery descriptor..."), 15);
+        QVector<QPair<QString, QString>> path_labels;
+        if (auto_mode) {
+            path_labels = {
+                {QStringLiteral("Coinomi/Ian Coleman Defcoin BIP44 external m/44'/1337'/0'/0/*"), QStringLiteral("m/44'/1337'/0'/0/*")},
+                {QStringLiteral("Coinomi/Ian Coleman Defcoin BIP44 change m/44'/1337'/0'/1/*"), QStringLiteral("m/44'/1337'/0'/1/*")},
+                {QStringLiteral("Legacy Bitcoin-family BIP44 external m/44'/0'/0'/0/*"), QStringLiteral("m/44'/0'/0'/0/*")},
+                {QStringLiteral("Legacy Bitcoin-family BIP44 change m/44'/0'/0'/1/*"), QStringLiteral("m/44'/0'/0'/1/*")},
+                {QStringLiteral("Litecoin-family BIP44 external m/44'/2'/0'/0/*"), QStringLiteral("m/44'/2'/0'/0/*")},
+                {QStringLiteral("Litecoin-family BIP44 change m/44'/2'/0'/1/*"), QStringLiteral("m/44'/2'/0'/1/*")},
+                {QStringLiteral("Legacy BIP32 external chain m/0/*"), QStringLiteral("m/0/*")}
+            };
+        } else {
+            path_labels = {{QStringLiteral("Manual external scan %1").arg(derivation_path.trimmed().isEmpty() ? QStringLiteral("m/44'/1337'/0'/0/*") : derivation_path.trimmed()),
+                            derivation_path}};
+        }
+
+        for (const auto& item : path_labels) {
+            const QString descriptor = descriptorForRecoveryPath(xprv, item.second, &error);
+            if (descriptor.isEmpty()) {
+                xprv.clear();
+                setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                Q_EMIT userMessage(QStringLiteral("Wallet not restored"), error);
+                return;
+            }
+            descriptors.push_back({QStringLiteral("BIP39 recovery: %1").arg(item.first), descriptor});
+        }
+        xprv.clear();
+        if (descriptors.isEmpty()) {
+            setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+            Q_EMIT userMessage(QStringLiteral("Wallet not restored"), QStringLiteral("No recovery descriptors were prepared."));
+            return;
+        }
+    }
+
+    QJsonArray create_params;
+    create_params << clean_wallet_name
+                  << false
+                  << true
+                  << QJsonValue()
+                  << false
+                  << false
+                  << true;
+
+    setRecoveryState(true, QStringLiteral("Creating recovery wallet..."), 25);
+    rpcCall(QStringLiteral("createwallet"), create_params, false, [this, clean_wallet_name, wif, descriptors, descriptor_scan_mode, gap_scan_mode, range](const QJsonValue&, const QString& error) {
+        if (!error.isEmpty()) {
+            setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+            Q_EMIT userMessage(QStringLiteral("Wallet not restored"), error);
+            return;
+        }
+
+        const auto continue_restore = [this, clean_wallet_name, wif, descriptors, descriptor_scan_mode, gap_scan_mode, range]() {
+            setCurrentWalletInternal(clean_wallet_name);
+            if (!descriptor_scan_mode) {
+                setRecoveryState(true, QStringLiteral("Setting wallet HD seed from recovery phrase..."), 55);
+                rpcCall(QStringLiteral("sethdseed"), {true, wif}, true, [this, clean_wallet_name](const QJsonValue&, const QString& seed_error) {
+                    if (!seed_error.isEmpty()) {
+                        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                        Q_EMIT userMessage(QStringLiteral("Wallet not restored"), seed_error);
+                        return;
+                    }
+                    refresh();
+                    setRecoveryState(false, QStringLiteral("Recovery complete."), 100);
+                    Q_EMIT userMessage(QStringLiteral("Wallet restored"),
+                                       QStringLiteral("The wallet was created from the recovery phrase and loaded. Back up the wallet and keep the phrase offline."));
+                });
+                return;
+            }
+
+            if (gap_scan_mode) {
+                importRecoveryDescriptorsUntilEmpty(descriptors, std::abs(range));
+            } else {
+                importRecoveryDescriptorsWithRescan(descriptors, range);
+            }
+        };
+
+        setRecoveryState(true, QStringLiteral("Loading recovery wallet..."), 30);
+        rpcCall(QStringLiteral("loadwallet"), {clean_wallet_name, true}, false, [this, clean_wallet_name, continue_restore](const QJsonValue&, const QString& load_error) {
+            if (load_error.isEmpty() || load_error.contains(QStringLiteral("already loaded"), Qt::CaseInsensitive)) {
+                continue_restore();
+                return;
+            }
+            setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+            Q_EMIT userMessage(QStringLiteral("Wallet not restored"), load_error);
+        });
+    });
+}
+
+QVariantMap NuRpcService::convertCompatibilityEncoding(const QString& text) const
+{
+    QVariantMap result;
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty()) {
+        result.insert(QStringLiteral("ok"), false);
+        result.insert(QStringLiteral("error"), QStringLiteral("Paste an xpub/xprv, dfcp/dfcv, or P2SH address to convert."));
+        return result;
+    }
+
+    QByteArray payload;
+    if (!decodeBase58CheckPayload(trimmed, &payload)) {
+        result.insert(QStringLiteral("ok"), false);
+        result.insert(QStringLiteral("error"), QStringLiteral("This is not a valid Base58Check Defcoin extended key or P2SH address."));
+        return result;
+    }
+
+    const QByteArray xpub = bytes({0x04, 0x88, 0xB2, 0x1E});
+    const QByteArray xprv = bytes({0x04, 0x88, 0xAD, 0xE4});
+    const QByteArray dfcp = bytes({0x02, 0xFA, 0x54, 0xD7});
+    const QByteArray dfcv = bytes({0x02, 0xFA, 0x54, 0xAD});
+
+    if (payload.size() == 78 && (hasPrefix(payload, xpub) || hasPrefix(payload, dfcp))) {
+        const QByteArray key_body = payload.mid(4);
+        result.insert(QStringLiteral("ok"), true);
+        result.insert(QStringLiteral("kind"), QStringLiteral("Extended public key"));
+        result.insert(QStringLiteral("current"), encodeBase58CheckPayload(xpub + key_body));
+        result.insert(QStringLiteral("defcoin"), encodeBase58CheckPayload(dfcp + key_body));
+        result.insert(QStringLiteral("note"), QStringLiteral("Nu accepts both xpub and dfcp. dfcp is an alternate Defcoin display/export form."));
+        return result;
+    }
+    if (payload.size() == 78 && (hasPrefix(payload, xprv) || hasPrefix(payload, dfcv))) {
+        const QByteArray key_body = payload.mid(4);
+        result.insert(QStringLiteral("ok"), true);
+        result.insert(QStringLiteral("kind"), QStringLiteral("Extended private key"));
+        result.insert(QStringLiteral("current"), encodeBase58CheckPayload(xprv + key_body));
+        result.insert(QStringLiteral("defcoin"), encodeBase58CheckPayload(dfcv + key_body));
+        result.insert(QStringLiteral("note"), QStringLiteral("Keep private keys secret. Nu accepts both xprv and dfcv; dfcv is an alternate Defcoin display/export form."));
+        return result;
+    }
+
+    if (payload.size() == 21) {
+        const unsigned char version = static_cast<unsigned char>(payload.at(0));
+        if (version == 50 || version == 5 || version == 22) {
+            const QByteArray hash = payload.mid(1);
+            result.insert(QStringLiteral("ok"), true);
+            result.insert(QStringLiteral("kind"), QStringLiteral("P2SH address"));
+            result.insert(QStringLiteral("canonical"), encodeBase58CheckPayload(bytes({50}) + hash));
+            result.insert(QStringLiteral("legacy3"), encodeBase58CheckPayload(bytes({5}) + hash));
+            result.insert(QStringLiteral("tool"), encodeBase58CheckPayload(bytes({22}) + hash));
+            result.insert(QStringLiteral("note"), version == 50
+                ? QStringLiteral("This is already Nu's canonical M... P2SH form. Nu also accepts old 3... and tool 9/A... encodings.")
+                : QStringLiteral("Nu accepts this legacy/tool P2SH encoding and shows the canonical M... equivalent for new use."));
+            return result;
+        }
+    }
+
+    result.insert(QStringLiteral("ok"), false);
+    result.insert(QStringLiteral("error"), QStringLiteral("Recognized Base58Check data, but it is not an xpub/xprv, dfcp/dfcv, or supported Defcoin P2SH encoding."));
+    return result;
+}
+
+void NuRpcService::setCurrentWallet(const QString& name)
+{
+    const QString wallet_name = normalizedWalletListName(name);
+    if (!isLikelyLoadableWalletMenuName(wallet_name)) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not selected"),
+                           QStringLiteral("Choose a wallet directory created by Defcoin Core Nu. Backup .dat copies are intentionally hidden to avoid opening duplicate Berkeley DB files."));
+        return;
+    }
+
+    if (!m_loaded_wallets.contains(wallet_name)) {
+        loadWallet(wallet_name);
+        return;
+    }
+
+    if (setCurrentWalletInternal(wallet_name)) {
+        refreshWallet();
+        refreshAddressBook();
+    }
+}
+
+void NuRpcService::loadWallet(const QString& name)
+{
+    const QString wallet_name = normalizedWalletListName(name);
+    if (!isLikelyLoadableWalletMenuName(wallet_name)) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not opened"),
+                           QStringLiteral("Choose a wallet directory created by Defcoin Core Nu. Backup .dat copies are intentionally hidden to avoid opening duplicate Berkeley DB files."));
+        return;
+    }
+    if (m_loaded_wallets.contains(wallet_name)) {
+        setCurrentWallet(wallet_name);
+        return;
+    }
+    rpcCall(QStringLiteral("loadwallet"), {walletLoadNameFor(wallet_name), true}, false, [this, wallet_name](const QJsonValue&, const QString& error) {
+        const bool already_loaded = error.contains(QStringLiteral("already loaded"), Qt::CaseInsensitive);
+        if (error.isEmpty()) {
+            setCurrentWalletInternal(wallet_name);
+            refresh();
+        } else if (already_loaded) {
+            setCurrentWalletInternal(wallet_name);
+            refresh();
+        }
+        Q_EMIT userMessage(error.isEmpty() || already_loaded ? QStringLiteral("Wallet opened") : QStringLiteral("Wallet not opened"),
+                           error.isEmpty() || already_loaded ? QStringLiteral("The wallet is loaded and selected. Existing wallet data was not deleted.")
+                                                             : error);
+    });
+}
+
+void NuRpcService::openWallets(const QVariantList& names)
+{
+    QStringList queue;
+    QString final_wallet;
+    for (const QVariant& value : names) {
+        const QString wallet_name = normalizedWalletListName(value.toString());
+        if (!isLikelyLoadableWalletMenuName(wallet_name)) continue;
+        if (!queue.contains(wallet_name)) queue.push_back(wallet_name);
+        final_wallet = wallet_name;
+    }
+
+    if (queue.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("No wallets selected"), QStringLiteral("Select one or more wallet entries first."));
+        return;
+    }
+
+    if (m_wallet_open_queue_active) {
+        for (const QString& wallet_name : queue) {
+            if (!m_wallet_open_queue.contains(wallet_name)) m_wallet_open_queue.push_back(wallet_name);
+        }
+        m_wallet_open_queue_final_wallet = final_wallet;
+        Q_EMIT userMessage(QStringLiteral("Wallets queued"), QStringLiteral("The selected wallets were added to the current open queue."));
+        return;
+    }
+
+    m_wallet_open_queue = queue;
+    m_wallet_open_queue_final_wallet = final_wallet;
+    m_wallet_open_queue_active = true;
+    continueWalletOpenQueue();
+}
+
+void NuRpcService::continueWalletOpenQueue()
+{
+    if (m_wallet_open_queue.isEmpty()) {
+        const QString final_wallet = m_wallet_open_queue_final_wallet;
+        m_wallet_open_queue_final_wallet.clear();
+        m_wallet_open_queue_active = false;
+        if (m_loaded_wallets.contains(final_wallet)) {
+            setCurrentWalletInternal(final_wallet);
+        }
+        refresh();
+        Q_EMIT userMessage(QStringLiteral("Wallets opened"), QStringLiteral("Selected wallets were opened. The last selected wallet is active."));
+        return;
+    }
+
+    const QString wallet_name = m_wallet_open_queue.takeFirst();
+    if (m_loaded_wallets.contains(wallet_name)) {
+        setCurrentWalletInternal(wallet_name);
+        QTimer::singleShot(0, this, &NuRpcService::continueWalletOpenQueue);
+        return;
+    }
+
+    rpcCall(QStringLiteral("loadwallet"), {walletLoadNameFor(wallet_name), true}, false, [this, wallet_name](const QJsonValue&, const QString& error) {
+        const bool already_loaded = error.contains(QStringLiteral("already loaded"), Qt::CaseInsensitive);
+        if (error.isEmpty() || already_loaded) {
+            if (!m_loaded_wallets.contains(wallet_name)) m_loaded_wallets.push_back(wallet_name);
+            setCurrentWalletInternal(wallet_name);
+            QTimer::singleShot(0, this, &NuRpcService::continueWalletOpenQueue);
+            return;
+        }
+
+        m_wallet_open_queue.clear();
+        m_wallet_open_queue_final_wallet.clear();
+        m_wallet_open_queue_active = false;
+        refreshWalletList();
+        Q_EMIT userMessage(QStringLiteral("Wallet not opened"),
+                           QStringLiteral("%1 could not be opened:\n%2").arg(walletDisplayName(wallet_name), error));
+    });
+}
+
+void NuRpcService::closeWallet(const QString& name)
+{
+    const QString wallet_name = name.trimmed().isEmpty() ? m_wallet_name : name.trimmed();
+    if (!m_wallet_selected && wallet_name.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("No wallet loaded"), QStringLiteral("There is no loaded wallet to close."));
+        return;
+    }
+    rpcCall(QStringLiteral("unloadwallet"), {wallet_name, false}, false, [this, wallet_name](const QJsonValue&, const QString& error) {
+        if (error.isEmpty()) {
+            QStringList remaining = m_loaded_wallets;
+            remaining.removeAll(wallet_name);
+            m_loaded_wallets = remaining;
+            if (m_wallet_selected && m_wallet_name == wallet_name) {
+                if (remaining.isEmpty()) {
+                    setCurrentWalletInternal(QString(), false);
+                } else {
+                    setCurrentWalletInternal(remaining.first());
+                }
+            }
+            refresh();
+        }
+        Q_EMIT userMessage(error.isEmpty() ? QStringLiteral("Wallet closed") : QStringLiteral("Wallet not closed"),
+                           error.isEmpty() ? QStringLiteral("The wallet was unloaded from this session. Wallet files and funds were not deleted.") : error);
+    });
+}
+
+void NuRpcService::closeAllWallets()
+{
+    if (m_loaded_wallets.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("No wallets loaded"), QStringLiteral("There are no loaded wallets to close."));
+        return;
+    }
+
+    auto remaining = std::make_shared<int>(m_loaded_wallets.size());
+    auto errors = std::make_shared<QStringList>();
+    const QStringList wallets = m_loaded_wallets;
+    for (const QString& wallet_name : wallets) {
+        rpcCall(QStringLiteral("unloadwallet"), {wallet_name, false}, false, [this, remaining, errors](const QJsonValue&, const QString& error) {
+            if (!error.isEmpty()) errors->push_back(error);
+            --(*remaining);
+            if (*remaining == 0) {
+                m_loaded_wallets.clear();
+                setCurrentWalletInternal(QString(), false);
+                refresh();
+                Q_EMIT userMessage(errors->isEmpty() ? QStringLiteral("Wallets closed") : QStringLiteral("Some wallets were not closed"),
+                                   errors->isEmpty() ? QStringLiteral("All loaded wallets were unloaded from this session. Wallet files and funds were not deleted.")
+                                                     : errors->join(QStringLiteral("\n")));
+            }
+        });
+    }
+}
+
+void NuRpcService::renameWallet(const QString& old_name, const QString& new_name)
+{
+    const QString wallet_name = old_name.trimmed();
+    const QString new_wallet_name = new_name.trimmed();
+    if (wallet_name.isEmpty() || wallet_name == QLatin1String("wallet.dat")) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not renamed"),
+                           QStringLiteral("Nu does not rename the legacy default wallet.dat from this screen. Back it up and move it manually only if you know exactly why you need to."));
+        return;
+    }
+    if (!isLikelyLoadableWalletMenuName(wallet_name)) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not renamed"),
+                           QStringLiteral("Choose a wallet directory created by Defcoin Core Nu. Backup .dat copies and suspicious names are intentionally hidden."));
+        return;
+    }
+    if (new_wallet_name.size() > 128) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not renamed"),
+                           QStringLiteral("Wallet names can be up to 128 characters. Shorten the new name before renaming the wallet."));
+        return;
+    }
+    if (!isLikelyCreatableWalletMenuName(new_wallet_name) || new_wallet_name == QLatin1String("wallet.dat")) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not renamed"),
+                           QStringLiteral("Enter a new wallet directory name without slashes, colons, control characters, path segments, backup suffixes, copy labels, or .dat filenames."));
+        return;
+    }
+
+    QString wallet_leaf = wallet_name;
+    wallet_leaf.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    if (wallet_leaf.startsWith(QStringLiteral("wallets/"))) {
+        wallet_leaf = wallet_leaf.mid(QStringLiteral("wallets/").size());
+    }
+    if (wallet_leaf == new_wallet_name) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not renamed"),
+                           QStringLiteral("Enter a different wallet name before renaming."));
+        return;
+    }
+    if (m_available_wallets.contains(new_wallet_name) || m_loaded_wallets.contains(new_wallet_name)) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not renamed"),
+                           QStringLiteral("A wallet with that name already exists. Choose a unique wallet name."));
+        return;
+    }
+
+    const bool was_loaded = m_loaded_wallets.contains(wallet_name);
+    const bool was_selected = m_wallet_selected && m_wallet_name == wallet_name;
+
+    auto move_wallet = [this, wallet_name, new_wallet_name, was_loaded, was_selected]() {
+        const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
+        QString normalized = wallet_name;
+        normalized.replace(QLatin1Char('\\'), QLatin1Char('/'));
+        const QString leaf = normalized.startsWith(QStringLiteral("wallets/"))
+            ? normalized.mid(QStringLiteral("wallets/").size())
+            : normalized;
+
+        QStringList candidates;
+        candidates << data_dir.filePath(normalized);
+        if (!normalized.startsWith(QStringLiteral("wallets/"))) {
+            candidates << data_dir.filePath(QStringLiteral("wallets/") + leaf);
+        }
+
+        QString source_path;
+        for (const QString& candidate : candidates) {
+            if (QFileInfo::exists(candidate)) {
+                source_path = QFileInfo(candidate).absoluteFilePath();
+                break;
+            }
+        }
+        if (source_path.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Wallet not renamed"),
+                               QStringLiteral("Nu could not find the wallet files for '%1'. Refresh the wallet list and check the Defcoin data directory.").arg(walletDisplayName(wallet_name)));
+            refresh();
+            return;
+        }
+
+        const QFileInfo source_info(source_path);
+        const QString destination = QDir(source_info.absolutePath()).filePath(new_wallet_name);
+        if (QFileInfo::exists(destination)) {
+            Q_EMIT userMessage(QStringLiteral("Wallet not renamed"),
+                               QStringLiteral("A file or folder named '%1' already exists beside the selected wallet. Choose a unique wallet name.").arg(new_wallet_name));
+            return;
+        }
+
+        bool moved = false;
+        if (source_info.isDir()) {
+            moved = QDir().rename(source_path, destination);
+        } else {
+            moved = QFile::rename(source_path, destination);
+        }
+        if (!moved) {
+            Q_EMIT userMessage(QStringLiteral("Wallet not renamed"),
+                               QStringLiteral("Nu could not rename '%1'. Check file permissions and make sure the wallet is closed.").arg(walletDisplayName(wallet_name)));
+            return;
+        }
+
+        pruneCoreWalletAutoloadSettings({wallet_name});
+        m_loaded_wallets.removeAll(wallet_name);
+        m_available_wallets.removeAll(wallet_name);
+        if (was_selected) setCurrentWalletInternal(QString(), false);
+
+        if (was_loaded || was_selected) {
+            rpcCall(QStringLiteral("loadwallet"), {new_wallet_name, true}, false, [this, wallet_name, new_wallet_name](const QJsonValue&, const QString& load_error) {
+                const bool already_loaded = load_error.contains(QStringLiteral("already loaded"), Qt::CaseInsensitive);
+                if (load_error.isEmpty() || already_loaded) {
+                    setCurrentWalletInternal(new_wallet_name);
+                    refresh();
+                    Q_EMIT userMessage(QStringLiteral("Wallet renamed"),
+                                       QStringLiteral("'%1' was renamed to '%2' and loaded.").arg(walletDisplayName(wallet_name), walletDisplayName(new_wallet_name)));
+                    return;
+                }
+                refresh();
+                Q_EMIT userMessage(QStringLiteral("Wallet renamed but not loaded"),
+                                   QStringLiteral("'%1' was renamed to '%2', but Nu could not reload it automatically:\n%3").arg(walletDisplayName(wallet_name), walletDisplayName(new_wallet_name), load_error));
+            });
+            return;
+        }
+
+        refresh();
+        Q_EMIT userMessage(QStringLiteral("Wallet renamed"),
+                           QStringLiteral("'%1' was renamed to '%2'.").arg(walletDisplayName(wallet_name), walletDisplayName(new_wallet_name)));
+    };
+
+    if (was_loaded) {
+        rpcCall(QStringLiteral("unloadwallet"), {wallet_name, false}, false, [this, wallet_name, move_wallet](const QJsonValue&, const QString& error) {
+            if (!error.isEmpty() && !error.contains(QStringLiteral("not loaded"), Qt::CaseInsensitive)) {
+                Q_EMIT userMessage(QStringLiteral("Wallet not renamed"), error);
+                return;
+            }
+            m_loaded_wallets.removeAll(wallet_name);
+            if (m_wallet_selected && m_wallet_name == wallet_name) setCurrentWalletInternal(QString(), false);
+            move_wallet();
+        });
+        return;
+    }
+
+    move_wallet();
+}
+
+void NuRpcService::deleteWallet(const QString& name)
+{
+    const QString wallet_name = name.trimmed();
+    if (wallet_name.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not deleted"),
+                           QStringLiteral("Nu does not delete the legacy default wallet.dat from this screen. Back it up first and remove it manually from the Defcoin data directory if you really intend to retire it."));
+        return;
+    }
+    if (!isLikelyLoadableWalletMenuName(wallet_name)) {
+        Q_EMIT userMessage(QStringLiteral("Wallet not deleted"),
+                           QStringLiteral("Choose a wallet directory created by Defcoin Core Nu. Backup .dat copies and suspicious names are intentionally hidden."));
+        return;
+    }
+
+    auto move_wallet = [this, wallet_name]() {
+        const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
+        QString normalized = wallet_name;
+        normalized.replace(QLatin1Char('\\'), QLatin1Char('/'));
+        const QString leaf = normalized.startsWith(QStringLiteral("wallets/"))
+            ? normalized.mid(QStringLiteral("wallets/").size())
+            : normalized;
+
+        QStringList candidates;
+        candidates << data_dir.filePath(normalized);
+        if (!normalized.startsWith(QStringLiteral("wallets/"))) {
+            candidates << data_dir.filePath(QStringLiteral("wallets/") + leaf);
+        }
+
+        QString source_path;
+        for (const QString& candidate : candidates) {
+            if (QFileInfo::exists(candidate)) {
+                source_path = QFileInfo(candidate).absoluteFilePath();
+                break;
+            }
+        }
+        if (source_path.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Wallet not deleted"),
+                               QStringLiteral("Nu could not find the wallet files for '%1'. Refresh the wallet list and check the Defcoin data directory.").arg(walletDisplayName(wallet_name)));
+            refresh();
+            return;
+        }
+
+        const QString deleted_root = data_dir.filePath(QStringLiteral("Deleted Wallets"));
+        QDir().mkpath(deleted_root);
+        QString safe_leaf = leaf;
+        safe_leaf.replace(QRegularExpression(QStringLiteral(R"([^A-Za-z0-9._ -])")), QStringLiteral("_"));
+        if (safe_leaf.trimmed().isEmpty()) safe_leaf = QStringLiteral("wallet");
+        const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+        QString destination = QDir(deleted_root).filePath(QStringLiteral("%1-deleted-%2").arg(safe_leaf, stamp));
+        int suffix = 2;
+        while (QFileInfo::exists(destination)) {
+            destination = QDir(deleted_root).filePath(QStringLiteral("%1-deleted-%2-%3").arg(safe_leaf, stamp).arg(suffix++));
+        }
+
+        bool moved = false;
+        const QFileInfo source_info(source_path);
+        if (source_info.isDir()) {
+            moved = QDir().rename(source_path, destination);
+        } else {
+            moved = QFile::rename(source_path, destination);
+        }
+        if (!moved) {
+            Q_EMIT userMessage(QStringLiteral("Wallet not deleted"),
+                               QStringLiteral("Nu could not move '%1' into Deleted Wallets. Check file permissions and make sure the wallet is closed.").arg(walletDisplayName(wallet_name)));
+            return;
+        }
+
+        pruneCoreWalletAutoloadSettings({wallet_name});
+        m_loaded_wallets.removeAll(wallet_name);
+        m_available_wallets.removeAll(wallet_name);
+        if (m_wallet_selected && m_wallet_name == wallet_name) {
+            setCurrentWalletInternal(m_loaded_wallets.isEmpty() ? QString() : m_loaded_wallets.first(), !m_loaded_wallets.isEmpty());
+        }
+        refresh();
+        Q_EMIT userMessage(QStringLiteral("Wallet moved to Deleted Wallets"),
+                           QStringLiteral("'%1' was closed if needed and moved to:\n%2\n\nThis is a reversible cleanup move, not a secure wipe.").arg(walletDisplayName(wallet_name), QDir::toNativeSeparators(destination)));
+    };
+
+    if (m_loaded_wallets.contains(wallet_name)) {
+        rpcCall(QStringLiteral("unloadwallet"), {wallet_name, false}, false, [this, wallet_name, move_wallet](const QJsonValue&, const QString& error) {
+            if (!error.isEmpty() && !error.contains(QStringLiteral("not loaded"), Qt::CaseInsensitive)) {
+                Q_EMIT userMessage(QStringLiteral("Wallet not deleted"), error);
+                return;
+            }
+            m_loaded_wallets.removeAll(wallet_name);
+            if (m_wallet_selected && m_wallet_name == wallet_name) setCurrentWalletInternal(QString(), false);
+            move_wallet();
+        });
+        return;
+    }
+
+    move_wallet();
+}
+
 void NuRpcService::encryptWallet(const QString& passphrase)
 {
+    if (!ensureCurrentWalletSelected(QStringLiteral("Wallet not encrypted"))) return;
     if (m_wallet_encrypted) {
         Q_EMIT userMessage(QStringLiteral("Wallet already encrypted"),
                            QStringLiteral("This wallet already has a passphrase. Use Change passphrase to update it."));
@@ -2072,7 +7537,9 @@ void NuRpcService::encryptWallet(const QString& passphrase)
         Q_EMIT userMessage(QStringLiteral("Wallet not encrypted"), QStringLiteral("Enter a passphrase of at least 8 characters."));
         return;
     }
-    rpcCall(QStringLiteral("encryptwallet"), {passphrase}, true, [this](const QJsonValue& result, const QString& error) {
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("encryptwallet"), {passphrase}, true, [this, wallet_name](const QJsonValue& result, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         Q_EMIT userMessage(error.isEmpty() ? QStringLiteral("Wallet encrypted") : QStringLiteral("Wallet encryption failed"),
                            error.isEmpty() ? result.toString(QStringLiteral("Wallet encrypted. Close and reopen the backend before spending.")) : error);
         refreshWallet();
@@ -2081,6 +7548,7 @@ void NuRpcService::encryptWallet(const QString& passphrase)
 
 void NuRpcService::changeWalletPassphrase(const QString& old_passphrase, const QString& new_passphrase)
 {
+    if (!ensureCurrentWalletSelected(QStringLiteral("Passphrase not changed"))) return;
     if (!m_wallet_encrypted) {
         Q_EMIT userMessage(QStringLiteral("Passphrase not changed"),
                            QStringLiteral("This wallet is not encrypted yet. Use Encrypt wallet to create the first wallet passphrase."));
@@ -2094,7 +7562,9 @@ void NuRpcService::changeWalletPassphrase(const QString& old_passphrase, const Q
         Q_EMIT userMessage(QStringLiteral("Passphrase not changed"), QStringLiteral("Enter a new passphrase of at least 8 characters."));
         return;
     }
-    rpcCall(QStringLiteral("walletpassphrasechange"), {old_passphrase, new_passphrase}, true, [this](const QJsonValue&, const QString& error) {
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("walletpassphrasechange"), {old_passphrase, new_passphrase}, true, [this, wallet_name](const QJsonValue&, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         QString message = error;
         if (message.contains(QStringLiteral("unencrypted wallet"), Qt::CaseInsensitive)) {
             message = QStringLiteral("This wallet is not encrypted yet. Use Encrypt wallet to create the first wallet passphrase.");
@@ -2106,11 +7576,14 @@ void NuRpcService::changeWalletPassphrase(const QString& old_passphrase, const Q
 
 void NuRpcService::signMessage(const QString& address, const QString& message)
 {
+    if (!ensureCurrentWalletSelected(QStringLiteral("Message not signed"))) return;
     if (address.trimmed().isEmpty() || message.isEmpty()) {
         Q_EMIT userMessage(QStringLiteral("Message not signed"), QStringLiteral("Enter an address and message."));
         return;
     }
-    rpcCall(QStringLiteral("signmessage"), {address.trimmed(), message}, true, [this](const QJsonValue& result, const QString& error) {
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("signmessage"), {address.trimmed(), message}, true, [this, wallet_name](const QJsonValue& result, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) {
             Q_EMIT userMessage(QStringLiteral("Message signing failed"), error);
             return;
@@ -2152,13 +7625,16 @@ void NuRpcService::openDebugLog()
 
 void NuRpcService::requestTransactionDetails(const QString& txid)
 {
+    if (!ensureCurrentWalletSelected(QStringLiteral("Transaction details unavailable"))) return;
     const QString clean_txid = txid.trimmed();
     if (clean_txid.isEmpty()) {
         Q_EMIT userMessage(QStringLiteral("Transaction details unavailable"), QStringLiteral("This row does not include a transaction ID."));
         return;
     }
 
-    rpcCall(QStringLiteral("gettransaction"), {clean_txid, true}, true, [this, clean_txid](const QJsonValue& result, const QString& error) {
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("gettransaction"), {clean_txid, true}, true, [this, wallet_name, clean_txid](const QJsonValue& result, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) {
             Q_EMIT userMessage(QStringLiteral("Transaction details unavailable"), error);
             return;
@@ -2199,6 +7675,17 @@ void NuRpcService::requestTransactionDetails(const QString& txid)
         html += rowHtml(QStringLiteral("Transaction ID"), clean_txid);
         if (tx.contains(QStringLiteral("blockhash"))) html += rowHtml(QStringLiteral("Block hash"), tx.value(QStringLiteral("blockhash")).toString());
         html += QStringLiteral("</table>");
+
+        if (usingInternalExplorer()) {
+            html += QStringLiteral("<h3>Internal explorer</h3><p>Open cached SQLite-backed explorer views for:</p><ul>");
+            html += QStringLiteral("<li>Transaction ID: <a href=\"nu://transaction/%1\" title=\"Open internal explorer window\">%2</a></li>")
+                .arg(QString::fromLatin1(QUrl::toPercentEncoding(clean_txid)).toHtmlEscaped(), clean_txid.toHtmlEscaped());
+            if (!address.isEmpty()) {
+                html += QStringLiteral("<li>Wallet Address: <a href=\"nu://address/%1\" title=\"Open internal explorer window\">%2</a></li>")
+                    .arg(QString::fromLatin1(QUrl::toPercentEncoding(address)).toHtmlEscaped(), address.toHtmlEscaped());
+            }
+            html += QStringLiteral("</ul>");
+        }
 
         const QString tx_url = explorerUrlForTransaction(clean_txid);
         const QString address_url = explorerUrlForAddress(address);
@@ -2378,7 +7865,7 @@ void NuRpcService::exportTrafficCsv()
         return;
     }
     QTextStream out(&file);
-    out << "Seconds,Local Time,Received bytes per second,Sent bytes per second\n";
+    out << "Seconds,Local Time,Average received bytes per second,Average sent bytes per second\n";
     for (const QVariant& point_value : m_traffic_samples) {
         const QVariantMap point = point_value.toMap();
         out << point.value(QStringLiteral("seconds")).toDouble() << ','
@@ -2461,7 +7948,10 @@ void NuRpcService::signCurrentPsbt()
         Q_EMIT userMessage(QStringLiteral("No PSBT loaded"), QStringLiteral("Load a PSBT before signing."));
         return;
     }
-    rpcCall(QStringLiteral("walletprocesspsbt"), {m_current_psbt, true}, true, [this](const QJsonValue& result, const QString& error) {
+    if (!ensureCurrentWalletSelected(QStringLiteral("PSBT signing failed"))) return;
+    const QString wallet_name = m_wallet_name;
+    rpcCall(QStringLiteral("walletprocesspsbt"), {m_current_psbt, true}, true, [this, wallet_name](const QJsonValue& result, const QString& error) {
+        if (wallet_name != m_wallet_name) return;
         if (!error.isEmpty()) {
             Q_EMIT userMessage(QStringLiteral("PSBT signing failed"), error);
             return;
@@ -2587,6 +8077,8 @@ QVariantList NuRpcService::suggestedTableColumnWidths(const QVariantList& column
 {
     QVariantList out;
     if (columns.isEmpty()) return out;
+    Q_UNUSED(column_weights);
+    Q_UNUSED(available_width);
 
     QFont font = QApplication::font();
     QFont mono_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
@@ -2603,9 +8095,7 @@ QVariantList NuRpcService::suggestedTableColumnWidths(const QVariantList& column
     QFontMetrics header_metrics(header_font);
     QFontMetrics mono_header_metrics(mono_header_font);
 
-    Q_UNUSED(column_weights);
-    Q_UNUSED(available_width);
-    const int padding = compact ? 18 : 28;
+    const int padding = compact ? 16 : 22;
 
     QVector<double> widths;
     widths.reserve(columns.size());
@@ -2618,13 +8108,16 @@ QVariantList NuRpcService::suggestedTableColumnWidths(const QVariantList& column
         const QFontMetrics& cell_metrics = mono ? mono_metrics : metrics;
         const QFontMetrics& title_metrics = mono ? mono_header_metrics : header_metrics;
         double wanted = minimum;
-        wanted = qMax(wanted, double(title_metrics.horizontalAdvance(title) + padding + 8));
+        wanted = qMax(wanted, double(title_metrics.horizontalAdvance(title) + padding));
         for (const QVariant& row_value : rows) {
             const QVariantList row = tableRowCells(row_value);
             if (row.size() <= c) continue;
-            wanted = qMax(wanted, double(cell_metrics.horizontalAdvance(row.at(c).toString()) + padding + 8));
+            wanted = qMax(wanted, double(cell_metrics.horizontalAdvance(row.at(c).toString()) + padding));
         }
-        widths.push_back(qBound(minimum, std::ceil(wanted), maximum));
+        const double effective_maximum = (type == QLatin1String("action") || type == QLatin1String("delete"))
+            ? maximum
+            : qMax(maximum, wanted);
+        widths.push_back(qBound(minimum, std::ceil(wanted), effective_maximum));
     }
 
     for (double width : widths) out.push_back(std::ceil(width));

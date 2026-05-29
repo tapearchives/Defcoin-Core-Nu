@@ -13,14 +13,20 @@ Item {
     property int peerInitialView: 0
 
     signal aboutRequested
+    signal createWalletRequested
+    signal createRecoveryWalletRequested
+    signal restoreRecoveryWalletRequested
 
     function routeIndex(route) {
         switch (route) {
         case "send": return 1
         case "receive": return 2
         case "activity": return 3
-        case "node": return 4
-        case "settings": return 5
+        case "wallet": return 4
+        case "mining": return 5
+        case "explorer": return 6
+        case "node": return 7
+        case "settings": return 8
         default: return 0
         }
     }
@@ -71,6 +77,13 @@ Item {
                     }
                     ReceiveView {}
                     ActivityView {}
+                    WalletView {
+                        onCreateWalletRequested: root.createWalletRequested()
+                        onCreateRecoveryWalletRequested: root.createRecoveryWalletRequested()
+                        onRestoreRecoveryWalletRequested: root.restoreRecoveryWalletRequested()
+                    }
+                    MiningView {}
+                    ExplorerView {}
                     NodeView {
                         initialTab: root.nodeInitialTab
                         initialPeerView: root.peerInitialView

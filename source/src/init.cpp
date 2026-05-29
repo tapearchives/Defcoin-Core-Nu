@@ -1869,8 +1869,14 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         // The option to not set NODE_WITNESS is only used in the tests and should be removed.
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
 
-        // NODE_MWEB requires NODE_WITNESS, so we shouldn't signal for NODE_MWEB without NODE_WITNESS
-        nLocalServices = ServiceFlags(nLocalServices | NODE_MWEB | NODE_MWEB_LIGHT_CLIENT);
+        const auto& mweb_deployment = chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_MWEB];
+        const bool mweb_configured =
+            mweb_deployment.nStartTime != Consensus::BIP9Deployment::NEVER_ACTIVE ||
+            mweb_deployment.nStartHeight != std::numeric_limits<int>::max();
+        if (mweb_configured) {
+            // NODE_MWEB requires NODE_WITNESS, so we shouldn't signal for NODE_MWEB without NODE_WITNESS.
+            nLocalServices = ServiceFlags(nLocalServices | NODE_MWEB | NODE_MWEB_LIGHT_CLIENT);
+        }
     }
 
     // ********************************************************* Step 11: import blocks
@@ -1999,11 +2005,10 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         return InitError(ResolveErrMsg("bind", bind_arg));
     }
 
-    if (connOptions.onion_binds.empty()) {
-        connOptions.onion_binds.push_back(DefaultOnionServiceTarget());
-    }
-
     if (args.GetBoolArg("-listenonion", DEFAULT_LISTEN_ONION)) {
+        if (connOptions.onion_binds.empty()) {
+            connOptions.onion_binds.push_back(DefaultOnionServiceTarget());
+        }
         const auto bind_addr = connOptions.onion_binds.front();
         if (connOptions.onion_binds.size() > 1) {
             InitWarning(strprintf(_("More than one onion bind address is provided. Using %s for the automatically created Tor onion service."), bind_addr.ToStringIPPort()));

@@ -1,27 +1,34 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(DefcoinCoreNuQml VERSION 26.3.1 LANGUAGES CXX)
+project(DefcoinCoreNuQml VERSION 26.5.1 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.3.1" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.5.1" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
+set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
+set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
 
 if(APPLE)
     enable_language(OBJCXX)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network OpenGL Qml QmlMeta QmlModels QmlWorkerScript Quick QuickControls2 QuickLayouts QuickTemplates2 Svg Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network OpenGL Qml QmlMeta QmlModels QmlWorkerScript Quick QuickControls2 QuickLayouts QuickTemplates2 Sql Svg Widgets)
 find_library(QRENCODE_LIBRARY qrencode REQUIRED)
 find_path(QRENCODE_INCLUDE_DIR qrencode.h REQUIRED)
 
 qt_add_executable(DefcoinCoreNu
     MACOSX_BUNDLE
     main.cpp
+    NuPlatformIntegration.cpp
+    NuPlatformIntegration.h
     NuRpcService.cpp
     NuRpcService.h
+    NuVelopackUpdater.cpp
+    NuVelopackUpdater.h
 )
 
 set(DEFCOIN_NU_ICON_MACOS "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/DefcoinCoreNuNuIcon.icns")
@@ -58,6 +65,7 @@ target_link_libraries(DefcoinCoreNu
         Qt6::QuickControls2
         Qt6::QuickLayouts
         Qt6::QuickTemplates2
+        Qt6::Sql
         Qt6::Svg
         Qt6::Widgets
         ${QRENCODE_LIBRARY}
@@ -87,6 +95,7 @@ endif()
 target_compile_definitions(DefcoinCoreNu PRIVATE
     DEFCOIN_NU_VERSION="${DEFCOIN_NU_RELEASE_NAME}"
     DEFCOIN_NU_HELP_ENABLED=${DEFCOIN_NU_HELP_ENABLED_VALUE}
+    DEFCOIN_NU_VELOPACK_UPDATE_URL="${DEFCOIN_NU_VELOPACK_UPDATE_URL}"
 )
 
 file(GLOB_RECURSE DEFCOIN_NU_QML_FILES CONFIGURE_DEPENDS
@@ -96,14 +105,17 @@ file(GLOB_RECURSE DEFCOIN_NU_QML_FILES CONFIGURE_DEPENDS
 
 set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/DefcoinCoreNu.ico"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/bip39/english.txt"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-coin-stack-hires.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-icon-1024.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/activity.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/copy.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/external-link.svg"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/explorer.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/home.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/isolated.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/lock.svg"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/mining.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/network.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/node.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/qr.svg"
@@ -129,6 +141,7 @@ Qml2Imports=qml
 endif()
 
 set(DEFCOIN_NU_BACKEND_BINARY "" CACHE FILEPATH "Optional defcoind binary to bundle with Defcoin Core Nu")
+set(DEFCOIN_NU_CLI_BINARY "" CACHE FILEPATH "Optional defcoin-cli binary to bundle with Defcoin Core Nu")
 
 if(APPLE)
     set(DEFCOIN_NU_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/nu")
@@ -213,8 +226,11 @@ if(APPLE)
                 COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/qml"
                 COMMAND "${DEFCOIN_NU_MACDEPLOYQT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>"
                     "-qmldir=${CMAKE_CURRENT_LIST_DIR}/../qml"
+                    "-libpath=${DEFCOIN_NU_QT_ROOT}/lib"
                     -always-overwrite
                     -appstore-compliant
+                COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/fix_macos_qt_rpath.sh" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/MacOS/DefcoinCoreNu"
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/repair_macos_qt_bundle.py" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>"
                 COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
                 COMMENT "Deploying Qt frameworks and QML imports with macdeployqt"
             )
@@ -253,6 +269,7 @@ if(WIN32)
         Qt6::QuickControls2
         Qt6::QuickLayouts
         Qt6::QuickTemplates2
+        Qt6::Sql
         Qt6::Svg
         Qt6::Widgets
     )
@@ -360,14 +377,67 @@ if(WIN32)
     )
 endif()
 
+if(DEFCOIN_NU_VELOPACK_ROOT)
+    if(APPLE)
+        set(DEFCOIN_NU_VELOPACK_RUNTIME "${DEFCOIN_NU_VELOPACK_ROOT}/lib/velopack_libc_osx.dylib")
+        set(DEFCOIN_NU_VELOPACK_RUNTIME_DEST "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Frameworks/velopack_libc_osx.dylib")
+        if(EXISTS "${DEFCOIN_NU_VELOPACK_RUNTIME}")
+            add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Frameworks"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_VELOPACK_RUNTIME}" "${DEFCOIN_NU_VELOPACK_RUNTIME_DEST}"
+                COMMENT "Bundling Velopack runtime for Defcoin Core Nu"
+            )
+        else()
+            message(WARNING "DEFCOIN_NU_VELOPACK_ROOT was set, but ${DEFCOIN_NU_VELOPACK_RUNTIME} was not found")
+        endif()
+    elseif(WIN32)
+        set(DEFCOIN_NU_VELOPACK_RUNTIME "${DEFCOIN_NU_VELOPACK_ROOT}/lib/velopack_libc_win_x64_msvc.dll")
+        if(EXISTS "${DEFCOIN_NU_VELOPACK_RUNTIME}")
+            add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_VELOPACK_RUNTIME}" "$<TARGET_FILE_DIR:DefcoinCoreNu>"
+                COMMENT "Bundling Velopack runtime for Defcoin Core Nu"
+            )
+        else()
+            message(WARNING "DEFCOIN_NU_VELOPACK_ROOT was set, but ${DEFCOIN_NU_VELOPACK_RUNTIME} was not found")
+        endif()
+    elseif(UNIX)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(DEFCOIN_NU_VELOPACK_RUNTIME "${DEFCOIN_NU_VELOPACK_ROOT}/lib/velopack_libc_linux_arm64_gnu.so")
+        else()
+            set(DEFCOIN_NU_VELOPACK_RUNTIME "${DEFCOIN_NU_VELOPACK_ROOT}/lib/velopack_libc_linux_x64_gnu.so")
+        endif()
+        if(EXISTS "${DEFCOIN_NU_VELOPACK_RUNTIME}")
+            add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_VELOPACK_RUNTIME}" "$<TARGET_FILE_DIR:DefcoinCoreNu>"
+                COMMENT "Bundling Velopack runtime for Defcoin Core Nu"
+            )
+        else()
+            message(WARNING "DEFCOIN_NU_VELOPACK_ROOT was set, but ${DEFCOIN_NU_VELOPACK_RUNTIME} was not found")
+        endif()
+    endif()
+endif()
+
 if(DEFCOIN_NU_BACKEND_BINARY)
     get_filename_component(DEFCOIN_NU_BACKEND_INPUT_DIR "${DEFCOIN_NU_BACKEND_BINARY}" DIRECTORY)
+    if(NOT DEFCOIN_NU_CLI_BINARY)
+        if(WIN32)
+            set(DEFCOIN_NU_CLI_CANDIDATE "${DEFCOIN_NU_BACKEND_INPUT_DIR}/defcoin-cli.exe")
+        else()
+            set(DEFCOIN_NU_CLI_CANDIDATE "${DEFCOIN_NU_BACKEND_INPUT_DIR}/defcoin-cli")
+        endif()
+        if(EXISTS "${DEFCOIN_NU_CLI_CANDIDATE}")
+            set(DEFCOIN_NU_CLI_BINARY "${DEFCOIN_NU_CLI_CANDIDATE}")
+        endif()
+    endif()
     if(APPLE)
         set(DEFCOIN_NU_BACKEND_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/nu/bin/defcoind")
+        set(DEFCOIN_NU_CLI_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/nu/bin/defcoin-cli")
     elseif(WIN32)
         set(DEFCOIN_NU_BACKEND_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoind.exe")
+        set(DEFCOIN_NU_CLI_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoin-cli.exe")
     else()
         set(DEFCOIN_NU_BACKEND_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoind")
+        set(DEFCOIN_NU_CLI_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoin-cli")
     endif()
     add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_RESOURCE_DIR}/bin"
@@ -375,6 +445,14 @@ if(DEFCOIN_NU_BACKEND_BINARY)
         COMMAND /bin/chmod 755 "${DEFCOIN_NU_BACKEND_OUTPUT}"
         COMMENT "Bundling Defcoin backend for Nu"
     )
+    if(DEFCOIN_NU_CLI_BINARY)
+        add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_RESOURCE_DIR}/bin"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_CLI_BINARY}" "${DEFCOIN_NU_CLI_OUTPUT}"
+            COMMAND /bin/chmod 755 "${DEFCOIN_NU_CLI_OUTPUT}"
+            COMMENT "Bundling Defcoin CLI for Nu"
+        )
+    endif()
     if(WIN32)
         file(GLOB DEFCOIN_NU_BACKEND_RUNTIME_DLLS CONFIGURE_DEPENDS
             "${DEFCOIN_NU_BACKEND_INPUT_DIR}/*.dll"
