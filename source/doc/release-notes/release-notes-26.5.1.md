@@ -40,8 +40,8 @@ policy, and `/Defcoin` User-Agent filtering.
   legacy BDB wallets remain supported.
 - Added Wallet table storage-format reporting, showing `BDB` for Berkeley DB
   legacy wallets and `SQL` for SQLite descriptor wallets.
-- Bundled `defcoin-cli` next to `defcoind` in Nu desktop packages for advanced
-  support, scripting, and local RPC diagnostics.
+- Bundled the Litecoin-equivalent Defcoin command-line tool set in Nu desktop
+  packages: `defcoind`, `defcoin-cli`, `defcoin-tx`, and `defcoin-wallet`.
 
 ## Wallet Storage Scope
 

@@ -341,9 +341,11 @@ node tools:
 - `src/defcoin-wallet`
 - `src/qt/defcoin-qt` where the inherited Qt Widgets wallet is enabled
 
-Nu desktop packages bundle `defcoind` as the managed backend and bundle
-`defcoin-cli` alongside it for advanced support and local RPC diagnostics. The
-GUI does not require end users to run the CLI manually.
+Nu desktop packages bundle the same user-facing command-line binaries that the
+inherited Litecoin Core release model provides, renamed and parameterized for
+Defcoin: `defcoind`, `defcoin-cli`, `defcoin-tx`, and `defcoin-wallet`. The GUI
+uses `defcoind` as its managed backend and does not require end users to run the
+CLI tools manually.
 
 Run focused smoke tests after building:
 
@@ -359,6 +361,8 @@ cmake -S src/qt/nu/app -B build/nu-qml-macos \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DDEFCOIN_NU_BACKEND_BINARY="$SRC/src/defcoind" \
   -DDEFCOIN_NU_CLI_BINARY="$SRC/src/defcoin-cli" \
+  -DDEFCOIN_NU_TX_BINARY="$SRC/src/defcoin-tx" \
+  -DDEFCOIN_NU_WALLET_BINARY="$SRC/src/defcoin-wallet" \
   -DDEFCOIN_NU_RELEASE_NAME="26.5.1" \
   -DDEFCOIN_NU_ENABLE_HELP=OFF
 

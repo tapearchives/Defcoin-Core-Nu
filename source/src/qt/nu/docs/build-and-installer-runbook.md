@@ -44,6 +44,8 @@ cmake -S src/qt/nu/app -B build/nu-qml-arm64 \
   -DQt6_DIR="$QT_MAC/lib/cmake/Qt6" \
   -DDEFCOIN_NU_BACKEND_BINARY="$SRC/src/defcoind" \
   -DDEFCOIN_NU_CLI_BINARY="$SRC/src/defcoin-cli" \
+  -DDEFCOIN_NU_TX_BINARY="$SRC/src/defcoin-tx" \
+  -DDEFCOIN_NU_WALLET_BINARY="$SRC/src/defcoin-wallet" \
   -DDEFCOIN_NU_RELEASE_NAME="26.5.1" \
   -DDEFCOIN_NU_ENABLE_HELP=OFF
 
@@ -90,7 +92,7 @@ CONFIG_SITE="$SRC/depends/x86_64-w64-mingw32/share/config.site" \
   ./configure --prefix=/ --host=x86_64-w64-mingw32 --without-gui --enable-wallet \
   --with-sqlite=yes --with-miniupnpc --disable-zmq --disable-tests --disable-bench \
   --disable-shared --with-pic
-make -j1 src/defcoind.exe
+make -j1 src/defcoind.exe src/defcoin-cli.exe src/defcoin-tx.exe src/defcoin-wallet.exe
 ```
 
 Build the Windows Qt Quick shell:
@@ -101,6 +103,8 @@ cmake -S src/qt/nu/app -B build/nu-qml-win64 \
   -DCMAKE_TOOLCHAIN_FILE="$SRC/depends/cmake/mingw-w64-x86_64.cmake" \
   -DDEFCOIN_NU_BACKEND_BINARY="$WIN_SRC/src/defcoind.exe" \
   -DDEFCOIN_NU_CLI_BINARY="$WIN_SRC/src/defcoin-cli.exe" \
+  -DDEFCOIN_NU_TX_BINARY="$WIN_SRC/src/defcoin-tx.exe" \
+  -DDEFCOIN_NU_WALLET_BINARY="$WIN_SRC/src/defcoin-wallet.exe" \
   -DDEFCOIN_NU_RELEASE_NAME="26.5.1" \
   -DDEFCOIN_NU_ENABLE_HELP=OFF \
   -DQt6_DIR="$QT_WIN/lib/cmake/Qt6" \

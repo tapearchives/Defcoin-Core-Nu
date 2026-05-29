@@ -142,6 +142,8 @@ endif()
 
 set(DEFCOIN_NU_BACKEND_BINARY "" CACHE FILEPATH "Optional defcoind binary to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_CLI_BINARY "" CACHE FILEPATH "Optional defcoin-cli binary to bundle with Defcoin Core Nu")
+set(DEFCOIN_NU_TX_BINARY "" CACHE FILEPATH "Optional defcoin-tx binary to bundle with Defcoin Core Nu")
+set(DEFCOIN_NU_WALLET_BINARY "" CACHE FILEPATH "Optional defcoin-wallet binary to bundle with Defcoin Core Nu")
 
 if(APPLE)
     set(DEFCOIN_NU_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/nu")
@@ -429,15 +431,41 @@ if(DEFCOIN_NU_BACKEND_BINARY)
             set(DEFCOIN_NU_CLI_BINARY "${DEFCOIN_NU_CLI_CANDIDATE}")
         endif()
     endif()
+    if(NOT DEFCOIN_NU_TX_BINARY)
+        if(WIN32)
+            set(DEFCOIN_NU_TX_CANDIDATE "${DEFCOIN_NU_BACKEND_INPUT_DIR}/defcoin-tx.exe")
+        else()
+            set(DEFCOIN_NU_TX_CANDIDATE "${DEFCOIN_NU_BACKEND_INPUT_DIR}/defcoin-tx")
+        endif()
+        if(EXISTS "${DEFCOIN_NU_TX_CANDIDATE}")
+            set(DEFCOIN_NU_TX_BINARY "${DEFCOIN_NU_TX_CANDIDATE}")
+        endif()
+    endif()
+    if(NOT DEFCOIN_NU_WALLET_BINARY)
+        if(WIN32)
+            set(DEFCOIN_NU_WALLET_CANDIDATE "${DEFCOIN_NU_BACKEND_INPUT_DIR}/defcoin-wallet.exe")
+        else()
+            set(DEFCOIN_NU_WALLET_CANDIDATE "${DEFCOIN_NU_BACKEND_INPUT_DIR}/defcoin-wallet")
+        endif()
+        if(EXISTS "${DEFCOIN_NU_WALLET_CANDIDATE}")
+            set(DEFCOIN_NU_WALLET_BINARY "${DEFCOIN_NU_WALLET_CANDIDATE}")
+        endif()
+    endif()
     if(APPLE)
         set(DEFCOIN_NU_BACKEND_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/nu/bin/defcoind")
         set(DEFCOIN_NU_CLI_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/nu/bin/defcoin-cli")
+        set(DEFCOIN_NU_TX_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/nu/bin/defcoin-tx")
+        set(DEFCOIN_NU_WALLET_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/nu/bin/defcoin-wallet")
     elseif(WIN32)
         set(DEFCOIN_NU_BACKEND_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoind.exe")
         set(DEFCOIN_NU_CLI_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoin-cli.exe")
+        set(DEFCOIN_NU_TX_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoin-tx.exe")
+        set(DEFCOIN_NU_WALLET_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoin-wallet.exe")
     else()
         set(DEFCOIN_NU_BACKEND_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoind")
         set(DEFCOIN_NU_CLI_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoin-cli")
+        set(DEFCOIN_NU_TX_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoin-tx")
+        set(DEFCOIN_NU_WALLET_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreNu>/nu/bin/defcoin-wallet")
     endif()
     add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_RESOURCE_DIR}/bin"
@@ -451,6 +479,22 @@ if(DEFCOIN_NU_BACKEND_BINARY)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_CLI_BINARY}" "${DEFCOIN_NU_CLI_OUTPUT}"
             COMMAND /bin/chmod 755 "${DEFCOIN_NU_CLI_OUTPUT}"
             COMMENT "Bundling Defcoin CLI for Nu"
+        )
+    endif()
+    if(DEFCOIN_NU_TX_BINARY)
+        add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_RESOURCE_DIR}/bin"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_TX_BINARY}" "${DEFCOIN_NU_TX_OUTPUT}"
+            COMMAND /bin/chmod 755 "${DEFCOIN_NU_TX_OUTPUT}"
+            COMMENT "Bundling Defcoin transaction utility for Nu"
+        )
+    endif()
+    if(DEFCOIN_NU_WALLET_BINARY)
+        add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_RESOURCE_DIR}/bin"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_WALLET_BINARY}" "${DEFCOIN_NU_WALLET_OUTPUT}"
+            COMMAND /bin/chmod 755 "${DEFCOIN_NU_WALLET_OUTPUT}"
+            COMMENT "Bundling Defcoin wallet utility for Nu"
         )
     endif()
     if(WIN32)
