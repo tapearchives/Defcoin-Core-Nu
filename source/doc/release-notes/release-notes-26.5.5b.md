@@ -1,8 +1,8 @@
-# Defcoin Core Nu 26.5.5a Release Notes
+# Defcoin Core Nu 26.5.5b Release Notes
 
 Codename: `Core Memories`
 
-Defcoin Core Nu `26.5.5a` adds the first blockchain forensics surface to the
+Defcoin Core Nu `26.5.5b` adds the first blockchain forensics surface to the
 desktop wallet while keeping the chain, wallet, recovery, mining, and explorer
 behavior from the current `26.5` line.
 
@@ -52,14 +52,20 @@ behavior from the current `26.5` line.
 - Peer diagnostics now display Reverse DNS normally while sorting it by hidden
   reverse-domain notation, with right-aligned Reverse DNS and LAN-aware Known
   DNS alignment.
+- UDP fast-sync availability now reports capability state rather than mere
+  Defcoin compatibility. Old non-Nu peers show `No`; Nu peers start as `TBA`
+  until this session receives a valid UDP response or records a failed attempt.
 - Witness Repair now reads stored block bodies to identify missing witness data,
   rather than relying only on chain-index flags.
+- Explorer status text now wraps inside its panel instead of being covered by
+  tabs or action buttons.
 
 ## Build Suffix
 
-`26.5.5a` is the first changed rebuild in the `26.5.5` line. Future changed
-rebuilds in the same release line should use the next letter suffix, while the
-inherited Core client version stays `0.21.5.5`.
+`26.5.5b` is the current changed rebuild in the `26.5.5` line. Future changed
+rebuilds in the same release line should use the next letter suffix
+(`26.5.5c`, `26.5.5d`, and so on), while the inherited Core client version
+stays `0.21.5.5`.
 
 ## Technical Notes
 

@@ -2649,12 +2649,26 @@ void NuRpcService::refreshNode()
             const QPair<QString, QString> endpoint = splitPeerAddressAndPort(peer.value(QStringLiteral("addr")).toString());
             QHostAddress udp_fast_sync_address;
             QString udp_fast_sync_host_key;
-            const bool udp_fast_sync_candidate = isDefcoinUserAgent(subver) && udp_fast_sync_address.setAddress(endpoint.first);
-            if (udp_fast_sync_candidate) {
+            const bool nu_fast_sync_candidate = isDefcoinCoreNuUserAgent(subver) && udp_fast_sync_address.setAddress(endpoint.first);
+            if (nu_fast_sync_candidate) {
                 udp_fast_sync_host_key = normalizedFastSyncHost(udp_fast_sync_address);
                 udp_fast_sync_peer_hosts.insert(udp_fast_sync_host_key);
             }
-            const QString fast_sync_available = (m_lan_fast_sync_enabled && udp_fast_sync_candidate) ? QStringLiteral("Yes") : QStringLiteral("No");
+            QString fast_sync_available = QStringLiteral("No");
+            if (!m_lan_fast_sync_enabled) {
+                fast_sync_available = QStringLiteral("Off");
+            } else if (nu_fast_sync_candidate) {
+                if (!udp_fast_sync_host_key.isEmpty() &&
+                    (m_udp_fast_sync_available_peer_hosts.contains(udp_fast_sync_host_key) ||
+                     m_udp_fast_sync_used_peer_hosts.contains(udp_fast_sync_host_key))) {
+                    fast_sync_available = QStringLiteral("Yes");
+                } else if (!udp_fast_sync_host_key.isEmpty() &&
+                           m_udp_fast_sync_failed_peer_hosts.contains(udp_fast_sync_host_key)) {
+                    fast_sync_available = QStringLiteral("Failed");
+                } else {
+                    fast_sync_available = QStringLiteral("TBA");
+                }
+            }
             const QString fast_sync_used = (!udp_fast_sync_host_key.isEmpty() && m_udp_fast_sync_used_peer_hosts.contains(udp_fast_sync_host_key)) ? QStringLiteral("Yes") : QStringLiteral("No");
             schedulePeerNameLookups(endpoint.first);
             scheduleLanPeerNameLookups(endpoint.first);
@@ -3151,6 +3165,7 @@ void NuRpcService::resetLanFastSyncTransfer(const QString& status)
     m_lan_fast_sync_request_ms = 0;
     m_lan_fast_sync_request_in_flight = false;
     m_lan_fast_sync_submit_in_flight = false;
+    m_udp_fast_sync_current_target_hosts.clear();
     m_lan_fast_sync_status = status;
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
@@ -3195,6 +3210,12 @@ void NuRpcService::lanFastSyncTick()
         if (m_lan_fast_sync_request_ms > 0 && now - m_lan_fast_sync_request_ms > LAN_FAST_SYNC_REQUEST_TIMEOUT_MS) {
             ++m_lan_fast_sync_retransmit_errors;
             if (m_lan_fast_sync_retransmit_errors % LAN_FAST_SYNC_MAX_RETRIES_PER_BLOCK == 0) {
+                for (const QString& host : std::as_const(m_udp_fast_sync_current_target_hosts)) {
+                    if (!m_udp_fast_sync_available_peer_hosts.contains(host) &&
+                        !m_udp_fast_sync_used_peer_hosts.contains(host)) {
+                        m_udp_fast_sync_failed_peer_hosts.insert(host);
+                    }
+                }
                 resetLanFastSyncTransfer(QStringLiteral("UDP fast sync fell back to TCP/Core at block %1 after missing chunks.").arg(m_lan_fast_sync_current_height));
                 return;
             }
@@ -3227,6 +3248,7 @@ void NuRpcService::requestLanFastSyncBlock(int height)
     m_lan_fast_sync_block_checksum.clear();
     m_lan_fast_sync_request_ms = QDateTime::currentMSecsSinceEpoch();
     m_lan_fast_sync_request_in_flight = true;
+    m_udp_fast_sync_current_target_hosts.clear();
 
     QJsonObject header;
     header.insert(QStringLiteral("type"), QStringLiteral("request-block"));
@@ -3251,6 +3273,8 @@ void NuRpcService::requestLanFastSyncBlock(int height)
         if (sent_targets.contains(key)) continue;
         if (m_lan_fast_sync_socket->writeDatagram(datagram, peer_address, LAN_FAST_SYNC_PORT) > 0) {
             sent_targets.insert(key);
+            m_udp_fast_sync_attempted_peer_hosts.insert(key);
+            m_udp_fast_sync_current_target_hosts.insert(key);
             ++target_count;
         }
     }
@@ -3318,6 +3342,10 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
     const int height = header.value(QStringLiteral("height")).toInt(-1);
     if (request_id.isEmpty() || height < 0 || height > m_block_height) return;
     const QString sender_key = normalizedFastSyncHost(sender);
+    if (!sender_key.isEmpty()) {
+        m_udp_fast_sync_available_peer_hosts.insert(sender_key);
+        m_udp_fast_sync_failed_peer_hosts.remove(sender_key);
+    }
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const qint64 last_request_ms = m_udp_fast_sync_last_request_ms_by_host.value(sender_key, 0);
     if (last_request_ms > 0 && now - last_request_ms < LAN_FAST_SYNC_MIN_REQUEST_INTERVAL_MS) return;
@@ -3398,6 +3426,8 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     if (m_lan_fast_sync_chunks.contains(seq)) return;
     m_lan_fast_sync_chunks.insert(seq, payload);
     if (!sender_key.isEmpty()) {
+        m_udp_fast_sync_available_peer_hosts.insert(sender_key);
+        m_udp_fast_sync_failed_peer_hosts.remove(sender_key);
         m_udp_fast_sync_used_peer_hosts.insert(sender_key);
     }
 
@@ -9603,4 +9633,12 @@ bool NuRpcService::isDefcoinUserAgent(QString subver)
 {
     subver = trimUserAgent(subver);
     return subver.startsWith(QStringLiteral("Defcoin"), Qt::CaseInsensitive);
+}
+
+bool NuRpcService::isDefcoinCoreNuUserAgent(QString subver)
+{
+    subver = trimUserAgent(subver);
+    return subver.startsWith(QStringLiteral("DefcoinCoreNu:"), Qt::CaseInsensitive) ||
+           subver.startsWith(QStringLiteral("DefcoinCoreNu/"), Qt::CaseInsensitive) ||
+           subver.compare(QStringLiteral("DefcoinCoreNu"), Qt::CaseInsensitive) == 0;
 }

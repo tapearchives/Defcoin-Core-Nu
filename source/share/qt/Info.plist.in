@@ -24,10 +24,10 @@
   <string>Defcoin Core uses local network access only when peer-to-peer networking or local peer discovery is enabled, so it can connect to other Defcoin nodes on your LAN.</string>
 
   <key>CFBundleShortVersionString</key>
-  <string>26.5.5a</string>
+  <string>26.5.5b</string>
 
   <key>CFBundleVersion</key>
-  <string>26.5.5a</string>
+  <string>26.5.5b</string>
 
   <key>CFBundleSignature</key>
   <string>????</string>
@@ -42,7 +42,7 @@
   <string>Defcoin Core</string>
 
   <key>CFBundleGetInfoString</key>
-  <string>Defcoin Core Nu 26.5.5a</string>
+  <string>Defcoin Core Nu 26.5.5b</string>
 
   <key>LSHasLocalizedDisplayName</key>
   <true/>

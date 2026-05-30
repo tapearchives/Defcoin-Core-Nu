@@ -97,8 +97,12 @@ ColumnLayout {
     }
 
     NuPanel {
+        id: explorerStatusPanel
         Layout.fillWidth: true
+        Layout.preferredHeight: Math.max(158, explorerStatusContent.implicitHeight + padding * 2)
+        Layout.minimumHeight: Math.max(158, explorerStatusContent.implicitHeight + padding * 2)
         ColumnLayout {
+            id: explorerStatusContent
             anchors.fill: parent
             spacing: NuTokens.spaceMd
 
@@ -127,6 +131,7 @@ ColumnLayout {
 
                 NuActionButton {
                     Layout.preferredWidth: 148
+                    Layout.alignment: Qt.AlignTop
                     text: "Refresh stats"
                     helpText: "Reload Top 100 and movement summaries from the local SQLite explorer index."
                     onClicked: root.refreshAnalytics()
@@ -144,6 +149,7 @@ ColumnLayout {
 
             Flow {
                 Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
                 spacing: NuTokens.spaceLg
                 NuMetricRow { label: "Index"; value: root.indexPercentText() }
                 NuMetricRow { label: "Next block"; value: String(NuService.explorerIndexHeight) }

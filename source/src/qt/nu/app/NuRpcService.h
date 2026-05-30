@@ -618,6 +618,7 @@ private:
     static QString formatServices(const QString& services_hex);
     static QString trimUserAgent(QString subver);
     static bool isDefcoinUserAgent(QString subver);
+    static bool isDefcoinCoreNuUserAgent(QString subver);
 
     QNetworkAccessManager* m_network = nullptr;
     QNetworkAccessManager* m_update_network = nullptr;
@@ -754,7 +755,11 @@ private:
     QSet<QString> m_peer_lan_lookup_pending;
     QSet<QString> m_peer_lan_lookup_attempted;
     QSet<QString> m_udp_fast_sync_peer_hosts;
+    QSet<QString> m_udp_fast_sync_attempted_peer_hosts;
+    QSet<QString> m_udp_fast_sync_available_peer_hosts;
+    QSet<QString> m_udp_fast_sync_failed_peer_hosts;
     QSet<QString> m_udp_fast_sync_used_peer_hosts;
+    QSet<QString> m_udp_fast_sync_current_target_hosts;
     QHash<QString, qint64> m_udp_fast_sync_last_request_ms_by_host;
     int m_address_book_refresh_generation = 0;
     QVariantList m_address_book;

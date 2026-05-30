@@ -1,8 +1,8 @@
 # Defcoin Core Changelog
 
-## 26.5.5a Core Memories
+## 26.5.5b Core Memories
 
-Defcoin Core Nu `26.5.5a` adds the first Forensics view for average users who
+Defcoin Core Nu `26.5.5b` adds the first Forensics view for average users who
 want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Added
@@ -37,9 +37,9 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Changed
 
-- Updated visible Nu release metadata to `26.5.5a`.
+- Updated visible Nu release metadata to `26.5.5b`.
 - Letter suffixes now identify every changed rebuild in this release line:
-  `26.5.5a`, then `26.5.5b`, and so on. The inherited Core client version
+  `26.5.5a`, `26.5.5b`, `26.5.5c`, and so on. The inherited Core client version
   remains `0.21.5.5`.
 - Added Forensics to the sidebar, View menu, app resources, and Build Notes.
 - Diagnostics > Status now reports sync method details, UDP transfer rate in
@@ -54,6 +54,9 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
   column by hidden reverse-domain notation, so related domains group together.
 - Reverse DNS cells are right-aligned; Known DNS cells are right-aligned except
   true LAN aliases, which display as `LAN:<name>` and are left-aligned.
+- UDP fast-sync availability now distinguishes old non-Nu peers from Nu peers:
+  non-Nu peers show `No`, Nu peers start as `TBA`, and they switch to `Yes` or
+  `Failed` only after a UDP fast-sync exchange is attempted.
 
 ### Fixed
 
@@ -62,6 +65,8 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
   cannot incorrectly complete in under one second without reading the chain.
 - LAN peer-name discovery no longer treats public ISP reverse-DNS names as
   local workstation names.
+- Explorer status content now reserves enough height for wrapped index messages,
+  so status text cannot paint under the tab bar or buttons.
 
 ## 26.5.2 Core Memories
 
