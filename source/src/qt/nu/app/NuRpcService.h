@@ -525,6 +525,7 @@ private:
     void rpcCall(const QString& method, const QJsonArray& params, bool wallet_scoped, RpcCallback callback);
     void rpcCallForWallet(const QString& method, const QJsonArray& params, const QString& wallet_name, RpcCallback callback);
     void rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls, bool wallet_scoped, RpcBatchCallback callback);
+    void rpcBatchCallAsSingles(const QVector<QPair<QString, QJsonArray>>& calls, bool wallet_scoped, RpcBatchCallback callback);
     void handleReply(QNetworkReply* reply);
     QUrl rpcUrl(bool wallet_scoped) const;
     QUrl rpcUrlForWallet(const QString& wallet_name) const;
@@ -557,6 +558,8 @@ private:
     bool isUdpFastSyncAllowedPeer(const QHostAddress& address) const;
     QString lanFastSyncMethodSummary() const;
     QString lanFastSyncRateSummary() const;
+    QString syncTransportSpeedSummary() const;
+    void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes);
     void refreshDebugLog();
     void updateReceiveQr();
     QString receiveRequestSettingsKey() const;
@@ -813,6 +816,9 @@ private:
     qint64 m_last_bytes_sent = -1;
     QString m_traffic_received_total = QStringLiteral("0 B");
     QString m_traffic_sent_total = QStringLiteral("0 B");
+    qint64 m_sync_tcp_bytes_received = 0;
+    qint64 m_sync_tcp_bytes_sent = 0;
+    double m_sync_tcp_active_seconds = 0.0;
     QStringList m_log_lines;
     QVariantList m_log_line_numbers;
     QString m_last_logged_error_message;
@@ -843,6 +849,10 @@ private:
     int m_lan_fast_sync_retransmit_errors = 0;
     int m_lan_fast_sync_blocks_received = 0;
     qint64 m_lan_fast_sync_bytes_received = 0;
+    qint64 m_lan_fast_sync_udp_bytes_received = 0;
+    qint64 m_lan_fast_sync_udp_bytes_sent = 0;
+    qint64 m_lan_fast_sync_udp_first_activity_ms = 0;
+    qint64 m_lan_fast_sync_udp_last_activity_ms = 0;
     qint64 m_lan_fast_sync_started_ms = 0;
     qint64 m_lan_fast_sync_request_ms = 0;
     qint64 m_lan_fast_sync_last_progress_ms = 0;

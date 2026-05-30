@@ -206,12 +206,16 @@ ColumnLayout {
                     NuMetricRow { label: "Rows"; value: String(NuService.forensicsIrregularMessageCount) }
                 }
 
-                Label {
+                Basic.TextArea {
                     Layout.fillWidth: true
                     text: NuService.forensicsScanStatus
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap
+                    readOnly: true
+                    selectByMouse: true
+                    background: Item {}
+                    padding: 0
                 }
 
                 Label {
@@ -223,13 +227,17 @@ ColumnLayout {
                     wrapMode: Text.WordWrap
                 }
 
-                Label {
+                Basic.TextArea {
                     Layout.fillWidth: true
                     visible: NuService.forensicsScanComplete && NuService.forensicsScanSummary.length > 0
                     text: NuService.forensicsScanSummary
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap
+                    readOnly: true
+                    selectByMouse: true
+                    background: Item {}
+                    padding: 0
                 }
 
                 NuDataTable {
@@ -340,12 +348,16 @@ ColumnLayout {
                     }
                 }
 
-                Label {
+                Basic.TextArea {
                     Layout.fillWidth: true
                     text: NuService.forensicsWitnessRepairStatus
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontBody
                     wrapMode: Text.WordWrap
+                    readOnly: true
+                    selectByMouse: true
+                    background: Item {}
+                    padding: 0
                 }
 
                 Label {

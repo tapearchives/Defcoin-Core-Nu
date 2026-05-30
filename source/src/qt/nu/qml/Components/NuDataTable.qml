@@ -243,6 +243,14 @@ Rectangle {
         return ({})
     }
 
+    function cellToolTip(row, index) {
+        const meta = rowMeta(row)
+        const tips = meta.cellTooltips
+        if (tips !== undefined && tips !== null && index >= 0 && index < tips.length) return String(tips[index] || "")
+        if (meta.rowTooltip !== undefined && meta.rowTooltip !== null) return String(meta.rowTooltip || "")
+        return ""
+    }
+
     function rowKey(row) {
         const meta = rowMeta(row)
         let value = meta[root.rowKeyMetaField]
@@ -1333,11 +1341,17 @@ Rectangle {
                                 }
 
                                 MouseArea {
+                                    id: bodyMouse
                                     anchors.fill: parent
                                     visible: !root.isActionColumn(bodyCell.index)
+                                    hoverEnabled: true
                                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                                     cursorShape: root.cellLinkUrl(bodyRow.modelData, bodyCell.index).length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
                                     property point startPoint: Qt.point(0, 0)
+                                    ToolTip.visible: bodyMouse.containsMouse && root.cellToolTip(bodyRow.modelData, bodyCell.index).length > 0
+                                    ToolTip.text: root.cellToolTip(bodyRow.modelData, bodyCell.index)
+                                    ToolTip.delay: NuTokens.tooltipDelay
+                                    ToolTip.timeout: NuTokens.tooltipTimeout
                                     onPressed: (mouse) => {
                                         if (mouse.button === Qt.RightButton) {
                                             root.openCopyMenu(bodyCell, mouse.x, mouse.y, bodyRow.index, bodyCell.index)

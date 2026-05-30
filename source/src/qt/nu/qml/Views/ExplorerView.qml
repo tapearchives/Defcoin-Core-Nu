@@ -17,9 +17,20 @@ ColumnLayout {
     property int hoveredRichRank: -1
     property var timelineSnapshot: ({ rows: [], height: -1, status: "No Top 100 timeline snapshot loaded." })
     property bool timelinePlaying: false
+    property bool top100EndInitialized: false
+    property bool top100EndEdited: false
     readonly property real indexProgress: NuService.explorerIndexTip > 0
                                           ? Math.max(0, Math.min(1, NuService.explorerIndexHeight / NuService.explorerIndexTip))
                                           : 0
+
+    Connections {
+        target: NuService
+        function onExplorerChanged() {
+            if (!top100EndField || root.top100EndEdited || NuService.explorerIndexTip <= 0) return
+            if (top100EndField.text.length === 0 || top100EndField.text === "0")
+                root.initializeTop100EndField(true)
+        }
+    }
 
     function indexPercentText() {
         if (NuService.explorerIndexTip <= 0) return "0.00%"
@@ -34,6 +45,26 @@ ColumnLayout {
     function movementPageCount(rowsPerPage) {
         const perPage = Math.max(1, rowsPerPage)
         return Math.max(1, Math.ceil(NuService.explorerMovements.length / perPage))
+    }
+
+    function initializeTop100EndField(force) {
+        if (!top100EndField || (root.top100EndInitialized && root.top100EndEdited && !force)) return
+        const tip = Math.max(0, NuService.explorerIndexTip)
+        top100EndField.text = String(tip)
+        root.top100EndInitialized = true
+        root.top100EndEdited = false
+    }
+
+    function timelineSnapshotTimeText() {
+        const seconds = Number(root.timelineSnapshot.time || 0)
+        if (!seconds || seconds <= 0) return "date and time unavailable"
+        return Qt.formatDateTime(new Date(seconds * 1000), "yyyy-MM-dd hh:mm:ss t")
+    }
+
+    function timelineSnapshotHeaderText() {
+        const height = Number(root.timelineSnapshot.height)
+        if (isNaN(height) || height < 0) return "No snapshot"
+        return "Block " + height + " on date and time " + root.timelineSnapshotTimeText()
     }
 
     function movementPageRows(rowsPerPage) {
@@ -192,19 +223,27 @@ ColumnLayout {
                         font.pixelSize: NuTokens.fontBodyLarge
                         font.weight: Font.DemiBold
                     }
-                    Label {
+                    Basic.TextArea {
                         Layout.fillWidth: true
                         text: NuService.explorerIndexStatus
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontSmall
                         wrapMode: Text.WordWrap
+                        readOnly: true
+                        selectByMouse: true
+                        background: Item {}
+                        padding: 0
                     }
-                    Label {
+                    Basic.TextArea {
                         Layout.fillWidth: true
                         text: NuService.explorerAnalyticsStatus
                         color: NuTokens.textMuted
                         font.pixelSize: NuTokens.fontSmall
                         wrapMode: Text.WordWrap
+                        readOnly: true
+                        selectByMouse: true
+                        background: Item {}
+                        padding: 0
                     }
                 }
 
@@ -398,12 +437,16 @@ ColumnLayout {
                     font.weight: Font.DemiBold
                 }
 
-                Label {
+                Basic.TextArea {
                     Layout.fillWidth: true
                     text: NuService.explorerTop100Status
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap
+                    readOnly: true
+                    selectByMouse: true
+                    background: Item {}
+                    padding: 0
                 }
 
                 Flow {
@@ -430,9 +473,11 @@ ColumnLayout {
                     NuTextField {
                         id: top100EndField
                         width: 120
-                        text: String(Math.max(0, NuService.explorerIndexTip))
+                        text: ""
                         validator: IntValidator { bottom: 0; top: 99999999 }
                         helpText: "Last block height to include. Leave this at the indexed tip for a full current timeline."
+                        onTextEdited: root.top100EndEdited = true
+                        Component.onCompleted: root.initializeTop100EndField(false)
                     }
                     NuActionButton {
                         width: 132
@@ -441,7 +486,7 @@ ColumnLayout {
                         primary: enabled
                         helpText: "Build the exact sparse Top 100 timeline from local balance deltas."
                         onClicked: NuService.startExplorerTop100Timeline(parseInt(top100StartField.text) || 0,
-                                                                          parseInt(top100EndField.text) || NuService.explorerIndexTip)
+                                                                          top100EndField.text.length > 0 ? parseInt(top100EndField.text) : NuService.explorerIndexTip)
                     }
                     NuActionButton {
                         width: 112
@@ -602,12 +647,12 @@ ColumnLayout {
                             }
                             NuActionButton {
                                 width: 118
-                                text: "Over time"
+                                text: "Timeline"
                                 enabled: NuService.explorerTop100TimelineEventCount > 0
                                 helpText: "Open the sparse Top 100 over-time animation window."
                                 onClicked: {
                                     root.loadTimelineSnapshotAtPosition(1)
-                                    top100TimelineWindow.show()
+                                    top100TimelineWindow.showFullScreen()
                                     top100TimelineWindow.raise()
                                     top100TimelineWindow.requestActivate()
                                 }
@@ -788,28 +833,30 @@ ColumnLayout {
             minimumWidth: 760
             minimumHeight: 560
             visible: false
-            title: "Top 100 Over Time"
+            title: "Top 100 Timeline"
             color: NuTokens.backgroundBase
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: NuTokens.spaceLg
-                spacing: NuTokens.spaceMd
+                anchors.margins: NuTokens.spaceMd
+                spacing: NuTokens.spaceSm
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: NuTokens.spaceMd
+                spacing: NuTokens.spaceSm
                 Label {
                     Layout.fillWidth: true
-                    text: "Top 100 Over Time"
+                    text: "Top 100 Timeline"
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontTitle
                     font.weight: Font.DemiBold
                 }
                 Label {
-                    text: root.timelineSnapshot.height >= 0 ? "Block " + root.timelineSnapshot.height : "No snapshot"
+                    Layout.maximumWidth: Math.max(240, top100TimelineWindow.width * 0.46)
+                    text: root.timelineSnapshotHeaderText()
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontBody
+                    wrapMode: Text.WordWrap
                 }
                 NuActionButton {
                     Layout.preferredWidth: 94
@@ -822,7 +869,7 @@ ColumnLayout {
             Canvas {
                 id: timelinePie
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: Math.min(420, top100TimelineWindow.width - 80)
+                Layout.preferredWidth: Math.min(340, top100TimelineWindow.width - 80)
                 Layout.preferredHeight: Layout.preferredWidth
                 onPaint: {
                     const ctx = getContext("2d")

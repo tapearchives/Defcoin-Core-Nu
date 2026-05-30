@@ -5,7 +5,7 @@ import "../Theme"
 
 Item {
     id: root
-    implicitHeight: 34
+    implicitHeight: 52
     activeFocusOnTab: true
 
     property real start: 0
@@ -53,18 +53,20 @@ Item {
     Label {
         id: title
         anchors.left: parent.left
-        anchors.verticalCenter: parent.verticalCenter
-        width: 78
+        anchors.right: parent.right
+        anchors.top: parent.top
         text: "Timeline"
         color: NuTokens.textSecondary
-        font.pixelSize: NuTokens.fontBody
+        font.pixelSize: NuTokens.fontSmall
+        elide: Text.ElideRight
     }
 
     Rectangle {
         id: track
-        anchors.left: title.right
+        anchors.left: parent.left
         anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.top: title.bottom
+        anchors.topMargin: 12
         height: 8
         radius: 4
         color: NuTokens.lineSubtle

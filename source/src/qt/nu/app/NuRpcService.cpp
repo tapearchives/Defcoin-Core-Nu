@@ -317,6 +317,13 @@ QVariantMap tableRow(std::initializer_list<QVariant> cells, const QVariantMap& m
     return out;
 }
 
+QVariantMap metricRow(const QString& metric, const QString& value, const QString& tooltip)
+{
+    QVariantList tips;
+    tips << tooltip << tooltip;
+    return tableRow({metric, value}, QVariantMap{{QStringLiteral("cellTooltips"), tips}});
+}
+
 QVariantList tableRowCells(const QVariant& value)
 {
     const QVariantMap map = value.toMap();
@@ -2247,45 +2254,24 @@ void NuRpcService::rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls
         const QJsonDocument doc = QJsonDocument::fromJson(body, &parse_error);
         reply->deleteLater();
         if (parse_error.error != QJsonParseError::NoError || !doc.isArray()) {
-            if (count > 1) {
-                const int split = std::max(1, static_cast<int>(count) / 2);
-                const QVector<QPair<QString, QJsonArray>> first = calls_copy.mid(0, split);
-                const QVector<QPair<QString, QJsonArray>> second = calls_copy.mid(split);
-                rpcBatchCall(first, wallet_scoped, [this, second, wallet_scoped, count, split, callback](const QVector<QJsonValue>& first_results,
-                                                                                                         const QStringList& first_errors,
-                                                                                                         const QString& first_batch_error) mutable {
-                    if (!first_batch_error.isEmpty()) {
-                        QVector<QJsonValue> retry_results(count);
-                        QStringList retry_errors;
-                        retry_errors.fill(QString(), count);
-                        callback(retry_results, retry_errors, first_batch_error);
-                        return;
-                    }
-                    rpcBatchCall(second, wallet_scoped, [count, split, first_results, first_errors, callback](const QVector<QJsonValue>& second_results,
-                                                                                                             const QStringList& second_errors,
-                                                                                                             const QString& second_batch_error) mutable {
-                        QVector<QJsonValue> retry_results(count);
-                        QStringList retry_errors;
-                        retry_errors.fill(QString(), count);
-                        for (int i = 0; i < first_results.size() && i < split; ++i) retry_results[i] = first_results.at(i);
-                        for (int i = 0; i < first_errors.size() && i < split; ++i) retry_errors[i] = first_errors.at(i);
-                        for (int i = 0; i < second_results.size() && split + i < count; ++i) retry_results[split + i] = second_results.at(i);
-                        for (int i = 0; i < second_errors.size() && split + i < count; ++i) retry_errors[split + i] = second_errors.at(i);
-                        callback(retry_results, retry_errors, second_batch_error);
-                    });
-                });
-                return;
-            }
             QString preview = QString::fromUtf8(body.left(240)).simplified();
             if (preview.isEmpty()) preview = QStringLiteral("(empty body)");
-            callback(results,
-                     errors,
-                     QStringLiteral("RPC batch returned malformed JSON: %1. HTTP %2, content-type \"%3\", %4 bytes, preview: %5")
-                         .arg(parse_error.errorString())
-                         .arg(http_status > 0 ? QString::number(http_status) : QStringLiteral("unknown"))
-                         .arg(content_type.isEmpty() ? QStringLiteral("unknown") : content_type)
-                         .arg(body.size())
-                         .arg(preview));
+            const QString malformed_message = QStringLiteral("RPC batch returned malformed JSON: %1. HTTP %2, content-type \"%3\", %4 bytes, preview: %5")
+                .arg(parse_error.errorString())
+                .arg(http_status > 0 ? QString::number(http_status) : QStringLiteral("unknown"))
+                .arg(content_type.isEmpty() ? QStringLiteral("unknown") : content_type)
+                .arg(body.size())
+                .arg(preview);
+            appendLaunchDiagnostic(QStringLiteral("%1 Retrying %2 RPC call(s) individually.").arg(malformed_message, QString::number(count)));
+            rpcBatchCallAsSingles(calls_copy, wallet_scoped, [callback = std::move(callback), malformed_message](const QVector<QJsonValue>& single_results,
+                                                                                                                const QStringList& single_errors,
+                                                                                                                const QString& single_error) mutable {
+                if (!single_error.isEmpty()) {
+                    callback(single_results, single_errors, malformed_message + QStringLiteral("; single-call fallback failed: ") + single_error);
+                    return;
+                }
+                callback(single_results, single_errors, QString());
+            });
             return;
         }
 
@@ -2308,6 +2294,45 @@ void NuRpcService::rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls
 
         callback(results, errors, QString());
     });
+}
+
+void NuRpcService::rpcBatchCallAsSingles(const QVector<QPair<QString, QJsonArray>>& calls,
+                                         bool wallet_scoped,
+                                         RpcBatchCallback callback)
+{
+    const int count = calls.size();
+    QVector<QJsonValue> empty_results(count);
+    QStringList empty_errors;
+    empty_errors.fill(QString(), count);
+    if (calls.isEmpty()) {
+        callback(empty_results, empty_errors, QString());
+        return;
+    }
+
+    auto results = std::make_shared<QVector<QJsonValue>>(count);
+    auto errors = std::make_shared<QStringList>();
+    errors->fill(QString(), count);
+    auto index = std::make_shared<int>(0);
+    auto callback_ptr = std::make_shared<RpcBatchCallback>(std::move(callback));
+    auto run_next = std::make_shared<std::function<void()>>();
+    *run_next = [this, calls, wallet_scoped, results, errors, index, callback_ptr, run_next]() mutable {
+        if (*index >= calls.size()) {
+            (*callback_ptr)(*results, *errors, QString());
+            return;
+        }
+        const int current = *index;
+        const QPair<QString, QJsonArray> call = calls.at(current);
+        rpcCall(call.first, call.second, wallet_scoped, [results, errors, index, callback_ptr, run_next, current](const QJsonValue& result, const QString& error) mutable {
+            if (!error.isEmpty()) {
+                (*errors)[current] = error;
+            } else {
+                (*results)[current] = result;
+            }
+            ++(*index);
+            (*run_next)();
+        });
+    };
+    (*run_next)();
 }
 
 void NuRpcService::handleReply(QNetworkReply* reply)
@@ -3316,10 +3341,21 @@ void NuRpcService::sampleTraffic()
 
         double recv_rate = 0.0;
         double sent_rate = 0.0;
+        qint64 recv_delta = 0;
+        qint64 sent_delta = 0;
+        bool sync_transport_changed = false;
         if (m_last_traffic_ms > 0 && now_ms > m_last_traffic_ms) {
             const double seconds = (now_ms - m_last_traffic_ms) / 1000.0;
-            recv_rate = qMax(0.0, (recv - m_last_bytes_recv) / seconds);
-            sent_rate = qMax(0.0, (sent - m_last_bytes_sent) / seconds);
+            recv_delta = qMax<qint64>(0, recv - m_last_bytes_recv);
+            sent_delta = qMax<qint64>(0, sent - m_last_bytes_sent);
+            recv_rate = qMax(0.0, recv_delta / seconds);
+            sent_rate = qMax(0.0, sent_delta / seconds);
+            if (m_syncing && seconds > 0.0 && (recv_delta > 0 || sent_delta > 0)) {
+                m_sync_tcp_bytes_received += recv_delta;
+                m_sync_tcp_bytes_sent += sent_delta;
+                m_sync_tcp_active_seconds += seconds;
+                sync_transport_changed = true;
+            }
         }
 
         m_last_traffic_ms = now_ms;
@@ -3358,6 +3394,10 @@ void NuRpcService::sampleTraffic()
         }
         while (m_traffic_samples.size() > TRAFFIC_CHART_MAX_SAMPLES) {
             m_traffic_samples.removeFirst();
+        }
+        if (sync_transport_changed) {
+            rebuildNodeMetrics();
+            Q_EMIT stateChanged();
         }
         Q_EMIT trafficChanged();
     });
@@ -3403,12 +3443,11 @@ void NuRpcService::stopLanFastSyncSocket()
 
 QString NuRpcService::lanFastSyncRateSummary() const
 {
-    const qint64 elapsed_ms = m_lan_fast_sync_started_ms > 0
-        ? qMax<qint64>(1, QDateTime::currentMSecsSinceEpoch() - m_lan_fast_sync_started_ms)
-        : 1;
-    const double seconds = elapsed_ms / 1000.0;
+    const double seconds = m_lan_fast_sync_udp_first_activity_ms > 0 && m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms
+        ? qMax(1.0, double(m_lan_fast_sync_udp_last_activity_ms - m_lan_fast_sync_udp_first_activity_ms) / 1000.0)
+        : 1.0;
     const double blocks_per_second = m_lan_fast_sync_blocks_received / seconds;
-    const double bytes_per_second = m_lan_fast_sync_bytes_received / seconds;
+    const double bytes_per_second = (m_lan_fast_sync_udp_bytes_received + m_lan_fast_sync_udp_bytes_sent) / seconds;
     return QStringLiteral("%1 blocks/s | %2/s")
         .arg(QString::number(blocks_per_second, 'f', blocks_per_second >= 10.0 ? 1 : 2),
              formatBytes(static_cast<qint64>(bytes_per_second)));
@@ -3416,10 +3455,57 @@ QString NuRpcService::lanFastSyncRateSummary() const
 
 QString NuRpcService::lanFastSyncMethodSummary() const
 {
-    if (!m_lan_fast_sync_enabled) return QStringLiteral("TCP/Core sync; UDP fast sync off");
-    return QStringLiteral("TCP/Core sync + UDP fast sync | %1 | %2 UDP retransmit errors (OK)")
-        .arg(lanFastSyncRateSummary())
-        .arg(m_lan_fast_sync_retransmit_errors);
+    QStringList methods;
+    if (m_sync_tcp_bytes_received > 0 || m_sync_tcp_bytes_sent > 0) {
+        methods.push_back(QStringLiteral("TCP/Core"));
+    }
+    if (m_lan_fast_sync_udp_bytes_received > 0 || m_lan_fast_sync_udp_bytes_sent > 0) {
+        methods.push_back(QStringLiteral("UDP fast sync: %1 block%2 accepted, %3 retransmit error%4 (OK)")
+            .arg(m_lan_fast_sync_blocks_received)
+            .arg(m_lan_fast_sync_blocks_received == 1 ? QString() : QStringLiteral("s"))
+            .arg(m_lan_fast_sync_retransmit_errors)
+            .arg(m_lan_fast_sync_retransmit_errors == 1 ? QString() : QStringLiteral("s")));
+    }
+    if (!methods.isEmpty()) return methods.join(QStringLiteral(" + "));
+    return m_syncing ? QStringLiteral("No sync transport observed yet") : QStringLiteral("No sync transport observed this session");
+}
+
+QString NuRpcService::syncTransportSpeedSummary() const
+{
+    const qint64 tcp_total = m_sync_tcp_bytes_received + m_sync_tcp_bytes_sent;
+    const qint64 udp_total = m_lan_fast_sync_udp_bytes_received + m_lan_fast_sync_udp_bytes_sent;
+    const qint64 combined_total = tcp_total + udp_total;
+    const double tcp_seconds = tcp_total > 0 ? qMax(1.0, m_sync_tcp_active_seconds) : 0.0;
+    const double udp_seconds = udp_total > 0
+        ? (m_lan_fast_sync_udp_first_activity_ms > 0 && m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms
+            ? qMax(1.0, double(m_lan_fast_sync_udp_last_activity_ms - m_lan_fast_sync_udp_first_activity_ms) / 1000.0)
+            : 1.0)
+        : 0.0;
+    const double combined_seconds = qMax(tcp_seconds, udp_seconds);
+
+    auto volume_rate = [this](qint64 bytes, double seconds) {
+        if (bytes <= 0) return QStringLiteral("-");
+        const qint64 average_rate = static_cast<qint64>(std::llround(bytes / qMax(1.0, seconds)));
+        return QStringLiteral("%1 total, %2/s avg").arg(formatBytes(bytes), formatBytes(average_rate));
+    };
+
+    QStringList parts;
+    parts.push_back(QStringLiteral("TCP: %1").arg(volume_rate(tcp_total, tcp_seconds)));
+    parts.push_back(QStringLiteral("UDP: %1").arg(volume_rate(udp_total, udp_seconds)));
+    parts.push_back(QStringLiteral("Combined: %1").arg(volume_rate(combined_total, combined_seconds)));
+    return parts.join(QStringLiteral(" | "));
+}
+
+void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes)
+{
+    if (sent_bytes <= 0 && received_bytes <= 0) return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_lan_fast_sync_udp_first_activity_ms <= 0) {
+        m_lan_fast_sync_udp_first_activity_ms = now;
+    }
+    m_lan_fast_sync_udp_last_activity_ms = now;
+    if (sent_bytes > 0) m_lan_fast_sync_udp_bytes_sent += sent_bytes;
+    if (received_bytes > 0) m_lan_fast_sync_udp_bytes_received += received_bytes;
 }
 
 void NuRpcService::resetLanFastSyncTransfer(const QString& status)
@@ -3540,7 +3626,9 @@ void NuRpcService::requestLanFastSyncBlock(int height)
         if (!peer_address.setAddress(host)) continue;
         const QString key = normalizedFastSyncHost(peer_address);
         if (sent_targets.contains(key)) continue;
-        if (m_lan_fast_sync_socket->writeDatagram(datagram, peer_address, LAN_FAST_SYNC_PORT) > 0) {
+        const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, peer_address, LAN_FAST_SYNC_PORT);
+        if (written > 0) {
+            recordLanFastSyncUdpTraffic(written, 0);
             sent_targets.insert(key);
             m_udp_fast_sync_attempted_peer_hosts.insert(key);
             m_udp_fast_sync_current_target_hosts.insert(key);
@@ -3548,7 +3636,9 @@ void NuRpcService::requestLanFastSyncBlock(int height)
         }
     }
     if (m_lan_node_discovery_enabled) {
-        if (m_lan_fast_sync_socket->writeDatagram(datagram, QHostAddress::Broadcast, LAN_FAST_SYNC_PORT) > 0) {
+        const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, QHostAddress::Broadcast, LAN_FAST_SYNC_PORT);
+        if (written > 0) {
+            recordLanFastSyncUdpTraffic(written, 0);
             ++target_count;
         }
         for (const QNetworkInterface& iface : QNetworkInterface::allInterfaces()) {
@@ -3556,7 +3646,9 @@ void NuRpcService::requestLanFastSyncBlock(int height)
             for (const QNetworkAddressEntry& entry : iface.addressEntries()) {
                 const QHostAddress broadcast = entry.broadcast();
                 if (!broadcast.isNull()) {
-                    if (m_lan_fast_sync_socket->writeDatagram(datagram, broadcast, LAN_FAST_SYNC_PORT) > 0) {
+                    const qint64 iface_written = m_lan_fast_sync_socket->writeDatagram(datagram, broadcast, LAN_FAST_SYNC_PORT);
+                    if (iface_written > 0) {
+                        recordLanFastSyncUdpTraffic(iface_written, 0);
                         ++target_count;
                     }
                 }
@@ -3582,7 +3674,8 @@ void NuRpcService::handleLanFastSyncDatagrams()
     while (m_lan_fast_sync_socket->hasPendingDatagrams() && processed < LAN_FAST_SYNC_MAX_DATAGRAMS_PER_READ) {
         ++processed;
         const QNetworkDatagram datagram = m_lan_fast_sync_socket->receiveDatagram();
-        if (datagram.data().size() > LAN_FAST_SYNC_MAX_DATAGRAM_BYTES) continue;
+        const int datagram_size = datagram.data().size();
+        if (datagram_size > LAN_FAST_SYNC_MAX_DATAGRAM_BYTES) continue;
         const QHostAddress sender = datagram.senderAddress();
         if (!isUdpFastSyncAllowedPeer(sender)) continue;
         QJsonObject header;
@@ -3590,6 +3683,7 @@ void NuRpcService::handleLanFastSyncDatagrams()
         if (!parseLanFastSyncDatagram(datagram.data(), &header, &payload)) continue;
         if (header.value(QStringLiteral("version")).toInt(0) != 1) continue;
         if (header.value(QStringLiteral("capability")).toString() != QLatin1String(UDP_FAST_SYNC_CAPABILITY)) continue;
+        recordLanFastSyncUdpTraffic(0, datagram_size);
         const QString type = header.value(QStringLiteral("type")).toString();
         if (type == QLatin1String("request-block")) {
             handleLanFastSyncRequest(header, sender, datagram.senderPort());
@@ -3658,7 +3752,8 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
                 chunk_header.insert(QStringLiteral("chunk_checksum"), lanFastSyncChecksum(chunk));
                 const QByteArray datagram = lanFastSyncDatagram(chunk_header, chunk);
                 if (!datagram.isEmpty() && datagram.size() <= peer_max_datagram) {
-                    m_lan_fast_sync_socket->writeDatagram(datagram, sender, reply_port);
+                    const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, sender, reply_port);
+                    if (written > 0) recordLanFastSyncUdpTraffic(written, 0);
                 }
             }
         });
@@ -4376,6 +4471,18 @@ void NuRpcService::repairWitnessBlockDataNow(int start_height, bool fix_missing_
     int height = start_height;
     if (height <= 0) height = 903168;
 
+    if (m_block_height > 0 && height > m_block_height) {
+        m_forensics_witness_repair_running = false;
+        m_forensics_witness_repair_start_height = height;
+        m_forensics_witness_repair_inspected_blocks = 0;
+        m_forensics_witness_repair_first_missing_height = -1;
+        m_forensics_witness_repair_status = QStringLiteral("Inspection not started. Requested start height %1 is above the current active-chain height %2, so there are no local blocks in that range to inspect yet.")
+            .arg(QString::number(height), QString::number(m_block_height));
+        Q_EMIT forensicsChanged();
+        Q_EMIT userMessage(QStringLiteral("Blockchain inspection not started"), m_forensics_witness_repair_status);
+        return;
+    }
+
     if (m_forensics_witness_repair_running) {
         Q_EMIT userMessage(QStringLiteral("Inspection already running"),
                            QStringLiteral("A witness data inspection is already running. Wait for it to finish before starting another one."));
@@ -4540,20 +4647,35 @@ void NuRpcService::rebuildNodeMetrics()
         .arg(m_sync_state)
         .arg(lanFastSyncMethodSummary());
     m_node_metrics = {
-        row({"Syncing", sync_value}),
-        row({"Network active", m_metric_network_active}),
-        row({"Connections", QStringLiteral("Total: %1 | In: %2 | Out: %3")
-             .arg(m_metric_connections, m_metric_inbound, m_metric_outbound)}),
-        row({"Version", m_metric_version}),
-        row({"Blocks", m_metric_blocks}),
-        row({"Headers", m_metric_headers}),
-        row({"Verification", m_metric_verification}),
-        row({"Difficulty", m_metric_difficulty}),
-        row({"Network hashrate (120 blocks)", m_metric_network_hashrate}),
-        row({"Chain tips", m_metric_chain_tips}),
-        row({"Top sent P2P messages", m_metric_peer_messages_sent}),
-        row({"Top rec'd P2P messages", m_metric_peer_messages_received}),
-        row({"Traffic", m_metric_traffic})
+        metricRow(QStringLiteral("Syncing"), sync_value,
+                  QStringLiteral("Blockchain sync progress, current sync state, and only the transport methods that have actually carried sync traffic during this Nu session.")),
+        metricRow(QStringLiteral("Syncing speeds"), syncTransportSpeedSummary(),
+                  QStringLiteral("Accumulated sync-session transport volume and average rate. TCP is measured from Core network byte deltas while the node is syncing. UDP is measured from valid fast-sync datagrams sent or received by Nu. Combined is TCP plus UDP.")),
+        metricRow(QStringLiteral("Network active"), m_metric_network_active,
+                  QStringLiteral("Whether the backend currently allows peer network activity.")),
+        metricRow(QStringLiteral("Connections"), QStringLiteral("Total: %1 | In: %2 | Out: %3")
+                  .arg(m_metric_connections, m_metric_inbound, m_metric_outbound),
+                  QStringLiteral("Peer connection count using Litecoin/Core convention. In means a remote peer opened the connection into this node; Out means this node opened the connection to a peer.")),
+        metricRow(QStringLiteral("Version"), m_metric_version,
+                  QStringLiteral("Local backend user agent string advertised to peers.")),
+        metricRow(QStringLiteral("Blocks"), m_metric_blocks,
+                  QStringLiteral("Current fully validated active-chain block height.")),
+        metricRow(QStringLiteral("Headers"), m_metric_headers,
+                  QStringLiteral("Highest header height known by the backend. Headers can be ahead of fully downloaded blocks during sync.")),
+        metricRow(QStringLiteral("Verification"), m_metric_verification,
+                  QStringLiteral("Backend verification progress estimate across the active chain.")),
+        metricRow(QStringLiteral("Difficulty"), m_metric_difficulty,
+                  QStringLiteral("Current active-chain proof-of-work difficulty. It can change at retarget boundaries.")),
+        metricRow(QStringLiteral("Network hashrate (120 blocks)"), m_metric_network_hashrate,
+                  QStringLiteral("Estimated recent network hashrate from getnetworkhashps over the last 120 blocks.")),
+        metricRow(QStringLiteral("Chain tips"), m_metric_chain_tips,
+                  QStringLiteral("Summary of active and known stale/header-only chain tips reported by the backend.")),
+        metricRow(QStringLiteral("Top sent P2P messages"), m_metric_peer_messages_sent,
+                  QStringLiteral("Largest P2P message categories sent to peers, aggregated from getpeerinfo byte counters.")),
+        metricRow(QStringLiteral("Top rec'd P2P messages"), m_metric_peer_messages_received,
+                  QStringLiteral("Largest P2P message categories received from peers, aggregated from getpeerinfo byte counters.")),
+        metricRow(QStringLiteral("Traffic"), m_metric_traffic,
+                  QStringLiteral("Total backend P2P network traffic reported by getnettotals, independent of the sync-only speed row."))
     };
 }
 
