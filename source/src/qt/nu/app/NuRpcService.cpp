@@ -23,6 +23,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QNetworkAccessManager>
 #include <QNetworkDatagram>
 #include <QNetworkInterface>
@@ -54,11 +55,14 @@
 #include <qrencode.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cctype>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <memory>
+#include <set>
 #include <utility>
 #if defined(Q_OS_MACOS)
 #include "MacHelp.h"
@@ -79,6 +83,8 @@ constexpr qint64 TRAFFIC_CHART_BUCKET_MS = TRAFFIC_CHART_BUCKET_SECONDS * 1000;
 constexpr int RECOVERY_GAP_SCAN_BATCH_SIZE = 1024;
 constexpr int RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES = 65536;
 constexpr int EXPLORER_INDEX_BATCH_BLOCKS = 96;
+constexpr int EXPLORER_TOP100_CHUNK_BLOCKS = 2500;
+constexpr int EXPLORER_TOP100_ANCHOR_BLOCKS = 10000;
 constexpr quint16 LAN_FAST_SYNC_PORT = 10334;
 constexpr int LAN_FAST_SYNC_MAX_DATAGRAM_BYTES = 1232;
 constexpr int LAN_FAST_SYNC_MAX_HEADER_BYTES = 768;
@@ -94,6 +100,13 @@ constexpr char UDP_FAST_SYNC_CAPABILITY[] = "defcoin-nu-udp-fast-sync-v1";
 constexpr unsigned char DEFCOIN_CURRENT_WIF_PREFIX = 0xb0; // Defcoin v1.0.0+ private keys render as T...
 constexpr unsigned char DEFCOIN_LEGACY_WIF_PREFIX = 0x9e;  // Defcoin v0.22/Ian Coleman legacy entry renders as Q...
 constexpr char BASE58_ALPHABET[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const QStringList EXPLORER_TOP100_COLORS = {
+    QStringLiteral("#48b7ff"), QStringLiteral("#f3d447"), QStringLiteral("#46d39a"),
+    QStringLiteral("#f05d4f"), QStringLiteral("#b779ff"), QStringLiteral("#ff9f43"),
+    QStringLiteral("#5fe1e8"), QStringLiteral("#f78fb3"), QStringLiteral("#9bc53d"),
+    QStringLiteral("#c8d6e5"), QStringLiteral("#7f8fa6"), QStringLiteral("#00a8ff"),
+    QStringLiteral("#e84118"), QStringLiteral("#4cd137"), QStringLiteral("#8c7ae6")
+};
 
 QByteArray doubleSha256(const QByteArray& bytes)
 {
@@ -103,6 +116,12 @@ QByteArray doubleSha256(const QByteArray& bytes)
 QString lanFastSyncChecksum(const QByteArray& bytes)
 {
     return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+}
+
+QString explorerTop100Color(int rank)
+{
+    if (rank <= 0) return EXPLORER_TOP100_COLORS.last();
+    return EXPLORER_TOP100_COLORS.at((rank - 1) % EXPLORER_TOP100_COLORS.size());
 }
 
 QString normalizedFastSyncHost(const QHostAddress& address)
@@ -1391,6 +1410,8 @@ NuRpcService::~NuRpcService()
 {
     stopMiner();
     stopLanFastSyncSocket();
+    stopExplorerTop100Timeline();
+    releaseExplorerWriterLock();
     stopOwnedBackend();
 }
 
@@ -2100,8 +2121,9 @@ void NuRpcService::rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls
     const QByteArray auth = QStringLiteral("%1:%2").arg(m_rpc_user, m_rpc_password).toUtf8().toBase64();
     request.setRawHeader("Authorization", "Basic " + auth);
 
+    const QVector<QPair<QString, QJsonArray>> calls_copy = calls;
     QNetworkReply* reply = m_network->post(request, QJsonDocument(batch).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [reply, id_to_index, count = calls.size(), callback = std::move(callback)]() mutable {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, id_to_index, count = calls.size(), calls_copy, wallet_scoped, callback = std::move(callback)]() mutable {
         QVector<QJsonValue> results(count);
         QStringList errors;
         errors.fill(QString(), count);
@@ -2114,10 +2136,51 @@ void NuRpcService::rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls
         }
 
         QJsonParseError parse_error;
-        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &parse_error);
+        const int http_status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString content_type = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+        const QByteArray body = reply->readAll();
+        const QJsonDocument doc = QJsonDocument::fromJson(body, &parse_error);
         reply->deleteLater();
         if (parse_error.error != QJsonParseError::NoError || !doc.isArray()) {
-            callback(results, errors, QStringLiteral("RPC batch returned malformed JSON: %1").arg(parse_error.errorString()));
+            if (count > 1) {
+                const int split = std::max(1, static_cast<int>(count) / 2);
+                const QVector<QPair<QString, QJsonArray>> first = calls_copy.mid(0, split);
+                const QVector<QPair<QString, QJsonArray>> second = calls_copy.mid(split);
+                rpcBatchCall(first, wallet_scoped, [this, second, wallet_scoped, count, split, callback](const QVector<QJsonValue>& first_results,
+                                                                                                         const QStringList& first_errors,
+                                                                                                         const QString& first_batch_error) mutable {
+                    if (!first_batch_error.isEmpty()) {
+                        QVector<QJsonValue> retry_results(count);
+                        QStringList retry_errors;
+                        retry_errors.fill(QString(), count);
+                        callback(retry_results, retry_errors, first_batch_error);
+                        return;
+                    }
+                    rpcBatchCall(second, wallet_scoped, [count, split, first_results, first_errors, callback](const QVector<QJsonValue>& second_results,
+                                                                                                             const QStringList& second_errors,
+                                                                                                             const QString& second_batch_error) mutable {
+                        QVector<QJsonValue> retry_results(count);
+                        QStringList retry_errors;
+                        retry_errors.fill(QString(), count);
+                        for (int i = 0; i < first_results.size() && i < split; ++i) retry_results[i] = first_results.at(i);
+                        for (int i = 0; i < first_errors.size() && i < split; ++i) retry_errors[i] = first_errors.at(i);
+                        for (int i = 0; i < second_results.size() && split + i < count; ++i) retry_results[split + i] = second_results.at(i);
+                        for (int i = 0; i < second_errors.size() && split + i < count; ++i) retry_errors[split + i] = second_errors.at(i);
+                        callback(retry_results, retry_errors, second_batch_error);
+                    });
+                });
+                return;
+            }
+            QString preview = QString::fromUtf8(body.left(240)).simplified();
+            if (preview.isEmpty()) preview = QStringLiteral("(empty body)");
+            callback(results,
+                     errors,
+                     QStringLiteral("RPC batch returned malformed JSON: %1. HTTP %2, content-type \"%3\", %4 bytes, preview: %5")
+                         .arg(parse_error.errorString())
+                         .arg(http_status > 0 ? QString::number(http_status) : QStringLiteral("unknown"))
+                         .arg(content_type.isEmpty() ? QStringLiteral("unknown") : content_type)
+                         .arg(body.size())
+                         .arg(preview));
             return;
         }
 
@@ -6259,11 +6322,161 @@ bool NuRpcService::ensureExplorerDatabase(QString* error) const
             if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_address ON explorer_tx_outputs(address, block_height DESC)"));
             if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_block ON explorer_tx_outputs(block_height)"));
             if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_spent_by ON explorer_tx_outputs(spent_by_txid)"));
+            if (ok) {
+                ok = query.exec(QStringLiteral(
+                    "CREATE TABLE IF NOT EXISTS explorer_balance_deltas ("
+                    "height INTEGER NOT NULL,"
+                    "address TEXT NOT NULL,"
+                    "delta_sats INTEGER NOT NULL,"
+                    "PRIMARY KEY(height, address))"));
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_balance_deltas_address ON explorer_balance_deltas(address, height)"));
+            if (ok) {
+                ok = query.exec(QStringLiteral(
+                    "CREATE TABLE IF NOT EXISTS explorer_top100_events ("
+                    "height INTEGER NOT NULL,"
+                    "time INTEGER NOT NULL,"
+                    "rank INTEGER NOT NULL,"
+                    "address TEXT NOT NULL,"
+                    "percent_whole INTEGER NOT NULL,"
+                    "color_index INTEGER NOT NULL,"
+                    "is_anchor INTEGER NOT NULL,"
+                    "PRIMARY KEY(height, rank))"));
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_top100_events_height ON explorer_top100_events(height)"));
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_top100_events_rank_height ON explorer_top100_events(rank, height DESC)"));
+            if (ok) {
+                ok = query.exec(QStringLiteral(
+                    "CREATE TABLE IF NOT EXISTS explorer_top100_ranges ("
+                    "start_height INTEGER NOT NULL,"
+                    "end_height INTEGER NOT NULL,"
+                    "status TEXT NOT NULL,"
+                    "started_at INTEGER NOT NULL,"
+                    "completed_at INTEGER,"
+                    "PRIMARY KEY(start_height, end_height))"));
+                if (!ok) local_error = query.lastError().text();
+            }
         }
         db.close();
     }
     QSqlDatabase::removeDatabase(connection_name);
     if (!ok && error) *error = QStringLiteral("SQLite explorer index unavailable: %1").arg(local_error);
+    return ok;
+}
+
+bool NuRpcService::acquireExplorerWriterLock(QString* error)
+{
+    if (m_explorer_writer_lock && m_explorer_writer_lock->isLocked()) return true;
+    const QFileInfo db_info(explorerDatabasePath());
+    if (!QDir().mkpath(db_info.absolutePath())) {
+        if (error) *error = QStringLiteral("Could not create explorer index directory:\n%1").arg(db_info.absolutePath());
+        return false;
+    }
+    m_explorer_writer_lock = std::make_unique<QLockFile>(db_info.absoluteFilePath() + QStringLiteral(".writer.lock"));
+    m_explorer_writer_lock->setStaleLockTime(30000);
+    if (m_explorer_writer_lock->tryLock(100)) return true;
+    if (error) {
+        *error = QStringLiteral("Another Defcoin Core Nu window is writing the explorer index. Pause indexing there or close the other window before starting this operation.");
+    }
+    m_explorer_writer_lock.reset();
+    return false;
+}
+
+void NuRpcService::releaseExplorerWriterLock()
+{
+    if (m_explorer_writer_lock) {
+        if (m_explorer_writer_lock->isLocked()) m_explorer_writer_lock->unlock();
+        m_explorer_writer_lock.reset();
+    }
+}
+
+bool NuRpcService::ensureExplorerBalanceDeltas(QString* error)
+{
+    QString db_error;
+    if (!ensureExplorerDatabase(&db_error)) {
+        if (error) *error = db_error;
+        return false;
+    }
+
+    const int highest = explorerHighestIndexedBlock();
+    const QString connection_name = QStringLiteral("nu_explorer_delta_rebuild_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    bool rebuild = highest >= 0;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery pragma(db);
+            pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+            pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+            pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+            pragma.exec(QStringLiteral("PRAGMA cache_size=-131072"));
+
+            QSqlQuery meta(db);
+            meta.prepare(QStringLiteral("SELECT value FROM explorer_meta WHERE key = 'balance_deltas_height'"));
+            if (meta.exec() && meta.next()) {
+                rebuild = meta.value(0).toInt() < highest;
+            }
+            QSqlQuery count_query(db);
+            if (count_query.exec(QStringLiteral("SELECT COUNT(*) FROM explorer_tx_outputs")) && count_query.next()) {
+                rebuild = rebuild && count_query.value(0).toLongLong() > 0;
+            }
+
+            ok = true;
+            if (rebuild) {
+                ok = db.transaction();
+                if (!ok) local_error = db.lastError().text();
+                QSqlQuery query(db);
+                if (ok && !query.exec(QStringLiteral("DELETE FROM explorer_balance_deltas"))) {
+                    ok = false;
+                    local_error = query.lastError().text();
+                }
+                if (ok && !query.exec(QStringLiteral(
+                        "INSERT INTO explorer_balance_deltas(height, address, delta_sats) "
+                        "SELECT block_height, address, SUM(value_sats) "
+                        "FROM explorer_tx_outputs "
+                        "GROUP BY block_height, address "
+                        "HAVING SUM(value_sats) != 0"))) {
+                    ok = false;
+                    local_error = query.lastError().text();
+                }
+                if (ok && !query.exec(QStringLiteral(
+                        "INSERT INTO explorer_balance_deltas(height, address, delta_sats) "
+                        "SELECT spent_in_height, address, -SUM(value_sats) "
+                        "FROM explorer_tx_outputs "
+                        "WHERE spent_in_height IS NOT NULL "
+                        "GROUP BY spent_in_height, address "
+                        "HAVING SUM(value_sats) != 0 "
+                        "ON CONFLICT(height, address) DO UPDATE SET delta_sats = delta_sats + excluded.delta_sats"))) {
+                    ok = false;
+                    local_error = query.lastError().text();
+                }
+                if (ok) {
+                    QSqlQuery meta_write(db);
+                    meta_write.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('balance_deltas_height', ?)"));
+                    meta_write.addBindValue(QString::number(highest));
+                    if (!meta_write.exec()) {
+                        ok = false;
+                        local_error = meta_write.lastError().text();
+                    }
+                }
+                if (ok) {
+                    ok = db.commit();
+                    if (!ok) local_error = db.lastError().text();
+                } else {
+                    db.rollback();
+                }
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok && error) *error = local_error;
     return ok;
 }
 
@@ -6473,6 +6686,7 @@ QVariantList NuRpcService::explorerRichListFromDb(QString* error) const
                         : 0.0;
                     rows.push_back(QVariantMap{
                         {QStringLiteral("cells"), QVariantList{
+                            explorerTop100Color(rank),
                             rank,
                             address,
                             explorerAmountText(balance_sats),
@@ -6484,6 +6698,8 @@ QVariantList NuRpcService::explorerRichListFromDb(QString* error) const
                             {QStringLiteral("type"), QStringLiteral("address")},
                             {QStringLiteral("id"), address},
                             {QStringLiteral("address"), address},
+                            {QStringLiteral("rank"), rank},
+                            {QStringLiteral("color"), explorerTop100Color(rank)},
                             {QStringLiteral("balanceSats"), QVariant::fromValue<qlonglong>(balance_sats)},
                             {QStringLiteral("receivedSats"), QVariant::fromValue<qlonglong>(received_sats)},
                             {QStringLiteral("sharePercent"), share}}}
@@ -6574,6 +6790,7 @@ void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins)
     QString movement_error;
     m_explorer_rich_list = explorerRichListFromDb(&rich_error);
     m_explorer_movements = explorerMovementsFromDb(threshold_sats, &movement_error);
+    refreshExplorerTop100TimelineStats();
     if (!rich_error.isEmpty() || !movement_error.isEmpty()) {
         QStringList details;
         if (!rich_error.isEmpty()) details.push_back(QStringLiteral("Top 100: %1").arg(rich_error));
@@ -6966,7 +7183,35 @@ bool NuRpcService::explorerPruneFromHeight(int height, QString* error)
             }
             if (ok) {
                 QSqlQuery query(db);
+                query.prepare(QStringLiteral("DELETE FROM explorer_balance_deltas WHERE height >= ?"));
+                query.addBindValue(prune_height);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("DELETE FROM explorer_top100_events WHERE height >= ?"));
+                query.addBindValue(prune_height);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("DELETE FROM explorer_top100_ranges WHERE end_height >= ?"));
+                query.addBindValue(prune_height);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
                 query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('last_indexed_height', ?)"));
+                query.addBindValue(QString::number(prune_height - 1));
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('balance_deltas_height', ?)"));
                 query.addBindValue(QString::number(prune_height - 1));
                 ok = query.exec();
                 if (!ok) local_error = query.lastError().text();
@@ -7021,9 +7266,12 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
             QSqlQuery block_query(db);
             QSqlQuery delete_tx_query(db);
             QSqlQuery delete_out_query(db);
+            QSqlQuery delete_delta_query(db);
             QSqlQuery tx_query(db);
             QSqlQuery output_query(db);
+            QSqlQuery spend_lookup_query(db);
             QSqlQuery spend_query(db);
+            QSqlQuery delta_query(db);
             QSqlQuery meta_query(db);
             if (ok) ok = block_query.prepare(QStringLiteral(
                 "INSERT INTO explorer_blocks(height, hash, time, tx_count, raw_json, indexed_at) "
@@ -7032,15 +7280,22 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                 "hash=excluded.hash, time=excluded.time, tx_count=excluded.tx_count, raw_json=excluded.raw_json, indexed_at=excluded.indexed_at"));
             if (ok) ok = delete_tx_query.prepare(QStringLiteral("DELETE FROM explorer_block_transactions WHERE block_height = ?"));
             if (ok) ok = delete_out_query.prepare(QStringLiteral("DELETE FROM explorer_tx_outputs WHERE block_height = ?"));
+            if (ok) ok = delete_delta_query.prepare(QStringLiteral("DELETE FROM explorer_balance_deltas WHERE height = ?"));
             if (ok) ok = tx_query.prepare(QStringLiteral("INSERT INTO explorer_block_transactions(block_height, tx_index, txid) VALUES(?, ?, ?)"));
             if (ok) ok = output_query.prepare(QStringLiteral(
                 "INSERT OR REPLACE INTO explorer_tx_outputs("
                 "txid, vout, block_height, address, value_sats, value_text, script_type, spent_by_txid, spent_in_height, spent_vin) "
                 "VALUES(?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)"));
+            if (ok) ok = spend_lookup_query.prepare(QStringLiteral(
+                "SELECT address, value_sats FROM explorer_tx_outputs WHERE txid = ? AND vout = ?"));
             if (ok) ok = spend_query.prepare(QStringLiteral(
                 "UPDATE explorer_tx_outputs "
                 "SET spent_by_txid = ?, spent_in_height = ?, spent_vin = ? "
                 "WHERE txid = ? AND vout = ?"));
+            if (ok) ok = delta_query.prepare(QStringLiteral(
+                "INSERT INTO explorer_balance_deltas(height, address, delta_sats) "
+                "VALUES(?, ?, ?) "
+                "ON CONFLICT(height, address) DO UPDATE SET delta_sats = delta_sats + excluded.delta_sats"));
             if (ok) ok = meta_query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES(?, ?)"));
             if (!ok) local_error = db.lastError().text();
 
@@ -7092,6 +7347,18 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                     local_error = delete_out_query.lastError().text();
                     break;
                 }
+                delete_delta_query.bindValue(0, height);
+                ok = delete_delta_query.exec();
+                if (!ok) {
+                    local_error = delete_delta_query.lastError().text();
+                    break;
+                }
+
+                QHash<QString, qint64> block_deltas;
+                const auto add_delta = [&block_deltas](const QString& address, qint64 delta) {
+                    if (address.isEmpty() || delta == 0) return;
+                    block_deltas.insert(address, block_deltas.value(address, 0) + delta);
+                };
 
                 for (int i = 0; i < txs.size(); ++i) {
                     QString txid = txs.at(i).toString();
@@ -7136,6 +7403,7 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                                 local_error = output_query.lastError().text();
                                 break;
                             }
+                            add_delta(address, value_sats);
                             ++local_output_rows;
                         }
                         if (!ok) break;
@@ -7148,6 +7416,17 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                         const QString prev_txid = in.value(QStringLiteral("txid")).toString();
                         const int prev_vout = in.value(QStringLiteral("vout")).toInt(-1);
                         if (prev_txid.isEmpty() || prev_vout < 0) continue;
+                        spend_lookup_query.bindValue(0, prev_txid);
+                        spend_lookup_query.bindValue(1, prev_vout);
+                        ok = spend_lookup_query.exec();
+                        if (!ok) {
+                            local_error = spend_lookup_query.lastError().text();
+                            break;
+                        }
+                        while (spend_lookup_query.next()) {
+                            add_delta(spend_lookup_query.value(0).toString(), -spend_lookup_query.value(1).toLongLong());
+                        }
+                        spend_lookup_query.finish();
                         spend_query.bindValue(0, txid);
                         spend_query.bindValue(1, height);
                         spend_query.bindValue(2, vin_index);
@@ -7162,11 +7441,30 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                     if (!ok) break;
                 }
                 if (!ok) break;
+
+                for (auto it = block_deltas.constBegin(); it != block_deltas.constEnd(); ++it) {
+                    if (it.value() == 0) continue;
+                    delta_query.bindValue(0, height);
+                    delta_query.bindValue(1, it.key());
+                    delta_query.bindValue(2, QVariant::fromValue<qlonglong>(it.value()));
+                    ok = delta_query.exec();
+                    if (!ok) {
+                        local_error = delta_query.lastError().text();
+                        break;
+                    }
+                }
+                if (!ok) break;
             }
 
             if (ok && last_height >= 0) {
-                meta_query.addBindValue(QStringLiteral("last_indexed_height"));
-                meta_query.addBindValue(QString::number(last_height));
+                meta_query.bindValue(0, QStringLiteral("last_indexed_height"));
+                meta_query.bindValue(1, QString::number(last_height));
+                ok = meta_query.exec();
+                if (!ok) local_error = meta_query.lastError().text();
+            }
+            if (ok && last_height >= 0) {
+                meta_query.bindValue(0, QStringLiteral("balance_deltas_height"));
+                meta_query.bindValue(1, QString::number(last_height));
                 ok = meta_query.exec();
                 if (!ok) local_error = meta_query.lastError().text();
             }
@@ -7199,6 +7497,10 @@ void NuRpcService::startExplorerIndexing()
         Q_EMIT userMessage(QStringLiteral("Explorer index unavailable"), error);
         return;
     }
+    if (!acquireExplorerWriterLock(&error)) {
+        Q_EMIT userMessage(QStringLiteral("Explorer index already active"), error);
+        return;
+    }
 
     m_explorer_indexing = true;
     m_explorer_index_request_in_flight = false;
@@ -7213,6 +7515,7 @@ void NuRpcService::startExplorerIndexing()
         if (!m_explorer_indexing) return;
         if (!error.isEmpty()) {
             m_explorer_indexing = false;
+            releaseExplorerWriterLock();
             m_explorer_index_status = QStringLiteral("Index stopped: %1").arg(error);
             Q_EMIT explorerChanged();
             return;
@@ -7231,6 +7534,7 @@ void NuRpcService::startExplorerIndexing()
                 QString prune_error;
                 if (!explorerPruneFromHeight(highest, &prune_error)) {
                     m_explorer_indexing = false;
+                    releaseExplorerWriterLock();
                     m_explorer_index_status = QStringLiteral("Index repair failed at block %1: %2")
                         .arg(QString::number(highest), prune_error);
                     Q_EMIT explorerChanged();
@@ -7248,6 +7552,7 @@ void NuRpcService::startExplorerIndexing()
             m_explorer_index_height = highest + 1;
             if (m_explorer_index_height > m_explorer_index_tip) {
                 m_explorer_indexing = false;
+                releaseExplorerWriterLock();
                 m_explorer_index_status = QStringLiteral("Index is current at block %1.").arg(QString::number(m_explorer_index_tip));
                 Q_EMIT explorerChanged();
                 return;
@@ -7266,15 +7571,21 @@ void NuRpcService::stopExplorerIndexing()
     m_explorer_index_status = QStringLiteral("Index paused at block %1 with %2 blocks cached.")
         .arg(QString::number(std::max(0, m_explorer_index_height - 1)),
              QString::number(m_explorer_indexed_block_count));
+    if (!m_explorer_top100_scanning) releaseExplorerWriterLock();
     Q_EMIT explorerChanged();
 }
 
 void NuRpcService::resetExplorerIndex()
 {
     stopExplorerIndexing();
+    stopExplorerTop100Timeline();
     QString error;
     if (!ensureExplorerDatabase(&error)) {
         Q_EMIT userMessage(QStringLiteral("Explorer index unavailable"), error);
+        return;
+    }
+    if (!acquireExplorerWriterLock(&error)) {
+        Q_EMIT userMessage(QStringLiteral("Explorer index reset blocked"), error);
         return;
     }
     const QString connection_name = QStringLiteral("nu_explorer_reset_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
@@ -7289,7 +7600,10 @@ void NuRpcService::resetExplorerIndex()
             ok = query.exec(QStringLiteral("DELETE FROM explorer_tx_outputs"));
             if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_block_transactions"));
             if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_blocks"));
-            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_meta WHERE key IN ('last_indexed_height', 'tip_height')"));
+            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_balance_deltas"));
+            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_top100_events"));
+            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_top100_ranges"));
+            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_meta WHERE key IN ('last_indexed_height', 'tip_height', 'balance_deltas_height')"));
             if (!ok) local_error = query.lastError().text();
         } else {
             local_error = db.lastError().text();
@@ -7297,6 +7611,7 @@ void NuRpcService::resetExplorerIndex()
         db.close();
     }
     QSqlDatabase::removeDatabase(connection_name);
+    releaseExplorerWriterLock();
     if (!ok) {
         Q_EMIT userMessage(QStringLiteral("Explorer index reset failed"), local_error);
         return;
@@ -7307,6 +7622,7 @@ void NuRpcService::resetExplorerIndex()
     m_explorer_indexed_output_count = 0;
     m_explorer_rich_list.clear();
     m_explorer_movements.clear();
+    refreshExplorerTop100TimelineStats();
     m_explorer_analytics_status = QStringLiteral("Explorer analytics cleared with the local block index.");
     m_explorer_index_status = QStringLiteral("Index reset. Cached lookups were kept; block index tables were cleared.");
     Q_EMIT explorerChanged();
@@ -7325,6 +7641,7 @@ void NuRpcService::explorerIndexStep()
     if (!m_explorer_indexing || m_explorer_index_request_in_flight) return;
     if (m_explorer_index_height > m_explorer_index_tip) {
         m_explorer_indexing = false;
+        releaseExplorerWriterLock();
         m_explorer_index_status = QStringLiteral("Index is current at block %1 with %2 blocks cached.")
             .arg(QString::number(m_explorer_index_tip), QString::number(m_explorer_indexed_block_count));
         refreshExplorerAnalytics(5000);
@@ -7360,6 +7677,7 @@ void NuRpcService::explorerIndexStep()
         if (!batch_error.isEmpty()) {
             m_explorer_indexing = false;
             m_explorer_index_request_in_flight = false;
+            releaseExplorerWriterLock();
             m_explorer_index_status = QStringLiteral("Index stopped near block %1: %2")
                 .arg(QString::number(start_height), batch_error);
             Q_EMIT explorerChanged();
@@ -7373,6 +7691,7 @@ void NuRpcService::explorerIndexStep()
             if (i < hash_errors.size() && !hash_errors.at(i).isEmpty()) {
                 m_explorer_indexing = false;
                 m_explorer_index_request_in_flight = false;
+                releaseExplorerWriterLock();
                 m_explorer_index_status = QStringLiteral("Index stopped at block %1: %2")
                     .arg(QString::number(height), hash_errors.at(i));
                 Q_EMIT explorerChanged();
@@ -7382,6 +7701,7 @@ void NuRpcService::explorerIndexStep()
             if (hash.isEmpty()) {
                 m_explorer_indexing = false;
                 m_explorer_index_request_in_flight = false;
+                releaseExplorerWriterLock();
                 m_explorer_index_status = QStringLiteral("Index stopped at block %1: empty block hash response.")
                     .arg(QString::number(height));
                 Q_EMIT explorerChanged();
@@ -7397,6 +7717,7 @@ void NuRpcService::explorerIndexStep()
             if (!m_explorer_indexing) return;
             if (!block_batch_error.isEmpty()) {
                 m_explorer_indexing = false;
+                releaseExplorerWriterLock();
                 m_explorer_index_status = QStringLiteral("Index stopped near block %1: %2")
                     .arg(QString::number(start_height), block_batch_error);
                 Q_EMIT explorerChanged();
@@ -7410,6 +7731,7 @@ void NuRpcService::explorerIndexStep()
                 const int height = start_height + i;
                 if (i < block_errors.size() && !block_errors.at(i).isEmpty()) {
                     m_explorer_indexing = false;
+                    releaseExplorerWriterLock();
                     m_explorer_index_status = QStringLiteral("Index stopped at block %1: %2")
                         .arg(QString::number(height), block_errors.at(i));
                     Q_EMIT explorerChanged();
@@ -7420,6 +7742,7 @@ void NuRpcService::explorerIndexStep()
                 const int block_height = block.value(QStringLiteral("height")).toInt(-1);
                 if (hash.isEmpty() || block_height != height) {
                     m_explorer_indexing = false;
+                    releaseExplorerWriterLock();
                     m_explorer_index_status = QStringLiteral("Index stopped at block %1: malformed block response.")
                         .arg(QString::number(height));
                     Q_EMIT explorerChanged();
@@ -7429,6 +7752,7 @@ void NuRpcService::explorerIndexStep()
                     QString prune_error;
                     if (!explorerPruneFromHeight(height - 1, &prune_error)) {
                         m_explorer_indexing = false;
+                        releaseExplorerWriterLock();
                         m_explorer_index_status = QStringLiteral("Index repair failed near block %1: %2")
                             .arg(QString::number(height), prune_error);
                         Q_EMIT explorerChanged();
@@ -7451,6 +7775,7 @@ void NuRpcService::explorerIndexStep()
             QString store_error;
             if (!storeExplorerBlocks(blocks, &output_rows_written, &store_error)) {
                 m_explorer_indexing = false;
+                releaseExplorerWriterLock();
                 m_explorer_index_status = QStringLiteral("Index storage failed at blocks %1-%2: %3")
                     .arg(QString::number(start_height), QString::number(end_height), store_error);
                 Q_EMIT explorerChanged();
@@ -7484,6 +7809,551 @@ void NuRpcService::explorerIndexStep()
             scheduleExplorerIndexStep(0);
         });
     });
+}
+
+void NuRpcService::refreshExplorerTop100TimelineStats()
+{
+    m_explorer_top100_timeline_start_height = -1;
+    m_explorer_top100_timeline_end_height = -1;
+    m_explorer_top100_timeline_event_count = 0;
+
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return;
+    const QString connection_name = QStringLiteral("nu_explorer_top100_stats_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            if (query.exec(QStringLiteral("SELECT MIN(height), MAX(height), COUNT(*) FROM explorer_top100_events")) && query.next()) {
+                if (!query.value(0).isNull()) m_explorer_top100_timeline_start_height = query.value(0).toInt();
+                if (!query.value(1).isNull()) m_explorer_top100_timeline_end_height = query.value(1).toInt();
+                m_explorer_top100_timeline_event_count = query.value(2).toInt();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+}
+
+bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height, QString* error)
+{
+    const int highest = explorerHighestIndexedBlock();
+    if (highest < 0) {
+        if (error) *error = QStringLiteral("Build the Explorer block index before building the Top 100 timeline.");
+        return false;
+    }
+    const int start = std::max(0, std::min(start_height, highest));
+    const int end = std::max(start, std::min(end_height < 0 ? highest : end_height, highest));
+
+    if (!ensureExplorerBalanceDeltas(error)) return false;
+
+    m_explorer_top100_balances.clear();
+    m_explorer_top100_order.clear();
+    m_explorer_top100_previous_rows.clear();
+    m_explorer_top100_total_sats = 0;
+    m_explorer_top100_events_written = 0;
+
+    const QString connection_name = QStringLiteral("nu_explorer_top100_init_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery pragma(db);
+            pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+            pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+            pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+            ok = db.transaction();
+            if (!ok) local_error = db.lastError().text();
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("DELETE FROM explorer_top100_events WHERE height BETWEEN ? AND ?"));
+                query.addBindValue(start);
+                query.addBindValue(end);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("DELETE FROM explorer_top100_ranges WHERE NOT(end_height < ? OR start_height > ?)"));
+                query.addBindValue(start);
+                query.addBindValue(end);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery range_query(db);
+                range_query.prepare(QStringLiteral(
+                    "INSERT OR REPLACE INTO explorer_top100_ranges(start_height, end_height, status, started_at, completed_at) "
+                    "VALUES(?, ?, 'running', ?, NULL)"));
+                range_query.addBindValue(start);
+                range_query.addBindValue(end);
+                range_query.addBindValue(QDateTime::currentSecsSinceEpoch());
+                ok = range_query.exec();
+                if (!ok) local_error = range_query.lastError().text();
+            }
+            if (ok && start > 0) {
+                QSqlQuery balance_query(db);
+                balance_query.prepare(QStringLiteral(
+                    "SELECT address, SUM(delta_sats) AS balance_sats "
+                    "FROM explorer_balance_deltas "
+                    "WHERE height < ? "
+                    "GROUP BY address "
+                    "HAVING balance_sats > 0"));
+                balance_query.addBindValue(start);
+                ok = balance_query.exec();
+                if (!ok) {
+                    local_error = balance_query.lastError().text();
+                } else {
+                    while (balance_query.next()) {
+                        const QString address = balance_query.value(0).toString();
+                        const qint64 balance = balance_query.value(1).toLongLong();
+                        if (address.isEmpty() || balance <= 0) continue;
+                        m_explorer_top100_balances.insert(address, balance);
+                        m_explorer_top100_order.insert(ExplorerTop100Entry{balance, address});
+                        m_explorer_top100_total_sats += balance;
+                    }
+                }
+            }
+            if (ok) {
+                ok = db.commit();
+                if (!ok) local_error = db.lastError().text();
+            } else {
+                db.rollback();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok) {
+        if (error) *error = local_error;
+        return false;
+    }
+
+    m_explorer_top100_scan_start_height = start;
+    m_explorer_top100_scan_height = start;
+    m_explorer_top100_scan_end_height = end;
+    m_explorer_top100_started_ms = QDateTime::currentMSecsSinceEpoch();
+    m_explorer_top100_status = QStringLiteral("Top 100 timeline scanning blocks %1-%2.")
+        .arg(QString::number(start), QString::number(end));
+    return true;
+}
+
+bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool force_anchor, QString* error)
+{
+    QVector<QPair<QString, int>> current_rows;
+    current_rows.reserve(100);
+    int rank = 1;
+    for (auto it = m_explorer_top100_order.crbegin(); it != m_explorer_top100_order.crend() && rank <= 100; ++it, ++rank) {
+        const int pct = m_explorer_top100_total_sats > 0
+            ? static_cast<int>(std::llround(100.0 * static_cast<double>(it->balance) / static_cast<double>(m_explorer_top100_total_sats)))
+            : 0;
+        current_rows.push_back(qMakePair(it->address, pct));
+    }
+
+    if (!force_anchor && current_rows == m_explorer_top100_previous_rows) return true;
+
+    const QString connection_name = QStringLiteral("nu_explorer_top100_events_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            ok = db.transaction();
+            if (!ok) local_error = db.lastError().text();
+            QSqlQuery query(db);
+            if (ok) {
+                ok = query.prepare(QStringLiteral(
+                    "INSERT OR REPLACE INTO explorer_top100_events(height, time, rank, address, percent_whole, color_index, is_anchor) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?)"));
+                if (!ok) local_error = query.lastError().text();
+            }
+            const int max_rows = std::max(current_rows.size(), m_explorer_top100_previous_rows.size());
+            for (int i = 0; ok && i < max_rows && i < 100; ++i) {
+                const QPair<QString, int> current = i < current_rows.size() ? current_rows.at(i) : qMakePair(QString(), 0);
+                const QPair<QString, int> previous = i < m_explorer_top100_previous_rows.size() ? m_explorer_top100_previous_rows.at(i) : qMakePair(QString(), -1);
+                if (!force_anchor && current == previous) continue;
+                query.bindValue(0, height);
+                query.bindValue(1, QVariant::fromValue<qlonglong>(block_time));
+                query.bindValue(2, i + 1);
+                query.bindValue(3, current.first);
+                query.bindValue(4, current.second);
+                query.bindValue(5, i % EXPLORER_TOP100_COLORS.size());
+                query.bindValue(6, force_anchor ? 1 : 0);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+                else ++m_explorer_top100_events_written;
+            }
+            if (ok) {
+                ok = db.commit();
+                if (!ok) local_error = db.lastError().text();
+            } else {
+                db.rollback();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok) {
+        if (error) *error = local_error;
+        return false;
+    }
+    m_explorer_top100_previous_rows = current_rows;
+    return true;
+}
+
+bool NuRpcService::finishExplorerTop100Scan(bool completed, QString* error)
+{
+    const QString connection_name = QStringLiteral("nu_explorer_top100_finish_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral(
+                "UPDATE explorer_top100_ranges SET status = ?, completed_at = ? "
+                "WHERE start_height = ? AND end_height = ?"));
+            query.addBindValue(completed ? QStringLiteral("complete") : QStringLiteral("paused"));
+            query.addBindValue(completed ? QVariant(QDateTime::currentSecsSinceEpoch()) : QVariant());
+            query.addBindValue(m_explorer_top100_scan_start_height);
+            query.addBindValue(m_explorer_top100_scan_end_height);
+            ok = query.exec();
+            if (!ok) local_error = query.lastError().text();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    refreshExplorerTop100TimelineStats();
+    if (!ok && error) *error = local_error;
+    return ok;
+}
+
+void NuRpcService::scheduleExplorerTop100Step(int delay_ms)
+{
+    if (!m_explorer_top100_scanning) return;
+    QTimer::singleShot(std::max(0, delay_ms), this, [this] {
+        explorerTop100Step();
+    });
+}
+
+void NuRpcService::explorerTop100Step()
+{
+    if (!m_explorer_top100_scanning) return;
+    if (m_explorer_top100_scan_height > m_explorer_top100_scan_end_height) {
+        QString finish_error;
+        finishExplorerTop100Scan(true, &finish_error);
+        m_explorer_top100_scanning = false;
+        releaseExplorerWriterLock();
+        m_explorer_top100_status = finish_error.isEmpty()
+            ? QStringLiteral("Top 100 timeline complete through block %1 with %2 sparse events.")
+                  .arg(QString::number(m_explorer_top100_scan_end_height), QString::number(m_explorer_top100_events_written))
+            : QStringLiteral("Top 100 timeline finished, but range status could not be saved: %1").arg(finish_error);
+        refreshExplorerAnalytics(5000);
+        Q_EMIT explorerChanged();
+        return;
+    }
+
+    const int chunk_start = m_explorer_top100_scan_height;
+    const int chunk_end = std::min(m_explorer_top100_scan_end_height, chunk_start + EXPLORER_TOP100_CHUNK_BLOCKS - 1);
+    const QString connection_name = QStringLiteral("nu_explorer_top100_scan_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    int last_height = -1;
+    qint64 last_time = 0;
+    int rows_read = 0;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral(
+                "SELECT d.height, COALESCE(b.time, 0), d.address, d.delta_sats "
+                "FROM explorer_balance_deltas d LEFT JOIN explorer_blocks b ON b.height = d.height "
+                "WHERE d.height BETWEEN ? AND ? "
+                "ORDER BY d.height ASC"));
+            query.addBindValue(chunk_start);
+            query.addBindValue(chunk_end);
+            ok = query.exec();
+            if (!ok) {
+                local_error = query.lastError().text();
+            } else {
+                while (query.next()) {
+                    const int height = query.value(0).toInt();
+                    const qint64 block_time = query.value(1).toLongLong();
+                    if (last_height >= 0 && height != last_height) {
+                        const bool force_anchor = m_explorer_top100_previous_rows.isEmpty()
+                            || last_height == m_explorer_top100_scan_start_height
+                            || (last_height % EXPLORER_TOP100_ANCHOR_BLOCKS) == 0;
+                        if (!writeExplorerTop100Events(last_height, last_time, force_anchor, &local_error)) {
+                            ok = false;
+                            break;
+                        }
+                    }
+
+                    const QString address = query.value(2).toString();
+                    const qint64 delta = query.value(3).toLongLong();
+                    const qint64 old_balance = m_explorer_top100_balances.value(address, 0);
+                    if (old_balance > 0) m_explorer_top100_order.erase(ExplorerTop100Entry{old_balance, address});
+                    const qint64 new_balance = old_balance + delta;
+                    m_explorer_top100_total_sats += std::max<qint64>(0, new_balance) - std::max<qint64>(0, old_balance);
+                    if (new_balance > 0) {
+                        m_explorer_top100_balances.insert(address, new_balance);
+                        m_explorer_top100_order.insert(ExplorerTop100Entry{new_balance, address});
+                    } else {
+                        m_explorer_top100_balances.remove(address);
+                    }
+                    last_height = height;
+                    last_time = block_time;
+                    ++rows_read;
+                }
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+
+    if (ok && last_height >= 0) {
+        const bool force_anchor = m_explorer_top100_previous_rows.isEmpty()
+            || last_height == m_explorer_top100_scan_start_height
+            || (last_height % EXPLORER_TOP100_ANCHOR_BLOCKS) == 0;
+        ok = writeExplorerTop100Events(last_height, last_time, force_anchor, &local_error);
+    }
+
+    if (!ok) {
+        m_explorer_top100_scanning = false;
+        finishExplorerTop100Scan(false, nullptr);
+        releaseExplorerWriterLock();
+        m_explorer_top100_status = QStringLiteral("Top 100 timeline stopped near block %1: %2")
+            .arg(QString::number(chunk_start), local_error);
+        Q_EMIT explorerChanged();
+        return;
+    }
+
+    m_explorer_top100_scan_height = chunk_end + 1;
+    const qint64 elapsed_ms = std::max<qint64>(1, QDateTime::currentMSecsSinceEpoch() - m_explorer_top100_started_ms);
+    const int scanned_blocks = std::max(1, m_explorer_top100_scan_height - m_explorer_top100_scan_start_height);
+    const double blocks_per_second = 1000.0 * static_cast<double>(scanned_blocks) / static_cast<double>(elapsed_ms);
+    const double pct = 100.0 * static_cast<double>(m_explorer_top100_scan_height - m_explorer_top100_scan_start_height)
+        / static_cast<double>(std::max(1, m_explorer_top100_scan_end_height - m_explorer_top100_scan_start_height + 1));
+    m_explorer_top100_status = QStringLiteral("Top 100 timeline indexed through block %1 of %2 (%3%). %4 sparse events, %5 delta rows in last batch, %6 blocks/s.")
+        .arg(QString::number(chunk_end),
+             QString::number(m_explorer_top100_scan_end_height),
+             QString::number(std::min(100.0, pct), 'f', 2),
+             QString::number(m_explorer_top100_events_written),
+             QString::number(rows_read),
+             QString::number(blocks_per_second, 'f', blocks_per_second >= 100.0 ? 0 : 1));
+    refreshExplorerTop100TimelineStats();
+    Q_EMIT explorerChanged();
+    scheduleExplorerTop100Step(0);
+}
+
+void NuRpcService::startExplorerTop100Timeline(int start_height, int end_height)
+{
+    if (m_explorer_top100_scanning) return;
+    if (m_explorer_indexing) {
+        Q_EMIT userMessage(QStringLiteral("Top 100 timeline not started"),
+                           QStringLiteral("Pause the main Explorer index before rebuilding the Top 100 timeline."));
+        return;
+    }
+    QString error;
+    if (!acquireExplorerWriterLock(&error)) {
+        Q_EMIT userMessage(QStringLiteral("Top 100 timeline blocked"), error);
+        return;
+    }
+    if (!initializeExplorerTop100Scan(start_height, end_height, &error)) {
+        releaseExplorerWriterLock();
+        Q_EMIT userMessage(QStringLiteral("Top 100 timeline not started"), error);
+        return;
+    }
+    m_explorer_top100_scanning = true;
+    m_explorer_top100_paused_by_user = false;
+    Q_EMIT explorerChanged();
+    scheduleExplorerTop100Step(0);
+}
+
+void NuRpcService::stopExplorerTop100Timeline()
+{
+    if (!m_explorer_top100_scanning) return;
+    m_explorer_top100_scanning = false;
+    m_explorer_top100_paused_by_user = true;
+    finishExplorerTop100Scan(false, nullptr);
+    releaseExplorerWriterLock();
+    m_explorer_top100_status = QStringLiteral("Top 100 timeline paused at block %1.")
+        .arg(QString::number(m_explorer_top100_scan_height));
+    Q_EMIT explorerChanged();
+}
+
+void NuRpcService::resetExplorerTop100Timeline()
+{
+    stopExplorerTop100Timeline();
+    QString error;
+    if (!ensureExplorerDatabase(&error)) {
+        Q_EMIT userMessage(QStringLiteral("Top 100 timeline unavailable"), error);
+        return;
+    }
+    if (!acquireExplorerWriterLock(&error)) {
+        Q_EMIT userMessage(QStringLiteral("Top 100 reset blocked"), error);
+        return;
+    }
+    const QString connection_name = QStringLiteral("nu_explorer_top100_reset_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            ok = query.exec(QStringLiteral("DELETE FROM explorer_top100_events"));
+            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_top100_ranges"));
+            if (!ok) local_error = query.lastError().text();
+        } else {
+            local_error = db.lastError().text();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    releaseExplorerWriterLock();
+    if (!ok) {
+        Q_EMIT userMessage(QStringLiteral("Top 100 reset failed"), local_error);
+        return;
+    }
+    refreshExplorerTop100TimelineStats();
+    m_explorer_top100_status = QStringLiteral("Top 100 timeline cleared.");
+    Q_EMIT explorerChanged();
+}
+
+void NuRpcService::scanRemainingExplorerTop100Timeline()
+{
+    const int highest = explorerHighestIndexedBlock();
+    if (highest < 0) {
+        Q_EMIT userMessage(QStringLiteral("Top 100 timeline not started"),
+                           QStringLiteral("Build the Explorer block index before scanning remaining Top 100 ranges."));
+        return;
+    }
+
+    int gap_start = 0;
+    int gap_end = highest;
+    bool found_gap = false;
+    QString error;
+    if (!ensureExplorerDatabase(&error)) {
+        Q_EMIT userMessage(QStringLiteral("Top 100 timeline unavailable"), error);
+        return;
+    }
+    const QString connection_name = QStringLiteral("nu_explorer_top100_gap_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            if (query.exec(QStringLiteral(
+                    "SELECT start_height, end_height FROM explorer_top100_ranges "
+                    "WHERE status = 'complete' ORDER BY start_height ASC"))) {
+                int cursor = 0;
+                while (query.next()) {
+                    const int start = query.value(0).toInt();
+                    const int end = query.value(1).toInt();
+                    if (start > cursor) {
+                        gap_start = cursor;
+                        gap_end = std::min(highest, start - 1);
+                        found_gap = true;
+                        break;
+                    }
+                    cursor = std::max(cursor, end + 1);
+                }
+                if (!found_gap && cursor <= highest) {
+                    gap_start = cursor;
+                    gap_end = highest;
+                    found_gap = true;
+                }
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+
+    if (!found_gap) {
+        m_explorer_top100_status = QStringLiteral("Top 100 timeline already covers indexed blocks 0-%1.")
+            .arg(QString::number(highest));
+        Q_EMIT explorerChanged();
+        return;
+    }
+    startExplorerTop100Timeline(gap_start, gap_end);
+}
+
+QVariantMap NuRpcService::explorerTop100Snapshot(int height) const
+{
+    QVariantMap out;
+    QVariantList rows;
+    out.insert(QStringLiteral("height"), height);
+    out.insert(QStringLiteral("rows"), rows);
+    out.insert(QStringLiteral("status"), QStringLiteral("No Top 100 timeline rows are available yet."));
+
+    QString error;
+    if (!ensureExplorerDatabase(&error)) {
+        out.insert(QStringLiteral("status"), error);
+        return out;
+    }
+    const QString connection_name = QStringLiteral("nu_explorer_top100_snapshot_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    int snapshot_height = -1;
+    qint64 snapshot_time = 0;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            for (int rank = 1; rank <= 100; ++rank) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral(
+                    "SELECT height, time, address, percent_whole, color_index "
+                    "FROM explorer_top100_events "
+                    "WHERE rank = ? AND height <= ? "
+                    "ORDER BY height DESC LIMIT 1"));
+                query.addBindValue(rank);
+                query.addBindValue(height);
+                if (query.exec() && query.next()) {
+                    const QString address = query.value(2).toString();
+                    if (address.isEmpty()) continue;
+                    snapshot_height = std::max(snapshot_height, query.value(0).toInt());
+                    snapshot_time = std::max<qint64>(snapshot_time, query.value(1).toLongLong());
+                    const int pct = query.value(3).toInt();
+                    rows.push_back(QVariantMap{
+                        {QStringLiteral("cells"), QVariantList{
+                            explorerTop100Color(rank),
+                            rank,
+                            address,
+                            QString::number(pct) + QStringLiteral("%")}},
+                        {QStringLiteral("meta"), QVariantMap{
+                            {QStringLiteral("type"), QStringLiteral("address")},
+                            {QStringLiteral("id"), address},
+                            {QStringLiteral("rank"), rank},
+                            {QStringLiteral("address"), address},
+                            {QStringLiteral("percentWhole"), pct},
+                            {QStringLiteral("color"), explorerTop100Color(rank)}}}});
+                }
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    out.insert(QStringLiteral("height"), snapshot_height >= 0 ? snapshot_height : height);
+    out.insert(QStringLiteral("time"), QVariant::fromValue<qlonglong>(snapshot_time));
+    out.insert(QStringLiteral("rows"), rows);
+    out.insert(QStringLiteral("status"), rows.isEmpty()
+        ? QStringLiteral("No Top 100 snapshot exists at or before this block.")
+        : QStringLiteral("Snapshot reconstructed from sparse Top 100 timeline events."));
+    return out;
 }
 
 void NuRpcService::refreshForensicsIrregularMessages()

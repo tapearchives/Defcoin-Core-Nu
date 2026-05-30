@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Basic 2.15 as Basic
 import QtQuick.Layouts 1.15
+import QtQuick.Window 2.15
 import Defcoin.Nu 1.0
 
 import "../Theme"
@@ -12,6 +13,10 @@ ColumnLayout {
     spacing: NuTokens.spaceLg
 
     property int movementPage: 0
+    property int selectedRichRank: -1
+    property int hoveredRichRank: -1
+    property var timelineSnapshot: ({ rows: [], height: -1, status: "No Top 100 timeline snapshot loaded." })
+    property bool timelinePlaying: false
     readonly property real indexProgress: NuService.explorerIndexTip > 0
                                           ? Math.max(0, Math.min(1, NuService.explorerIndexHeight / NuService.explorerIndexTip))
                                           : 0
@@ -73,6 +78,71 @@ ColumnLayout {
         else if (type === "block") NuService.openBlockInExplorer(id)
     }
 
+    function richRowsForPie() {
+        return NuService.explorerRichList.slice(0, 10)
+    }
+
+    function richTotalSats() {
+        let total = 0
+        for (let i = 0; i < NuService.explorerRichList.length; ++i)
+            total += Number((NuService.explorerRichList[i].meta || {}).balanceSats || 0)
+        return total
+    }
+
+    function colorForRichRow(row, fallbackIndex) {
+        const meta = row && row.meta ? row.meta : {}
+        const cells = row && row.cells ? row.cells : []
+        const fromRow = meta.color || (cells.length > 0 ? cells[0] : "")
+        return String(fromRow || ["#48b7ff", "#f3d447", "#46d39a", "#f05d4f", "#b779ff", "#ff9f43", "#5fe1e8", "#f78fb3", "#9bc53d", "#c8d6e5", "#7f8fa6"][fallbackIndex % 11])
+    }
+
+    function richSliceAt(x, y) {
+        const rows = richRowsForPie()
+        const total = richTotalSats()
+        if (rows.length === 0 || total <= 0) return -1
+        const cx = richPie.width / 2
+        const cy = richPie.height / 2
+        const dx = x - cx
+        const dy = y - cy
+        const distance = Math.sqrt(dx * dx + dy * dy)
+        const radius = Math.min(richPie.width, richPie.height) * 0.42
+        if (distance < radius * 0.52 || distance > radius * 1.16) return -1
+        let angle = Math.atan2(dy, dx)
+        if (angle < -Math.PI / 2) angle += Math.PI * 2
+        let start = -Math.PI / 2
+        for (let i = 0; i < rows.length; ++i) {
+            const sats = Number((rows[i].meta || {}).balanceSats || 0)
+            const end = start + (Math.PI * 2 * sats / total)
+            if (angle >= start && angle <= end) return Number((rows[i].meta || {}).rank || (i + 1))
+            start = end
+        }
+        return 0
+    }
+
+    function richHoverText(rank) {
+        if (rank < 0) return ""
+        if (rank === 0) return "Other indexed addresses outside the first ten visible pie slices."
+        for (let i = 0; i < NuService.explorerRichList.length; ++i) {
+            const row = NuService.explorerRichList[i]
+            const meta = row.meta || {}
+            if (Number(meta.rank || 0) === rank) {
+                return "Rank " + rank + "\n" + String(meta.address || "") + "\nBalance: " + String(row.cells[3] || "") + "\nShare: " + String(row.cells[4] || "")
+            }
+        }
+        return ""
+    }
+
+    function timelineHeightForPosition(position) {
+        const start = Math.max(0, NuService.explorerTop100TimelineStartHeight)
+        const end = Math.max(start, NuService.explorerTop100TimelineEndHeight)
+        return Math.round(start + Math.max(0, Math.min(1, position)) * Math.max(1, end - start))
+    }
+
+    function loadTimelineSnapshotAtPosition(position) {
+        root.timelineSnapshot = NuService.explorerTop100Snapshot(root.timelineHeightForPosition(position))
+        if (timelinePie) timelinePie.requestPaint()
+    }
+
     Component.onCompleted: NuService.refreshExplorerAnalytics(root.movementThresholdCoins())
 
     onMovementPageChanged: {
@@ -87,6 +157,8 @@ ColumnLayout {
                 root.movementPage = Math.max(0, root.movementPageCount(movementTableHost.rowsPerPage) - 1)
             if (richPie)
                 richPie.requestPaint()
+            if (timelinePie)
+                timelinePie.requestPaint()
         }
     }
 
@@ -164,6 +236,7 @@ ColumnLayout {
                 NuMetricRow { label: "Blocks"; value: String(NuService.explorerIndexedBlockCount) }
                 NuMetricRow { label: "Outputs"; value: String(NuService.explorerIndexedOutputCount) }
                 NuMetricRow { label: "Top 100"; value: String(NuService.explorerRichList.length) }
+                NuMetricRow { label: "Top 100 events"; value: String(NuService.explorerTop100TimelineEventCount) }
                 NuMetricRow { label: "Movements"; value: String(NuService.explorerMovements.length) }
             }
         }
@@ -311,6 +384,89 @@ ColumnLayout {
                     }
                 }
 
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: NuTokens.lineSubtle
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Top 100 timeline index"
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontBodyLarge
+                    font.weight: Font.DemiBold
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: NuService.explorerTop100Status
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    wrapMode: Text.WordWrap
+                }
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceMd
+
+                    Label {
+                        text: "Start"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontSmall
+                    }
+                    NuTextField {
+                        id: top100StartField
+                        width: 110
+                        text: "0"
+                        validator: IntValidator { bottom: 0; top: 99999999 }
+                        helpText: "First block height to include when rebuilding the sparse Top 100 over-time index."
+                    }
+                    Label {
+                        text: "Stop"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontSmall
+                    }
+                    NuTextField {
+                        id: top100EndField
+                        width: 120
+                        text: String(Math.max(0, NuService.explorerIndexTip))
+                        validator: IntValidator { bottom: 0; top: 99999999 }
+                        helpText: "Last block height to include. Leave this at the indexed tip for a full current timeline."
+                    }
+                    NuActionButton {
+                        width: 132
+                        text: NuService.explorerTop100Scanning ? "Scanning" : "Start scan"
+                        enabled: !NuService.explorerTop100Scanning && !NuService.explorerIndexing
+                        primary: enabled
+                        helpText: "Build the exact sparse Top 100 timeline from local balance deltas."
+                        onClicked: NuService.startExplorerTop100Timeline(parseInt(top100StartField.text) || 0,
+                                                                          parseInt(top100EndField.text) || NuService.explorerIndexTip)
+                    }
+                    NuActionButton {
+                        width: 112
+                        text: "Pause scan"
+                        enabled: NuService.explorerTop100Scanning
+                        helpText: "Pause the Top 100 timeline scan after the current chunk."
+                        onClicked: NuService.stopExplorerTop100Timeline()
+                    }
+                    NuActionButton {
+                        width: 152
+                        text: "Scan remaining"
+                        enabled: !NuService.explorerTop100Scanning && !NuService.explorerIndexing
+                        helpText: "Scan the next missing Top 100 timeline range between block 0 and the indexed tip."
+                        onClicked: NuService.scanRemainingExplorerTop100Timeline()
+                    }
+                    NuActionButton {
+                        width: 138
+                        text: "Clear timeline"
+                        enabled: !NuService.explorerTop100Scanning && !NuService.explorerIndexing
+                        danger: true
+                        helpText: "Delete only the sparse Top 100 over-time events and ranges."
+                        onClicked: NuService.resetExplorerTop100Timeline()
+                    }
+                }
+
                 Label {
                     Layout.fillWidth: true
                     text: "Index database: " + NuService.explorerDatabasePath
@@ -339,11 +495,8 @@ ColumnLayout {
                         onPaint: {
                             const ctx = getContext("2d")
                             ctx.reset()
-                            const colors = ["#48b7ff", "#f3d447", "#46d39a", "#f05d4f", "#b779ff", "#ff9f43", "#5fe1e8", "#f78fb3", "#9bc53d", "#c8d6e5", "#6c7a89"]
-                            const rows = NuService.explorerRichList.slice(0, 10)
-                            let total = 0
-                            for (let i = 0; i < NuService.explorerRichList.length; ++i)
-                                total += Number((NuService.explorerRichList[i].meta || {}).balanceSats || 0)
+                            const rows = root.richRowsForPie()
+                            const total = root.richTotalSats()
                             const cx = width / 2
                             const cy = height / 2
                             const radius = Math.min(width, height) * 0.42
@@ -364,13 +517,19 @@ ColumnLayout {
                             let start = -Math.PI / 2
                             for (let s = 0; s < rows.length; ++s) {
                                 const sats = Number((rows[s].meta || {}).balanceSats || 0)
+                                const rank = Number((rows[s].meta || {}).rank || (s + 1))
                                 used += sats
                                 const end = start + (Math.PI * 2 * sats / total)
+                                const selected = root.selectedRichRank === rank
+                                const mid = (start + end) / 2
+                                const offset = selected ? 10 : 0
+                                const sx = cx + Math.cos(mid) * offset
+                                const sy = cy + Math.sin(mid) * offset
                                 ctx.beginPath()
-                                ctx.moveTo(cx, cy)
-                                ctx.arc(cx, cy, radius, start, end)
+                                ctx.moveTo(sx, sy)
+                                ctx.arc(sx, sy, radius, start, end)
                                 ctx.closePath()
-                                ctx.fillStyle = colors[s % colors.length]
+                                ctx.fillStyle = root.colorForRichRow(rows[s], s)
                                 ctx.fill()
                                 start = end
                             }
@@ -379,7 +538,7 @@ ColumnLayout {
                                 ctx.moveTo(cx, cy)
                                 ctx.arc(cx, cy, radius, start, Math.PI * 1.5)
                                 ctx.closePath()
-                                ctx.fillStyle = colors[10]
+                                ctx.fillStyle = "#7f8fa6"
                                 ctx.fill()
                             }
                             ctx.beginPath()
@@ -394,6 +553,24 @@ ColumnLayout {
                             ctx.font = "11px " + NuTokens.bodyFont
                             ctx.fillStyle = NuTokens.textSecondary
                             ctx.fillText("indexed balances", cx, cy + 10)
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            ToolTip.visible: containsMouse && root.richHoverText(root.hoveredRichRank).length > 0
+                            ToolTip.text: root.richHoverText(root.hoveredRichRank)
+                            ToolTip.delay: NuTokens.tooltipDelay
+                            ToolTip.timeout: NuTokens.tooltipTimeout
+                            onPositionChanged: (mouse) => {
+                                root.hoveredRichRank = root.richSliceAt(mouse.x, mouse.y)
+                            }
+                            onExited: root.hoveredRichRank = -1
+                            onClicked: (mouse) => {
+                                const rank = root.richSliceAt(mouse.x, mouse.y)
+                                root.selectedRichRank = root.selectedRichRank === rank ? -1 : rank
+                                richPie.requestPaint()
+                            }
                         }
                     }
 
@@ -423,8 +600,21 @@ ColumnLayout {
                                 helpText: "Recalculate Top 100 and movement summaries from the local SQLite explorer index."
                                 onClicked: root.refreshAnalytics()
                             }
+                            NuActionButton {
+                                width: 118
+                                text: "Over time"
+                                enabled: NuService.explorerTop100TimelineEventCount > 0
+                                helpText: "Open the sparse Top 100 over-time animation window."
+                                onClicked: {
+                                    root.loadTimelineSnapshotAtPosition(1)
+                                    top100TimelineWindow.show()
+                                    top100TimelineWindow.raise()
+                                    top100TimelineWindow.requestActivate()
+                                }
+                            }
                             NuMetricRow { label: "Rows"; value: String(NuService.explorerRichList.length) }
                             NuMetricRow { label: "Coverage"; value: NuService.explorerIndexedBlockCount + " blocks" }
+                            NuMetricRow { label: "Timeline"; value: NuService.explorerTop100TimelineEventCount + " events" }
                         }
                     }
                 }
@@ -433,12 +623,19 @@ ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     tableId: "internalExplorerRichList"
-                    columns: ["Rank", "Address", "Balance", "Share", "Received", "Txs", "UTXOs"]
-                    columnTypes: ["number", "address", "amount", "number", "amount", "number", "number"]
-                    columnWeights: [0.45, 3.1, 1.1, 0.75, 1.1, 0.55, 0.55]
+                    columns: ["", "Rank", "Address", "Balance", "Share", "Received", "Txs", "UTXOs"]
+                    columnTypes: ["swatch", "number", "address", "amount", "number", "amount", "number", "number"]
+                    columnWeights: [0.25, 0.45, 3.1, 1.1, 0.75, 1.1, 0.55, 0.55]
                     rows: NuService.explorerRichList
                     emptyText: "Top 100 appears after the Explorer index contains spendable outputs."
-                    defaultSortColumn: 0
+                    defaultSortColumn: 1
+                    rowSelectionEnabled: true
+                    plainClickSelectsRows: true
+                    rowKeyMetaField: "rank"
+                    onRowSelectionChanged: (keys) => {
+                        root.selectedRichRank = keys.length > 0 ? Number(keys[0]) : -1
+                        richPie.requestPaint()
+                    }
                     onRowActivated: (row) => root.openRow(row)
                 }
             }
@@ -561,6 +758,178 @@ ColumnLayout {
                         onClicked: root.movementPage = Math.min(root.movementPageCount(movementTableHost.rowsPerPage) - 1, root.movementPage + 1)
                     }
                 }
+            }
+        }
+    }
+
+    Timer {
+        id: timelinePlayTimer
+        interval: 350
+        repeat: true
+        running: root.timelinePlaying && top100TimelineWindow.visible
+        onTriggered: {
+            const next = Math.min(1, timelineRange.start + 0.01)
+            timelineRange.start = next
+            timelineRange.end = Math.min(1, Math.max(next + timelineRange.minSpan, timelineRange.end + 0.01))
+            root.loadTimelineSnapshotAtPosition(timelineRange.start)
+            if (next >= 1) root.timelinePlaying = false
+        }
+    }
+
+    Item {
+        Layout.preferredWidth: 0
+        Layout.preferredHeight: 0
+        visible: false
+
+        Window {
+            id: top100TimelineWindow
+            width: 1040
+            height: 760
+            minimumWidth: 760
+            minimumHeight: 560
+            visible: false
+            title: "Top 100 Over Time"
+            color: NuTokens.backgroundBase
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: NuTokens.spaceLg
+                spacing: NuTokens.spaceMd
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: NuTokens.spaceMd
+                Label {
+                    Layout.fillWidth: true
+                    text: "Top 100 Over Time"
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontTitle
+                    font.weight: Font.DemiBold
+                }
+                Label {
+                    text: root.timelineSnapshot.height >= 0 ? "Block " + root.timelineSnapshot.height : "No snapshot"
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontBody
+                }
+                NuActionButton {
+                    Layout.preferredWidth: 94
+                    text: root.timelinePlaying ? "Pause" : "Play"
+                    helpText: "Animate the pie chart forward through sparse Top 100 timeline events."
+                    onClicked: root.timelinePlaying = !root.timelinePlaying
+                }
+            }
+
+            Canvas {
+                id: timelinePie
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: Math.min(420, top100TimelineWindow.width - 80)
+                Layout.preferredHeight: Layout.preferredWidth
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    const rows = root.timelineSnapshot.rows || []
+                    const cx = width / 2
+                    const cy = height / 2
+                    const radius = Math.min(width, height) * 0.43
+                    let totalPct = 0
+                    for (let i = 0; i < rows.length; ++i)
+                        totalPct += Math.max(0, parseInt(String(rows[i].cells[3]).replace("%", "")) || 0)
+                    if (rows.length === 0 || totalPct <= 0) {
+                        ctx.strokeStyle = NuTokens.lineSubtle
+                        ctx.lineWidth = 2
+                        ctx.beginPath()
+                        ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+                        ctx.stroke()
+                        ctx.fillStyle = NuTokens.textSecondary
+                        ctx.textAlign = "center"
+                        ctx.textBaseline = "middle"
+                        ctx.font = "13px " + NuTokens.bodyFont
+                        ctx.fillText("Build Top 100 timeline", cx, cy)
+                        return
+                    }
+                    let start = -Math.PI / 2
+                    for (let r = 0; r < rows.length; ++r) {
+                        const pct = Math.max(0, parseInt(String(rows[r].cells[3]).replace("%", "")) || 0)
+                        if (pct <= 0) continue
+                        const rank = Number(rows[r].cells[1] || (r + 1))
+                        const selected = root.selectedRichRank === rank
+                        const end = start + Math.PI * 2 * pct / Math.max(100, totalPct)
+                        const mid = (start + end) / 2
+                        const offset = selected ? 12 : 0
+                        const sx = cx + Math.cos(mid) * offset
+                        const sy = cy + Math.sin(mid) * offset
+                        ctx.beginPath()
+                        ctx.moveTo(sx, sy)
+                        ctx.arc(sx, sy, radius, start, end)
+                        ctx.closePath()
+                        ctx.fillStyle = String(rows[r].cells[0] || "#7f8fa6")
+                        ctx.fill()
+                        start = end
+                    }
+                    if (start < Math.PI * 1.5) {
+                        ctx.beginPath()
+                        ctx.moveTo(cx, cy)
+                        ctx.arc(cx, cy, radius, start, Math.PI * 1.5)
+                        ctx.closePath()
+                        ctx.fillStyle = "#2f3640"
+                        ctx.fill()
+                    }
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, radius * 0.52, 0, Math.PI * 2)
+                    ctx.fillStyle = NuTokens.panelBase
+                    ctx.fill()
+                    ctx.fillStyle = NuTokens.textPrimary
+                    ctx.textAlign = "center"
+                    ctx.textBaseline = "middle"
+                    ctx.font = "700 15px " + NuTokens.bodyFont
+                    ctx.fillText("Top 100", cx, cy - 8)
+                    ctx.font = "12px " + NuTokens.bodyFont
+                    ctx.fillStyle = NuTokens.textSecondary
+                    ctx.fillText("whole-percent history", cx, cy + 12)
+                }
+            }
+
+            NuTimelineWindow {
+                id: timelineRange
+                Layout.fillWidth: true
+                label: "Block range"
+                start: 0
+                end: 1
+                minSpan: 0.01
+                onViewportChanged: (s, e) => root.loadTimelineSnapshotAtPosition(s)
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: root.timelineSnapshot.status || ""
+                color: NuTokens.textSecondary
+                font.pixelSize: NuTokens.fontSmall
+                wrapMode: Text.WordWrap
+            }
+
+            NuDataTable {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                tableId: "internalExplorerTop100Timeline"
+                columns: ["", "Rank", "Address", "Share"]
+                columnTypes: ["swatch", "number", "address", "number"]
+                columnWeights: [0.25, 0.4, 3.2, 0.65]
+                rows: root.timelineSnapshot.rows || []
+                emptyText: "No Top 100 timeline snapshot loaded."
+                defaultSortColumn: 1
+                rowSelectionEnabled: true
+                plainClickSelectsRows: true
+                rowKeyMetaField: "rank"
+                onRowSelectionChanged: (keys) => {
+                    root.selectedRichRank = keys.length > 0 ? Number(keys[0]) : -1
+                    timelinePie.requestPaint()
+                }
+                onRowActivated: (row) => root.openRow(row)
+            }
+        }
+
+            onVisibleChanged: {
+                if (!visible) root.timelinePlaying = false
             }
         }
     }

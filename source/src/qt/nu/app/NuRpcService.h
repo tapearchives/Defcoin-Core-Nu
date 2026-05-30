@@ -16,13 +16,17 @@
 #include <QVariantMap>
 #include <QVector>
 
+#include <atomic>
 #include <functional>
+#include <memory>
+#include <set>
 
 class QNetworkAccessManager;
 class QNetworkReply;
 class QFile;
 class QHostAddress;
 class QJsonObject;
+class QLockFile;
 class QProcess;
 class QTimer;
 class QUdpSocket;
@@ -142,6 +146,13 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QVariantList explorerRichList READ explorerRichList NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerMovements READ explorerMovements NOTIFY explorerChanged)
     Q_PROPERTY(QString explorerAnalyticsStatus READ explorerAnalyticsStatus NOTIFY explorerChanged)
+    Q_PROPERTY(bool explorerTop100Scanning READ explorerTop100Scanning NOTIFY explorerChanged)
+    Q_PROPERTY(QString explorerTop100Status READ explorerTop100Status NOTIFY explorerChanged)
+    Q_PROPERTY(int explorerTop100ScanHeight READ explorerTop100ScanHeight NOTIFY explorerChanged)
+    Q_PROPERTY(int explorerTop100ScanEndHeight READ explorerTop100ScanEndHeight NOTIFY explorerChanged)
+    Q_PROPERTY(int explorerTop100TimelineStartHeight READ explorerTop100TimelineStartHeight NOTIFY explorerChanged)
+    Q_PROPERTY(int explorerTop100TimelineEndHeight READ explorerTop100TimelineEndHeight NOTIFY explorerChanged)
+    Q_PROPERTY(int explorerTop100TimelineEventCount READ explorerTop100TimelineEventCount NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList forensicsIrregularMessages READ forensicsIrregularMessages NOTIFY forensicsChanged)
     Q_PROPERTY(bool forensicsScanning READ forensicsScanning NOTIFY forensicsChanged)
     Q_PROPERTY(QString forensicsScanStatus READ forensicsScanStatus NOTIFY forensicsChanged)
@@ -275,6 +286,13 @@ public:
     QVariantList explorerRichList() const { return m_explorer_rich_list; }
     QVariantList explorerMovements() const { return m_explorer_movements; }
     QString explorerAnalyticsStatus() const { return m_explorer_analytics_status; }
+    bool explorerTop100Scanning() const { return m_explorer_top100_scanning; }
+    QString explorerTop100Status() const { return m_explorer_top100_status; }
+    int explorerTop100ScanHeight() const { return m_explorer_top100_scan_height; }
+    int explorerTop100ScanEndHeight() const { return m_explorer_top100_scan_end_height; }
+    int explorerTop100TimelineStartHeight() const { return m_explorer_top100_timeline_start_height; }
+    int explorerTop100TimelineEndHeight() const { return m_explorer_top100_timeline_end_height; }
+    int explorerTop100TimelineEventCount() const { return m_explorer_top100_timeline_event_count; }
     QVariantList forensicsIrregularMessages() const { return m_forensics_irregular_messages; }
     bool forensicsScanning() const { return m_forensics_scanning; }
     QString forensicsScanStatus() const { return m_forensics_scan_status; }
@@ -381,6 +399,11 @@ public:
     Q_INVOKABLE void startExplorerIndexing();
     Q_INVOKABLE void stopExplorerIndexing();
     Q_INVOKABLE void resetExplorerIndex();
+    Q_INVOKABLE void startExplorerTop100Timeline(int start_height, int end_height);
+    Q_INVOKABLE void stopExplorerTop100Timeline();
+    Q_INVOKABLE void resetExplorerTop100Timeline();
+    Q_INVOKABLE void scanRemainingExplorerTop100Timeline();
+    Q_INVOKABLE QVariantMap explorerTop100Snapshot(int height) const;
     Q_INVOKABLE void refreshForensicsIrregularMessages();
     Q_INVOKABLE void startForensicsIrregularMessages(int start_height);
     Q_INVOKABLE void stopForensicsScan();
@@ -553,6 +576,9 @@ private:
     QString explorerAddressUrlTemplate(const QString& url) const;
     bool usingInternalExplorer() const;
     bool ensureExplorerDatabase(QString* error = nullptr) const;
+    bool ensureExplorerBalanceDeltas(QString* error = nullptr);
+    bool acquireExplorerWriterLock(QString* error = nullptr);
+    void releaseExplorerWriterLock();
     void cacheExplorerLookup(const QString& type,
                              const QString& id,
                              const QString& title,
@@ -564,6 +590,7 @@ private:
     int explorerIndexedOutputCountFromDb() const;
     QVariantList explorerRichListFromDb(QString* error = nullptr) const;
     QVariantList explorerMovementsFromDb(qint64 threshold_sats, QString* error = nullptr) const;
+    void refreshExplorerTop100TimelineStats();
     QString explorerBlockHashAtHeight(int height) const;
     QString explorerBlockHashForTransaction(const QString& txid) const;
     QString explorerCachedBlockHtml(const QString& block_id, QJsonObject* raw_json = nullptr, bool* found = nullptr) const;
@@ -574,6 +601,11 @@ private:
     bool storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* output_rows_written = nullptr, QString* error = nullptr);
     void scheduleExplorerIndexStep(int delay_ms = 0);
     void explorerIndexStep();
+    void scheduleExplorerTop100Step(int delay_ms = 0);
+    void explorerTop100Step();
+    bool initializeExplorerTop100Scan(int start_height, int end_height, QString* error = nullptr);
+    bool writeExplorerTop100Events(int height, qint64 block_time, bool force_anchor, QString* error = nullptr);
+    bool finishExplorerTop100Scan(bool completed, QString* error = nullptr);
     void scheduleForensicsScanStep(int delay_ms = 0);
     void forensicsScanStep();
     void rebuildForensicsScanSummary();
@@ -834,6 +866,33 @@ private:
     int m_explorer_indexed_output_count = 0;
     qint64 m_explorer_index_started_ms = 0;
     int m_explorer_index_started_block_count = 0;
+    std::unique_ptr<QLockFile> m_explorer_writer_lock;
+    struct ExplorerTop100Entry {
+        qint64 balance = 0;
+        QString address;
+    };
+    struct ExplorerTop100EntryLess {
+        bool operator()(const ExplorerTop100Entry& a, const ExplorerTop100Entry& b) const
+        {
+            if (a.balance != b.balance) return a.balance < b.balance;
+            return a.address > b.address;
+        }
+    };
+    bool m_explorer_top100_scanning = false;
+    bool m_explorer_top100_paused_by_user = false;
+    QString m_explorer_top100_status = QStringLiteral("Top 100 timeline not built yet.");
+    int m_explorer_top100_scan_start_height = 0;
+    int m_explorer_top100_scan_height = 0;
+    int m_explorer_top100_scan_end_height = 0;
+    int m_explorer_top100_timeline_start_height = -1;
+    int m_explorer_top100_timeline_end_height = -1;
+    int m_explorer_top100_timeline_event_count = 0;
+    int m_explorer_top100_events_written = 0;
+    qint64 m_explorer_top100_started_ms = 0;
+    qint64 m_explorer_top100_total_sats = 0;
+    QHash<QString, qint64> m_explorer_top100_balances;
+    std::set<ExplorerTop100Entry, ExplorerTop100EntryLess> m_explorer_top100_order;
+    QVector<QPair<QString, int>> m_explorer_top100_previous_rows;
     QVariantList m_forensics_irregular_messages;
     bool m_forensics_scanning = false;
     bool m_forensics_request_in_flight = false;

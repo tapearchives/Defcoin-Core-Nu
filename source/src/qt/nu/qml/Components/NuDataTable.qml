@@ -131,6 +131,7 @@ Rectangle {
         if (index >= 0 && index < columnMinimums.length) return Math.max(36, Number(columnMinimums[index]))
         const type = columnType(index)
         if (type === "action" || type === "delete") return 44
+        if (type === "swatch") return 38
         if (type === "ipport" || type === "address" || type === "hash") return 210
         if (type === "date") return 132
         if (type === "bytes" || type === "amount") return 96
@@ -143,6 +144,7 @@ Rectangle {
         if (index >= 0 && index < columnMaximums.length && Number(columnMaximums[index]) > 0) return Number(columnMaximums[index])
         const type = columnType(index)
         if (type === "action" || type === "delete") return 44
+        if (type === "swatch") return 52
         if (type === "ipport") return 840
         if (type === "address" || type === "hash") return 960
         if (type === "text") return 1200
@@ -196,7 +198,7 @@ Rectangle {
     function rightAlignColumn(index) {
         const type = columnType(index)
         const name = (index >= 0 && index < columns.length ? String(columns[index]) : "").toLowerCase()
-        if (type === "center") return false
+        if (type === "center" || type === "swatch") return false
         if (type === "rightText" || type === "reverseDns") return true
         if (type === "bytes" || type === "amount" || type === "duration" || type === "number") return true
         return name === "dir." || name === "dir" || name.indexOf("direction") >= 0
@@ -208,7 +210,7 @@ Rectangle {
     function centerAlignColumn(index) {
         const type = columnType(index)
         const name = (index >= 0 && index < columns.length ? String(columns[index]) : "").toLowerCase()
-        return type === "center" || name === "active"
+        return type === "center" || type === "swatch" || name === "active"
     }
 
     function headerHorizontalAlignment(index) {
@@ -1260,7 +1262,7 @@ Rectangle {
                                 TextEdit {
                                     anchors.fill: parent
                                     anchors.margins: root.compact ? NuTokens.spaceXs : NuTokens.spaceSm
-                                    visible: !root.isActionColumn(bodyCell.index)
+                                    visible: !root.isActionColumn(bodyCell.index) && root.columnType(bodyCell.index) !== "swatch"
                                     readOnly: true
                                     selectByMouse: true
                                     persistentSelection: true
@@ -1275,6 +1277,17 @@ Rectangle {
                                     horizontalAlignment: root.cellHorizontalAlignment(bodyRow.modelData, bodyCell.index)
                                     wrapMode: TextEdit.NoWrap
                                     clip: true
+                                }
+
+                                Rectangle {
+                                    visible: root.columnType(bodyCell.index) === "swatch"
+                                    anchors.centerIn: parent
+                                    width: Math.min(18, Math.max(12, parent.width - 16))
+                                    height: width
+                                    radius: 2
+                                    color: String(root.valueAt(bodyRow.modelData, bodyCell.index) || NuTokens.lineSubtle)
+                                    border.color: NuTokens.lineStrong
+                                    border.width: 1
                                 }
 
                                 MouseArea {
