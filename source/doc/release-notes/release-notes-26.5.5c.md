@@ -1,8 +1,8 @@
-# Defcoin Core Nu 26.5.5b Release Notes
+# Defcoin Core Nu 26.5.5c Release Notes
 
 Codename: `Core Memories`
 
-Defcoin Core Nu `26.5.5b` adds the first blockchain forensics surface to the
+Defcoin Core Nu `26.5.5c` adds the first blockchain forensics surface to the
 desktop wallet while keeping the chain, wallet, recovery, mining, and explorer
 behavior from the current `26.5` line.
 
@@ -59,12 +59,17 @@ behavior from the current `26.5` line.
   rather than relying only on chain-index flags.
 - Explorer status text now wraps inside its panel instead of being covered by
   tabs or action buttons.
+- Explorer indexing now processes blocks in batched RPC requests and batched
+  SQLite writes. This removes the previous one-block-at-a-time 120 ms throttle
+  and substantially improves initial index build speed on modern SSD systems.
+- Explorer index progress and analytics summary text are now shown as separate
+  stable lines, eliminating the short-lived `Loaded Top...` repaint flicker.
 
 ## Build Suffix
 
-`26.5.5b` is the current changed rebuild in the `26.5.5` line. Future changed
+`26.5.5c` is the current changed rebuild in the `26.5.5` line. Future changed
 rebuilds in the same release line should use the next letter suffix
-(`26.5.5c`, `26.5.5d`, and so on), while the inherited Core client version
+(`26.5.5d`, `26.5.5e`, and so on), while the inherited Core client version
 stays `0.21.5.5`.
 
 ## Technical Notes

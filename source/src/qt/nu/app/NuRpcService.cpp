@@ -78,6 +78,7 @@ constexpr int TRAFFIC_CHART_MAX_SAMPLES = TRAFFIC_CHART_MAX_SECONDS / TRAFFIC_CH
 constexpr qint64 TRAFFIC_CHART_BUCKET_MS = TRAFFIC_CHART_BUCKET_SECONDS * 1000;
 constexpr int RECOVERY_GAP_SCAN_BATCH_SIZE = 1024;
 constexpr int RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES = 65536;
+constexpr int EXPLORER_INDEX_BATCH_BLOCKS = 96;
 constexpr quint16 LAN_FAST_SYNC_PORT = 10334;
 constexpr int LAN_FAST_SYNC_MAX_DATAGRAM_BYTES = 1232;
 constexpr int LAN_FAST_SYNC_MAX_HEADER_BYTES = 768;
@@ -2066,6 +2067,79 @@ void NuRpcService::rpcCallForWallet(const QString& method, const QJsonArray& par
     m_pending.insert(id, PendingCall{method, std::move(callback)});
     QNetworkReply* reply = m_network->post(request, QJsonDocument(request_obj).toJson(QJsonDocument::Compact));
     reply->setProperty("nuRpcId", id);
+}
+
+void NuRpcService::rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls,
+                                bool wallet_scoped,
+                                RpcBatchCallback callback)
+{
+    if (calls.isEmpty()) {
+        callback({}, {}, QString());
+        return;
+    }
+    if (!loadRpcSettings()) {
+        callback({}, {}, m_last_error);
+        return;
+    }
+
+    QJsonArray batch;
+    QHash<int, int> id_to_index;
+    for (int i = 0; i < calls.size(); ++i) {
+        const int id = m_next_id++;
+        id_to_index.insert(id, i);
+        QJsonObject request_obj;
+        request_obj.insert(QStringLiteral("jsonrpc"), QStringLiteral("1.0"));
+        request_obj.insert(QStringLiteral("id"), id);
+        request_obj.insert(QStringLiteral("method"), calls.at(i).first);
+        request_obj.insert(QStringLiteral("params"), calls.at(i).second);
+        batch.append(request_obj);
+    }
+
+    QNetworkRequest request(rpcUrl(wallet_scoped));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    const QByteArray auth = QStringLiteral("%1:%2").arg(m_rpc_user, m_rpc_password).toUtf8().toBase64();
+    request.setRawHeader("Authorization", "Basic " + auth);
+
+    QNetworkReply* reply = m_network->post(request, QJsonDocument(batch).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [reply, id_to_index, count = calls.size(), callback = std::move(callback)]() mutable {
+        QVector<QJsonValue> results(count);
+        QStringList errors;
+        errors.fill(QString(), count);
+
+        if (reply->error() != QNetworkReply::NoError) {
+            const QString network_error = reply->errorString();
+            reply->deleteLater();
+            callback(results, errors, network_error);
+            return;
+        }
+
+        QJsonParseError parse_error;
+        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll(), &parse_error);
+        reply->deleteLater();
+        if (parse_error.error != QJsonParseError::NoError || !doc.isArray()) {
+            callback(results, errors, QStringLiteral("RPC batch returned malformed JSON: %1").arg(parse_error.errorString()));
+            return;
+        }
+
+        for (const QJsonValue& value : doc.array()) {
+            const QJsonObject object = value.toObject();
+            const int id = object.value(QStringLiteral("id")).toInt(-1);
+            if (!id_to_index.contains(id)) continue;
+            const int index = id_to_index.value(id);
+            const QJsonValue error_value = object.value(QStringLiteral("error"));
+            if (!error_value.isNull() && !error_value.isUndefined()) {
+                const QJsonObject error_obj = error_value.toObject();
+                const QString message = error_obj.value(QStringLiteral("message")).toString();
+                errors[index] = message.isEmpty()
+                    ? QString::fromUtf8(QJsonDocument(error_obj).toJson(QJsonDocument::Compact))
+                    : message;
+            } else {
+                results[index] = object.value(QStringLiteral("result"));
+            }
+        }
+
+        callback(results, errors, QString());
+    });
 }
 
 void NuRpcService::handleReply(QNetworkReply* reply)
@@ -6913,27 +6987,19 @@ bool NuRpcService::explorerPruneFromHeight(int height, QString* error)
 
 bool NuRpcService::storeExplorerBlock(const QJsonObject& block, QString* error)
 {
-    const int height = block.value(QStringLiteral("height")).toInt(-1);
-    const QString hash = block.value(QStringLiteral("hash")).toString();
-    const QJsonArray txs = block.value(QStringLiteral("tx")).toArray();
-    QJsonArray compact_txs;
-    for (const QJsonValue& value : txs) {
-        QString txid = value.toString();
-        if (txid.isEmpty()) txid = value.toObject().value(QStringLiteral("txid")).toString();
-        if (!txid.isEmpty()) compact_txs.append(txid);
-    }
-    QJsonObject compact_block = block;
-    compact_block.insert(QStringLiteral("tx"), compact_txs);
-    if (height < 0 || hash.isEmpty()) {
-        if (error) *error = QStringLiteral("Block JSON did not include a height and hash.");
-        return false;
-    }
+    return storeExplorerBlocks(QVector<QJsonObject>{block}, nullptr, error);
+}
+
+bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* output_rows_written, QString* error)
+{
+    if (output_rows_written) *output_rows_written = 0;
+    if (blocks.isEmpty()) return true;
+
     QString db_error;
     if (!ensureExplorerDatabase(&db_error)) {
         if (error) *error = db_error;
         return false;
     }
-
     const QString connection_name = QStringLiteral("nu_explorer_block_write_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
     bool ok = false;
     QString local_error;
@@ -6944,41 +7010,89 @@ bool NuRpcService::storeExplorerBlock(const QJsonObject& block, QString* error)
         if (!ok) {
             local_error = db.lastError().text();
         } else {
+            QSqlQuery pragma(db);
+            pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+            pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+            pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+            pragma.exec(QStringLiteral("PRAGMA cache_size=-131072"));
             ok = db.transaction();
             if (!ok) local_error = db.lastError().text();
-            if (ok) {
-                QSqlQuery block_query(db);
-                block_query.prepare(QStringLiteral(
-                    "INSERT INTO explorer_blocks(height, hash, time, tx_count, raw_json, indexed_at) "
-                    "VALUES(?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(height) DO UPDATE SET "
-                    "hash=excluded.hash, time=excluded.time, tx_count=excluded.tx_count, raw_json=excluded.raw_json, indexed_at=excluded.indexed_at"));
-                block_query.addBindValue(height);
-                block_query.addBindValue(hash);
-                block_query.addBindValue(block.value(QStringLiteral("time")).toVariant().toLongLong());
-                block_query.addBindValue(static_cast<int>(compact_txs.size()));
-                block_query.addBindValue(QString::fromUtf8(QJsonDocument(compact_block).toJson(QJsonDocument::Compact)));
-                block_query.addBindValue(QDateTime::currentSecsSinceEpoch());
+
+            QSqlQuery block_query(db);
+            QSqlQuery delete_tx_query(db);
+            QSqlQuery delete_out_query(db);
+            QSqlQuery tx_query(db);
+            QSqlQuery output_query(db);
+            QSqlQuery spend_query(db);
+            QSqlQuery meta_query(db);
+            if (ok) ok = block_query.prepare(QStringLiteral(
+                "INSERT INTO explorer_blocks(height, hash, time, tx_count, raw_json, indexed_at) "
+                "VALUES(?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(height) DO UPDATE SET "
+                "hash=excluded.hash, time=excluded.time, tx_count=excluded.tx_count, raw_json=excluded.raw_json, indexed_at=excluded.indexed_at"));
+            if (ok) ok = delete_tx_query.prepare(QStringLiteral("DELETE FROM explorer_block_transactions WHERE block_height = ?"));
+            if (ok) ok = delete_out_query.prepare(QStringLiteral("DELETE FROM explorer_tx_outputs WHERE block_height = ?"));
+            if (ok) ok = tx_query.prepare(QStringLiteral("INSERT INTO explorer_block_transactions(block_height, tx_index, txid) VALUES(?, ?, ?)"));
+            if (ok) ok = output_query.prepare(QStringLiteral(
+                "INSERT OR REPLACE INTO explorer_tx_outputs("
+                "txid, vout, block_height, address, value_sats, value_text, script_type, spent_by_txid, spent_in_height, spent_vin) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)"));
+            if (ok) ok = spend_query.prepare(QStringLiteral(
+                "UPDATE explorer_tx_outputs "
+                "SET spent_by_txid = ?, spent_in_height = ?, spent_vin = ? "
+                "WHERE txid = ? AND vout = ?"));
+            if (ok) ok = meta_query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES(?, ?)"));
+            if (!ok) local_error = db.lastError().text();
+
+            int last_height = -1;
+            int local_output_rows = 0;
+            const qint64 indexed_at = QDateTime::currentSecsSinceEpoch();
+            for (const QJsonObject& block : blocks) {
+                if (!ok) break;
+                const int height = block.value(QStringLiteral("height")).toInt(-1);
+                const QString hash = block.value(QStringLiteral("hash")).toString();
+                const QJsonArray txs = block.value(QStringLiteral("tx")).toArray();
+                if (height < 0 || hash.isEmpty()) {
+                    ok = false;
+                    local_error = QStringLiteral("Block JSON did not include a height and hash.");
+                    break;
+                }
+                last_height = height;
+
+                QJsonArray compact_txs;
+                for (const QJsonValue& value : txs) {
+                    QString txid = value.toString();
+                    if (txid.isEmpty()) txid = value.toObject().value(QStringLiteral("txid")).toString();
+                    if (!txid.isEmpty()) compact_txs.append(txid);
+                }
+                QJsonObject compact_block = block;
+                compact_block.insert(QStringLiteral("tx"), compact_txs);
+
+                block_query.bindValue(0, height);
+                block_query.bindValue(1, hash);
+                block_query.bindValue(2, block.value(QStringLiteral("time")).toVariant().toLongLong());
+                block_query.bindValue(3, static_cast<int>(compact_txs.size()));
+                block_query.bindValue(4, QString::fromUtf8(QJsonDocument(compact_block).toJson(QJsonDocument::Compact)));
+                block_query.bindValue(5, indexed_at);
                 ok = block_query.exec();
-                if (!ok) local_error = block_query.lastError().text();
-            }
-            if (ok) {
-                QSqlQuery delete_query(db);
-                delete_query.prepare(QStringLiteral("DELETE FROM explorer_block_transactions WHERE block_height = ?"));
-                delete_query.addBindValue(height);
-                ok = delete_query.exec();
-                if (!ok) local_error = delete_query.lastError().text();
-            }
-            if (ok) {
-                QSqlQuery delete_query(db);
-                delete_query.prepare(QStringLiteral("DELETE FROM explorer_tx_outputs WHERE block_height = ?"));
-                delete_query.addBindValue(height);
-                ok = delete_query.exec();
-                if (!ok) local_error = delete_query.lastError().text();
-            }
-            if (ok) {
-                QSqlQuery tx_query(db);
-                tx_query.prepare(QStringLiteral("INSERT INTO explorer_block_transactions(block_height, tx_index, txid) VALUES(?, ?, ?)"));
+                if (!ok) {
+                    local_error = block_query.lastError().text();
+                    break;
+                }
+
+                delete_tx_query.bindValue(0, height);
+                ok = delete_tx_query.exec();
+                if (!ok) {
+                    local_error = delete_tx_query.lastError().text();
+                    break;
+                }
+                delete_out_query.bindValue(0, height);
+                ok = delete_out_query.exec();
+                if (!ok) {
+                    local_error = delete_out_query.lastError().text();
+                    break;
+                }
+
                 for (int i = 0; i < txs.size(); ++i) {
                     QString txid = txs.at(i).toString();
                     if (txid.isEmpty()) txid = txs.at(i).toObject().value(QStringLiteral("txid")).toString();
@@ -6992,18 +7106,8 @@ bool NuRpcService::storeExplorerBlock(const QJsonObject& block, QString* error)
                         break;
                     }
                 }
-            }
-            if (ok) {
-                QSqlQuery output_query(db);
-                output_query.prepare(QStringLiteral(
-                    "INSERT OR REPLACE INTO explorer_tx_outputs("
-                    "txid, vout, block_height, address, value_sats, value_text, script_type, spent_by_txid, spent_in_height, spent_vin) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)"));
-                QSqlQuery spend_query(db);
-                spend_query.prepare(QStringLiteral(
-                    "UPDATE explorer_tx_outputs "
-                    "SET spent_by_txid = ?, spent_in_height = ?, spent_vin = ? "
-                    "WHERE txid = ? AND vout = ?"));
+                if (!ok) break;
+
                 for (int tx_index = 0; tx_index < txs.size(); ++tx_index) {
                     const QJsonObject tx = txs.at(tx_index).toObject();
                     const QString txid = tx.value(QStringLiteral("txid")).toString();
@@ -7032,6 +7136,7 @@ bool NuRpcService::storeExplorerBlock(const QJsonObject& block, QString* error)
                                 local_error = output_query.lastError().text();
                                 break;
                             }
+                            ++local_output_rows;
                         }
                         if (!ok) break;
                     }
@@ -7056,18 +7161,19 @@ bool NuRpcService::storeExplorerBlock(const QJsonObject& block, QString* error)
                     }
                     if (!ok) break;
                 }
+                if (!ok) break;
             }
-            if (ok) {
-                QSqlQuery meta_query(db);
-                meta_query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES(?, ?)"));
+
+            if (ok && last_height >= 0) {
                 meta_query.addBindValue(QStringLiteral("last_indexed_height"));
-                meta_query.addBindValue(QString::number(height));
+                meta_query.addBindValue(QString::number(last_height));
                 ok = meta_query.exec();
                 if (!ok) local_error = meta_query.lastError().text();
             }
             if (ok) {
                 ok = db.commit();
                 if (!ok) local_error = db.lastError().text();
+                else if (output_rows_written) *output_rows_written = local_output_rows;
             } else {
                 db.rollback();
             }
@@ -7098,6 +7204,8 @@ void NuRpcService::startExplorerIndexing()
     m_explorer_index_request_in_flight = false;
     m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
     m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
+    m_explorer_index_started_ms = QDateTime::currentMSecsSinceEpoch();
+    m_explorer_index_started_block_count = m_explorer_indexed_block_count;
     m_explorer_index_status = QStringLiteral("Reading current chain height...");
     Q_EMIT explorerChanged();
 
@@ -7224,77 +7332,156 @@ void NuRpcService::explorerIndexStep()
         return;
     }
 
-    const int height = m_explorer_index_height;
+    const int start_height = m_explorer_index_height;
+    const int end_height = std::min(m_explorer_index_tip, start_height + EXPLORER_INDEX_BATCH_BLOCKS - 1);
+    const int batch_count = end_height - start_height + 1;
     m_explorer_index_request_in_flight = true;
-    const double pct = m_explorer_index_tip > 0 ? (100.0 * static_cast<double>(height) / static_cast<double>(m_explorer_index_tip)) : 0.0;
-    m_explorer_index_status = QStringLiteral("Indexing block %1 of %2 (%3%).")
-        .arg(QString::number(height),
+    const double pct = m_explorer_index_tip > 0 ? (100.0 * static_cast<double>(start_height) / static_cast<double>(m_explorer_index_tip)) : 0.0;
+    m_explorer_index_status = QStringLiteral("Indexing blocks %1-%2 of %3 (%4%).")
+        .arg(QString::number(start_height),
+             QString::number(end_height),
              QString::number(m_explorer_index_tip),
              QString::number(pct, 'f', 2));
     Q_EMIT explorerChanged();
 
-    rpcCall(QStringLiteral("getblockhash"), {height}, false, [this, height](const QJsonValue& hash_result, const QString& hash_error) {
+    QVector<QPair<QString, QJsonArray>> hash_calls;
+    hash_calls.reserve(batch_count);
+    for (int height = start_height; height <= end_height; ++height) {
+        hash_calls.push_back({QStringLiteral("getblockhash"), QJsonArray{height}});
+    }
+
+    rpcBatchCall(hash_calls, false, [this, start_height, end_height](const QVector<QJsonValue>& hash_results,
+                                                                     const QStringList& hash_errors,
+                                                                     const QString& batch_error) {
         if (!m_explorer_indexing) {
             m_explorer_index_request_in_flight = false;
             return;
         }
-        if (!hash_error.isEmpty()) {
+        if (!batch_error.isEmpty()) {
             m_explorer_indexing = false;
             m_explorer_index_request_in_flight = false;
-            m_explorer_index_status = QStringLiteral("Index stopped at block %1: %2").arg(QString::number(height), hash_error);
+            m_explorer_index_status = QStringLiteral("Index stopped near block %1: %2")
+                .arg(QString::number(start_height), batch_error);
             Q_EMIT explorerChanged();
             return;
         }
-        const QString hash = hash_result.toString();
-        rpcCall(QStringLiteral("getblock"), {hash, 2}, false, [this, height](const QJsonValue& block_result, const QString& block_error) {
-            m_explorer_index_request_in_flight = false;
-            if (!m_explorer_indexing) return;
-            if (!block_error.isEmpty()) {
+
+        QVector<QPair<QString, QJsonArray>> block_calls;
+        block_calls.reserve(hash_results.size());
+        for (int i = 0; i < hash_results.size(); ++i) {
+            const int height = start_height + i;
+            if (i < hash_errors.size() && !hash_errors.at(i).isEmpty()) {
                 m_explorer_indexing = false;
-                m_explorer_index_status = QStringLiteral("Index stopped at block %1: %2").arg(QString::number(height), block_error);
+                m_explorer_index_request_in_flight = false;
+                m_explorer_index_status = QStringLiteral("Index stopped at block %1: %2")
+                    .arg(QString::number(height), hash_errors.at(i));
                 Q_EMIT explorerChanged();
                 return;
             }
-            const QJsonObject block = block_result.toObject();
-            const QString previous_hash = block.value(QStringLiteral("previousblockhash")).toString();
-            if (height > 0 && previous_hash != explorerBlockHashAtHeight(height - 1)) {
-                QString prune_error;
-                if (!explorerPruneFromHeight(height - 1, &prune_error)) {
+            const QString hash = hash_results.at(i).toString();
+            if (hash.isEmpty()) {
+                m_explorer_indexing = false;
+                m_explorer_index_request_in_flight = false;
+                m_explorer_index_status = QStringLiteral("Index stopped at block %1: empty block hash response.")
+                    .arg(QString::number(height));
+                Q_EMIT explorerChanged();
+                return;
+            }
+            block_calls.push_back({QStringLiteral("getblock"), QJsonArray{hash, 2}});
+        }
+
+        rpcBatchCall(block_calls, false, [this, start_height, end_height](const QVector<QJsonValue>& block_results,
+                                                                          const QStringList& block_errors,
+                                                                          const QString& block_batch_error) {
+            m_explorer_index_request_in_flight = false;
+            if (!m_explorer_indexing) return;
+            if (!block_batch_error.isEmpty()) {
+                m_explorer_indexing = false;
+                m_explorer_index_status = QStringLiteral("Index stopped near block %1: %2")
+                    .arg(QString::number(start_height), block_batch_error);
+                Q_EMIT explorerChanged();
+                return;
+            }
+
+            QVector<QJsonObject> blocks;
+            blocks.reserve(block_results.size());
+            QString expected_previous_hash = start_height > 0 ? explorerBlockHashAtHeight(start_height - 1) : QString();
+            for (int i = 0; i < block_results.size(); ++i) {
+                const int height = start_height + i;
+                if (i < block_errors.size() && !block_errors.at(i).isEmpty()) {
                     m_explorer_indexing = false;
-                    m_explorer_index_status = QStringLiteral("Index repair failed near block %1: %2").arg(QString::number(height), prune_error);
+                    m_explorer_index_status = QStringLiteral("Index stopped at block %1: %2")
+                        .arg(QString::number(height), block_errors.at(i));
                     Q_EMIT explorerChanged();
                     return;
                 }
-                m_explorer_index_height = height - 1;
-                m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
-                m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
-                m_explorer_index_status = QStringLiteral("Detected a chain reorg near block %1. Pruned one block and will retry.").arg(QString::number(height));
-                Q_EMIT explorerChanged();
-                scheduleExplorerIndexStep(0);
-                return;
+                const QJsonObject block = block_results.at(i).toObject();
+                const QString hash = block.value(QStringLiteral("hash")).toString();
+                const int block_height = block.value(QStringLiteral("height")).toInt(-1);
+                if (hash.isEmpty() || block_height != height) {
+                    m_explorer_indexing = false;
+                    m_explorer_index_status = QStringLiteral("Index stopped at block %1: malformed block response.")
+                        .arg(QString::number(height));
+                    Q_EMIT explorerChanged();
+                    return;
+                }
+                if (height > 0 && block.value(QStringLiteral("previousblockhash")).toString() != expected_previous_hash) {
+                    QString prune_error;
+                    if (!explorerPruneFromHeight(height - 1, &prune_error)) {
+                        m_explorer_indexing = false;
+                        m_explorer_index_status = QStringLiteral("Index repair failed near block %1: %2")
+                            .arg(QString::number(height), prune_error);
+                        Q_EMIT explorerChanged();
+                        return;
+                    }
+                    m_explorer_index_height = height - 1;
+                    m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
+                    m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
+                    m_explorer_index_status = QStringLiteral("Detected a chain reorg near block %1. Pruned one block and will retry.")
+                        .arg(QString::number(height));
+                    Q_EMIT explorerChanged();
+                    scheduleExplorerIndexStep(0);
+                    return;
+                }
+                expected_previous_hash = hash;
+                blocks.push_back(block);
             }
+
+            int output_rows_written = 0;
             QString store_error;
-            if (!storeExplorerBlock(block, &store_error)) {
+            if (!storeExplorerBlocks(blocks, &output_rows_written, &store_error)) {
                 m_explorer_indexing = false;
-                m_explorer_index_status = QStringLiteral("Index storage failed at block %1: %2").arg(QString::number(height), store_error);
+                m_explorer_index_status = QStringLiteral("Index storage failed at blocks %1-%2: %3")
+                    .arg(QString::number(start_height), QString::number(end_height), store_error);
                 Q_EMIT explorerChanged();
                 return;
             }
-            ++m_explorer_index_height;
-            ++m_explorer_indexed_block_count;
-            if (height % 100 == 0) {
+
+            m_explorer_index_height = end_height + 1;
+            m_explorer_indexed_block_count += blocks.size();
+            m_explorer_indexed_output_count += output_rows_written;
+            if (end_height % 960 == 0 || m_explorer_index_height > m_explorer_index_tip) {
                 m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
                 m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
             }
-            const double pct = m_explorer_index_tip > 0 ? (100.0 * static_cast<double>(m_explorer_index_height) / static_cast<double>(m_explorer_index_tip)) : 0.0;
-            m_explorer_index_status = QStringLiteral("Indexed through block %1 of %2 (%3%). %4 blocks and %5 standard outputs cached.")
-                .arg(QString::number(height),
+            const double done_pct = m_explorer_index_tip > 0 ? (100.0 * static_cast<double>(m_explorer_index_height) / static_cast<double>(m_explorer_index_tip)) : 0.0;
+            QString rate_text;
+            const qint64 elapsed_ms = m_explorer_index_started_ms > 0 ? QDateTime::currentMSecsSinceEpoch() - m_explorer_index_started_ms : 0;
+            if (elapsed_ms > 0) {
+                const int run_blocks = std::max(1, m_explorer_indexed_block_count - m_explorer_index_started_block_count);
+                const double blocks_per_second = 1000.0 * static_cast<double>(run_blocks) / static_cast<double>(elapsed_ms);
+                rate_text = QStringLiteral(" %1 blocks/s.")
+                    .arg(QString::number(blocks_per_second, 'f', blocks_per_second >= 100.0 ? 0 : 1));
+            }
+            m_explorer_index_status = QStringLiteral("Indexed through block %1 of %2 (%3%). %4 blocks and %5 standard outputs cached.%6")
+                .arg(QString::number(end_height),
                      QString::number(m_explorer_index_tip),
-                     QString::number(std::min(100.0, pct), 'f', 2),
+                     QString::number(std::min(100.0, done_pct), 'f', 2),
                      QString::number(m_explorer_indexed_block_count),
-                     QString::number(m_explorer_indexed_output_count));
+                     QString::number(m_explorer_indexed_output_count),
+                     rate_text);
             Q_EMIT explorerChanged();
-            scheduleExplorerIndexStep(120);
+            scheduleExplorerIndexStep(0);
         });
     });
 }

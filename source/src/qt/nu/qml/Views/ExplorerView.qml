@@ -122,8 +122,15 @@ ColumnLayout {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: NuService.explorerIndexStatus + " " + NuService.explorerAnalyticsStatus
+                        text: NuService.explorerIndexStatus
                         color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontSmall
+                        wrapMode: Text.WordWrap
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: NuService.explorerAnalyticsStatus
+                        color: NuTokens.textMuted
                         font.pixelSize: NuTokens.fontSmall
                         wrapMode: Text.WordWrap
                     }

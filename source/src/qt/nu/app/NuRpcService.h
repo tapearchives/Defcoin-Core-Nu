@@ -8,11 +8,13 @@
 #include <QJsonValue>
 #include <QObject>
 #include <QElapsedTimer>
+#include <QPair>
 #include <QSet>
 #include <QStringList>
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QVector>
 
 #include <functional>
 
@@ -460,6 +462,7 @@ Q_SIGNALS:
 
 private:
     using RpcCallback = std::function<void(const QJsonValue&, const QString&)>;
+    using RpcBatchCallback = std::function<void(const QVector<QJsonValue>&, const QStringList&, const QString&)>;
 
     struct PendingCall {
         QString method;
@@ -498,6 +501,7 @@ private:
     bool shouldAutostartAfterTransportError(QNetworkReply* reply) const;
     void rpcCall(const QString& method, const QJsonArray& params, bool wallet_scoped, RpcCallback callback);
     void rpcCallForWallet(const QString& method, const QJsonArray& params, const QString& wallet_name, RpcCallback callback);
+    void rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls, bool wallet_scoped, RpcBatchCallback callback);
     void handleReply(QNetworkReply* reply);
     QUrl rpcUrl(bool wallet_scoped) const;
     QUrl rpcUrlForWallet(const QString& wallet_name) const;
@@ -567,7 +571,8 @@ private:
     QString explorerIndexedAddressHtml(const QString& address, bool* found = nullptr) const;
     bool explorerPruneFromHeight(int height, QString* error = nullptr);
     bool storeExplorerBlock(const QJsonObject& block, QString* error = nullptr);
-    void scheduleExplorerIndexStep(int delay_ms = 120);
+    bool storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* output_rows_written = nullptr, QString* error = nullptr);
+    void scheduleExplorerIndexStep(int delay_ms = 0);
     void explorerIndexStep();
     void scheduleForensicsScanStep(int delay_ms = 0);
     void forensicsScanStep();
@@ -827,6 +832,8 @@ private:
     int m_explorer_index_tip = 0;
     int m_explorer_indexed_block_count = 0;
     int m_explorer_indexed_output_count = 0;
+    qint64 m_explorer_index_started_ms = 0;
+    int m_explorer_index_started_block_count = 0;
     QVariantList m_forensics_irregular_messages;
     bool m_forensics_scanning = false;
     bool m_forensics_request_in_flight = false;
