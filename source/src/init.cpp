@@ -64,6 +64,7 @@
 #include <walletinitinterface.h>
 
 #include <functional>
+#include <limits>
 #include <set>
 #include <stdint.h>
 #include <stdio.h>
@@ -430,6 +431,11 @@ void SetupServerArgs(NodeContext& node)
             "(default: 0 = disable pruning blocks, 1 = allow manual pruning via RPC, >=%u = automatically prune block files to stay under the specified target size in MiB)", MIN_DISK_SPACE_FOR_BLOCK_FILES / 1024 / 1024), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-reindex", "Rebuild chain state and block index from the blk*.dat files on disk", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-reindex-chainstate", "Rebuild chain state from the currently indexed blocks. When in pruning mode or if blocks on disk might be corrupted, use full -reindex instead.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-repairwitnessfromheight=<n>",
+        "At startup, scan from height <n> for post-SegWit blocks stored without witness data, "
+        "rewind to the first affected block, erase indexed block data from there, and redownload "
+        "clean block bodies from witness-capable peers.",
+        ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-settings=<file>", strprintf("Specify path to dynamic settings data file. Can be disabled with -nosettings. File is written at runtime and not meant to be edited by users (use %s instead for custom settings). Relative paths will be prefixed by datadir location. (default: %s)", BITCOIN_CONF_FILENAME, BITCOIN_SETTINGS_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #if HAVE_SYSTEM
     argsman.AddArg("-startupnotify=<cmd>", "Execute command on startup.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -1724,6 +1730,13 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
             }
 
             bool failed_rewind{false};
+            const int64_t repair_witness_from_height_arg = args.GetArg("-repairwitnessfromheight", 1);
+            const int repair_witness_from_height = repair_witness_from_height_arg < 1 ? 1 :
+                repair_witness_from_height_arg > std::numeric_limits<int>::max() ? std::numeric_limits<int>::max() :
+                static_cast<int>(repair_witness_from_height_arg);
+            if (repair_witness_from_height > 1) {
+                LogPrintf("Repair witness block data requested from height %d\n", repair_witness_from_height);
+            }
             // Can't hold cs_main while calling RewindBlockIndex, so retrieve the relevant
             // chainstates beforehand.
             for (CChainState* chainstate : WITH_LOCK(::cs_main, return chainman.GetAll())) {
@@ -1732,7 +1745,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
                     // It both disconnects blocks based on the chainstate, and drops block data in
                     // BlockIndex() based on lack of available witness data.
                     uiInterface.InitMessage(_("Rewinding blocks...").translated);
-                    if (!chainstate->RewindBlockIndex(chainparams)) {
+                    if (!chainstate->RewindBlockIndex(chainparams, repair_witness_from_height)) {
                         strLoadError = _(
                             "Unable to rewind the database to a pre-fork state. "
                             "You will need to redownload the blockchain");

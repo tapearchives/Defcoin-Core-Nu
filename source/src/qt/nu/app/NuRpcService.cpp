@@ -1540,6 +1540,10 @@ bool NuRpcService::ensureBackendStarted()
         true;
 #endif
 
+    QSettings nu_settings;
+    int pending_repair_witness_from_height = nu_settings.value(QStringLiteral("RepairWitnessFromHeight"), 0).toInt();
+    if (pending_repair_witness_from_height < 0) pending_repair_witness_from_height = 0;
+
     QStringList args;
     args << QStringLiteral("-datadir=%1").arg(QDir::toNativeSeparators(m_data_dir))
          << QStringLiteral("-debuglogfile=%1").arg(QDir::toNativeSeparators(QDir(m_data_dir).filePath(QStringLiteral("debug.log"))))
@@ -1553,6 +1557,10 @@ bool NuRpcService::ensureBackendStarted()
          << QStringLiteral("-rpcbind=127.0.0.1")
          << QStringLiteral("-rpcallowip=127.0.0.1");
     appendLaunchDiagnostic(QStringLiteral("Historical Defcoin SegWit is active; post-activation blocks require witness-capable peers and stripped post-activation block data is rewound for clean redownload."));
+    if (pending_repair_witness_from_height > 0) {
+        args << QStringLiteral("-repairwitnessfromheight=%1").arg(pending_repair_witness_from_height);
+        appendLaunchDiagnostic(QStringLiteral("One-shot witness block data repair is scheduled from height %1.").arg(pending_repair_witness_from_height));
+    }
 
     const QFileInfo legacy_default_wallet(QDir(m_data_dir).filePath(QStringLiteral("wallet.dat")));
     const QDir nested_wallets_dir(QDir(m_data_dir).filePath(QStringLiteral("wallets")));
@@ -1626,6 +1634,11 @@ bool NuRpcService::ensureBackendStarted()
     if (started) {
         m_backend_started_by_nu = true;
         m_backend_pid = pid;
+        if (pending_repair_witness_from_height > 0) {
+            nu_settings.remove(QStringLiteral("RepairWitnessFromHeight"));
+            nu_settings.sync();
+            appendLaunchDiagnostic(QStringLiteral("One-shot witness block data repair request was handed to the backend and cleared from Nu settings."));
+        }
         m_connection_status = QStringLiteral("Starting backend");
         m_metric_network_active = QStringLiteral("Starting");
         m_last_error = QStringLiteral("Starting Defcoin backend from %1%2")
@@ -3480,6 +3493,60 @@ void NuRpcService::setNetworkActive(bool active)
         }
         m_have_pending_network_active = false;
         m_network_state = active ? QStringLiteral("connected") : QStringLiteral("isolated");
+        refreshNode();
+    });
+}
+
+void NuRpcService::scheduleWitnessBlockRepair(int start_height)
+{
+    int height = start_height;
+    if (height <= 0) height = 903168;
+
+    QSettings settings;
+    settings.setValue(QStringLiteral("RepairWitnessFromHeight"), height);
+    settings.sync();
+
+    appendLaunchDiagnostic(QStringLiteral("Scheduled one-shot witness block data repair from height %1 for the next Nu-managed backend launch.").arg(height));
+    Q_EMIT userMessage(QStringLiteral("Blockchain repair scheduled"),
+                       QStringLiteral("Nu will pass -repairwitnessfromheight=%1 the next time it starts its bundled backend. Quit and reopen Defcoin Core Nu to run the repair. This redownloads incomplete block bodies; it is separate from a wallet rescan.").arg(height));
+}
+
+void NuRpcService::repairWitnessBlockDataNow(int start_height)
+{
+    int height = start_height;
+    if (height <= 0) height = 903168;
+
+    appendLaunchDiagnostic(QStringLiteral("Live witness block data repair requested from height %1.").arg(height));
+    m_last_error = QStringLiteral("Repairing witness block data from height %1. Networking is paused during the rewind step.").arg(height);
+    m_network_state = QStringLiteral("isolated");
+    m_metric_network_active = QStringLiteral("Repairing");
+    rebuildNodeMetrics();
+    Q_EMIT stateChanged();
+
+    rpcCall(QStringLiteral("repairwitnessblockdata"), {height, true}, false, [this, height](const QJsonValue& result, const QString& error) {
+        if (!error.isEmpty()) {
+            appendLaunchDiagnostic(QStringLiteral("Live witness block data repair failed from height %1: %2").arg(height).arg(error));
+            Q_EMIT userMessage(QStringLiteral("Blockchain repair failed"), error);
+            refreshNode();
+            return;
+        }
+
+        const QJsonObject obj = result.toObject();
+        const int before = obj.value(QStringLiteral("height_before")).toInt();
+        const int after = obj.value(QStringLiteral("height_after_rewind")).toInt();
+        const bool rewound = obj.value(QStringLiteral("rewound")).toBool();
+        const QString next_step = obj.value(QStringLiteral("next_step")).toString();
+
+        appendLaunchDiagnostic(QStringLiteral("Live witness block data repair completed from height %1. Height before: %2. Height after rewind: %3. Rewound: %4.")
+            .arg(height)
+            .arg(before)
+            .arg(after)
+            .arg(rewound ? QStringLiteral("yes") : QStringLiteral("no")));
+        Q_EMIT userMessage(QStringLiteral("Blockchain repair complete"),
+                           QStringLiteral("%1\n\nHeight before: %2\nHeight after rewind: %3\n\nNu will continue syncing and redownloading any missing block bodies in the normal sync flow.")
+                               .arg(next_step.isEmpty() ? QStringLiteral("Repair command completed.") : next_step)
+                               .arg(before)
+                               .arg(after));
         refreshNode();
     });
 }

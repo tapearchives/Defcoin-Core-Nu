@@ -28,6 +28,11 @@ ColumnLayout {
         const values = ["internal", "dc903", "legacy", "custom"]
         return index >= 0 && index < values.length ? values[index] : "internal"
     }
+    property int pendingWitnessRepairStartHeight: 903168
+    function witnessRepairHeightValue() {
+        const parsed = parseInt(witnessRepairStartHeight.text)
+        return isNaN(parsed) || parsed < 1 ? 903168 : parsed
+    }
 
     NuPageHeader {
         Layout.fillWidth: true
@@ -49,20 +54,26 @@ ColumnLayout {
         currentIndex: tabs.currentIndex
 
         NuPanel {
-            ColumnLayout {
+            ScrollView {
+                id: networkScroll
                 anchors.fill: parent
-                spacing: NuTokens.spaceLg
+                clip: true
+                contentWidth: availableWidth
 
                 ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: NuTokens.spaceSm
+                    width: networkScroll.availableWidth
+                    spacing: NuTokens.spaceLg
 
-                    Label {
-                        text: "Network state"
-                        color: NuTokens.textPrimary
-                        font.pixelSize: NuTokens.fontBody
-                        font.weight: Font.DemiBold
-                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceSm
+
+                        Label {
+                            text: "Network state"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontBody
+                            font.weight: Font.DemiBold
+                        }
 
                     NuStatusDot {
                         label: NuService.networkState === "connected" ? "Network connected" : "Network isolated"
@@ -123,7 +134,7 @@ ColumnLayout {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    height: 1
+                    Layout.preferredHeight: 1
                     color: NuTokens.lineSubtle
                 }
 
@@ -153,6 +164,63 @@ ColumnLayout {
                     }
                 }
 
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: NuTokens.lineSubtle
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceSm
+
+                    Label {
+                        text: "Blockchain repair"
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontBody
+                        font.weight: Font.DemiBold
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Use this only when post-activation block bodies need to be redownloaded from witness-capable peers. It repairs stored block data; it is not a wallet balance rescan."
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontBody
+                        wrapMode: Text.WordWrap
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceMd
+
+                        Label {
+                            text: "Start height"
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontBody
+                        }
+
+                        NuTextField {
+                            id: witnessRepairStartHeight
+                            Layout.preferredWidth: 150
+                            text: "903168"
+                            inputMethodHints: Qt.ImhDigitsOnly
+                            validator: IntValidator { bottom: 1; top: 2147483647 }
+                            helpText: "Nu will scan from this height, find the first stored post-SegWit block missing witness data, rewind from there, and redownload block bodies from witness-capable peers."
+                        }
+
+                        NuActionButton {
+                            text: "Repair now..."
+                            Layout.preferredWidth: 150
+                            primary: true
+                            helpText: "Shows a confirmation, pauses P2P networking, rewinds incomplete block data from the selected height, then resumes normal sync."
+                            onClicked: {
+                                root.pendingWitnessRepairStartHeight = root.witnessRepairHeightValue()
+                                witnessRepairConfirmDialog.open()
+                            }
+                        }
+                    }
+                }
+
                 Label {
                     Layout.fillWidth: true
                     text: "Peer compatibility and connectivity settings are saved and applied to the running backend when RPC is connected."
@@ -160,6 +228,7 @@ ColumnLayout {
                     font.pixelSize: NuTokens.fontBody
                     wrapMode: Text.WordWrap
                 }
+            }
             }
         }
 
@@ -199,7 +268,7 @@ ColumnLayout {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    height: 1
+                    Layout.preferredHeight: 1
                     color: NuTokens.lineSubtle
                 }
 
@@ -279,7 +348,7 @@ ColumnLayout {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    height: 1
+                    Layout.preferredHeight: 1
                     color: NuTokens.lineSubtle
                 }
 
@@ -394,6 +463,39 @@ ColumnLayout {
 
                 Item { Layout.fillHeight: true }
             }
+        }
+    }
+
+    NuDialog {
+        id: witnessRepairConfirmDialog
+        title: "Repair blockchain data"
+        dialogWidth: 620
+        acceptText: "Continue repair"
+        cancelText: "Cancel"
+        onAccepted: NuService.repairWitnessBlockDataNow(root.pendingWitnessRepairStartHeight)
+
+        Label {
+            Layout.fillWidth: true
+            text: "Nu will pause P2P networking, scan from block " + root.pendingWitnessRepairStartHeight + ", rewind the first post-SegWit block body that is missing witness data, and then resume normal sync. No restart is required."
+            color: NuTokens.textPrimary
+            font.pixelSize: NuTokens.fontBody
+            wrapMode: Text.WordWrap
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: "Current local height is " + NuService.blockHeight + ". At most " + Math.max(0, NuService.blockHeight - root.pendingWitnessRepairStartHeight) + " blocks are in the selected range. The rewind step is usually faster than a wallet rescan, but redownloading block bodies depends on peer speed and can take minutes or longer."
+            color: NuTokens.textSecondary
+            font.pixelSize: NuTokens.fontBody
+            wrapMode: Text.WordWrap
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: "This is not a wallet balance rescan and it does not delete wallet data. The wallet may look temporarily behind while the repaired blocks are redownloaded."
+            color: NuTokens.stateWarning
+            font.pixelSize: NuTokens.fontBody
+            wrapMode: Text.WordWrap
         }
     }
 }

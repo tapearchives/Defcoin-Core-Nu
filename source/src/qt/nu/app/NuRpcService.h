@@ -266,6 +266,8 @@ public:
                                 const QString& custom_change_address = QString());
     Q_INVOKABLE void setAddressLabel(const QString& address, const QString& label);
     Q_INVOKABLE void setNetworkActive(bool active);
+    Q_INVOKABLE void scheduleWitnessBlockRepair(int start_height);
+    Q_INVOKABLE void repairWitnessBlockDataNow(int start_height);
     Q_INVOKABLE void pingPeers();
     Q_INVOKABLE void runRpcCommand(const QString& method, const QString& params_json, bool wallet_scoped);
     Q_INVOKABLE QString walletDisplayName(const QString& name) const;

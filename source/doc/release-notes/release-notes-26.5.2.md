@@ -17,6 +17,12 @@ policy, recovery flow, and peer compatibility behavior introduced in `26.5.1`.
   addresses, not only transaction IDs.
 - Nu packages include the Litecoin-equivalent Defcoin command-line tool set:
   `defcoind`, `defcoin-cli`, `defcoin-tx`, and `defcoin-wallet`.
+- Added a witness block data repair control in Settings > Network. It can
+  pause networking, repair/redownload post-activation block bodies from a
+  chosen height such as `903168`, and then resume normal sync without requiring
+  an app restart.
+- Added the matching backend startup option `-repairwitnessfromheight=<n>` for
+  headless operators who need the same repair during daemon startup.
 
 Technical details are maintained in
 `doc/defcoin-core-nu-technical-guide.md`.

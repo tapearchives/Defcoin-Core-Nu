@@ -107,6 +107,14 @@ witness-capable peers. Existing Nu datadirs that previously stored stripped
 post-activation blocks are rewound by Core's inherited block-index repair path
 and redownloaded cleanly.
 
+Nu exposes a live block-body repair workflow in Settings > Network >
+Blockchain repair. It pauses P2P networking, asks the backend to rewind the
+first post-SegWit block body missing witness data from the chosen height, then
+resumes normal sync so clean block bodies are redownloaded from witness-capable
+peers. Headless operators can run the same startup scan once with
+`-repairwitnessfromheight=<height>`. This is block data repair, not a wallet
+rescan; wallet rescans remain separate RPC/wallet operations.
+
 The following inherited Litecoin features are not treated as active Defcoin
 mainnet consensus features in this release:
 

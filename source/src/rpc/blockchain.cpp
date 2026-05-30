@@ -14,6 +14,7 @@
 #include <core_io.h>
 #include <hash.h>
 #include <index/blockfilterindex.h>
+#include <net.h>
 #include <node/coinstats.h>
 #include <node/context.h>
 #include <node/utxo_snapshot.h>
@@ -496,6 +497,89 @@ static RPCHelpMan syncwithvalidationinterfacequeue()
 {
     SyncWithValidationInterfaceQueue();
     return NullUniValue;
+},
+    };
+}
+
+static RPCHelpMan repairwitnessblockdata()
+{
+    return RPCHelpMan{"repairwitnessblockdata",
+                "\nPause P2P networking, rewind active-chain blocks stored without witness data from the requested height, and resume networking for redownload.\n"
+                "\nThis repairs local block-body storage. It is not a wallet rescan and does not change consensus rules.\n",
+                {
+                    {"start_height", RPCArg::Type::NUM, /* default */ "903168", "Height to begin looking for post-SegWit blocks missing witness data."},
+                    {"resume_network", RPCArg::Type::BOOL, /* default */ "true", "Resume P2P networking after the rewind step if it was active before repair."},
+                },
+                RPCResult{
+                    RPCResult::Type::OBJ, "", "",
+                    {
+                        {RPCResult::Type::NUM, "start_height", "The requested scan start height."},
+                        {RPCResult::Type::NUM, "height_before", "Active-chain height before repair."},
+                        {RPCResult::Type::NUM, "height_after_rewind", "Active-chain height after the rewind step."},
+                        {RPCResult::Type::BOOL, "network_was_active", "Whether P2P networking was active before repair."},
+                        {RPCResult::Type::BOOL, "network_active", "Whether P2P networking is active after repair."},
+                        {RPCResult::Type::BOOL, "rewound", "Whether the active-chain height changed during the rewind step."},
+                        {RPCResult::Type::STR, "next_step", "What happens after the RPC returns."},
+                    }},
+                RPCExamples{
+                    HelpExampleCli("repairwitnessblockdata", "903168")
+            + HelpExampleRpc("repairwitnessblockdata", "903168")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    ChainstateManager& chainman = EnsureChainman(request.context);
+    CConnman& connman = EnsureConnman(request.context);
+
+    int start_height = 903168;
+    if (!request.params[0].isNull()) {
+        start_height = request.params[0].get_int();
+    }
+    if (start_height < 1) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "start_height must be at least 1");
+    }
+
+    bool resume_network = true;
+    if (!request.params[1].isNull()) {
+        resume_network = request.params[1].get_bool();
+    }
+
+    const int height_before = WITH_LOCK(cs_main, return chainman.ActiveChain().Height());
+    const bool network_was_active = connman.GetNetworkActive();
+
+    struct NetworkRestorer {
+        CConnman& connman;
+        bool restore;
+        bool was_active;
+        ~NetworkRestorer()
+        {
+            if (restore && was_active) connman.SetNetworkActive(true);
+        }
+    } network_restorer{connman, resume_network, network_was_active};
+
+    connman.SetNetworkActive(false);
+    SyncWithValidationInterfaceQueue();
+
+    LogPrintf("Repair witness block data requested by RPC from height %d\n", start_height);
+    for (CChainState* chainstate : WITH_LOCK(::cs_main, return chainman.GetAll())) {
+        if (!chainstate->RewindBlockIndex(Params(), start_height)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to rewind incomplete witness block data. Check debug.log for details.");
+        }
+    }
+    SyncWithValidationInterfaceQueue();
+
+    const int height_after = WITH_LOCK(cs_main, return chainman.ActiveChain().Height());
+
+    UniValue ret(UniValue::VOBJ);
+    ret.pushKV("start_height", start_height);
+    ret.pushKV("height_before", height_before);
+    ret.pushKV("height_after_rewind", height_after);
+    ret.pushKV("network_was_active", network_was_active);
+    ret.pushKV("network_active", resume_network && network_was_active);
+    ret.pushKV("rewound", height_after < height_before);
+    ret.pushKV("next_step", height_after < height_before
+        ? "P2P networking has been resumed; the node will redownload missing block bodies from witness-capable peers."
+        : "No active-chain rewind was needed from the requested height.");
+    return ret;
 },
     };
 }
@@ -2666,6 +2750,7 @@ static const CRPCCommand commands[] =
     { "blockchain",         "getmempoolentry",        &getmempoolentry,        {"txid"} },
     { "blockchain",         "getmempoolinfo",         &getmempoolinfo,         {} },
     { "blockchain",         "getrawmempool",          &getrawmempool,          {"verbose", "mempool_sequence"} },
+    { "blockchain",         "repairwitnessblockdata", &repairwitnessblockdata, {"start_height", "resume_network"} },
     { "blockchain",         "gettxout",               &gettxout,               {"txid","n","include_mempool"} },
     { "blockchain",         "gettxoutsetinfo",        &gettxoutsetinfo,        {"hash_type"} },
     { "blockchain",         "pruneblockchain",        &pruneblockchain,        {"height"} },

@@ -12,6 +12,10 @@ for the current Nu line.
 - Added wallet-address Explorer links from transaction detail output, including
   current `D...` addresses, canonical `M...` P2SH, legacy `3...` P2SH, and
   compatibility `9...`/`A...` P2SH forms.
+- Added a live witness block data repair setting that pauses networking,
+  rewinds/redownloads incomplete post-SegWit block bodies from a chosen height,
+  and resumes normal sync without an app restart. The backend also keeps
+  `-repairwitnessfromheight=<n>` for headless startup repair.
 
 ### Changed
 
