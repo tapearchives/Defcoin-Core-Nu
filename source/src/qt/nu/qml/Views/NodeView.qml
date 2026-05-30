@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Basic 2.15 as Basic
 import QtQuick.Layouts 1.15
+import QtQuick.Window 2.15
 import Defcoin.Nu 1.0
 
 import "../Theme"
@@ -17,10 +18,18 @@ ColumnLayout {
     property real trafficWindowEnd: 1
     property string logFilterError: ""
     property int shownLogLineCount: 0
+    property int logPopoutFontSize: 12
     property var logFilterPresetModel: []
+    property string peerSortKey: ""
+    property bool peerSortAscending: true
+    property string peerSimpleSortKey: ""
+    property bool peerSimpleSortAscending: true
+    property string peerDetailedSortKey: ""
+    property bool peerDetailedSortAscending: true
     readonly property int trafficMaxChartSeconds: 7 * 24 * 60 * 60
     property var simplePeerColumns: ["Node", "Dir", "IP Address: Port", "Ping", "Sent", "Rec'd", "User Agent"]
     property var simplePeerTypes: ["number", "text", "ipport", "duration", "bytes", "bytes", "text"]
+    property var simplePeerSortKeys: ["node", "direction", "ip", "ping", "sent", "received", "userAgent"]
     property var simplePeerWeights: [0.38, 0.24, 1.7, 0.42, 0.42, 0.42, 1.35]
     property var simplePeerMinimums: [48, 34, 132, 52, 58, 58, 92]
     property var simplePeerMaximums: [64, 42, 390, 74, 82, 82, 280]
@@ -33,11 +42,13 @@ ColumnLayout {
         "Total bytes received from this peer since the connection opened.",
         "Software name and version reported by the peer."
     ]
-    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "Reverse\nDNS Name", "Known\nDNS Name", "Protocol\nVersion", "Magic", "Svcs", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
-    property var detailedPeerTypes: ["number", "text", "ipport", "number", "text", "text", "number", "text", "text", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
-    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 1.05, 1.05, 0.5, 0.55, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
-    property var detailedPeerMinimums: [44, 34, 128, 46, 90, 96, 62, 74, 54, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
-    property var detailedPeerMaximums: [62, 42, 330, 70, 240, 220, 82, 92, 80, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
+    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "Reverse\nDNS Name", "Known\nDNS Name", "Protocol\nVersion", "Magic", "Svcs", "Fast\nSync\nAvail", "Fast\nSync\nUsed", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
+    property var detailedPeerTypes: ["number", "text", "ipport", "number", "reverseDns", "knownDns", "number", "text", "text", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
+    property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "fastSyncUsed", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
+    property var detailedPeerSortMetaFields: ["", "", "", "", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
+    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 1.05, 1.05, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
+    property var detailedPeerMinimums: [44, 34, 128, 46, 90, 96, 62, 74, 54, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
+    property var detailedPeerMaximums: [62, 42, 330, 70, 240, 220, 82, 92, 80, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
     property var detailedPeerTooltips: [
         "Backend peer connection ID for this session.",
         "Connection direction: In means the peer connected to this wallet; Out means this wallet connected to the peer.",
@@ -48,6 +59,8 @@ ColumnLayout {
         "P2P protocol version reported by the peer.",
         "Actual network message-start bytes selected for this peer, such as defc014e or fbc0b6db.",
         "Compact service flags advertised by the peer, such as N for NODE_NETWORK or W for witness support.",
+        "Whether Nu considers this connected Defcoin peer eligible for UDP fast-sync requests. This is an attempt-eligible signal, not proof the peer has already served a block over UDP.",
+        "Whether this peer has provided UDP fast-sync block chunks during this Nu session.",
         "Current round-trip latency reported by the backend.",
         "Best observed ping for this connection.",
         "Total bytes sent to this peer since the connection opened.",
@@ -66,6 +79,15 @@ ColumnLayout {
         "Cumulative addr/addrv2 relay entries processed from this peer during this connection after Defcoin user-agent and port filters. This is not a unique node count; one peer can send up to about 1000 address records in one response.",
         "Minimum transaction relay fee rate this peer has announced with its feefilter policy, displayed as DFC per kilobyte."
     ]
+
+    function applyPeerSortForCurrentView() {
+        if (!peersTable) return
+        const viewKey = peerViewToggle.currentIndex === 0 ? root.peerSimpleSortKey : root.peerDetailedSortKey
+        const viewAscending = peerViewToggle.currentIndex === 0 ? root.peerSimpleSortAscending : root.peerDetailedSortAscending
+        if (viewKey.length > 0 && peersTable.applyExternalSort(viewKey, viewAscending)) return
+        if (root.peerSortKey.length > 0 && peersTable.applyExternalSort(root.peerSortKey, root.peerSortAscending)) return
+        peersTable.sortColumn = -1
+    }
 
     function durationText(seconds) {
         seconds = Math.max(0, Math.round(seconds))
@@ -353,7 +375,10 @@ ColumnLayout {
                     currentIndex: root.initialPeerView
                     NuTabButton { text: "Simple" }
                     NuTabButton { text: "Detailed" }
-                    onCurrentIndexChanged: Qt.callLater(function() { peersTable.forceResetColumnWidths() })
+                    onCurrentIndexChanged: Qt.callLater(function() {
+                        root.applyPeerSortForCurrentView()
+                        peersTable.forceResetColumnWidths()
+                    })
                 }
 
                 Label {
@@ -380,11 +405,24 @@ ColumnLayout {
                 columns: peerViewToggle.currentIndex === 0 ? root.simplePeerColumns : root.detailedPeerColumns
                 columnTooltips: peerViewToggle.currentIndex === 0 ? root.simplePeerTooltips : root.detailedPeerTooltips
                 columnTypes: peerViewToggle.currentIndex === 0 ? root.simplePeerTypes : root.detailedPeerTypes
+                sortColumnKeys: peerViewToggle.currentIndex === 0 ? root.simplePeerSortKeys : root.detailedPeerSortKeys
+                columnSortMetaFields: peerViewToggle.currentIndex === 0 ? [] : root.detailedPeerSortMetaFields
                 columnWeights: peerViewToggle.currentIndex === 0 ? root.simplePeerWeights : root.detailedPeerWeights
                 columnMinimums: peerViewToggle.currentIndex === 0 ? root.simplePeerMinimums : root.detailedPeerMinimums
                 columnMaximums: peerViewToggle.currentIndex === 0 ? root.simplePeerMaximums : root.detailedPeerMaximums
                 rows: peerViewToggle.currentIndex === 0 ? NuService.peerRowsSimple : NuService.peerRowsDetailed
                 emptyText: "Peers hydrate here after the tab renders."
+                onSortChanged: (column, ascending, key) => {
+                    root.peerSortKey = key
+                    root.peerSortAscending = ascending
+                    if (peerViewToggle.currentIndex === 0) {
+                        root.peerSimpleSortKey = key
+                        root.peerSimpleSortAscending = ascending
+                    } else {
+                        root.peerDetailedSortKey = key
+                        root.peerDetailedSortAscending = ascending
+                    }
+                }
             }
 
             RowLayout {
@@ -473,12 +511,61 @@ ColumnLayout {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    spacing: NuTokens.spaceMd
                     Label {
-                        Layout.fillWidth: true
+                        Layout.preferredWidth: 142
                         text: "Log since launch"
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontBodyLarge
                         font.weight: Font.DemiBold
+                    }
+                    Label {
+                        text: "Verbosity"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontSmall
+                    }
+                    Basic.Slider {
+                        id: logVerbositySlider
+                        Layout.preferredWidth: 116
+                        from: 0
+                        to: 3
+                        stepSize: 1
+                        snapMode: Basic.Slider.SnapAlways
+                        value: NuService.logVerbosity
+                        ToolTip.visible: hovered || pressed
+                        ToolTip.text: root.logVerbosityName(value)
+                        ToolTip.delay: NuTokens.tooltipDelay
+                        onMoved: NuService.logVerbosity = Math.round(value)
+                        Connections {
+                            target: NuService
+                            function onSettingsChanged() { logVerbositySlider.value = NuService.logVerbosity }
+                        }
+                    }
+                    Label {
+                        text: root.logVerbosityName(NuService.logVerbosity)
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontSmall
+                    }
+                    Label {
+                        text: "Lines: " + root.shownLogLineCount
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontSmall
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.logFilterError
+                        color: NuTokens.stateWarning
+                        font.pixelSize: NuTokens.fontSmall
+                        elide: Text.ElideRight
+                    }
+                    NuActionButton {
+                        text: "Pop out"
+                        Layout.preferredWidth: 104
+                        helpText: "Open the launch log in a separate resizable window."
+                        onClicked: {
+                            logPopoutWindow.show()
+                            logPopoutWindow.raise()
+                        }
                     }
                     NuActionButton {
                         text: "Open debug.log"
@@ -497,70 +584,17 @@ ColumnLayout {
                         spacing: NuTokens.spaceSm
 
                         Label {
-                            text: "Verbosity"
-                            color: NuTokens.textSecondary
-                            font.pixelSize: NuTokens.fontSmall
-                        }
-                        Basic.Slider {
-                            id: logVerbositySlider
-                            Layout.preferredWidth: 180
-                            from: 0
-                            to: 3
-                            stepSize: 1
-                            snapMode: Basic.Slider.SnapAlways
-                            value: NuService.logVerbosity
-                            ToolTip.visible: hovered || pressed
-                            ToolTip.text: root.logVerbosityName(value)
-                            ToolTip.delay: NuTokens.tooltipDelay
-                            onMoved: NuService.logVerbosity = Math.round(value)
-                            Connections {
-                                target: NuService
-                                function onSettingsChanged() { logVerbositySlider.value = NuService.logVerbosity }
-                            }
-                        }
-                        Label {
-                            text: root.logVerbosityName(NuService.logVerbosity)
-                            color: NuTokens.textPrimary
-                            font.pixelSize: NuTokens.fontSmall
-                        }
-                        Label {
-                            text: "Lines shown: " + root.shownLogLineCount
-                            color: NuTokens.textSecondary
-                            font.pixelSize: NuTokens.fontSmall
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: root.logFilterError
-                            color: NuTokens.stateWarning
-                            font.pixelSize: NuTokens.fontSmall
-                            elide: Text.ElideRight
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: NuTokens.spaceSm
-
-                        Label {
-                            Layout.preferredWidth: 62
                             text: "Filter:"
                             color: NuTokens.textSecondary
                             font.pixelSize: NuTokens.fontSmall
                         }
-                        Basic.ComboBox {
+                        NuComboBox {
                             id: logSearchFilter
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 280
+                            Layout.preferredWidth: 260
                             editable: true
                             model: root.logFilterPresetModel
                             currentIndex: 0
-                            font.family: NuTokens.bodyFont
-                            font.pixelSize: NuTokens.fontBody
-                            leftPadding: NuTokens.spaceMd
-                            rightPadding: 34
-                            ToolTip.visible: hovered || activeFocus
-                            ToolTip.text: "Show only matching log lines. Choose a useful regex preset or type your own. Examples: Error, seednode|dns seed, version ."
-                            ToolTip.delay: NuTokens.tooltipDelay
+                            helpText: "Show only matching log lines. Choose a useful regex preset or type your own. Examples: Error, seednode|dns seed, version ."
                             Component.onCompleted: editText = NuService.logSearchPattern
                             onAccepted: root.setLogSearchPattern(editText)
                             onActivated: function(index) {
@@ -576,64 +610,22 @@ ColumnLayout {
                                     root.refreshLogFilterPresets()
                                 }
                             }
-                            delegate: ItemDelegate {
-                                width: logSearchFilter.popup.width
-                                text: modelData
-                                font.pixelSize: NuTokens.fontSmall
-                                contentItem: Text {
-                                    text: modelData
-                                    color: modelData === "[type search term here]" ? NuTokens.textMuted : NuTokens.textPrimary
-                                    font: logSearchFilter.font
-                                    elide: Text.ElideRight
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                            }
-                            popup: Basic.Popup {
-                                y: logSearchFilter.height + 2
-                                width: Math.max(logSearchFilter.width, 360)
-                                implicitHeight: Math.min(contentItem.implicitHeight, 320)
-                                contentItem: ListView {
-                                    clip: true
-                                    implicitHeight: Math.min(contentHeight, 320)
-                                    model: logSearchFilter.popup.visible ? logSearchFilter.delegateModel : null
-                                    Basic.ScrollBar.vertical: Basic.ScrollBar { policy: Basic.ScrollBar.AsNeeded }
-                                }
-                                background: Rectangle {
-                                    color: NuTokens.panelBase
-                                    border.color: NuTokens.lineStrong
-                                    radius: NuTokens.radiusSmall
-                                }
-                            }
                         }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: NuTokens.spaceSm
-
                         Label {
-                            Layout.preferredWidth: 62
                             text: "Remove:"
                             color: NuTokens.textSecondary
                             font.pixelSize: NuTokens.fontSmall
                         }
                         NuTextField {
                             id: logRemoveFilter
-                            Layout.fillWidth: true
+                            Layout.preferredWidth: 180
                             text: NuService.logRemovePattern
                             maximumLength: 160
                             placeholderText: "hide regex"
                             helpText: "Hide matching lines after Filter is applied. Examples: ping|pong, RPC credentials, ThreadRPCServer."
                             onEditingFinished: NuService.logRemovePattern = text
                         }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: NuTokens.spaceSm
-
                         Label {
-                            Layout.preferredWidth: 62
                             text: "Find:"
                             color: NuTokens.textSecondary
                             font.pixelSize: NuTokens.fontSmall
@@ -641,8 +633,9 @@ ColumnLayout {
                         NuTextField {
                             id: logFindField
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 170
                             maximumLength: 120
-                            placeholderText: "Cmd-F / Ctrl-F text search in shown log"
+                            placeholderText: "Find in shown log"
                             helpText: "Find text within the currently shown log lines without changing the filter."
                             onAccepted: root.findInLog(false)
                         }
@@ -815,6 +808,90 @@ ColumnLayout {
                         consoleOutput.cursorPosition = consoleOutput.text.length
                     }
                 }
+            }
+        }
+    }
+
+    Window {
+        id: logPopoutWindow
+        title: "Defcoin Core Nu - Log since launch"
+        width: 1180
+        height: 720
+        minimumWidth: 760
+        minimumHeight: 420
+        visible: false
+        color: NuTokens.backgroundBase
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: NuTokens.spaceLg
+            spacing: NuTokens.spaceSm
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: NuTokens.spaceMd
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Log since launch"
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontTitle
+                    font.weight: Font.DemiBold
+                }
+                Label { text: "Font"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontSmall }
+                Basic.Slider {
+                    Layout.preferredWidth: 150
+                    from: 9
+                    to: 18
+                    stepSize: 1
+                    value: root.logPopoutFontSize
+                    onMoved: root.logPopoutFontSize = Math.round(value)
+                }
+                Label {
+                    text: root.logPopoutFontSize + " px"
+                    color: NuTokens.textSecondary
+                    font.family: NuTokens.monoFont
+                    font.pixelSize: NuTokens.fontSmall
+                }
+                Label {
+                    text: "Lines: " + root.shownLogLineCount
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                }
+                NuActionButton {
+                    text: "Open debug.log"
+                    Layout.preferredWidth: 148
+                    onClicked: NuService.openDebugLog()
+                }
+            }
+
+            TextArea {
+                id: popoutLogText
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                readOnly: true
+                selectByMouse: true
+                persistentSelection: true
+                wrapMode: Text.NoWrap
+                text: root.filteredLogText()
+                color: NuTokens.textPrimary
+                selectionColor: NuTokens.lineStrong
+                selectedTextColor: NuTokens.textInverse
+                font.family: NuTokens.monoFont
+                font.pixelSize: root.logPopoutFontSize
+                background: Rectangle { color: NuTokens.backgroundBase; border.color: NuTokens.lineSubtle }
+
+                Shortcut {
+                    sequences: [StandardKey.Copy]
+                    enabled: popoutLogText.activeFocus && popoutLogText.selectedText.length > 0
+                    onActivated: NuService.copyText(popoutLogText.selectedText)
+                }
+            }
+
+            Connections {
+                target: NuService
+                function onLogChanged() { popoutLogText.text = root.filteredLogText() }
+                function onSettingsChanged() { popoutLogText.text = root.filteredLogText() }
             }
         }
     }

@@ -694,7 +694,7 @@ public:
 
     /** Replay blocks that aren't fully applied to the database. */
     bool ReplayBlocks(const CChainParams& params);
-    bool RewindBlockIndex(const CChainParams& params, int nMinimumHeight = 1) LOCKS_EXCLUDED(cs_main);
+    bool RewindBlockIndex(const CChainParams& params, int nMinimumHeight = 1, bool force_from_height = false) LOCKS_EXCLUDED(cs_main);
     bool LoadGenesisBlock(const CChainParams& chainparams);
 
     void PruneBlockIndexCandidates();

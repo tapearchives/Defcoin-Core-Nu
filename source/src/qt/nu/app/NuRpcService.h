@@ -19,8 +19,11 @@
 class QNetworkAccessManager;
 class QNetworkReply;
 class QFile;
+class QHostAddress;
+class QJsonObject;
 class QProcess;
 class QTimer;
+class QUdpSocket;
 class NuVelopackUpdater;
 
 class NuRpcService final : public QObject
@@ -80,6 +83,8 @@ class NuRpcService final : public QObject
     Q_PROPERTY(bool switchToDefcoinOnlyMagicStartingJuly2026 READ switchToDefcoinOnlyMagicStartingJuly2026 WRITE setSwitchToDefcoinOnlyMagicStartingJuly2026 NOTIFY settingsChanged)
     Q_PROPERTY(bool disallowLanNodeDiscovery READ disallowLanNodeDiscovery WRITE setDisallowLanNodeDiscovery NOTIFY settingsChanged)
     Q_PROPERTY(bool lanNodeDiscoveryEnabled READ lanNodeDiscoveryEnabled WRITE setLanNodeDiscoveryEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(bool lanFastSyncEnabled READ lanFastSyncEnabled WRITE setLanFastSyncEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(QString lanFastSyncStatus READ lanFastSyncStatus NOTIFY stateChanged)
     Q_PROPERTY(bool upnpConnectionsEnabled READ upnpConnectionsEnabled WRITE setUpnpConnectionsEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool showLanNodeDiscoveryNotice READ showLanNodeDiscoveryNotice NOTIFY settingsChanged)
     Q_PROPERTY(bool automaticUpdateChecksEnabled READ automaticUpdateChecksEnabled WRITE setAutomaticUpdateChecksEnabled NOTIFY settingsChanged)
@@ -138,9 +143,20 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QVariantList forensicsIrregularMessages READ forensicsIrregularMessages NOTIFY forensicsChanged)
     Q_PROPERTY(bool forensicsScanning READ forensicsScanning NOTIFY forensicsChanged)
     Q_PROPERTY(QString forensicsScanStatus READ forensicsScanStatus NOTIFY forensicsChanged)
+    Q_PROPERTY(QString forensicsScanSummary READ forensicsScanSummary NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsScanHeight READ forensicsScanHeight NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsScanTip READ forensicsScanTip NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsIrregularMessageCount READ forensicsIrregularMessageCount NOTIFY forensicsChanged)
+    Q_PROPERTY(bool forensicsScanComplete READ forensicsScanComplete NOTIFY forensicsChanged)
+    Q_PROPERTY(bool forensicsAcceptBip141AsRegular READ forensicsAcceptBip141AsRegular WRITE setForensicsAcceptBip141AsRegular NOTIFY settingsChanged)
+    Q_PROPERTY(bool forensicsMissingWitnessFound READ forensicsMissingWitnessFound NOTIFY forensicsChanged)
+    Q_PROPERTY(int forensicsFirstMissingWitnessHeight READ forensicsFirstMissingWitnessHeight NOTIFY forensicsChanged)
+    Q_PROPERTY(int forensicsMissingWitnessCount READ forensicsMissingWitnessCount NOTIFY forensicsChanged)
+    Q_PROPERTY(bool forensicsWitnessRepairRunning READ forensicsWitnessRepairRunning NOTIFY forensicsChanged)
+    Q_PROPERTY(QString forensicsWitnessRepairStatus READ forensicsWitnessRepairStatus NOTIFY forensicsChanged)
+    Q_PROPERTY(int forensicsWitnessRepairStartHeight READ forensicsWitnessRepairStartHeight NOTIFY forensicsChanged)
+    Q_PROPERTY(int forensicsWitnessRepairInspectedBlocks READ forensicsWitnessRepairInspectedBlocks NOTIFY forensicsChanged)
+    Q_PROPERTY(int forensicsWitnessRepairFirstMissingHeight READ forensicsWitnessRepairFirstMissingHeight NOTIFY forensicsChanged)
 
 public:
     explicit NuRpcService(QObject* parent = nullptr);
@@ -199,6 +215,8 @@ public:
     bool switchToDefcoinOnlyMagicStartingJuly2026() const { return m_switch_to_defcoin_only_magic_starting_july_2026; }
     bool disallowLanNodeDiscovery() const { return !m_lan_node_discovery_enabled; }
     bool lanNodeDiscoveryEnabled() const { return m_lan_node_discovery_enabled; }
+    bool lanFastSyncEnabled() const { return m_lan_fast_sync_enabled; }
+    QString lanFastSyncStatus() const { return m_lan_fast_sync_status; }
     bool upnpConnectionsEnabled() const { return m_upnp_connections_enabled; }
     bool showLanNodeDiscoveryNotice() const { return !m_lan_node_discovery_notice_acknowledged && !m_lan_node_discovery_enabled; }
     bool automaticUpdateChecksEnabled() const { return m_automatic_update_checks_enabled; }
@@ -258,9 +276,20 @@ public:
     QVariantList forensicsIrregularMessages() const { return m_forensics_irregular_messages; }
     bool forensicsScanning() const { return m_forensics_scanning; }
     QString forensicsScanStatus() const { return m_forensics_scan_status; }
+    QString forensicsScanSummary() const { return m_forensics_scan_summary; }
     int forensicsScanHeight() const { return m_forensics_scan_height; }
     int forensicsScanTip() const { return m_forensics_scan_tip; }
     int forensicsIrregularMessageCount() const { return m_forensics_irregular_messages.size(); }
+    bool forensicsScanComplete() const { return m_forensics_scan_complete; }
+    bool forensicsAcceptBip141AsRegular() const { return m_forensics_accept_bip141_as_regular; }
+    bool forensicsMissingWitnessFound() const { return m_forensics_missing_witness_found; }
+    int forensicsFirstMissingWitnessHeight() const { return m_forensics_first_missing_witness_height; }
+    int forensicsMissingWitnessCount() const { return m_forensics_missing_witness_count; }
+    bool forensicsWitnessRepairRunning() const { return m_forensics_witness_repair_running; }
+    QString forensicsWitnessRepairStatus() const { return m_forensics_witness_repair_status; }
+    int forensicsWitnessRepairStartHeight() const { return m_forensics_witness_repair_start_height; }
+    int forensicsWitnessRepairInspectedBlocks() const { return m_forensics_witness_repair_inspected_blocks; }
+    int forensicsWitnessRepairFirstMissingHeight() const { return m_forensics_witness_repair_first_missing_height; }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void requestNewAddress(const QString& label = QString(), const QString& amount = QString(), const QString& message = QString());
@@ -351,7 +380,10 @@ public:
     Q_INVOKABLE void stopExplorerIndexing();
     Q_INVOKABLE void resetExplorerIndex();
     Q_INVOKABLE void refreshForensicsIrregularMessages();
+    Q_INVOKABLE void startForensicsIrregularMessages(int start_height);
     Q_INVOKABLE void stopForensicsScan();
+    Q_INVOKABLE void resumeForensicsScan();
+    Q_INVOKABLE void exportForensicsIrregularMessagesCsv();
     Q_INVOKABLE void checkForUpdates(bool manual);
     Q_INVOKABLE void downloadPendingUpdate();
     Q_INVOKABLE void installDownloadedUpdate();
@@ -388,6 +420,7 @@ public Q_SLOTS:
     void setSwitchToDefcoinOnlyMagicStartingJuly2026(bool enabled);
     void setDisallowLanNodeDiscovery(bool enabled);
     void setLanNodeDiscoveryEnabled(bool enabled);
+    void setLanFastSyncEnabled(bool enabled);
     void setUpnpConnectionsEnabled(bool enabled);
     void setAutomaticUpdateChecksEnabled(bool enabled);
     void setTableCopyDelimiterStyle(const QString& style);
@@ -395,6 +428,7 @@ public Q_SLOTS:
     void setLogVerbosity(int verbosity);
     void setLogSearchPattern(const QString& pattern);
     void setLogRemovePattern(const QString& pattern);
+    void setForensicsAcceptBip141AsRegular(bool enabled);
     void setBackgroundCloseEnabled(bool enabled);
     void setMaskBalances(bool enabled);
     void setThirdPartyTxUrlsEnabled(bool enabled);
@@ -485,6 +519,17 @@ private:
     void scheduleLanPeerNameLookups(const QString& host);
     void scheduleConfiguredSeedAliasLookups();
     void sampleTraffic();
+    void ensureLanFastSyncSocket();
+    void stopLanFastSyncSocket();
+    void handleLanFastSyncDatagrams();
+    void lanFastSyncTick();
+    void requestLanFastSyncBlock(int height);
+    void handleLanFastSyncRequest(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
+    void handleLanFastSyncChunk(const QJsonObject& header, const QByteArray& payload, const QHostAddress& sender);
+    void resetLanFastSyncTransfer(const QString& status);
+    bool isUdpFastSyncAllowedPeer(const QHostAddress& address) const;
+    QString lanFastSyncMethodSummary() const;
+    QString lanFastSyncRateSummary() const;
     void refreshDebugLog();
     void updateReceiveQr();
     QString receiveRequestSettingsKey() const;
@@ -526,6 +571,10 @@ private:
     void explorerIndexStep();
     void scheduleForensicsScanStep(int delay_ms = 0);
     void forensicsScanStep();
+    void rebuildForensicsScanSummary();
+    void resetForensicsPrefixCompression();
+    void finalizeForensicsPrefixCompression(QVariantList& rows);
+    bool appendForensicsDisplayRow(QVariantList& rows, const QVariantMap& display_row);
     QString explorerLookupHtml(const QString& title,
                                const QString& summary_html,
                                const QJsonValue& raw_json) const;
@@ -704,6 +753,9 @@ private:
     QSet<QString> m_peer_reverse_lookup_attempted;
     QSet<QString> m_peer_lan_lookup_pending;
     QSet<QString> m_peer_lan_lookup_attempted;
+    QSet<QString> m_udp_fast_sync_peer_hosts;
+    QSet<QString> m_udp_fast_sync_used_peer_hosts;
+    QHash<QString, qint64> m_udp_fast_sync_last_request_ms_by_host;
     int m_address_book_refresh_generation = 0;
     QVariantList m_address_book;
     QVariantList m_receive_requests;
@@ -734,6 +786,25 @@ private:
     QString m_current_psbt_summary = QStringLiteral("No PSBT loaded.");
     QString m_current_psbt_final_hex;
     bool m_only_defcoin_user_agents = true;
+    bool m_lan_fast_sync_enabled = true;
+    QUdpSocket* m_lan_fast_sync_socket = nullptr;
+    QTimer* m_lan_fast_sync_timer = nullptr;
+    QString m_lan_fast_sync_status = QStringLiteral("UDP fast sync idle.");
+    QString m_lan_fast_sync_request_id;
+    QString m_lan_fast_sync_block_hash;
+    QString m_lan_fast_sync_block_checksum;
+    QHash<int, QByteArray> m_lan_fast_sync_chunks;
+    int m_lan_fast_sync_current_height = -1;
+    int m_lan_fast_sync_expected_chunks = 0;
+    int m_lan_fast_sync_expected_size = 0;
+    int m_lan_fast_sync_retransmit_errors = 0;
+    int m_lan_fast_sync_blocks_received = 0;
+    qint64 m_lan_fast_sync_bytes_received = 0;
+    qint64 m_lan_fast_sync_started_ms = 0;
+    qint64 m_lan_fast_sync_request_ms = 0;
+    qint64 m_lan_fast_sync_last_progress_ms = 0;
+    bool m_lan_fast_sync_request_in_flight = false;
+    bool m_lan_fast_sync_submit_in_flight = false;
     bool m_mask_balances = false;
     bool m_third_party_tx_urls_enabled = false;
     QString m_third_party_tx_url;
@@ -744,6 +815,8 @@ private:
     QString m_explorer_analytics_status = QStringLiteral("Explorer analytics not loaded yet.");
     bool m_explorer_indexing = false;
     bool m_explorer_index_request_in_flight = false;
+    bool m_explorer_auto_index_requested = false;
+    bool m_explorer_index_paused_by_user = false;
     QString m_explorer_index_status = QStringLiteral("Index not running.");
     int m_explorer_index_height = 0;
     int m_explorer_index_tip = 0;
@@ -752,9 +825,31 @@ private:
     QVariantList m_forensics_irregular_messages;
     bool m_forensics_scanning = false;
     bool m_forensics_request_in_flight = false;
+    bool m_forensics_scan_complete = false;
+    bool m_forensics_accept_bip141_as_regular = true;
+    bool m_forensics_missing_witness_found = false;
+    int m_forensics_first_missing_witness_height = -1;
+    int m_forensics_missing_witness_count = 0;
     QString m_forensics_scan_status = QStringLiteral("Irregular message scan not started.");
+    QString m_forensics_scan_summary;
+    bool m_forensics_witness_repair_running = false;
+    QString m_forensics_witness_repair_status = QStringLiteral("Witness data inspection not started.");
+    int m_forensics_witness_repair_start_height = 903168;
+    int m_forensics_witness_repair_inspected_blocks = 0;
+    int m_forensics_witness_repair_first_missing_height = -1;
+    int m_forensics_scan_start_height = 0;
     int m_forensics_scan_height = 0;
     int m_forensics_scan_tip = 0;
+    QString m_forensics_compress_prefix;
+    int m_forensics_compress_start_height = -1;
+    int m_forensics_compress_last_height = -1;
+    QVariantMap m_forensics_compress_start_row;
+    QVariantMap m_forensics_compress_summary_row;
+    QVariantMap m_forensics_compress_end_row;
+    int m_forensics_compress_start_index = -1;
+    int m_forensics_compress_summary_index = -1;
+    int m_forensics_compress_end_index = -1;
+    int m_forensics_compress_count = 0;
     mutable QStringList m_bip39_words;
     mutable QHash<QString, int> m_bip39_word_index;
 };

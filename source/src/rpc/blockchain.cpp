@@ -504,7 +504,14 @@ static RPCHelpMan syncwithvalidationinterfacequeue()
     SyncWithValidationInterfaceQueue();
     return NullUniValue;
 },
-    };
+        };
+}
+
+static bool BlockStorageMissingRequiredWitness(const CBlockIndex* pindex, const CBlock& block, const Consensus::Params& consensus)
+{
+    if (pindex == nullptr || pindex->pprev == nullptr || !IsWitnessEnabled(pindex->pprev, consensus)) return false;
+    if (GetWitnessCommitmentIndex(block) == NO_WITNESS_COMMITMENT) return false;
+    return block.vtx.empty() || !block.vtx[0]->HasWitness();
 }
 
 static RPCHelpMan repairwitnessblockdata()
@@ -563,21 +570,42 @@ static RPCHelpMan repairwitnessblockdata()
     int height_before{0};
     int inspected_blocks{0};
     int first_missing_witness_height{-1};
+    std::vector<const CBlockIndex*> indexes;
     {
         LOCK(cs_main);
         const CChain& active_chain = chainman.ActiveChain();
         height_before = active_chain.Height();
         if (start_height <= height_before) {
+            indexes.reserve(height_before - start_height + 1);
             for (int height = start_height; height <= height_before; ++height) {
-                ++inspected_blocks;
-                if (height <= 0 || active_chain[height] == nullptr || active_chain[height - 1] == nullptr) continue;
-                if (IsWitnessEnabled(active_chain[height - 1], chainparams.GetConsensus()) &&
-                    !(active_chain[height]->nStatus & BLOCK_OPT_WITNESS)) {
-                    first_missing_witness_height = height;
-                    break;
-                }
+                indexes.push_back(active_chain[height]);
             }
         }
+    }
+
+    for (const CBlockIndex* pindex : indexes) {
+        if (pindex == nullptr) continue;
+        ++inspected_blocks;
+        if (inspected_blocks % 2000 == 0) {
+            EnsureNodeContext(request.context).rpc_interruption_point();
+        }
+        if (pindex->pprev == nullptr || !IsWitnessEnabled(pindex->pprev, chainparams.GetConsensus())) continue;
+
+        bool missing_witness = false;
+        if (IsBlockPruned(pindex)) {
+            missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
+        } else {
+            CBlock block;
+            if (ReadBlockFromDisk(block, pindex, chainparams.GetConsensus())) {
+                missing_witness = BlockStorageMissingRequiredWitness(pindex, block, chainparams.GetConsensus());
+            } else {
+                missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
+            }
+        }
+
+        if (!missing_witness) continue;
+        if (first_missing_witness_height < 0) first_missing_witness_height = pindex->nHeight;
+        if (fix_missing_witness) break;
     }
 
     const bool network_was_active = connman.GetNetworkActive();
@@ -621,9 +649,9 @@ static RPCHelpMan repairwitnessblockdata()
     connman.SetNetworkActive(false);
     SyncWithValidationInterfaceQueue();
 
-    LogPrintf("Repair witness block data requested by RPC from height %d; first missing witness data found at height %d\n", start_height, first_missing_witness_height);
+    LogPrintf("Repair witness block data requested by RPC from height %d; first missing witness data found at height %d after inspecting block bodies\n", start_height, first_missing_witness_height);
     for (CChainState* chainstate : WITH_LOCK(::cs_main, return chainman.GetAll())) {
-        if (!chainstate->RewindBlockIndex(chainparams, start_height)) {
+        if (!chainstate->RewindBlockIndex(chainparams, first_missing_witness_height, true)) {
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to rewind incomplete witness block data. Check debug.log for details.");
         }
     }
@@ -1192,6 +1220,11 @@ static bool IsNullDataOutput(const CTxOut& txout)
            txout.scriptPubKey[0] == OP_RETURN;
 }
 
+static bool IsForensicsCandidateOutput(const CTxOut& txout)
+{
+    return txout.scriptPubKey.IsUnspendable() && !txout.scriptPubKey.empty();
+}
+
 static std::string TrimDecodedText(std::string text)
 {
     const auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
@@ -1223,6 +1256,18 @@ static std::string DecodeNullDataPayload(const std::vector<unsigned char>& paylo
     return out;
 }
 
+static bool IsMostlyPrintableNullDataPayload(const std::vector<unsigned char>& payload)
+{
+    if (payload.empty()) return false;
+    int printable = 0;
+    for (const unsigned char c : payload) {
+        if (c == '\r' || c == '\n' || c == '\t' || (c >= 32 && c <= 126)) {
+            ++printable;
+        }
+    }
+    return printable * 100 >= static_cast<int>(payload.size()) * 55;
+}
+
 static std::vector<unsigned char> ExtractNullDataPayload(const CScript& script)
 {
     std::vector<unsigned char> payload;
@@ -1243,6 +1288,37 @@ static std::vector<unsigned char> ExtractNullDataPayload(const CScript& script)
         }
     }
     return payload;
+}
+
+static bool IsBip141WitnessCommitmentPayload(const std::vector<unsigned char>& payload)
+{
+    return payload.size() >= 4 &&
+           payload[0] == 0xaa &&
+           payload[1] == 0x21 &&
+           payload[2] == 0xa9 &&
+           payload[3] == 0xed;
+}
+
+static bool HasBip141WitnessCommitmentOutput(const CTransaction& tx)
+{
+    for (const CTxOut& txout : tx.vout) {
+        if (!IsNullDataOutput(txout)) continue;
+        if (IsBip141WitnessCommitmentPayload(ExtractNullDataPayload(txout.scriptPubKey))) return true;
+    }
+    return false;
+}
+
+static std::string ScriptPrefixHex(const CScript& script, size_t bytes)
+{
+    const size_t count = std::min(bytes, static_cast<size_t>(script.size()));
+    return HexStr(std::vector<unsigned char>(script.begin(), script.begin() + count));
+}
+
+static std::string PayloadPrefixHex(const std::vector<unsigned char>& payload, size_t bytes)
+{
+    const size_t count = std::min(bytes, payload.size());
+    if (count == 0) return "";
+    return HexStr(std::vector<unsigned char>(payload.begin(), payload.begin() + count));
 }
 
 static std::string JoinReasons(const std::vector<std::string>& reasons)
@@ -1275,6 +1351,9 @@ static RPCHelpMan scanirregularmessages()
                         {RPCResult::Type::NUM, "scanned_blocks", "Blocks inspected in this call."},
                         {RPCResult::Type::NUM, "next_height", "Next height to request when complete is false."},
                         {RPCResult::Type::BOOL, "complete", "Whether the requested range is fully scanned."},
+                        {RPCResult::Type::BOOL, "missing_witness_found", "Whether this scan chunk found active-chain post-SegWit block storage without witness data."},
+                        {RPCResult::Type::NUM, "first_missing_witness_height", "First affected active-chain height in this scan chunk, or -1 if none was found."},
+                        {RPCResult::Type::NUM, "missing_witness_count", "Affected active-chain block count in this scan chunk."},
                         {RPCResult::Type::ARR, "results", "Flagged OP_RETURN rows.",
                         {
                             {RPCResult::Type::OBJ, "", "",
@@ -1287,7 +1366,10 @@ static RPCHelpMan scanirregularmessages()
                                 {RPCResult::Type::STR, "decoded_text", "Printable decoded text, or a hex summary when not mostly text."},
                                 {RPCResult::Type::STR, "reason", "Short irregularity label."},
                                 {RPCResult::Type::NUM, "script_size", "ScriptPubKey byte length."},
+                                {RPCResult::Type::STR_HEX, "script_hex", "Raw scriptPubKey bytes."},
+                                {RPCResult::Type::STR_HEX, "script_prefix4", "First four scriptPubKey bytes, when available."},
                                 {RPCResult::Type::STR_HEX, "payload_hex", "Raw pushed payload bytes."},
+                                {RPCResult::Type::STR_HEX, "payload_prefix4", "First four pushed payload bytes, when available."},
                             }},
                         }},
                     }},
@@ -1349,6 +1431,8 @@ static RPCHelpMan scanirregularmessages()
     UniValue rows(UniValue::VARR);
     int scanned_blocks = 0;
     int next_height = start_height;
+    int first_missing_witness_height = -1;
+    int missing_witness_count = 0;
 
     for (const CBlockIndex* pindex : indexes) {
         if (rows.size() >= static_cast<size_t>(max_results)) break;
@@ -1356,6 +1440,12 @@ static RPCHelpMan scanirregularmessages()
 
         CBlock block;
         if (IsBlockPruned(pindex)) {
+            if (pindex != nullptr && pindex->nHeight > 0 && pindex->pprev != nullptr &&
+                IsWitnessEnabled(pindex->pprev, Params().GetConsensus()) &&
+                !(pindex->nStatus & BLOCK_OPT_WITNESS)) {
+                if (first_missing_witness_height < 0) first_missing_witness_height = pindex->nHeight;
+                ++missing_witness_count;
+            }
             next_height = pindex->nHeight + 1;
             ++scanned_blocks;
             continue;
@@ -1365,32 +1455,52 @@ static RPCHelpMan scanirregularmessages()
             ++scanned_blocks;
             continue;
         }
+        if (BlockStorageMissingRequiredWitness(pindex, block, Params().GetConsensus())) {
+            if (first_missing_witness_height < 0) first_missing_witness_height = pindex->nHeight;
+            ++missing_witness_count;
+        }
 
         for (const auto& tx : block.vtx) {
             int null_data_outputs = 0;
             for (const CTxOut& txout : tx->vout) {
                 if (IsNullDataOutput(txout)) ++null_data_outputs;
             }
-            if (null_data_outputs == 0) continue;
+            const bool coinbase_with_bip141_commitment = tx->IsCoinBase() && HasBip141WitnessCommitmentOutput(*tx);
+            int candidate_outputs = 0;
+            for (const CTxOut& txout : tx->vout) {
+                if (IsForensicsCandidateOutput(txout)) ++candidate_outputs;
+            }
+            if (candidate_outputs == 0) continue;
 
             for (size_t vout_index = 0; vout_index < tx->vout.size(); ++vout_index) {
                 if (rows.size() >= static_cast<size_t>(max_results)) break;
                 const CTxOut& txout = tx->vout[vout_index];
-                if (!IsNullDataOutput(txout)) continue;
+                if (!IsForensicsCandidateOutput(txout)) continue;
 
+                const std::vector<unsigned char> payload = ExtractNullDataPayload(txout.scriptPubKey);
+                const bool null_data = IsNullDataOutput(txout);
                 const bool burned_value = txout.nValue > 0;
                 const bool oversized = txout.scriptPubKey.size() > MAX_OP_RETURN_RELAY;
-                const bool active_opcodes = !txout.scriptPubKey.IsPushOnly(txout.scriptPubKey.begin() + 1);
-                const bool multiple = null_data_outputs > 1;
-                if (!burned_value && !oversized && !active_opcodes && !multiple) continue;
+                const bool non_op_return = !null_data;
+                const bool active_opcodes = null_data && !txout.scriptPubKey.IsPushOnly(txout.scriptPubKey.begin() + 1);
+                const bool multiple = null_data && null_data_outputs > 1;
+                const bool only_multiple_reason = multiple && !burned_value && !oversized && !active_opcodes && !non_op_return;
+                const bool routine_coinbase_metadata =
+                    only_multiple_reason &&
+                    coinbase_with_bip141_commitment &&
+                    !IsBip141WitnessCommitmentPayload(payload) &&
+                    !IsMostlyPrintableNullDataPayload(payload);
+                if (routine_coinbase_metadata) continue;
+                if (!burned_value && !oversized && !active_opcodes && !multiple && !non_op_return) continue;
 
                 std::vector<std::string> reasons;
+                if (non_op_return) reasons.push_back("Unspendable script without OP_RETURN 6a prefix");
                 if (burned_value) reasons.push_back("Burned nonzero Defcoin in OP_RETURN");
                 if (oversized) reasons.push_back("Bypassed standard size limits");
                 if (active_opcodes) reasons.push_back("Contains active execution opcodes");
                 if (multiple) reasons.push_back("Multiple OP_RETURN outputs in one transaction");
 
-                const std::vector<unsigned char> payload = ExtractNullDataPayload(txout.scriptPubKey);
+                const std::string script_hex = HexStr(std::vector<unsigned char>(txout.scriptPubKey.begin(), txout.scriptPubKey.end()));
 
                 UniValue entry(UniValue::VOBJ);
                 entry.pushKV("block_height", pindex->nHeight);
@@ -1401,7 +1511,10 @@ static RPCHelpMan scanirregularmessages()
                 entry.pushKV("decoded_text", DecodeNullDataPayload(payload));
                 entry.pushKV("reason", JoinReasons(reasons));
                 entry.pushKV("script_size", static_cast<int>(txout.scriptPubKey.size()));
+                entry.pushKV("script_hex", script_hex);
+                entry.pushKV("script_prefix4", ScriptPrefixHex(txout.scriptPubKey, 4));
                 entry.pushKV("payload_hex", HexStr(payload));
+                entry.pushKV("payload_prefix4", PayloadPrefixHex(payload, 4));
                 rows.push_back(entry);
             }
         }
@@ -1417,6 +1530,9 @@ static RPCHelpMan scanirregularmessages()
     result.pushKV("scanned_blocks", scanned_blocks);
     result.pushKV("next_height", next_height);
     result.pushKV("complete", next_height > end_height);
+    result.pushKV("missing_witness_found", first_missing_witness_height >= 0);
+    result.pushKV("first_missing_witness_height", first_missing_witness_height);
+    result.pushKV("missing_witness_count", missing_witness_count);
     result.pushKV("results", rows);
     return result;
 },

@@ -22,6 +22,12 @@ ColumnLayout {
     property bool hideZeroBip39RecoveryAddresses: false
     property int addressBookFilterRevision: 0
     property int walletListViewMode: 0
+    property string walletSortKey: ""
+    property bool walletSortAscending: true
+    property string walletSimpleSortKey: ""
+    property bool walletSimpleSortAscending: true
+    property string walletDetailedSortKey: ""
+    property bool walletDetailedSortAscending: true
 
     Component.onCompleted: NuService.refreshWalletStats()
     onVisibleChanged: if (visible) NuService.refreshWalletStats()
@@ -198,6 +204,12 @@ ColumnLayout {
                : ["center", "text", "text", "center", "amount", "amount", "amount", "amount", "number", "number", "number"]
     }
 
+    function walletTableSortKeys() {
+        return root.walletListViewMode === 0
+               ? ["active", "wallet", "state", "type"]
+               : ["active", "wallet", "state", "type", "total", "available", "pending", "immature", "transactions", "addresses", "nonZero"]
+    }
+
     function walletTableTooltips() {
         return root.walletListViewMode === 0
                ? [
@@ -237,6 +249,15 @@ ColumnLayout {
         return root.walletListViewMode === 0
                ? [0.42, 3.2, 1.0, 0.6]
                : [0.42, 3.0, 1.0, 0.6, 1.4, 1.1, 1.1, 1.1, 0.72, 0.82, 0.9]
+    }
+
+    function applyWalletSortForCurrentView() {
+        if (!walletFilesTable) return
+        const viewKey = root.walletListViewMode === 0 ? root.walletSimpleSortKey : root.walletDetailedSortKey
+        const viewAscending = root.walletListViewMode === 0 ? root.walletSimpleSortAscending : root.walletDetailedSortAscending
+        if (viewKey.length > 0 && walletFilesTable.applyExternalSort(viewKey, viewAscending)) return
+        if (root.walletSortKey.length > 0 && walletFilesTable.applyExternalSort(root.walletSortKey, root.walletSortAscending)) return
+        walletFilesTable.sortColumn = -1
     }
 
     function openOrSelectPrimaryWallet() {
@@ -518,7 +539,10 @@ ColumnLayout {
                         NuTabButton { text: "Detailed" }
                         onCurrentIndexChanged: {
                             root.walletListViewMode = currentIndex
-                            Qt.callLater(function() { walletFilesTable.forceResetColumnWidths() })
+                            Qt.callLater(function() {
+                                root.applyWalletSortForCurrentView()
+                                walletFilesTable.forceResetColumnWidths()
+                            })
                         }
                     }
 
@@ -540,6 +564,7 @@ ColumnLayout {
                     tableId: root.walletListViewMode === 0 ? "walletFileListSimple" : "walletFileListDetailed"
                     columns: root.walletTableColumns()
                     columnTypes: root.walletTableTypes()
+                    sortColumnKeys: root.walletTableSortKeys()
                     columnTooltips: root.walletTableTooltips()
                     rows: root.walletFileRows()
                     columnWeights: root.walletTableWeights()
@@ -551,6 +576,17 @@ ColumnLayout {
                     rowKeyMetaField: "key"
                     selectedRowKeys: root.selectedWalletKeys
                     emptyText: "Wallet files appear after RPC connects."
+                    onSortChanged: (column, ascending, key) => {
+                        root.walletSortKey = key
+                        root.walletSortAscending = ascending
+                        if (root.walletListViewMode === 0) {
+                            root.walletSimpleSortKey = key
+                            root.walletSimpleSortAscending = ascending
+                        } else {
+                            root.walletDetailedSortKey = key
+                            root.walletDetailedSortAscending = ascending
+                        }
+                    }
                     onRowSelectionChanged: (keys) => root.selectedWalletKeys = keys
                     onRowActivated: (row) => {
                         if (row && row.meta) {

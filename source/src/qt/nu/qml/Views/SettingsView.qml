@@ -28,13 +28,6 @@ ColumnLayout {
         const values = ["internal", "dc903", "legacy", "custom"]
         return index >= 0 && index < values.length ? values[index] : "internal"
     }
-    property int pendingWitnessRepairStartHeight: 903168
-    property bool pendingFixWitnessData: true
-    function witnessRepairHeightValue() {
-        const parsed = parseInt(witnessRepairStartHeight.text)
-        return isNaN(parsed) || parsed < 1 ? 903168 : parsed
-    }
-
     NuPageHeader {
         Layout.fillWidth: true
         title: "Settings"
@@ -158,85 +151,17 @@ ColumnLayout {
                     }
 
                     NuCheckBox {
+                        text: "Enable UDP fast sync"
+                        checked: NuService.lanFastSyncEnabled
+                        helpText: "On by default. Experimental. Nu can request checksum-protected raw block chunks over UDP port 10334 from connected Defcoin peers over IPv4 or IPv6. Packets are capped below normal internet MTU sizes, LAN discovery also enables local broadcast, every block is still submitted through normal Core validation, and TCP sync remains the fallback."
+                        onToggled: NuService.lanFastSyncEnabled = checked
+                    }
+
+                    NuCheckBox {
                         text: "Enable UPnP port mapping"
                         checked: NuService.upnpConnectionsEnabled
                         helpText: "Off by default. UPnP asks a compatible router to open Defcoin's peer port for inbound connections. Leave it off on restricted, shared, or untrusted networks."
                         onToggled: NuService.upnpConnectionsEnabled = checked
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: NuTokens.lineSubtle
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: NuTokens.spaceSm
-
-                    Label {
-                        text: "Blockchain inspection"
-                        color: NuTokens.textPrimary
-                        font.pixelSize: NuTokens.fontBody
-                        font.weight: Font.DemiBold
-                    }
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: "Inspect local block storage when post-activation block bodies may need to be redownloaded from witness-capable peers. This is not a wallet balance rescan."
-                        color: NuTokens.textSecondary
-                        font.pixelSize: NuTokens.fontBody
-                        wrapMode: Text.WordWrap
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: NuTokens.spaceMd
-
-                        Label {
-                            text: "Start height"
-                            color: NuTokens.textSecondary
-                            font.pixelSize: NuTokens.fontBody
-                        }
-
-                        NuTextField {
-                            id: witnessRepairStartHeight
-                            Layout.preferredWidth: 150
-                            text: "903168"
-                            inputMethodHints: Qt.ImhDigitsOnly
-                            validator: IntValidator { bottom: 1; top: 2147483647 }
-                            helpText: "Nu will inspect from this height. If missing witness data is found and the fix option is enabled, Nu rewinds from the first affected block and redownloads clean block bodies."
-                        }
-                    }
-
-                    NuCheckBox {
-                        id: witnessRepairFixMissingData
-                        Layout.fillWidth: true
-                        checked: true
-                        text: "Fix missing witness data"
-                        helpText: "On by default. When inspection finds a stored block body without required witness data, Nu rewinds from that block so normal sync can redownload it from witness-capable peers."
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: NuTokens.spaceMd
-
-                        Item {
-                            Layout.fillWidth: true
-                        }
-
-                        NuActionButton {
-                            text: "Inspect now..."
-                            Layout.preferredWidth: 150
-                            primary: true
-                            helpText: "Shows a confirmation, inspects local block data from the selected height, and optionally repairs missing witness data without restarting."
-                            onClicked: {
-                                root.pendingWitnessRepairStartHeight = root.witnessRepairHeightValue()
-                                root.pendingFixWitnessData = witnessRepairFixMissingData.checked
-                                witnessRepairConfirmDialog.open()
-                            }
-                        }
                     }
                 }
 
@@ -482,45 +407,6 @@ ColumnLayout {
 
                 Item { Layout.fillHeight: true }
             }
-        }
-    }
-
-    NuDialog {
-        id: witnessRepairConfirmDialog
-        title: "Inspect blockchain data"
-        dialogWidth: 660
-        acceptText: "Continue inspection"
-        cancelText: "Cancel"
-        onAccepted: NuService.repairWitnessBlockDataNow(root.pendingWitnessRepairStartHeight, root.pendingFixWitnessData)
-
-        Label {
-            Layout.fillWidth: true
-            text: root.pendingFixWitnessData
-                  ? "Nu will inspect from block " + root.pendingWitnessRepairStartHeight + ". If missing witness data is found, it will pause P2P networking, rewind from the first affected block, and resume normal sync. No restart is required."
-                  : "Nu will inspect from block " + root.pendingWitnessRepairStartHeight + " and report whether missing witness data is present. No blocks will be rewound because Fix missing witness data is off."
-            color: NuTokens.textPrimary
-            font.pixelSize: NuTokens.fontBody
-            wrapMode: Text.WordWrap
-        }
-
-        Label {
-            Layout.fillWidth: true
-            text: root.pendingFixWitnessData
-                  ? "Current local height is " + NuService.blockHeight + ". At most " + Math.max(0, NuService.blockHeight - root.pendingWitnessRepairStartHeight) + " blocks are in the selected range. Rewinding is usually faster than a wallet rescan, but redownloading block bodies depends on peer speed and can take minutes or longer."
-                  : "Current local height is " + NuService.blockHeight + ". At most " + Math.max(0, NuService.blockHeight - root.pendingWitnessRepairStartHeight) + " blocks are in the selected range. Inspection-only mode reports findings without changing local block storage."
-            color: NuTokens.textSecondary
-            font.pixelSize: NuTokens.fontBody
-            wrapMode: Text.WordWrap
-        }
-
-        Label {
-            Layout.fillWidth: true
-            text: root.pendingFixWitnessData
-                  ? "This is not a wallet balance rescan and it does not delete wallet data. The wallet may look temporarily behind while repaired blocks are redownloaded."
-                  : "This is not a wallet balance rescan and it does not delete wallet data."
-            color: NuTokens.stateWarning
-            font.pixelSize: NuTokens.fontBody
-            wrapMode: Text.WordWrap
         }
     }
 }

@@ -93,7 +93,7 @@ ColumnLayout {
     NuPageHeader {
         Layout.fillWidth: true
         title: "Explorer"
-        detail: "Local block, transaction, address, rich-list, and movement lookups backed by a SQLite WAL cache."
+        detail: "Local block, transaction, address, Top 100, and movement lookups backed by a SQLite WAL cache."
     }
 
     NuPanel {
@@ -128,7 +128,7 @@ ColumnLayout {
                 NuActionButton {
                     Layout.preferredWidth: 148
                     text: "Refresh stats"
-                    helpText: "Reload rich-list and movement summaries from the local SQLite explorer index."
+                    helpText: "Reload Top 100 and movement summaries from the local SQLite explorer index."
                     onClicked: root.refreshAnalytics()
                 }
             }
@@ -168,6 +168,7 @@ ColumnLayout {
     StackLayout {
         Layout.fillWidth: true
         Layout.fillHeight: true
+        clip: true
         currentIndex: explorerTabs.currentIndex
 
         NuPanel {
@@ -285,7 +286,7 @@ ColumnLayout {
                         width: 130
                         enabled: !NuService.explorerIndexing
                         danger: true
-                        helpText: "Clear only the block, transaction, rich-list, and movement index. Recent manual lookups are kept."
+                        helpText: "Clear only the block, transaction, Top 100, and movement index. Recent manual lookups are kept."
                         onClicked: NuService.resetExplorerIndex()
                     }
 
@@ -388,7 +389,7 @@ ColumnLayout {
                         spacing: NuTokens.spaceSm
                         Label {
                             Layout.fillWidth: true
-                            text: "Rich List / Top 100"
+                            text: "Top 100 Address Balance Holders"
                             color: NuTokens.textPrimary
                             font.pixelSize: NuTokens.fontBodyLarge
                             font.weight: Font.DemiBold
@@ -406,7 +407,7 @@ ColumnLayout {
                             NuActionButton {
                                 width: 150
                                 text: "Refresh Top 100"
-                                helpText: "Recalculate rich-list and movement summaries from the local SQLite explorer index."
+                                helpText: "Recalculate Top 100 and movement summaries from the local SQLite explorer index."
                                 onClicked: root.refreshAnalytics()
                             }
                             NuMetricRow { label: "Rows"; value: String(NuService.explorerRichList.length) }

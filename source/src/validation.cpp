@@ -3354,8 +3354,12 @@ void CChainState::ReceivedBlockTransactions(const CBlock& block, CBlockIndex* pi
     pindexNew->nDataPos = pos.nPos;
     pindexNew->nUndoPos = 0;
     pindexNew->nStatus |= BLOCK_HAVE_DATA;
-    if (IsWitnessEnabled(pindexNew->pprev, consensusParams)) {
+    if (IsWitnessEnabled(pindexNew->pprev, consensusParams) &&
+        (GetWitnessCommitmentIndex(block) == NO_WITNESS_COMMITMENT ||
+         (!block.vtx.empty() && block.vtx[0]->HasWitness()))) {
         pindexNew->nStatus |= BLOCK_OPT_WITNESS;
+    } else {
+        pindexNew->nStatus &= ~BLOCK_OPT_WITNESS;
     }
     pindexNew->RaiseValidity(BLOCK_VALID_TRANSACTIONS);
     setDirtyBlockIndex.insert(pindexNew);
@@ -4649,7 +4653,7 @@ void CChainState::EraseBlockData(CBlockIndex* index)
     }
 }
 
-bool CChainState::RewindBlockIndex(const CChainParams& params, int nMinimumHeight)
+bool CChainState::RewindBlockIndex(const CChainParams& params, int nMinimumHeight, bool force_from_height)
 {
     // Note that during -reindex-chainstate we are called with an empty m_chain!
     if (nMinimumHeight < 1) nMinimumHeight = 1;
@@ -4674,14 +4678,16 @@ bool CChainState::RewindBlockIndex(const CChainParams& params, int nMinimumHeigh
     int nHeight = nMinimumHeight;
     {
         LOCK(cs_main);
-        while (nHeight <= m_chain.Height()) {
-            // Although SCRIPT_VERIFY_WITNESS is now generally enforced on all
-            // blocks in ConnectBlock, we don't need to go back and
-            // re-download/re-verify blocks from before segwit actually activated.
-            if (IsWitnessEnabled(m_chain[nHeight - 1], params.GetConsensus()) && !(m_chain[nHeight]->nStatus & BLOCK_OPT_WITNESS)) {
-                break;
+        if (!force_from_height) {
+            while (nHeight <= m_chain.Height()) {
+                // Although SCRIPT_VERIFY_WITNESS is now generally enforced on all
+                // blocks in ConnectBlock, we don't need to go back and
+                // re-download/re-verify blocks from before segwit actually activated.
+                if (IsWitnessEnabled(m_chain[nHeight - 1], params.GetConsensus()) && !(m_chain[nHeight]->nStatus & BLOCK_OPT_WITNESS)) {
+                    break;
+                }
+                nHeight++;
             }
-            nHeight++;
         }
 
         tip = m_chain.Tip();

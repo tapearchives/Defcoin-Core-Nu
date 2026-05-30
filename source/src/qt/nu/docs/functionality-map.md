@@ -1,4 +1,4 @@
-# Defcoin Core Nu 26.5.5 Functionality Map
+# Defcoin Core Nu 26.5.5a Functionality Map
 
 This map is the release checklist for preserving useful Litecoin Core wallet
 capabilities while reorganizing them into the Nu interface. Nu does not copy
@@ -62,10 +62,12 @@ review history, manage wallets, inspect the node, and configure the app.
 | Peer table | Diagnostics > Peers | `getpeerinfo` | Direct UI | Diagnostic transparency without the old inspector-heavy layout. Includes the actual P2P magic bytes selected from the peer packet header. |
 | Peer ping | Diagnostics > Peers | `ping` | Direct UI | Operational diagnostic kept close to peers. |
 | Network traffic | Diagnostics > Traffic | sampled `getnettotals` | Direct UI | At-a-glance connectivity health. |
+| UDP fast sync | Settings > Network, Diagnostics > Status | Nu UDP helper + backend `submitblock` | Experimental direct UI | Enabled by default. Connected-peer sub-MTU block mirroring can accelerate wallet catch-up over IPv4/IPv6 without bypassing Core validation or disabling TCP fallback. |
 | Debug log tail | Diagnostics > Log | `debug.log` tail | Direct UI | Read-only, scoped diagnostics. |
 | Open full debug log | Diagnostics > Log | system open `debug.log` | Direct UI | Maintenance action stays with diagnostic log context. |
 | RPC console | Diagnostics > Console | local JSON-RPC | Direct UI for advanced users | Preserves full Litecoin/Defcoin command surface while keeping ordinary users on safer flows. |
 | Irregular OP_RETURN messages | Forensics > Irregular Messages | `scanirregularmessages` | Direct UI | Flags accepted-chain message outputs that bypass standard relay expectations or burn DFC. |
+| Witness block storage repair | Forensics > Witness Repair | `repairwitnessblockdata` | Direct UI | Inspects and optionally rewinds/redownloads post-activation blocks whose local stored bodies are missing witness data, without loading the irregular-message table. |
 | About | About menu, Settings > About | local text/assets | Direct UI | Standard desktop behavior retained. |
 | Options/preferences | Settings | QML settings + RPC | Direct UI | Duplicate controls removed; Defcoin user-agent filter appears in Network only. |
 
@@ -76,6 +78,7 @@ review history, manage wallets, inspect the node, and configure the app.
 | Defcoin-only peer user-agent filtering | Settings > Network, Diagnostics peer table | Implemented as `/Defcoin` prefix only |
 | Network connect/isolate control | Settings > Network and status strip | Implemented |
 | Dual magic migration control | Settings > Network | Implemented as startup option for accepting both legacy `fbc0b6db` and new `defc014e` peer message bytes. In dual mode, outbound handshakes prefer the new `defc014e` bytes while bounded legacy probes keep old-only Defcoin peers reachable; with dual mode off, the backend uses new Defcoin magic only. |
+| UDP fast sync | Settings > Network, Diagnostics > Status | Experimental helper using sub-MTU chunked UDP block transfer from connected Defcoin peers and normal `submitblock` validation. LAN discovery adds local broadcast; TCP/Core sync stays active as fallback. |
 | Network traffic graph | Diagnostics > Traffic | Implemented in neutral form |
 | Debug log tab/readout | Diagnostics > Log | Implemented |
 | Mask balances | Home | Implemented |

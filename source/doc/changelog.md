@@ -1,25 +1,67 @@
 # Defcoin Core Changelog
 
-## 26.5.5 Core Memories
+## 26.5.5a Core Memories
 
-Defcoin Core Nu `26.5.5` adds the first Forensics view for average users who
+Defcoin Core Nu `26.5.5a` adds the first Forensics view for average users who
 want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Added
 
 - Added a Forensics section with an `Irregular Messages` view.
+- Added a separate `Witness Repair` tab under Forensics so the post-`903168`
+  short-block inspection and repair can run without loading thousands of
+  irregular-message rows.
 - Added a native `scanirregularmessages` RPC that scans active-chain `CBlock`
   data in bounded chunks and flags nonstandard OP_RETURN outputs.
 - The Forensics table shows block height, transaction ID, burned DFC amount,
   decoded text, and a concise irregularity label.
+- Added a BIP141 definition column for recognized witness-commitment headers,
+  linking to the BIP141 commitment-structure reference.
+- Added a resizable pop-out irregular-message table with fixed-width font
+  controls, auto-fit/manual column widths, green-bar row striping, and selected
+  cell/range copy support.
+- Added resumable Forensics scans and a completion summary with irregular block
+  counts, non-`6a` prefix percentages, and unique four-byte prefix percentages.
 - Flagged cases include nonzero value burned into OP_RETURN outputs,
   OP_RETURN scripts above the standard relay size limit, active script opcodes,
   and multiple OP_RETURN outputs in one transaction.
+- Added an experimental UDP fast-sync helper, enabled by default. It can request
+  sub-MTU checksum-protected raw block chunks from connected Defcoin peers over
+  IPv4 or IPv6 and submits each assembled block through normal Core validation,
+  with ordinary TCP/Core sync left active as fallback. LAN discovery additionally
+  enables local broadcast.
+- Hardened UDP fast-sync packet handling with strict datagram/header/payload
+  caps, capability/version checks, bounded per-read processing, per-peer request
+  throttling, duplicate-chunk rejection, and checksum validation before block
+  assembly.
 
 ### Changed
 
-- Updated visible Nu release metadata to `26.5.5`.
+- Updated visible Nu release metadata to `26.5.5a`.
+- Letter suffixes now identify every changed rebuild in this release line:
+  `26.5.5a`, then `26.5.5b`, and so on. The inherited Core client version
+  remains `0.21.5.5`.
 - Added Forensics to the sidebar, View menu, app resources, and Build Notes.
+- Diagnostics > Status now reports sync method details, UDP transfer rate in
+  blocks/second and bytes/second, and UDP retransmit/checksum errors.
+- Large Forensics result sets now render through bounded table views so thousands
+  of loaded rows do not create thousands of QML delegates at once.
+- Routine non-text coinbase metadata paired with a normal BIP141 witness
+  commitment is no longer treated as an irregular hidden-message row.
+- The Irregular Messages start-height presets now omit `903168`; that boundary
+  belongs to the Witness Repair workflow.
+- Diagnostics > Peers now displays Reverse DNS normally while sorting that
+  column by hidden reverse-domain notation, so related domains group together.
+- Reverse DNS cells are right-aligned; Known DNS cells are right-aligned except
+  true LAN aliases, which display as `LAN:<name>` and are left-aligned.
+
+### Fixed
+
+- Witness Repair now inspects stored block bodies instead of trusting
+  over-broad `BLOCK_OPT_WITNESS` flags, so missing witness-form block storage
+  cannot incorrectly complete in under one second without reading the chain.
+- LAN peer-name discovery no longer treats public ISP reverse-DNS names as
+  local workstation names.
 
 ## 26.5.2 Core Memories
 

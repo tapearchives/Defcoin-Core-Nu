@@ -1,0 +1,79 @@
+# Defcoin Core Nu 26.5.5a Release Notes
+
+Codename: `Core Memories`
+
+Defcoin Core Nu `26.5.5a` adds the first blockchain forensics surface to the
+desktop wallet while keeping the chain, wallet, recovery, mining, and explorer
+behavior from the current `26.5` line.
+
+## Notable Changes
+
+- Added a new `Forensics` section to the desktop UI.
+- Added the first Forensics view, `Irregular Messages`, for unusual text
+  payloads embedded permanently in OP_RETURN outputs.
+- Added a separate Forensics `Witness Repair` tab for the post-`903168`
+  short-block inspection/repair path. This lets users inspect and fix missing
+  witness-form block storage without running the irregular-message scanner.
+- Added a clean table showing `Block Height`, `Transaction ID`, `Burned Defcoin
+  Amount`, `Decoded Text Message`, and a short irregularity label.
+- Added a `BIP141 Definition` column for recognized witness-commitment headers,
+  with a link to the authoritative BIP141 commitment-structure reference.
+- Added a resizable pop-out irregular-message table with fixed-width font size
+  controls, auto-fit column widths, manual column resizing, green-bar row
+  striping, and the same selected-cell copy behavior as the embedded table.
+- Added pause/resume scan behavior. Paused scans resume from their last scanned
+  block, and completed scans turn the action button into `Rescan`.
+- Added a completion summary reporting irregular block counts, the percentage
+  of scanned blocks with irregular rows, non-`6a` script-prefix counts, and
+  unique four-byte prefix percentages.
+- Added a bounded native backend scan using accepted block data rather than
+  slow UI-side block parsing.
+- Flagged OP_RETURN cases include:
+  - nonzero DFC burned into an unspendable output,
+  - scripts above the standard 83-byte OP_RETURN relay size,
+  - active execution opcodes after OP_RETURN,
+  - multiple OP_RETURN outputs in one transaction.
+- Added an experimental UDP fast-sync helper, enabled by default. Nu wallets can
+  request raw block bytes in sub-MTU checksum-protected UDP chunks from connected
+  Defcoin peers over IPv4 or IPv6 while the receiver still submits every
+  assembled block through normal Core validation. LAN discovery additionally
+  enables local broadcast.
+- Hardened UDP fast sync with datagram/header/payload caps, capability/version
+  checks, bounded per-read processing, per-peer request throttling,
+  duplicate-chunk rejection, and checksum validation before block assembly.
+- Diagnostics > Status now shows the active sync method, UDP transfer rate in
+  blocks/second and bytes/second, and retransmit/checksum errors. TCP/Core sync
+  remains active as the fallback path.
+- Forensics tables now render large result sets through bounded views so the app
+  remains responsive when thousands of irregular rows are loaded.
+- Routine non-text coinbase metadata that appears beside a normal BIP141 witness
+  commitment is treated as regular miner metadata rather than as a hidden
+  irregular message row.
+- Peer diagnostics now display Reverse DNS normally while sorting it by hidden
+  reverse-domain notation, with right-aligned Reverse DNS and LAN-aware Known
+  DNS alignment.
+- Witness Repair now reads stored block bodies to identify missing witness data,
+  rather than relying only on chain-index flags.
+
+## Build Suffix
+
+`26.5.5a` is the first changed rebuild in the `26.5.5` line. Future changed
+rebuilds in the same release line should use the next letter suffix, while the
+inherited Core client version stays `0.21.5.5`.
+
+## Technical Notes
+
+The new `scanirregularmessages` RPC scans the active chain in chunks and returns
+only flagged rows. It uses `CBlock` transaction data, checks unspendable
+OP_RETURN outputs, decodes pushed payload bytes as printable text where
+possible, and leaves consensus state unchanged.
+
+The UDP fast-sync helper is Defcoin-native Qt/C++ code rather than a direct
+copy of Solana, libp2p, or go-ethereum QUIC transports. Those projects were
+reviewed as design references, but their async networking stacks are not
+drop-in compatible with this Litecoin-derived Core process. Nu therefore keeps
+the acceleration layer narrow, optional, connected-peer scoped, and
+validation-preserving.
+
+Technical details are maintained in
+`doc/defcoin-core-nu-technical-guide.md`.

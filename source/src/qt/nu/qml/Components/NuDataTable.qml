@@ -23,12 +23,20 @@ Rectangle {
     property var columnTooltips: []
     property var columnMinimums: []
     property var columnMaximums: []
+    property var columnLinkMetaFields: []
+    property var columnSortMetaFields: []
+    property var sortColumnKeys: []
     property bool compact: false
+    property bool forceMonospace: false
+    property bool greenBarRows: false
     property int fontPixelSize: 0
     property bool sortable: true
     property bool restoreSavedColumnWidths: false
     property bool autoFitOnRowsChanged: false
+    property bool autoFitOnFontChanged: false
     property bool alwaysShowHorizontalScrollBar: false
+    property int rowRenderLimit: 0
+    property int widthMeasurementRowLimit: 1500
     property int defaultSortColumn: -1
     property bool defaultSortAscending: true
     property int sortColumn: -1
@@ -62,6 +70,7 @@ Rectangle {
     signal rowDeleteRequested(var row)
     signal rowSelectionChanged(var keys)
     signal resetRequested()
+    signal sortChanged(int column, bool ascending, string key)
 
     function columnWeight(index) {
         if (index >= 0 && index < columnWeights.length) return columnWeights[index]
@@ -82,6 +91,35 @@ Rectangle {
     function columnToolTip(index) {
         if (index >= 0 && index < columnTooltips.length) return String(columnTooltips[index])
         return ""
+    }
+
+    function normalizedColumnKey(index) {
+        if (index < 0 || index >= columns.length) return ""
+        return String(columns[index]).toLowerCase().replace(/\n/g, " ").replace(/[^a-z0-9]+/g, "")
+    }
+
+    function sortKeyForColumn(index) {
+        if (index >= 0 && index < sortColumnKeys.length && String(sortColumnKeys[index]).length > 0) {
+            return String(sortColumnKeys[index])
+        }
+        return normalizedColumnKey(index)
+    }
+
+    function indexForSortKey(key) {
+        const wanted = String(key || "")
+        if (wanted.length === 0) return -1
+        for (let i = 0; i < columns.length; ++i) {
+            if (sortKeyForColumn(i) === wanted) return i
+        }
+        return -1
+    }
+
+    function applyExternalSort(key, ascending) {
+        const index = indexForSortKey(key)
+        if (index < 0) return false
+        sortColumn = index
+        sortAscending = ascending
+        return true
     }
 
     function isActionColumn(index) {
@@ -112,6 +150,7 @@ Rectangle {
     }
 
     function isMonoColumn(index) {
+        if (forceMonospace) return true
         const type = columnType(index)
         const name = (index >= 0 && index < columns.length ? String(columns[index]) : "").toLowerCase()
         return type === "ipport" || type === "address" || type === "hash"
@@ -119,6 +158,35 @@ Rectangle {
                || name === "port" || name.indexOf("magic") >= 0 || name.indexOf("version") >= 0
                || name === "svcs" || name.indexOf("height") >= 0 || name.indexOf("headers") >= 0
                || name.indexOf("blocks") >= 0
+    }
+
+    function linkMetaField(index) {
+        if (index >= 0 && index < columnLinkMetaFields.length) return String(columnLinkMetaFields[index])
+        return ""
+    }
+
+    function cellLinkUrl(row, index) {
+        if (columnType(index) !== "link") return ""
+        const field = linkMetaField(index)
+        if (field.length === 0) return ""
+        const meta = rowMeta(row)
+        const value = meta[field]
+        return value === undefined || value === null ? "" : String(value)
+    }
+
+    function sortMetaField(index) {
+        if (index >= 0 && index < columnSortMetaFields.length) return String(columnSortMetaFields[index])
+        return ""
+    }
+
+    function sortValueAt(row, index) {
+        const field = sortMetaField(index)
+        if (field.length > 0) {
+            const meta = rowMeta(row)
+            const value = meta[field]
+            if (value !== undefined && value !== null) return value
+        }
+        return valueAt(row, index)
     }
 
     function cellFontSize() {
@@ -129,6 +197,7 @@ Rectangle {
         const type = columnType(index)
         const name = (index >= 0 && index < columns.length ? String(columns[index]) : "").toLowerCase()
         if (type === "center") return false
+        if (type === "rightText" || type === "reverseDns") return true
         if (type === "bytes" || type === "amount" || type === "duration" || type === "number") return true
         return name === "dir." || name === "dir" || name.indexOf("direction") >= 0
                || name === "port"
@@ -140,6 +209,24 @@ Rectangle {
         const type = columnType(index)
         const name = (index >= 0 && index < columns.length ? String(columns[index]) : "").toLowerCase()
         return type === "center" || name === "active"
+    }
+
+    function headerHorizontalAlignment(index) {
+        const type = columnType(index)
+        if (type === "knownDns") return Text.AlignHCenter
+        if (centerAlignColumn(index)) return Text.AlignHCenter
+        if (rightAlignColumn(index)) return Text.AlignRight
+        return Text.AlignLeft
+    }
+
+    function cellHorizontalAlignment(row, index) {
+        const type = columnType(index)
+        if (type === "knownDns") {
+            return String(valueAt(row, index)).indexOf("LAN:") === 0 ? Text.AlignLeft : Text.AlignRight
+        }
+        if (centerAlignColumn(index)) return Text.AlignHCenter
+        if (rightAlignColumn(index)) return Text.AlignRight
+        return Text.AlignLeft
     }
 
     function rowCells(row) {
@@ -325,6 +412,25 @@ Rectangle {
         return compact ? 8 : 14
     }
 
+    function rowHeight() {
+        return Math.max(compact ? 24 : 30, Math.ceil(cellFontSize() * 1.75) + (compact ? 4 : 8))
+    }
+
+    function headerNeedsExtraLine(index) {
+        if (index < 0 || index >= columns.length || index >= columnWidths.length) return false
+        const title = String(columns[index])
+        if (title.indexOf(" ") < 0 && title.indexOf("\n") < 0) return false
+        return roughTextWidth(title.replace(/\n/g, " "), index) > Number(columnWidths[index]) - 6
+    }
+
+    function headerHeight() {
+        const base = Math.max(compact ? 32 : 38, Math.ceil(cellFontSize() * 1.8) + (compact ? 6 : 8))
+        for (let i = 0; i < columns.length; ++i) {
+            if (headerNeedsExtraLine(i)) return base + Math.ceil(cellFontSize() * 1.35)
+        }
+        return base
+    }
+
     function roughTextWidth(text, index) {
         const size = cellFontSize()
         const s = String(text === undefined || text === null ? "" : text)
@@ -354,8 +460,9 @@ Rectangle {
 
     function autoWidths() {
         const availableForMetrics = Math.max(360, root.width - (compact ? NuTokens.spaceSm * 2 : NuTokens.spaceLg * 2))
+        const measuredRows = root.measurementRows()
         const suggested = NuService.suggestedTableColumnWidths(root.columns,
-                                                              root.rows ? root.rows : [],
+                                                              measuredRows,
                                                               root.columnTypes,
                                                               root.columnWeights,
                                                               root.columnMinimums,
@@ -368,8 +475,8 @@ Rectangle {
         let out = defaultWidths()
         for (let c = 0; c < columns.length; ++c) {
             let wanted = roughTextWidth(columns[c], c) + 14
-            for (let r = 0; r < rows.length; ++r) {
-                const row = rowCells(rows[r])
+            for (let r = 0; r < measuredRows.length; ++r) {
+                const row = rowCells(measuredRows[r])
                 if (row && row.length > c) wanted = Math.max(wanted, roughTextWidth(row[c], c))
             }
             const hardMax = isActionColumn(c) ? columnMax(c) : Math.max(columnMax(c), wanted)
@@ -381,11 +488,12 @@ Rectangle {
     function layoutSignature() {
         let parts = [columns.join("|"), columnTypes.join("|"), Math.floor(root.width / 12), root.compact ? "compact" : "regular"]
         parts.push(rows ? rows.length : 0)
+        const measuredRows = root.measurementRows()
         for (let c = 0; c < columns.length; ++c) {
             let longest = String(columns[c]).length
-            if (rows) {
-                for (let r = 0; r < rows.length; ++r) {
-                    const row = rowCells(rows[r])
+            if (measuredRows) {
+                for (let r = 0; r < measuredRows.length; ++r) {
+                    const row = rowCells(measuredRows[r])
                     if (row && row.length > c) longest = Math.max(longest, String(row[c]).length)
                 }
             }
@@ -411,11 +519,11 @@ Rectangle {
     }
 
     function rowAtY(y) {
-        const headerHeight = root.compact ? 40 : 44
-        const rowHeight = root.compact ? 28 : 36
+        const headerHeight = root.headerHeight()
+        const rowHeight = root.rowHeight()
         if (y < headerHeight) return -1
         const row = Math.floor((y - headerHeight) / rowHeight)
-        return Math.max(0, Math.min((rows ? rows.length : 1) - 1, row))
+        return Math.max(0, Math.min(root.renderedRowCount() - 1, row))
     }
 
     function totalWidth() {
@@ -528,8 +636,8 @@ Rectangle {
 
     function compareRows(a, b) {
         const type = columnType(sortColumn)
-        const av = valueAt(a, sortColumn)
-        const bv = valueAt(b, sortColumn)
+        const av = sortValueAt(a, sortColumn)
+        const bv = sortValueAt(b, sortColumn)
         let diff = 0
         const aMissing = isMissingSortValue(av)
         const bMissing = isMissingSortValue(bv)
@@ -565,6 +673,22 @@ Rectangle {
             })
             out = indexed.map(function(item) { return item.row })
         }
+        if (rowRenderLimit > 0 && out.length > rowRenderLimit) out = out.slice(0, rowRenderLimit)
+        return out
+    }
+
+    function renderedRowCount() {
+        const count = rows ? rows.length : 0
+        return rowRenderLimit > 0 ? Math.min(count, rowRenderLimit) : count
+    }
+
+    function measurementRows() {
+        if (!rows) return []
+        const limit = Math.max(1, widthMeasurementRowLimit)
+        if (rows.length <= limit) return rows
+        let out = rows.slice(0, limit)
+        const tailCount = Math.min(200, rows.length - limit)
+        if (tailCount > 0) out = out.concat(rows.slice(rows.length - tailCount))
         return out
     }
 
@@ -738,6 +862,7 @@ Rectangle {
             sortColumn = index
             sortAscending = true
         }
+        sortChanged(sortColumn, sortAscending, sortKeyForColumn(sortColumn))
     }
 
     function setAutoWidths(save) {
@@ -768,15 +893,11 @@ Rectangle {
     function resetColumnWidths() {
         manualColumnWidths = false
         if (tableId.length > 0) NuService.resetTableColumnWidths(tableId)
-        sortColumn = defaultSortColumn
-        sortAscending = defaultSortAscending
         setAutoWidths(true)
     }
 
     function forceResetColumnWidths() {
         manualColumnWidths = false
-        sortColumn = defaultSortColumn
-        sortAscending = defaultSortAscending
         setAutoWidths(false)
         lastLayoutSignature = layoutSignature()
         lastRowCount = rows ? rows.length : 0
@@ -790,7 +911,13 @@ Rectangle {
         loadWidths(forceAuto === true)
     }
 
-    Component.onCompleted: scheduleResize(false)
+    Component.onCompleted: {
+        if (sortColumn < 0 && defaultSortColumn >= 0 && defaultSortColumn < columns.length) {
+            sortColumn = defaultSortColumn
+            sortAscending = defaultSortAscending
+        }
+        scheduleResize(false)
+    }
     onColumnsChanged: {
         if (!userResizingColumns) scheduleResize(true)
     }
@@ -800,6 +927,9 @@ Rectangle {
     }
     onWidthChanged: {
         if (!userResizingColumns) scheduleResize(false)
+    }
+    onFontPixelSizeChanged: {
+        if (!userResizingColumns && autoFitOnFontChanged) scheduleResize(true)
     }
     onTableIdChanged: {
         if (!userResizingColumns) scheduleResize(true)
@@ -848,7 +978,7 @@ Rectangle {
                 Row {
                     id: headerRow
                     width: scroll.contentWidth
-                    height: root.compact ? 40 : 44
+                    height: root.headerHeight()
                     visible: root.columns.length > 0
 
                     Repeater {
@@ -879,11 +1009,10 @@ Rectangle {
                                 anchors.margins: root.compact ? NuTokens.spaceXs : NuTokens.spaceSm
                                 text: headerCell.modelData
                                 color: NuTokens.textPrimary
-                                font.family: NuTokens.bodyFont
+                                font.family: root.forceMonospace ? NuTokens.monoFont : NuTokens.bodyFont
                                 font.pixelSize: root.cellFontSize()
                                 font.weight: Font.DemiBold
-                                horizontalAlignment: root.centerAlignColumn(headerCell.index) ? Text.AlignHCenter
-                                                     : (root.rightAlignColumn(headerCell.index) ? Text.AlignRight : Text.AlignLeft)
+                                horizontalAlignment: root.headerHorizontalAlignment(headerCell.index)
                                 verticalAlignment: Text.AlignVCenter
                                 wrapMode: Text.WordWrap
                                 clip: true
@@ -1016,7 +1145,7 @@ Rectangle {
                         required property int index
                         required property var modelData
                         width: scroll.contentWidth
-                        height: root.compact ? 28 : 36
+                        height: root.rowHeight()
 
                         Repeater {
                             model: root.columns.length
@@ -1026,7 +1155,9 @@ Rectangle {
                                 required property int index
                                 width: root.columnWidths.length > index ? root.columnWidths[index] : root.columnWeight(index) * 100
                                 height: bodyRow.height
-                                color: "transparent"
+                                color: root.greenBarRows
+                                       ? (bodyRow.index % 2 === 0 ? Qt.rgba(0.88, 0.96, 0.88, 0.22) : Qt.rgba(0.96, 1.0, 0.96, 0.10))
+                                       : "transparent"
                                 border.color: NuTokens.lineSubtle
 
                                 Rectangle {
@@ -1134,14 +1265,14 @@ Rectangle {
                                     selectByMouse: true
                                     persistentSelection: true
                                     text: root.valueAt(bodyRow.modelData, bodyCell.index)
-                                    color: NuTokens.textPrimary
+                                    color: root.cellLinkUrl(bodyRow.modelData, bodyCell.index).length > 0 ? NuTokens.accentSky : NuTokens.textPrimary
                                     selectedTextColor: NuTokens.textInverse
                                     selectionColor: NuTokens.lineStrong
                                     font.family: root.isMonoColumn(bodyCell.index) ? NuTokens.monoFont : NuTokens.bodyFont
                                     font.pixelSize: root.cellFontSize()
+                                    font.underline: root.cellLinkUrl(bodyRow.modelData, bodyCell.index).length > 0
                                     verticalAlignment: Text.AlignVCenter
-                                    horizontalAlignment: root.centerAlignColumn(bodyCell.index) ? Text.AlignHCenter
-                                                         : (root.rightAlignColumn(bodyCell.index) ? Text.AlignRight : Text.AlignLeft)
+                                    horizontalAlignment: root.cellHorizontalAlignment(bodyRow.modelData, bodyCell.index)
                                     wrapMode: TextEdit.NoWrap
                                     clip: true
                                 }
@@ -1150,7 +1281,7 @@ Rectangle {
                                     anchors.fill: parent
                                     visible: !root.isActionColumn(bodyCell.index)
                                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                    cursorShape: Qt.IBeamCursor
+                                    cursorShape: root.cellLinkUrl(bodyRow.modelData, bodyCell.index).length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
                                     property point startPoint: Qt.point(0, 0)
                                     onPressed: (mouse) => {
                                         if (mouse.button === Qt.RightButton) {
@@ -1175,7 +1306,17 @@ Rectangle {
                                         root.updateRangeSelection(point)
                                     }
                                     onReleased: (mouse) => {
-                                        if (mouse.button !== Qt.RightButton) root.finishRangeSelection()
+                                        if (mouse.button !== Qt.RightButton) {
+                                            const link = root.cellLinkUrl(bodyRow.modelData, bodyCell.index)
+                                            const modified = (mouse.modifiers & Qt.ShiftModifier) !== 0
+                                                    || (mouse.modifiers & Qt.ControlModifier) !== 0
+                                                    || (mouse.modifiers & Qt.MetaModifier) !== 0
+                                            root.finishRangeSelection()
+                                            if (link.length > 0 && !root.selectionDragged && !modified) {
+                                                Qt.openUrlExternally(link)
+                                                mouse.accepted = true
+                                            }
+                                        }
                                     }
                                     onDoubleClicked: (mouse) => {
                                         if (mouse.button === Qt.RightButton) return
