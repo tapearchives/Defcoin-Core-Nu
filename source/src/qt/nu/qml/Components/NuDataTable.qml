@@ -132,6 +132,7 @@ Rectangle {
         const type = columnType(index)
         if (type === "action" || type === "delete") return 44
         if (type === "swatch") return 38
+        if (type === "lan") return 34
         if (type === "ipport" || type === "address" || type === "hash") return 210
         if (type === "date") return 132
         if (type === "bytes" || type === "amount") return 96
@@ -145,6 +146,7 @@ Rectangle {
         const type = columnType(index)
         if (type === "action" || type === "delete") return 44
         if (type === "swatch") return 52
+        if (type === "lan") return 40
         if (type === "ipport") return 840
         if (type === "address" || type === "hash") return 960
         if (type === "text") return 1200
@@ -198,7 +200,7 @@ Rectangle {
     function rightAlignColumn(index) {
         const type = columnType(index)
         const name = (index >= 0 && index < columns.length ? String(columns[index]) : "").toLowerCase()
-        if (type === "center" || type === "swatch") return false
+        if (type === "center" || type === "swatch" || type === "lan") return false
         if (type === "rightText" || type === "reverseDns") return true
         if (type === "bytes" || type === "amount" || type === "duration" || type === "number") return true
         return name === "dir." || name === "dir" || name.indexOf("direction") >= 0
@@ -210,7 +212,7 @@ Rectangle {
     function centerAlignColumn(index) {
         const type = columnType(index)
         const name = (index >= 0 && index < columns.length ? String(columns[index]) : "").toLowerCase()
-        return type === "center" || type === "swatch" || name === "active"
+        return type === "center" || type === "swatch" || type === "lan" || name === "active"
     }
 
     function headerHorizontalAlignment(index) {
@@ -1262,7 +1264,9 @@ Rectangle {
                                 TextEdit {
                                     anchors.fill: parent
                                     anchors.margins: root.compact ? NuTokens.spaceXs : NuTokens.spaceSm
-                                    visible: !root.isActionColumn(bodyCell.index) && root.columnType(bodyCell.index) !== "swatch"
+                                    visible: !root.isActionColumn(bodyCell.index)
+                                             && root.columnType(bodyCell.index) !== "swatch"
+                                             && root.columnType(bodyCell.index) !== "lan"
                                     readOnly: true
                                     selectByMouse: true
                                     persistentSelection: true
@@ -1288,6 +1292,44 @@ Rectangle {
                                     color: String(root.valueAt(bodyRow.modelData, bodyCell.index) || NuTokens.lineSubtle)
                                     border.color: NuTokens.lineStrong
                                     border.width: 1
+                                }
+
+                                Canvas {
+                                    id: lanGlyph
+                                    visible: root.columnType(bodyCell.index) === "lan"
+                                             && String(root.valueAt(bodyRow.modelData, bodyCell.index) || "").length > 0
+                                    anchors.centerIn: parent
+                                    width: Math.min(22, Math.max(16, parent.width - 8))
+                                    height: width
+                                    onPaint: {
+                                        const ctx = getContext("2d")
+                                        ctx.reset()
+                                        ctx.lineWidth = 1.5
+                                        ctx.strokeStyle = NuTokens.textPrimary
+                                        ctx.fillStyle = NuTokens.accentSky
+
+                                        const cx = width / 2
+                                        const topY = height * 0.27
+                                        const midY = height * 0.52
+                                        const lowY = height * 0.73
+                                        const box = Math.max(3.5, width * 0.18)
+
+                                        ctx.beginPath()
+                                        ctx.moveTo(cx, topY + box)
+                                        ctx.lineTo(cx, midY)
+                                        ctx.moveTo(cx, midY)
+                                        ctx.lineTo(width * 0.28, lowY - box / 2)
+                                        ctx.moveTo(cx, midY)
+                                        ctx.lineTo(width * 0.72, lowY - box / 2)
+                                        ctx.stroke()
+
+                                        ctx.fillRect(cx - box / 2, topY - box / 2, box, box)
+                                        ctx.strokeRect(cx - box / 2, topY - box / 2, box, box)
+                                        ctx.fillRect(width * 0.28 - box / 2, lowY - box / 2, box, box)
+                                        ctx.strokeRect(width * 0.28 - box / 2, lowY - box / 2, box, box)
+                                        ctx.fillRect(width * 0.72 - box / 2, lowY - box / 2, box, box)
+                                        ctx.strokeRect(width * 0.72 - box / 2, lowY - box / 2, box, box)
+                                    }
                                 }
 
                                 MouseArea {

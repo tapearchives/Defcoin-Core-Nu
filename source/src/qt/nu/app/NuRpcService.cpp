@@ -842,6 +842,111 @@ QString parseLanPeerNameLookupOutput(const QString& output)
     return QString();
 }
 
+QStringList parseLanPeerFingerprintDetails(const QString& output)
+{
+    QStringList details;
+    auto addDetail = [&details](const QString& label, QString value) {
+        value = value.trimmed();
+        value.replace(QRegularExpression(QStringLiteral(R"(\s+)")), QStringLiteral(" "));
+        if (value.isEmpty()) return;
+        const QString item = QStringLiteral("%1: %2").arg(label, value);
+        if (!details.contains(item, Qt::CaseInsensitive)) details.push_back(item);
+    };
+
+    const QString name = parseLanPeerNameLookupOutput(output);
+    if (!name.isEmpty()) addDetail(QStringLiteral("Name"), name);
+
+    const QVector<QPair<QString, QRegularExpression>> patterns{
+        {QStringLiteral("macOS"), QRegularExpression(QStringLiteral(R"(\bOS=\[([^\]]*(?:Mac|Darwin|Apple)[^\]]*)\])"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("Windows"), QRegularExpression(QStringLiteral(R"(\bOS=\[([^\]]*Windows[^\]]*)\])"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("Linux"), QRegularExpression(QStringLiteral(R"(\bOS=\[([^\]]*Linux[^\]]*)\])"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("OS"), QRegularExpression(QStringLiteral(R"(\bOS=\[([^\]]+)\])"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("Server"), QRegularExpression(QStringLiteral(R"(\bServer=\[([^\]]+)\])"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("Workgroup"), QRegularExpression(QStringLiteral(R"(\bWorkgroup=\[([^\]]+)\])"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("NetBIOS"), QRegularExpression(QStringLiteral(R"(NetBIOS\s+Name:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("OS"), QRegularExpression(QStringLiteral(R"(^\s*(?:Running|OS details):\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
+        {QStringLiteral("Device"), QRegularExpression(QStringLiteral(R"(^\s*Device type:\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
+        {QStringLiteral("MAC"), QRegularExpression(QStringLiteral(R"(^\s*MAC Address:\s*([0-9A-F:]{17}(?:\s+\([^)]+\))?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)}
+    };
+
+    for (const auto& item : patterns) {
+        QRegularExpressionMatchIterator it = item.second.globalMatch(output);
+        while (it.hasNext() && details.size() < 10) {
+            const QRegularExpressionMatch match = it.next();
+            addDetail(item.first, match.captured(1));
+        }
+    }
+
+    if (output.contains(QStringLiteral("Windows"), Qt::CaseInsensitive) && !details.join(QString()).contains(QStringLiteral("Windows"), Qt::CaseInsensitive)) {
+        addDetail(QStringLiteral("OS"), QStringLiteral("Windows"));
+    }
+    if ((output.contains(QStringLiteral("Darwin"), Qt::CaseInsensitive) || output.contains(QStringLiteral("Mac OS"), Qt::CaseInsensitive)) &&
+        !details.join(QString()).contains(QStringLiteral("macOS"), Qt::CaseInsensitive)) {
+        addDetail(QStringLiteral("OS"), QStringLiteral("macOS"));
+    }
+    if (output.contains(QStringLiteral("Linux"), Qt::CaseInsensitive) && !details.join(QString()).contains(QStringLiteral("Linux"), Qt::CaseInsensitive)) {
+        addDetail(QStringLiteral("OS"), QStringLiteral("Linux"));
+    }
+
+    return details;
+}
+
+QString nmapProgramPath()
+{
+    static const QStringList candidates{
+#if defined(Q_OS_WIN)
+        QStringLiteral("nmap.exe")
+#elif defined(Q_OS_MACOS)
+        QStringLiteral("/opt/homebrew/bin/nmap"),
+        QStringLiteral("/usr/local/bin/nmap"),
+        QStringLiteral("/usr/bin/nmap")
+#else
+        QStringLiteral("/usr/bin/nmap"),
+        QStringLiteral("/usr/local/bin/nmap")
+#endif
+    };
+    for (const QString& candidate : candidates) {
+        if (candidate.contains(QLatin1Char('/'))) {
+            if (QFileInfo::exists(candidate) && QFileInfo(candidate).isExecutable()) return candidate;
+        } else {
+            return candidate;
+        }
+    }
+    return QString();
+}
+
+bool isVisibleLanPeer(const QString& host,
+                      const QString& reverse_dns,
+                      const QString& known_dns,
+                      const QHash<QString, QString>& lan_cache,
+                      const QHash<QString, QString>& lan_info_cache)
+{
+    const QString key = normalizedPeerHost(host);
+    return isLikelyLanAddress(host) ||
+           isOnLocalInterfaceSubnet(host) ||
+           !lanAliasFromDnsName(reverse_dns).isEmpty() ||
+           known_dns.startsWith(QStringLiteral("LAN:"), Qt::CaseInsensitive) ||
+           lan_cache.contains(key) ||
+           lan_info_cache.contains(key);
+}
+
+QString peerLanWorkstationInfo(const QString& host,
+                               const QHash<QString, QString>& lan_info_cache,
+                               const QHash<QString, QString>& lan_name_cache,
+                               const QHash<QString, QString>& dns_cache,
+                               const QSet<QString>& pending)
+{
+    const QString key = normalizedPeerHost(host);
+    const QString info = lan_info_cache.value(key);
+    if (!info.isEmpty()) return info;
+    const QString name = lan_name_cache.value(key);
+    if (!name.isEmpty()) return QStringLiteral("Name: %1").arg(name);
+    const QString alias = lanAliasFromDnsName(dns_cache.value(key));
+    if (!alias.isEmpty()) return QStringLiteral("Name: %1").arg(alias.mid(4));
+    if (pending.contains(key)) return QStringLiteral("Scanning...");
+    return QStringLiteral("-");
+}
+
 QStringList configuredSeedDomains()
 {
     return {
@@ -2468,7 +2573,7 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
     const bool on_local_subnet = isOnLocalInterfaceSubnet(host);
     if (!isLikelyLanAddress(host) && !has_local_dns_hint && !on_local_subnet) return;
 
-    if (m_peer_lan_name_by_host.contains(key) ||
+    if ((m_peer_lan_name_by_host.contains(key) && m_peer_lan_info_by_host.contains(key)) ||
         m_peer_lan_lookup_pending.contains(key) ||
         m_peer_lan_lookup_attempted.contains(key)) {
         return;
@@ -2483,6 +2588,10 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
     };
 
     QVector<Command> commands;
+    const QString nmap = nmapProgramPath();
+    if (!nmap.isEmpty()) {
+        commands.push_back({nmap, {QStringLiteral("-O"), QStringLiteral("--osscan-limit"), QStringLiteral("--max-retries"), QStringLiteral("1"), QStringLiteral("--host-timeout"), QStringLiteral("5s"), QStringLiteral("-Pn"), address.toString()}});
+    }
 #if defined(Q_OS_MACOS)
     const QString ptr_name = reverseDnsNameForAddress(address);
     if (!ptr_name.isEmpty()) {
@@ -2511,10 +2620,25 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
     m_peer_lan_lookup_attempted.insert(key);
 
     auto command_list = std::make_shared<QVector<Command>>(commands);
+    auto aggregate_name = std::make_shared<QString>();
+    auto aggregate_details = std::make_shared<QStringList>();
     auto run_next = std::make_shared<std::function<void(int)>>();
-    *run_next = [this, key, command_list, run_next](int index) {
+    *run_next = [this, key, command_list, aggregate_name, aggregate_details, run_next](int index) {
         if (index >= command_list->size()) {
             m_peer_lan_lookup_pending.remove(key);
+            bool changed = false;
+            if (!aggregate_name->isEmpty() && m_peer_lan_name_by_host.value(key) != *aggregate_name) {
+                m_peer_lan_name_by_host.insert(key, *aggregate_name);
+                changed = true;
+            }
+            if (!aggregate_details->isEmpty()) {
+                const QString info = aggregate_details->join(QStringLiteral(" | "));
+                if (m_peer_lan_info_by_host.value(key) != info) {
+                    m_peer_lan_info_by_host.insert(key, info);
+                    changed = true;
+                }
+            }
+            if (changed) refreshNode();
             return;
         }
 
@@ -2533,7 +2657,7 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
             if (process->state() != QProcess::NotRunning) process->kill();
         });
 
-        const auto finish = [this, process, timeout, key, run_next, index, completed] {
+        const auto finish = [process, timeout, run_next, index, completed, aggregate_name, aggregate_details] {
             if (*completed) return;
             *completed = true;
             timeout->stop();
@@ -2542,12 +2666,12 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
                 + QLatin1Char('\n')
                 + QString::fromLocal8Bit(process->readAllStandardError());
             const QString name = parseLanPeerNameLookupOutput(output);
-            if (!name.isEmpty()) {
-                m_peer_lan_name_by_host.insert(key, name);
-                m_peer_lan_lookup_pending.remove(key);
-                process->deleteLater();
-                refreshNode();
-                return;
+            const QStringList details = parseLanPeerFingerprintDetails(output);
+            if (!name.isEmpty() && aggregate_name->isEmpty()) {
+                *aggregate_name = name;
+            }
+            for (const QString& detail : details) {
+                if (!aggregate_details->contains(detail, Qt::CaseInsensitive)) aggregate_details->push_back(detail);
             }
 
             process->deleteLater();
@@ -2821,6 +2945,11 @@ void NuRpcService::refreshNode()
             const QString services = formatServices(peer.value(QStringLiteral("services")).toString());
             const QString reverse_dns = peerDnsName(peer, endpoint, m_peer_dns_name_by_host);
             const QString known_dns = peerDomainAlias(peer, endpoint, m_peer_dns_name_by_host, m_peer_domain_alias_by_host, m_peer_lan_name_by_host);
+            const bool lan_peer = m_lan_node_discovery_enabled && isVisibleLanPeer(endpoint.first, reverse_dns, known_dns, m_peer_lan_name_by_host, m_peer_lan_info_by_host);
+            const QString lan_marker = lan_peer ? QStringLiteral("LAN") : QString();
+            const QString workstation_info = lan_peer
+                ? peerLanWorkstationInfo(endpoint.first, m_peer_lan_info_by_host, m_peer_lan_name_by_host, m_peer_dns_name_by_host, m_peer_lan_lookup_pending)
+                : QStringLiteral("-");
             const QJsonObject sent_per_msg = peer.value(QStringLiteral("bytessent_per_msg")).toObject();
             for (auto it = sent_per_msg.constBegin(); it != sent_per_msg.constEnd(); ++it) {
                 sent_message_bytes[it.key()] += it.value().toVariant().toLongLong();
@@ -2845,6 +2974,8 @@ void NuRpcService::refreshNode()
                 direction,
                 peerIpDisplay(endpoint),
                 fallbackDash(endpoint.second),
+                lan_marker,
+                workstation_info,
                 reverse_dns,
                 known_dns,
                 protocol_version,
@@ -2873,7 +3004,8 @@ void NuRpcService::refreshNode()
                     : QStringLiteral("-")
             }, {
                 {QStringLiteral("reverseDnsSort"), reverseDomainSortNotation(reverse_dns)},
-                {QStringLiteral("knownDnsSort"), reverseDomainSortNotation(known_dns.startsWith(QStringLiteral("LAN:")) ? known_dns.mid(4) : known_dns)}
+                {QStringLiteral("knownDnsSort"), reverseDomainSortNotation(known_dns.startsWith(QStringLiteral("LAN:")) ? known_dns.mid(4) : known_dns)},
+                {QStringLiteral("workstationInfoSort"), workstation_info}
             }));
         }
         m_peer_rows_simple = simple_rows;
@@ -4492,6 +4624,7 @@ void NuRpcService::setLanNodeDiscoveryEnabled(bool enabled)
     settings.setValue(QStringLiteral("LanNodeDiscoveryEnabled"), enabled);
     if (!enabled) {
         m_peer_lan_name_by_host.clear();
+        m_peer_lan_info_by_host.clear();
         m_peer_lan_lookup_pending.clear();
         m_peer_lan_lookup_attempted.clear();
     } else {

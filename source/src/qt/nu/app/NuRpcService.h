@@ -787,6 +787,7 @@ private:
     QHash<QString, QString> m_peer_domain_alias_by_host;
     QHash<QString, int> m_peer_domain_alias_priority_by_host;
     QHash<QString, QString> m_peer_lan_name_by_host;
+    QHash<QString, QString> m_peer_lan_info_by_host;
     QSet<QString> m_peer_reverse_lookup_pending;
     QSet<QString> m_peer_reverse_lookup_attempted;
     QSet<QString> m_peer_lan_lookup_pending;

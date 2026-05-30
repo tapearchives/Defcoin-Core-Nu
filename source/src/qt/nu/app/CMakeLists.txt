@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(DefcoinCoreNuQml VERSION 26.5.5 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.5.5e" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.5.5f" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -220,7 +220,22 @@ if(APPLE)
     )
 
     if(Qt6Core_DIR)
-        get_filename_component(DEFCOIN_NU_QT_ROOT "${Qt6Core_DIR}/../../.." ABSOLUTE)
+        if(Qt6_DIR)
+            get_filename_component(DEFCOIN_NU_QT_ROOT "${Qt6_DIR}/../../.." ABSOLUTE)
+        else()
+            get_filename_component(DEFCOIN_NU_QT_ROOT "${Qt6Core_DIR}/../../.." ABSOLUTE)
+        endif()
+        set(DEFCOIN_NU_QT_PLUGIN_ROOT "")
+        foreach(candidate_plugin_root
+            "${DEFCOIN_NU_QT_ROOT}/plugins"
+            "${DEFCOIN_NU_QT_ROOT}/share/qt/plugins"
+            "/opt/homebrew/share/qt/plugins"
+            "/usr/local/share/qt/plugins"
+        )
+            if(NOT DEFCOIN_NU_QT_PLUGIN_ROOT AND EXISTS "${candidate_plugin_root}")
+                set(DEFCOIN_NU_QT_PLUGIN_ROOT "${candidate_plugin_root}")
+            endif()
+        endforeach()
         set(DEFCOIN_NU_MACDEPLOYQT "${DEFCOIN_NU_QT_ROOT}/bin/macdeployqt")
         if(EXISTS "${DEFCOIN_NU_MACDEPLOYQT}")
             add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
@@ -232,9 +247,10 @@ if(APPLE)
                     "-libpath=${DEFCOIN_NU_QT_ROOT}/lib"
                     -always-overwrite
                     -appstore-compliant
-                COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_ROOT}/plugins/imageformats" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/imageformats"
-                COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_ROOT}/plugins/sqldrivers" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/sqldrivers"
-                COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_ROOT}/plugins/tls" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/tls"
+                    -no-codesign
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_PLUGIN_ROOT}/imageformats" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/imageformats"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_PLUGIN_ROOT}/sqldrivers" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/sqldrivers"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_PLUGIN_ROOT}/tls" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/tls"
                 COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/fix_macos_qt_rpath.sh" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/MacOS/DefcoinCoreNu"
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/repair_macos_qt_bundle.py" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>"
                 COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"

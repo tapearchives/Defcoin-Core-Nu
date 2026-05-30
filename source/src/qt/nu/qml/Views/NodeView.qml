@@ -35,25 +35,30 @@ ColumnLayout {
     property var simplePeerMaximums: [64, 42, 390, 74, 82, 82, 280]
     property var simplePeerTooltips: [
         "Backend peer connection ID for this session.",
-        "Connection direction: In means the peer connected to this wallet; Out means this wallet connected to the peer.",
+        "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
         "Peer endpoint, including IP address and TCP port.",
         "Current round-trip latency reported by the backend.",
         "Total bytes sent to this peer since the connection opened.",
         "Total bytes received from this peer since the connection opened.",
         "Software name and version reported by the peer."
     ]
-    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "Reverse\nDNS Name", "Known\nDNS Name", "Protocol\nVersion", "Magic", "Svcs", "Fast\nSync\nAvail", "Fast\nSync\nUsed", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
-    property var detailedPeerTypes: ["number", "text", "ipport", "number", "reverseDns", "knownDns", "number", "text", "text", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
-    property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "fastSyncUsed", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
-    property var detailedPeerSortMetaFields: ["", "", "", "", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
-    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 1.05, 1.05, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
-    property var detailedPeerMinimums: [44, 34, 128, 46, 90, 96, 62, 74, 54, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
-    property var detailedPeerMaximums: [62, 42, 330, 70, 240, 220, 82, 92, 80, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
+    readonly property int detailedLanColumnStart: 4
+    readonly property int detailedLanColumnCount: 2
+    property bool showLanPeerColumns: NuService.lanNodeDiscoveryEnabled
+    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "LAN", "Workstation\nInfo", "Reverse\nDNS Name", "Known\nDNS Name", "Protocol\nVersion", "Magic", "Svcs", "Fast\nSync\nAvail", "Fast\nSync\nUsed", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
+    property var detailedPeerTypes: ["number", "text", "ipport", "number", "lan", "text", "reverseDns", "knownDns", "number", "text", "text", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
+    property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "lan", "workstationInfo", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "fastSyncUsed", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
+    property var detailedPeerSortMetaFields: ["", "", "", "", "", "workstationInfoSort", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
+    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 0.2, 1.15, 1.05, 1.05, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
+    property var detailedPeerMinimums: [44, 34, 128, 46, 34, 116, 90, 96, 62, 74, 54, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
+    property var detailedPeerMaximums: [62, 42, 330, 70, 40, 360, 240, 220, 82, 92, 80, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
     property var detailedPeerTooltips: [
         "Backend peer connection ID for this session.",
-        "Connection direction: In means the peer connected to this wallet; Out means this wallet connected to the peer.",
+        "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
         "Peer IP address without the port. IPv4 values use fixed-width octet spacing so dots align.",
         "Peer TCP port.",
+        "LAN peer marker. This narrow column appears only when LAN communication/discovery is enabled and the peer address looks local.",
+        "Best-effort LAN workstation fingerprint for local peers, combining reverse DNS, Bonjour/DNS-SD, SMB/NetBIOS, ping, and optional nmap output when available.",
         "Best-effort reverse DNS name for the peer IP address. Blank means no reverse DNS name has resolved yet.",
         "Known seed/domain name or LAN workstation name associated with this peer address. LAN names are best-effort and appear as LAN:<machine name> when LAN discovery is enabled.",
         "P2P protocol version reported by the peer.",
@@ -79,6 +84,46 @@ ColumnLayout {
         "Cumulative addr/addrv2 relay entries processed from this peer during this connection after Defcoin user-agent and port filters. This is not a unique node count; one peer can send up to about 1000 address records in one response.",
         "Minimum transaction relay fee rate this peer has announced with its feefilter policy, displayed as DFC per kilobyte."
     ]
+
+    function filterLanPeerColumns(values) {
+        if (root.showLanPeerColumns) return values
+        let out = []
+        for (let i = 0; i < values.length; ++i) {
+            if (i < root.detailedLanColumnStart || i >= root.detailedLanColumnStart + root.detailedLanColumnCount) out.push(values[i])
+        }
+        return out
+    }
+
+    function normalizeDetailedPeerCells(row) {
+        let cells = []
+        if (row && row.cells !== undefined) cells = row.cells.slice()
+        else if (row) cells = row.slice()
+        if (cells.length === root.detailedPeerColumns.length - root.detailedLanColumnCount) {
+            cells.splice(root.detailedLanColumnStart, 0, "", "-")
+        }
+        while (cells.length < root.detailedPeerColumns.length) cells.push("")
+        return cells
+    }
+
+    function displayedDetailedPeerRows() {
+        const source = NuService.peerRowsDetailed || []
+        let rows = []
+        for (let r = 0; r < source.length; ++r) {
+            const row = source[r]
+            const cells = normalizeDetailedPeerCells(row)
+            const meta = row && row.meta !== undefined ? row.meta : ({})
+            if (root.showLanPeerColumns) {
+                rows.push({ "cells": cells, "meta": meta })
+                continue
+            }
+            let filtered = []
+            for (let i = 0; i < cells.length; ++i) {
+                if (i < root.detailedLanColumnStart || i >= root.detailedLanColumnStart + root.detailedLanColumnCount) filtered.push(cells[i])
+            }
+            rows.push({ "cells": filtered, "meta": meta })
+        }
+        return rows
+    }
 
     function applyPeerSortForCurrentView() {
         if (!peersTable) return
@@ -402,15 +447,15 @@ ColumnLayout {
                 alwaysShowHorizontalScrollBar: peerViewToggle.currentIndex === 1
                 tableId: peerViewToggle.currentIndex === 0 ? "nodePeersSimple" : "nodePeersDetailed"
                 restoreSavedColumnWidths: false
-                columns: peerViewToggle.currentIndex === 0 ? root.simplePeerColumns : root.detailedPeerColumns
-                columnTooltips: peerViewToggle.currentIndex === 0 ? root.simplePeerTooltips : root.detailedPeerTooltips
-                columnTypes: peerViewToggle.currentIndex === 0 ? root.simplePeerTypes : root.detailedPeerTypes
-                sortColumnKeys: peerViewToggle.currentIndex === 0 ? root.simplePeerSortKeys : root.detailedPeerSortKeys
-                columnSortMetaFields: peerViewToggle.currentIndex === 0 ? [] : root.detailedPeerSortMetaFields
-                columnWeights: peerViewToggle.currentIndex === 0 ? root.simplePeerWeights : root.detailedPeerWeights
-                columnMinimums: peerViewToggle.currentIndex === 0 ? root.simplePeerMinimums : root.detailedPeerMinimums
-                columnMaximums: peerViewToggle.currentIndex === 0 ? root.simplePeerMaximums : root.detailedPeerMaximums
-                rows: peerViewToggle.currentIndex === 0 ? NuService.peerRowsSimple : NuService.peerRowsDetailed
+                columns: peerViewToggle.currentIndex === 0 ? root.simplePeerColumns : root.filterLanPeerColumns(root.detailedPeerColumns)
+                columnTooltips: peerViewToggle.currentIndex === 0 ? root.simplePeerTooltips : root.filterLanPeerColumns(root.detailedPeerTooltips)
+                columnTypes: peerViewToggle.currentIndex === 0 ? root.simplePeerTypes : root.filterLanPeerColumns(root.detailedPeerTypes)
+                sortColumnKeys: peerViewToggle.currentIndex === 0 ? root.simplePeerSortKeys : root.filterLanPeerColumns(root.detailedPeerSortKeys)
+                columnSortMetaFields: peerViewToggle.currentIndex === 0 ? [] : root.filterLanPeerColumns(root.detailedPeerSortMetaFields)
+                columnWeights: peerViewToggle.currentIndex === 0 ? root.simplePeerWeights : root.filterLanPeerColumns(root.detailedPeerWeights)
+                columnMinimums: peerViewToggle.currentIndex === 0 ? root.simplePeerMinimums : root.filterLanPeerColumns(root.detailedPeerMinimums)
+                columnMaximums: peerViewToggle.currentIndex === 0 ? root.simplePeerMaximums : root.filterLanPeerColumns(root.detailedPeerMaximums)
+                rows: peerViewToggle.currentIndex === 0 ? NuService.peerRowsSimple : root.displayedDetailedPeerRows()
                 emptyText: "Peers hydrate here after the tab renders."
                 onSortChanged: (column, ascending, key) => {
                     root.peerSortKey = key
@@ -421,6 +466,16 @@ ColumnLayout {
                     } else {
                         root.peerDetailedSortKey = key
                         root.peerDetailedSortAscending = ascending
+                    }
+                }
+
+                Connections {
+                    target: NuService
+                    function onSettingsChanged() {
+                        Qt.callLater(function() {
+                            root.applyPeerSortForCurrentView()
+                            peersTable.forceResetColumnWidths()
+                        })
                     }
                 }
             }
