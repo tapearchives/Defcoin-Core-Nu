@@ -2955,15 +2955,21 @@ void NuRpcService::refreshNode()
                     fast_sync_available = QStringLiteral("TBA");
                 }
             }
-            const QString fast_sync_used = (!udp_fast_sync_host_key.isEmpty() && m_udp_fast_sync_used_peer_hosts.contains(udp_fast_sync_host_key)) ? QStringLiteral("Yes") : QStringLiteral("No");
             schedulePeerNameLookups(endpoint.first);
             scheduleLanPeerNameLookups(endpoint.first);
             const QString node_id = QString::number(peer.value(QStringLiteral("id")).toInt());
             const QString direction = peer.value(QStringLiteral("inbound")).toBool() ? QStringLiteral("In") : QStringLiteral("Out");
             const QString ping = formatPing(peer.value(QStringLiteral("pingtime")));
             const QString min_ping = formatPing(peer.value(QStringLiteral("minping")));
-            const QString sent = formatBytes(peer.value(QStringLiteral("bytessent")).toVariant().toLongLong());
-            const QString received = formatBytes(peer.value(QStringLiteral("bytesrecv")).toVariant().toLongLong());
+            const qint64 peer_bytes_sent = peer.value(QStringLiteral("bytessent")).toVariant().toLongLong();
+            const qint64 peer_bytes_received = peer.value(QStringLiteral("bytesrecv")).toVariant().toLongLong();
+            const QString sent = formatBytes(peer_bytes_sent);
+            const QString received = formatBytes(peer_bytes_received);
+            const bool tcp_used = peer_bytes_sent > 0 || peer_bytes_received > 0;
+            const bool udp_used = !udp_fast_sync_host_key.isEmpty() && m_udp_fast_sync_used_peer_hosts.contains(udp_fast_sync_host_key);
+            const QString transport_methods = tcp_used && udp_used
+                ? QStringLiteral("TCP+UDP")
+                : (tcp_used ? QStringLiteral("TCP") : (udp_used ? QStringLiteral("UDP") : QStringLiteral("-")));
             const QString magic = fallbackDash(peer.value(QStringLiteral("p2p_magic")).toString(
                 peer.value(QStringLiteral("magic")).toString(QStringLiteral("pending"))));
             const QString protocol_version = peerNumberText(peer, QStringLiteral("version"));
@@ -2988,6 +2994,7 @@ void NuRpcService::refreshNode()
                 node_id,
                 direction,
                 peerAddressPortDisplay(raw_addr, endpoint),
+                transport_methods,
                 ping,
                 sent,
                 received,
@@ -3007,7 +3014,7 @@ void NuRpcService::refreshNode()
                 magic,
                 services,
                 fast_sync_available,
-                fast_sync_used,
+                transport_methods,
                 ping,
                 min_ping,
                 sent,
@@ -3736,6 +3743,7 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
             const int total_chunks = (raw.size() + chunk_bytes - 1) / chunk_bytes;
             if (total_chunks <= 0 || total_chunks > LAN_FAST_SYNC_MAX_CHUNKS_PER_BLOCK) return;
             const QString block_checksum = lanFastSyncChecksum(raw);
+            bool sent_any_chunk = false;
             for (int seq = 0; seq < total_chunks; ++seq) {
                 const QByteArray chunk = raw.mid(seq * chunk_bytes, chunk_bytes);
                 QJsonObject chunk_header;
@@ -3753,7 +3761,19 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
                 const QByteArray datagram = lanFastSyncDatagram(chunk_header, chunk);
                 if (!datagram.isEmpty() && datagram.size() <= peer_max_datagram) {
                     const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, sender, reply_port);
-                    if (written > 0) recordLanFastSyncUdpTraffic(written, 0);
+                    if (written > 0) {
+                        recordLanFastSyncUdpTraffic(written, 0);
+                        sent_any_chunk = true;
+                    }
+                }
+            }
+            if (sent_any_chunk) {
+                const QString sender_key = normalizedFastSyncHost(sender);
+                if (!sender_key.isEmpty()) {
+                    m_udp_fast_sync_available_peer_hosts.insert(sender_key);
+                    m_udp_fast_sync_failed_peer_hosts.remove(sender_key);
+                    m_udp_fast_sync_used_peer_hosts.insert(sender_key);
+                    QTimer::singleShot(0, this, &NuRpcService::refreshNode);
                 }
             }
         });

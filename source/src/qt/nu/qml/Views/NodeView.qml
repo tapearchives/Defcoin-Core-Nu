@@ -27,16 +27,17 @@ ColumnLayout {
     property string peerDetailedSortKey: ""
     property bool peerDetailedSortAscending: true
     readonly property int trafficMaxChartSeconds: 7 * 24 * 60 * 60
-    property var simplePeerColumns: ["Node", "Dir", "IP Address: Port", "Ping", "Sent", "Rec'd", "User Agent"]
-    property var simplePeerTypes: ["number", "text", "ipport", "duration", "bytes", "bytes", "text"]
-    property var simplePeerSortKeys: ["node", "direction", "ip", "ping", "sent", "received", "userAgent"]
-    property var simplePeerWeights: [0.38, 0.24, 1.7, 0.42, 0.42, 0.42, 1.35]
-    property var simplePeerMinimums: [48, 34, 132, 52, 58, 58, 92]
-    property var simplePeerMaximums: [64, 42, 390, 74, 82, 82, 280]
+    property var simplePeerColumns: ["Node", "Dir", "IP Address: Port", "Methods", "Ping", "Sent", "Rec'd", "User Agent"]
+    property var simplePeerTypes: ["number", "text", "ipport", "center", "duration", "bytes", "bytes", "text"]
+    property var simplePeerSortKeys: ["node", "direction", "ip", "transportMethods", "ping", "sent", "received", "userAgent"]
+    property var simplePeerWeights: [0.38, 0.24, 1.7, 0.46, 0.42, 0.42, 0.42, 1.35]
+    property var simplePeerMinimums: [48, 34, 132, 66, 52, 58, 58, 92]
+    property var simplePeerMaximums: [64, 42, 390, 92, 74, 82, 82, 280]
     property var simplePeerTooltips: [
         "Backend peer connection ID for this session.",
         "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
         "Peer endpoint, including IP address and TCP port.",
+        "Transport methods that have successfully exchanged data with this peer during this Nu session: TCP, UDP, or TCP+UDP.",
         "Current round-trip latency reported by the backend.",
         "Total bytes sent to this peer since the connection opened.",
         "Total bytes received from this peer since the connection opened.",
@@ -45,9 +46,9 @@ ColumnLayout {
     readonly property int detailedLanColumnStart: 4
     readonly property int detailedLanColumnCount: 2
     property bool showLanPeerColumns: NuService.lanNodeDiscoveryEnabled
-    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "LAN", "Workstation\nInfo", "Reverse\nDNS Name", "Known\nDNS Name", "Protocol\nVersion", "Magic", "Svcs", "Fast\nSync\nAvail", "Fast\nSync\nUsed", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
+    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "LAN", "Workstation\nInfo", "Reverse\nDNS Name", "Known\nDNS Name", "Protocol\nVersion", "Magic", "Svcs", "Fast\nSync\nAvail", "Methods", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
     property var detailedPeerTypes: ["number", "text", "ipport", "number", "lan", "text", "reverseDns", "knownDns", "number", "text", "text", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
-    property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "lan", "workstationInfo", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "fastSyncUsed", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
+    property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "lan", "workstationInfo", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "transportMethods", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
     property var detailedPeerSortMetaFields: ["", "", "", "", "", "workstationInfoSort", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
     property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 0.2, 1.15, 1.05, 1.05, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
     property var detailedPeerMinimums: [44, 34, 128, 46, 34, 116, 90, 96, 62, 74, 54, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
@@ -65,7 +66,7 @@ ColumnLayout {
         "Actual network message-start bytes selected for this peer, such as defc014e or fbc0b6db.",
         "Compact service flags advertised by the peer, such as N for NODE_NETWORK or W for witness support.",
         "UDP fast-sync capability state. Old non-Nu peers show No. Nu peers start as TBA until this session receives a valid UDP fast-sync response, then switch to Yes or Failed.",
-        "Whether this peer has provided at least one UDP fast-sync block chunk during this Nu session.",
+        "Transport methods that have successfully exchanged data with this peer during this Nu session: TCP means Core P2P bytes; UDP means fast-sync block data; TCP+UDP means both.",
         "Current round-trip latency reported by the backend.",
         "Best observed ping for this connection.",
         "Total bytes sent to this peer since the connection opened.",
