@@ -29,8 +29,24 @@ ditto "$BUILT_APP" "$DEST_APP"
 chmod -R u+w "$DEST_APP"
 rm -f "$DEST_APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
 "$(dirname "$0")/bundle_macos_backend_deps.sh" "$DEST_APP"
-install_name_tool -delete_rpath /opt/homebrew/lib "$DEST_APP/Contents/MacOS/DefcoinCoreNu" 2>/dev/null || true
-install_name_tool -add_rpath "@executable_path/../Frameworks" "$DEST_APP/Contents/MacOS/DefcoinCoreNu" 2>/dev/null || true
+
+APP_EXE="$DEST_APP/Contents/MacOS/DefcoinCoreNu"
+while IFS= read -r rpath; do
+  case "$rpath" in
+    /opt/homebrew/lib|*"/toolchains/qt/"*|*"/Qt/"*"/macos/lib")
+      install_name_tool -delete_rpath "$rpath" "$APP_EXE" 2>/dev/null || true
+      ;;
+  esac
+done < <(otool -l "$APP_EXE" | awk '
+  /LC_RPATH/ {
+    getline
+    getline
+    sub(/^ *path /, "")
+    sub(/ \(offset.*$/, "")
+    print
+  }
+')
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_EXE" 2>/dev/null || true
 xattr -cr "$DEST_APP" || true
 
 codesign --force --deep --sign - "$DEST_APP" >/dev/null
