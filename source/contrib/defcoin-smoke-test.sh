@@ -83,8 +83,8 @@ done
 
 "$DEFCOIN_CLI" -regtest -datadir="$TMPDIR_ROOT" -rpcport="$RPCPORT" getblockchaininfo >/dev/null
 NETWORK_INFO="$("$DEFCOIN_CLI" -regtest -datadir="$TMPDIR_ROOT" -rpcport="$RPCPORT" getnetworkinfo)"
-if ! grep -q '"/DefcoinCoreNu:26.5.2/"' <<<"$NETWORK_INFO"; then
-    echo "getnetworkinfo does not report the expected DefcoinCoreNu 26.5.2 user agent" >&2
+if ! grep -q '"/DefcoinCoreNu:26.5.5/"' <<<"$NETWORK_INFO"; then
+    echo "getnetworkinfo does not report the expected DefcoinCoreNu 26.5.5 user agent" >&2
     echo "$NETWORK_INFO" >&2
     exit 1
 fi

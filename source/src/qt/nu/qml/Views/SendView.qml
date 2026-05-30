@@ -51,6 +51,20 @@ ColumnLayout {
         return row && row.length > 1 ? String(row[1]) : ""
     }
 
+    function recipientAddressForInspect() {
+        const selected = selectedAddressBookAddress().trim()
+        if (selected.length > 0)
+            return selected
+        let text = recipientField.text.trim()
+        if (text.toLowerCase().indexOf("defcoin:") === 0) {
+            text = text.substring("defcoin:".length)
+            const queryStart = text.indexOf("?")
+            if (queryStart >= 0)
+                text = text.substring(0, queryStart)
+        }
+        return text.trim()
+    }
+
     function loadUri(uri) {
         var text = String(uri === undefined || uri === null ? "" : uri).trim()
         if (text.length === 0)
@@ -82,7 +96,7 @@ ColumnLayout {
 
     NuPanel {
         Layout.fillWidth: true
-        implicitHeight: root.advancedOpen ? 650 : 430
+        implicitHeight: root.advancedOpen ? 590 : 430
 
         GridLayout {
             anchors.fill: parent
@@ -107,12 +121,12 @@ ColumnLayout {
                     }
                 }
 
-                NuActionButton {
-                    text: "I"
+                NuInspectButton {
                     Layout.preferredWidth: 44
-                    enabled: root.selectedAddressBookAddress().length > 0
-                    helpText: "Inspect the selected address in the configured blockchain explorer."
-                    onClicked: NuService.openAddressInExplorer(root.selectedAddressBookAddress())
+                    Layout.preferredHeight: 44
+                    enabled: root.recipientAddressForInspect().length > 0
+                    helpText: "Inspect the selected or entered address in the configured blockchain explorer."
+                    onClicked: NuService.openAddressInExplorer(root.recipientAddressForInspect())
                 }
             }
 
@@ -230,25 +244,26 @@ ColumnLayout {
                         Layout.fillWidth: true
                         spacing: NuTokens.spaceSm
 
-                        RowLayout {
+                        Flow {
                             Layout.fillWidth: true
+                            Layout.preferredHeight: implicitHeight
                             spacing: NuTokens.spaceSm
 
                             NuActionButton {
                                 text: "Load file..."
-                                Layout.preferredWidth: 124
+                                width: 112
                                 helpText: "Load a Partially Signed Defcoin Transaction from a .psbt or text file."
                                 onClicked: NuService.loadPsbtFromFile()
                             }
                             NuActionButton {
                                 text: "Load clipboard"
-                                Layout.preferredWidth: 148
+                                width: 130
                                 helpText: "Load text PSBT data from the clipboard."
                                 onClicked: NuService.loadPsbtFromClipboard()
                             }
                             NuActionButton {
                                 text: "Sign"
-                                Layout.preferredWidth: 86
+                                width: 76
                                 enabled: NuService.psbtLoaded
                                 opacity: enabled ? 1.0 : 0.48
                                 helpText: enabled ? "Ask the wallet backend to sign what it can in the loaded PSBT." : "Load a PSBT before signing."
@@ -256,7 +271,7 @@ ColumnLayout {
                             }
                             NuActionButton {
                                 text: "Finalize"
-                                Layout.preferredWidth: 104
+                                width: 92
                                 enabled: NuService.psbtLoaded
                                 opacity: enabled ? 1.0 : 0.48
                                 helpText: enabled ? "Finalize the loaded PSBT into a raw transaction when enough signatures are present." : "Load a PSBT before finalizing."
@@ -264,47 +279,43 @@ ColumnLayout {
                             }
                             NuActionButton {
                                 text: "Broadcast"
-                                Layout.preferredWidth: 118
+                                width: 104
                                 enabled: NuService.psbtFinalized
                                 opacity: enabled ? 1.0 : 0.48
                                 helpText: enabled ? "Broadcast the finalized transaction." : "Finalize a complete PSBT before broadcasting."
                                 onClicked: NuService.broadcastFinalizedPsbt()
                             }
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: NuTokens.spaceSm
-
                             NuActionButton {
                                 text: "Copy PSBT"
-                                Layout.preferredWidth: 118
+                                width: 100
                                 enabled: NuService.psbtLoaded
                                 opacity: enabled ? 1.0 : 0.48
                                 onClicked: NuService.copyCurrentPsbt()
                             }
                             NuActionButton {
                                 text: "Save PSBT..."
-                                Layout.preferredWidth: 126
+                                width: 110
                                 enabled: NuService.psbtLoaded
                                 opacity: enabled ? 1.0 : 0.48
                                 onClicked: NuService.saveCurrentPsbt()
                             }
                             NuActionButton {
                                 text: "Clear"
-                                Layout.preferredWidth: 86
+                                width: 76
                                 enabled: NuService.psbtLoaded
                                 opacity: enabled ? 1.0 : 0.48
                                 onClicked: NuService.clearCurrentPsbt()
                             }
-                            Item { Layout.fillWidth: true }
                         }
 
                         TextArea {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 120
+                            Layout.preferredHeight: 96
                             readOnly: true
                             selectByMouse: true
+                            selectByKeyboard: true
+                            activeFocusOnPress: true
+                            focusPolicy: Qt.StrongFocus
                             wrapMode: Text.WrapAnywhere
                             text: NuService.currentPsbtSummary
                             color: NuTokens.textPrimary
@@ -316,6 +327,12 @@ ColumnLayout {
                                 color: NuTokens.backgroundBase
                                 border.color: NuTokens.lineSubtle
                                 radius: NuTokens.radiusSmall
+                            }
+                            Keys.onPressed: function(event) {
+                                if (event.matches(StandardKey.Copy)) {
+                                    copy()
+                                    event.accepted = true
+                                }
                             }
                         }
                     }

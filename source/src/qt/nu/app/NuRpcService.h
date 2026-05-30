@@ -132,6 +132,15 @@ class NuRpcService final : public QObject
     Q_PROPERTY(int explorerIndexTip READ explorerIndexTip NOTIFY explorerChanged)
     Q_PROPERTY(int explorerIndexedBlockCount READ explorerIndexedBlockCount NOTIFY explorerChanged)
     Q_PROPERTY(int explorerIndexedOutputCount READ explorerIndexedOutputCount NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList explorerRichList READ explorerRichList NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList explorerMovements READ explorerMovements NOTIFY explorerChanged)
+    Q_PROPERTY(QString explorerAnalyticsStatus READ explorerAnalyticsStatus NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList forensicsIrregularMessages READ forensicsIrregularMessages NOTIFY forensicsChanged)
+    Q_PROPERTY(bool forensicsScanning READ forensicsScanning NOTIFY forensicsChanged)
+    Q_PROPERTY(QString forensicsScanStatus READ forensicsScanStatus NOTIFY forensicsChanged)
+    Q_PROPERTY(int forensicsScanHeight READ forensicsScanHeight NOTIFY forensicsChanged)
+    Q_PROPERTY(int forensicsScanTip READ forensicsScanTip NOTIFY forensicsChanged)
+    Q_PROPERTY(int forensicsIrregularMessageCount READ forensicsIrregularMessageCount NOTIFY forensicsChanged)
 
 public:
     explicit NuRpcService(QObject* parent = nullptr);
@@ -243,6 +252,15 @@ public:
     int explorerIndexTip() const { return m_explorer_index_tip; }
     int explorerIndexedBlockCount() const { return m_explorer_indexed_block_count; }
     int explorerIndexedOutputCount() const { return m_explorer_indexed_output_count; }
+    QVariantList explorerRichList() const { return m_explorer_rich_list; }
+    QVariantList explorerMovements() const { return m_explorer_movements; }
+    QString explorerAnalyticsStatus() const { return m_explorer_analytics_status; }
+    QVariantList forensicsIrregularMessages() const { return m_forensics_irregular_messages; }
+    bool forensicsScanning() const { return m_forensics_scanning; }
+    QString forensicsScanStatus() const { return m_forensics_scan_status; }
+    int forensicsScanHeight() const { return m_forensics_scan_height; }
+    int forensicsScanTip() const { return m_forensics_scan_tip; }
+    int forensicsIrregularMessageCount() const { return m_forensics_irregular_messages.size(); }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void requestNewAddress(const QString& label = QString(), const QString& amount = QString(), const QString& message = QString());
@@ -267,7 +285,7 @@ public:
     Q_INVOKABLE void setAddressLabel(const QString& address, const QString& label);
     Q_INVOKABLE void setNetworkActive(bool active);
     Q_INVOKABLE void scheduleWitnessBlockRepair(int start_height);
-    Q_INVOKABLE void repairWitnessBlockDataNow(int start_height);
+    Q_INVOKABLE void repairWitnessBlockDataNow(int start_height, bool fix_missing_witness = true);
     Q_INVOKABLE void pingPeers();
     Q_INVOKABLE void runRpcCommand(const QString& method, const QString& params_json, bool wallet_scoped);
     Q_INVOKABLE QString walletDisplayName(const QString& name) const;
@@ -328,9 +346,12 @@ public:
     Q_INVOKABLE void searchExplorer(const QString& query);
     Q_INVOKABLE void openExplorerLink(const QString& link);
     Q_INVOKABLE void refreshExplorerRecentLookups();
+    Q_INVOKABLE void refreshExplorerAnalytics(int movement_threshold_coins = 5000);
     Q_INVOKABLE void startExplorerIndexing();
     Q_INVOKABLE void stopExplorerIndexing();
     Q_INVOKABLE void resetExplorerIndex();
+    Q_INVOKABLE void refreshForensicsIrregularMessages();
+    Q_INVOKABLE void stopForensicsScan();
     Q_INVOKABLE void checkForUpdates(bool manual);
     Q_INVOKABLE void downloadPendingUpdate();
     Q_INVOKABLE void installDownloadedUpdate();
@@ -396,6 +417,7 @@ Q_SIGNALS:
     void transactionDetailsReady(const QString& title, const QString& html);
     void explorerWindowRequested(const QString& title, const QString& html);
     void explorerChanged();
+    void forensicsChanged();
     void updateAvailable(const QString& version, const QString& message);
     void updateDownloaded(const QString& version, const QString& filePath, const QString& message);
     void recoveryPhrasePreviewReady(const QVariantMap& preview, const QString& message);
@@ -491,6 +513,8 @@ private:
     int explorerHighestIndexedBlock() const;
     int explorerIndexedBlockCountFromDb() const;
     int explorerIndexedOutputCountFromDb() const;
+    QVariantList explorerRichListFromDb(QString* error = nullptr) const;
+    QVariantList explorerMovementsFromDb(qint64 threshold_sats, QString* error = nullptr) const;
     QString explorerBlockHashAtHeight(int height) const;
     QString explorerBlockHashForTransaction(const QString& txid) const;
     QString explorerCachedBlockHtml(const QString& block_id, QJsonObject* raw_json = nullptr, bool* found = nullptr) const;
@@ -500,6 +524,8 @@ private:
     bool storeExplorerBlock(const QJsonObject& block, QString* error = nullptr);
     void scheduleExplorerIndexStep(int delay_ms = 120);
     void explorerIndexStep();
+    void scheduleForensicsScanStep(int delay_ms = 0);
+    void forensicsScanStep();
     QString explorerLookupHtml(const QString& title,
                                const QString& summary_html,
                                const QJsonValue& raw_json) const;
@@ -713,6 +739,9 @@ private:
     QString m_third_party_tx_url;
     QString m_explorer_mode = QStringLiteral("internal");
     QVariantList m_explorer_recent_lookups;
+    QVariantList m_explorer_rich_list;
+    QVariantList m_explorer_movements;
+    QString m_explorer_analytics_status = QStringLiteral("Explorer analytics not loaded yet.");
     bool m_explorer_indexing = false;
     bool m_explorer_index_request_in_flight = false;
     QString m_explorer_index_status = QStringLiteral("Index not running.");
@@ -720,6 +749,12 @@ private:
     int m_explorer_index_tip = 0;
     int m_explorer_indexed_block_count = 0;
     int m_explorer_indexed_output_count = 0;
+    QVariantList m_forensics_irregular_messages;
+    bool m_forensics_scanning = false;
+    bool m_forensics_request_in_flight = false;
+    QString m_forensics_scan_status = QStringLiteral("Irregular message scan not started.");
+    int m_forensics_scan_height = 0;
+    int m_forensics_scan_tip = 0;
     mutable QStringList m_bip39_words;
     mutable QHash<QString, int> m_bip39_word_index;
 };

@@ -123,6 +123,13 @@ ApplicationWindow {
         var target = root.activeFocusItem
         if (!target)
             return
+        while (target && target.parent
+               && !(actionName === "undo" && target.undo)
+               && !(actionName === "redo" && target.redo)
+               && !(actionName === "cut" && (target.cut || target.mnemonicClipboardGuard))
+               && !(actionName === "copy" && (target.copy || target.mnemonicClipboardGuard))
+               && !(actionName === "paste" && target.paste))
+            target = target.parent
         try {
             if (actionName === "undo" && target.undo) target.undo()
             else if (actionName === "redo" && target.redo) target.redo()
@@ -200,7 +207,7 @@ ApplicationWindow {
              + "</ul>"
              + "<h2>What went into Nu</h2>"
              + "<ul>"
-             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, Explorer, Diagnostics, and Settings.</li>"
+             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, Explorer, Forensics, Diagnostics, and Settings.</li>"
              + "<li>Visual system, copy, and interaction patterns are guided by Nothing-style restraint and Bitcoin Design Community wallet usability patterns.</li>"
              + "<li>Bundled backend autostart, RPC connection handling, launch diagnostics, and current-launch log viewing.</li>"
              + "<li><b>Enable LAN node discovery</b> is off by default. When enabled, macOS may ask for Local Network access so Nu can find Defcoin nodes on the same LAN, which can help another local wallet copy blockchain data faster. The permission does not grant access to wallet keys, passphrases, or private wallet data.</li>"
@@ -209,6 +216,7 @@ ApplicationWindow {
              + "<li>The address filter is endpoint-specific, not IP-wide. If the same host runs Litecoin Core on one port and Defcoin Core on another, Nu keeps the Defcoin endpoint eligible and can replace older same-IP non-Defcoin ports in addrman. Defcoin nodes on non-standard ports can still communicate and be retained after completing an actual Defcoin handshake.</li>"
              + "<li>Peer inspection with simple and detailed views, including actual per-peer magic bytes where reported by the backend.</li>"
              + "<li>Network diagnostics now include difficulty, 120-block network hashrate, chain-tip counts, sync progress, and top P2P message types where the backend reports them. [Thanks to packetloss404 / Ian S. Walmsley's v1.0.2 build.]</li>"
+             + "<li>Forensics now surfaces irregular OP_RETURN messages from local block data, including text payloads that burned DFC, bypassed standard relay size limits, used active script opcodes, or appeared multiple times in one transaction.</li>"
              + "<li>BIP39 recovery phrase creation and restore workflows for Nu/Core HD wallets, plus an advanced preview-gated external derivation scan with Defcoin WIF compatibility options.</li>"
              + "<li>Local mining setup can select an external cpuminer-compatible executable, build scrypt stratum arguments, and monitor miner output without bundling miner binaries into the wallet app.</li>"
              + "<li>Wallet basics including receive requests, transaction inspection, PSBT tools, message signing, wallet backup, encryption, and optional third-party explorer links.</li>"
@@ -300,6 +308,7 @@ ApplicationWindow {
             "wallet": "Wallet",
             "mining": "Mining",
             "explorer": "Explorer",
+            "forensics": "Forensics",
             "diagnostics": "Diagnostics",
             "settings": "Settings",
             "psbt": "Partially signed transactions"
@@ -413,7 +422,8 @@ ApplicationWindow {
             NuMenuItem { text: qsTr("Wallet"); shortcut: Qt.platform.os === "osx" ? "Meta+5" : "Ctrl+5"; onTriggered: frame.currentRoute = "wallet" }
             NuMenuItem { text: qsTr("Mining"); shortcut: Qt.platform.os === "osx" ? "Meta+6" : "Ctrl+6"; onTriggered: frame.currentRoute = "mining" }
             NuMenuItem { text: qsTr("Explorer"); shortcut: Qt.platform.os === "osx" ? "Meta+7" : "Ctrl+7"; onTriggered: frame.currentRoute = "explorer" }
-            NuMenuItem { text: qsTr("Diagnostics"); shortcut: Qt.platform.os === "osx" ? "Meta+8" : "Ctrl+8"; onTriggered: root.openNode() }
+            NuMenuItem { text: qsTr("Forensics"); shortcut: Qt.platform.os === "osx" ? "Meta+8" : "Ctrl+8"; onTriggered: frame.currentRoute = "forensics" }
+            NuMenuItem { text: qsTr("Diagnostics"); shortcut: Qt.platform.os === "osx" ? "Meta+9" : "Ctrl+9"; onTriggered: root.openNode() }
         }
 
         Menu {
@@ -841,10 +851,10 @@ ApplicationWindow {
     Window {
         id: syncProgressWindow
         title: qsTr("Synchronizing blockchain")
-        width: 600
-        height: 340
-        minimumWidth: 540
-        minimumHeight: 300
+        width: 660
+        height: 380
+        minimumWidth: 620
+        minimumHeight: 340
         modality: Qt.NonModal
         flags: Qt.Dialog
         color: NuTokens.panelBase
@@ -936,7 +946,7 @@ ApplicationWindow {
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("You can hide this window while synchronization continues. The mast and Diagnostics > Status will keep updating.")
+                text: qsTr("Hide this window while sync continues. The mast and Diagnostics > Status keep updating.")
                 color: NuTokens.textSecondary
                 font.pixelSize: NuTokens.fontSmall
                 wrapMode: Text.WordWrap
@@ -1097,17 +1107,17 @@ ApplicationWindow {
 
                 NuCheckBox {
                     id: createWalletDisablePrivateKeys
-                    text: qsTr("Disable Private Keys")
-                    helpText: qsTr("Create a watch-only wallet that cannot hold private keys or spend coins by itself.")
+                    text: qsTr("Watch-only wallet")
+                    helpText: qsTr("Create a wallet for observing addresses without storing private keys. Use this for monitoring balances, imported public keys, or shared audit wallets that should not spend coins.")
                     onCheckedChanged: if (checked) createWalletEncrypt.checked = false
                 }
 
                 NuCheckBox {
                     id: createWalletBlank
-                    text: qsTr("Make Blank Wallet")
+                    text: qsTr("Start empty for imports")
                     helpText: createWalletSql.checked
-                              ? qsTr("Create an empty SQLite descriptor wallet. It will not be able to generate receive addresses until descriptors or keys are imported.")
-                              : qsTr("Create a legacy Berkeley DB wallet without an HD seed. A seed can be set later with legacy wallet commands.")
+                              ? qsTr("Create an empty SQLite descriptor wallet for importing descriptors, recovery paths, or watch-only data before generating normal receive addresses.")
+                              : qsTr("Create a legacy Berkeley DB wallet without an HD seed. Choose this only when you plan to import keys or set a seed with legacy wallet commands.")
                 }
 
                 NuCheckBox {

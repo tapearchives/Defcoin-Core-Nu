@@ -97,6 +97,45 @@ ColumnLayout {
         }, null, 2)
     }
 
+    function parseDecimal(value, fallbackValue) {
+        const cleaned = String(value || "").replace(/,/g, "").replace(/DFC/gi, "").trim()
+        const parsed = Number(cleaned)
+        return Number.isFinite(parsed) ? parsed : fallbackValue
+    }
+
+    function currentBlockReward() {
+        const height = Math.max(0, Number(NuService.blockHeight || 0))
+        const halvings = Math.floor(height / 840000)
+        return Math.max(0, 50 / Math.pow(2, halvings))
+    }
+
+    function calculatorDifficulty() {
+        return parseDecimal(rewardDifficulty.text, 0)
+    }
+
+    function calculatorHashrate() {
+        return parseDecimal(rewardHashrate.text, 0)
+    }
+
+    function calculatorBlockReward() {
+        return parseDecimal(rewardBlockValue.text, 0)
+    }
+
+    function calculatorCoinsPerDay() {
+        const difficulty = calculatorDifficulty()
+        const hashrate = calculatorHashrate()
+        const reward = calculatorBlockReward()
+        if (difficulty <= 0 || hashrate <= 0 || reward <= 0) return 0
+        const secondsPerBlock = (difficulty * 4294967296) / (hashrate * 1000)
+        if (!Number.isFinite(secondsPerBlock) || secondsPerBlock <= 0) return 0
+        return (86400 / secondsPerBlock) * reward
+    }
+
+    function useCurrentRewardDefaults() {
+        rewardDifficulty.text = parseDecimal(NuService.networkDifficulty, 0.091).toFixed(8).replace(/0+$/, "").replace(/\.$/, "")
+        rewardBlockValue.text = root.currentBlockReward().toFixed(8).replace(/0+$/, "").replace(/\.$/, "")
+    }
+
     function saveConfig() {
         NuService.saveMinerConfiguration(currentPoolUrl(), currentPayout(), currentPassword(), currentThreads(), currentNice())
     }
@@ -114,6 +153,7 @@ ColumnLayout {
         NuTabButton { text: "Pools" }
         NuTabButton { text: "Run" }
         NuTabButton { text: "Monitor" }
+        NuTabButton { text: "Reward Calculator" }
     }
 
     StackLayout {
@@ -478,6 +518,117 @@ ColumnLayout {
                         }
                     }
                 }
+            }
+        }
+
+        NuPanel {
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: NuTokens.spaceLg
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceLg
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceSm
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Reward Calculator"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontBodyLarge
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Estimate daily Defcoin output from current difficulty, block reward, and a miner hashrate. This follows the DC903 calculator formula and is a probability estimate, not a guarantee."
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontBody
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
+                    NuActionButton {
+                        Layout.preferredWidth: 180
+                        text: "Use current values"
+                        helpText: "Load current backend difficulty and the current block reward for this chain height."
+                        onClicked: root.useCurrentRewardDefaults()
+                    }
+                }
+
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 2
+                    rowSpacing: NuTokens.spaceMd
+                    columnSpacing: NuTokens.spaceLg
+
+                    Label { text: "Network Difficulty"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
+                    NuTextField {
+                        id: rewardDifficulty
+                        Layout.fillWidth: true
+                        text: parseDecimal(NuService.networkDifficulty, 0.091).toFixed(8).replace(/0+$/, "").replace(/\.$/, "")
+                        placeholderText: "0.091"
+                        helpText: "Current network difficulty from the backend. It can change at retarget boundaries, so estimates drift as the network changes."
+                    }
+
+                    Label { text: "Hashrate (KH/s)"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
+                    NuTextField {
+                        id: rewardHashrate
+                        Layout.fillWidth: true
+                        placeholderText: "Enter your hashrate"
+                        helpText: "Enter miner speed in kilohashes per second. For example, 12.5 means 12.5 KH/s."
+                    }
+
+                    Label { text: "Block Reward (DFC)"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
+                    NuTextField {
+                        id: rewardBlockValue
+                        Layout.fillWidth: true
+                        text: root.currentBlockReward().toFixed(8).replace(/0+$/, "").replace(/\.$/, "")
+                        placeholderText: "12.5"
+                        helpText: "Current subsidy computed from Defcoin's 840,000-block halving interval. Pool fees and stale shares are not included."
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 92
+                    radius: NuTokens.radiusMedium
+                    color: NuTokens.backgroundBase
+                    border.color: NuTokens.lineSubtle
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: NuTokens.spaceMd
+                        spacing: NuTokens.spaceXs
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.calculatorCoinsPerDay().toFixed(8) + " DFC/day"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontTitle
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.calculatorHashrate() > 0 && root.calculatorDifficulty() > 0
+                                  ? "At " + root.calculatorHashrate() + " KH/s and difficulty " + root.calculatorDifficulty() + ", expected output is based on difficulty * 2^32 work per block."
+                                  : "Enter positive values for difficulty, hashrate, and reward to calculate a daily estimate."
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Caveats: mining is probabilistic. Pool luck, pool fees, rejected or stale shares, difficulty changes, and hashrate fluctuations can make actual payouts differ from this estimate."
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    wrapMode: Text.WordWrap
+                }
+
+                Item { Layout.fillHeight: true }
             }
         }
     }

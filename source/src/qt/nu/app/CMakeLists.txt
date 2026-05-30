@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(DefcoinCoreNuQml VERSION 26.5.2 LANGUAGES CXX)
+project(DefcoinCoreNuQml VERSION 26.5.5 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.5.2" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.5.5" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -112,6 +112,7 @@ set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/copy.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/external-link.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/explorer.svg"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/forensics.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/home.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/isolated.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/lock.svg"
@@ -231,6 +232,9 @@ if(APPLE)
                     "-libpath=${DEFCOIN_NU_QT_ROOT}/lib"
                     -always-overwrite
                     -appstore-compliant
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_ROOT}/plugins/imageformats" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/imageformats"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_ROOT}/plugins/sqldrivers" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/sqldrivers"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_ROOT}/plugins/tls" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/tls"
                 COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/fix_macos_qt_rpath.sh" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/MacOS/DefcoinCoreNu"
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/repair_macos_qt_bundle.py" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>"
                 COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
@@ -343,7 +347,7 @@ if(WIN32)
         set(DEFCOIN_NU_QT_QML_DIR "${DEFCOIN_NU_QT_ROOT}/qml")
         set(DEFCOIN_NU_QT_TRANSLATIONS_DIR "${DEFCOIN_NU_QT_ROOT}/translations")
 
-        foreach(plugin_dir IN ITEMS platforms styles imageformats iconengines networkinformation tls)
+        foreach(plugin_dir IN ITEMS platforms styles imageformats iconengines networkinformation sqldrivers tls)
             if(EXISTS "${DEFCOIN_NU_QT_PLUGINS_DIR}/${plugin_dir}")
                 add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:DefcoinCoreNu>/plugins/${plugin_dir}"

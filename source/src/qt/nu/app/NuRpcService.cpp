@@ -3511,22 +3511,25 @@ void NuRpcService::scheduleWitnessBlockRepair(int start_height)
                        QStringLiteral("Nu will pass -repairwitnessfromheight=%1 the next time it starts its bundled backend. Quit and reopen Defcoin Core Nu to run the repair. This redownloads incomplete block bodies; it is separate from a wallet rescan.").arg(height));
 }
 
-void NuRpcService::repairWitnessBlockDataNow(int start_height)
+void NuRpcService::repairWitnessBlockDataNow(int start_height, bool fix_missing_witness)
 {
     int height = start_height;
     if (height <= 0) height = 903168;
 
-    appendLaunchDiagnostic(QStringLiteral("Live witness block data repair requested from height %1.").arg(height));
-    m_last_error = QStringLiteral("Repairing witness block data from height %1. Networking is paused during the rewind step.").arg(height);
-    m_network_state = QStringLiteral("isolated");
-    m_metric_network_active = QStringLiteral("Repairing");
+    appendLaunchDiagnostic(QStringLiteral("Live witness block data inspection requested from height %1. Fix missing witness data: %2.")
+        .arg(height)
+        .arg(fix_missing_witness ? QStringLiteral("yes") : QStringLiteral("no")));
+    m_last_error = fix_missing_witness
+        ? QStringLiteral("Inspecting witness block data from height %1. Networking pauses only if a rewind is required.").arg(height)
+        : QStringLiteral("Inspecting witness block data from height %1 without changing stored blocks.").arg(height);
+    m_metric_network_active = QStringLiteral("Inspecting");
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
 
-    rpcCall(QStringLiteral("repairwitnessblockdata"), {height, true}, false, [this, height](const QJsonValue& result, const QString& error) {
+    rpcCall(QStringLiteral("repairwitnessblockdata"), {height, true, fix_missing_witness}, false, [this, height, fix_missing_witness](const QJsonValue& result, const QString& error) {
         if (!error.isEmpty()) {
-            appendLaunchDiagnostic(QStringLiteral("Live witness block data repair failed from height %1: %2").arg(height).arg(error));
-            Q_EMIT userMessage(QStringLiteral("Blockchain repair failed"), error);
+            appendLaunchDiagnostic(QStringLiteral("Live witness block data inspection failed from height %1: %2").arg(height).arg(error));
+            Q_EMIT userMessage(QStringLiteral("Blockchain inspection failed"), error);
             refreshNode();
             return;
         }
@@ -3535,18 +3538,35 @@ void NuRpcService::repairWitnessBlockDataNow(int start_height)
         const int before = obj.value(QStringLiteral("height_before")).toInt();
         const int after = obj.value(QStringLiteral("height_after_rewind")).toInt();
         const bool rewound = obj.value(QStringLiteral("rewound")).toBool();
+        const bool missing_found = obj.value(QStringLiteral("missing_witness_found")).toBool();
+        const int inspected = obj.value(QStringLiteral("inspected_blocks")).toInt();
+        const int first_missing = obj.value(QStringLiteral("first_missing_witness_height")).toInt(-1);
         const QString next_step = obj.value(QStringLiteral("next_step")).toString();
 
-        appendLaunchDiagnostic(QStringLiteral("Live witness block data repair completed from height %1. Height before: %2. Height after rewind: %3. Rewound: %4.")
+        appendLaunchDiagnostic(QStringLiteral("Live witness block data inspection completed from height %1. Inspected: %2. First missing witness height: %3. Height before: %4. Height after rewind: %5. Rewound: %6.")
             .arg(height)
+            .arg(inspected)
+            .arg(first_missing > 0 ? QString::number(first_missing) : QStringLiteral("none"))
             .arg(before)
             .arg(after)
             .arg(rewound ? QStringLiteral("yes") : QStringLiteral("no")));
-        Q_EMIT userMessage(QStringLiteral("Blockchain repair complete"),
-                           QStringLiteral("%1\n\nHeight before: %2\nHeight after rewind: %3\n\nNu will continue syncing and redownloading any missing block bodies in the normal sync flow.")
-                               .arg(next_step.isEmpty() ? QStringLiteral("Repair command completed.") : next_step)
-                               .arg(before)
-                               .arg(after));
+        QString detail = QStringLiteral("%1\n\nStart height: %2\nBlocks inspected: %3\nHeight before: %4\nHeight after rewind: %5")
+            .arg(next_step.isEmpty() ? QStringLiteral("Inspection completed.") : next_step)
+            .arg(height)
+            .arg(inspected)
+            .arg(before)
+            .arg(after);
+        if (missing_found) {
+            detail += QStringLiteral("\nFirst missing witness block: %1").arg(first_missing);
+            if (fix_missing_witness && rewound) {
+                detail += QStringLiteral("\n\nNu will continue syncing and redownloading block bodies in the normal sync flow.");
+            } else if (!fix_missing_witness) {
+                detail += QStringLiteral("\n\nNo data was changed because Fix missing witness data was off.");
+            }
+        } else {
+            detail += QStringLiteral("\n\nNo missing witness block data was found in the selected active-chain range.");
+        }
+        Q_EMIT userMessage(QStringLiteral("Blockchain inspection complete"), detail);
         refreshNode();
     });
 }
@@ -5684,6 +5704,170 @@ int NuRpcService::explorerIndexedOutputCountFromDb() const
     return count;
 }
 
+QVariantList NuRpcService::explorerRichListFromDb(QString* error) const
+{
+    QVariantList rows;
+    QString db_error;
+    if (!ensureExplorerDatabase(&db_error)) {
+        if (error) *error = db_error;
+        return rows;
+    }
+
+    qint64 total_unspent_sats = 0;
+    const QString connection_name = QStringLiteral("nu_explorer_rich_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery total_query(db);
+            if (total_query.exec(QStringLiteral(
+                    "SELECT COALESCE(SUM(CASE WHEN spent_by_txid IS NULL THEN value_sats ELSE 0 END), 0) "
+                    "FROM explorer_tx_outputs")) && total_query.next()) {
+                total_unspent_sats = total_query.value(0).toLongLong();
+            }
+
+            QSqlQuery query(db);
+            if (!query.exec(QStringLiteral(
+                    "SELECT address, "
+                    "COALESCE(SUM(CASE WHEN spent_by_txid IS NULL THEN value_sats ELSE 0 END), 0) AS balance_sats, "
+                    "COALESCE(SUM(value_sats), 0) AS received_sats, "
+                    "COUNT(DISTINCT txid) AS tx_count, "
+                    "COALESCE(SUM(CASE WHEN spent_by_txid IS NULL THEN 1 ELSE 0 END), 0) AS unspent_outputs "
+                    "FROM explorer_tx_outputs "
+                    "GROUP BY address "
+                    "HAVING COALESCE(SUM(CASE WHEN spent_by_txid IS NULL THEN value_sats ELSE 0 END), 0) > 0 "
+                    "ORDER BY balance_sats DESC, address ASC "
+                    "LIMIT 100"))) {
+                local_error = query.lastError().text();
+            } else {
+                int rank = 1;
+                while (query.next()) {
+                    const QString address = query.value(0).toString();
+                    const qint64 balance_sats = query.value(1).toLongLong();
+                    const qint64 received_sats = query.value(2).toLongLong();
+                    const int tx_count = query.value(3).toInt();
+                    const int unspent_outputs = query.value(4).toInt();
+                    const double share = total_unspent_sats > 0
+                        ? (100.0 * static_cast<double>(balance_sats) / static_cast<double>(total_unspent_sats))
+                        : 0.0;
+                    rows.push_back(QVariantMap{
+                        {QStringLiteral("cells"), QVariantList{
+                            rank,
+                            address,
+                            explorerAmountText(balance_sats),
+                            QString::number(share, 'f', 4) + QStringLiteral("%"),
+                            explorerAmountText(received_sats),
+                            tx_count,
+                            unspent_outputs}},
+                        {QStringLiteral("meta"), QVariantMap{
+                            {QStringLiteral("type"), QStringLiteral("address")},
+                            {QStringLiteral("id"), address},
+                            {QStringLiteral("address"), address},
+                            {QStringLiteral("balanceSats"), QVariant::fromValue<qlonglong>(balance_sats)},
+                            {QStringLiteral("receivedSats"), QVariant::fromValue<qlonglong>(received_sats)},
+                            {QStringLiteral("sharePercent"), share}}}
+                    });
+                    ++rank;
+                }
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!local_error.isEmpty() && error) *error = local_error;
+    return rows;
+}
+
+QVariantList NuRpcService::explorerMovementsFromDb(qint64 threshold_sats, QString* error) const
+{
+    QVariantList rows;
+    QString db_error;
+    if (!ensureExplorerDatabase(&db_error)) {
+        if (error) *error = db_error;
+        return rows;
+    }
+
+    const qint64 bounded_threshold = std::max<qint64>(0, threshold_sats);
+    const QString connection_name = QStringLiteral("nu_explorer_movements_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral(
+                "SELECT o.txid, o.block_height, b.time, COALESCE(SUM(o.value_sats), 0) AS amount_sats, "
+                "COUNT(*) AS output_count, COUNT(DISTINCT o.address) AS address_count "
+                "FROM explorer_tx_outputs o "
+                "JOIN explorer_blocks b ON b.height = o.block_height "
+                "JOIN explorer_block_transactions t ON t.txid = o.txid AND t.block_height = o.block_height "
+                "WHERE t.tx_index > 0 "
+                "GROUP BY o.txid, o.block_height, b.time "
+                "HAVING amount_sats >= ? "
+                "ORDER BY b.time DESC, o.block_height DESC, amount_sats DESC "
+                "LIMIT 5000"));
+            query.addBindValue(QVariant::fromValue<qlonglong>(bounded_threshold));
+            if (!query.exec()) {
+                local_error = query.lastError().text();
+            } else {
+                while (query.next()) {
+                    const QString txid = query.value(0).toString();
+                    const int height = query.value(1).toInt();
+                    const qint64 time = query.value(2).toLongLong();
+                    const qint64 amount_sats = query.value(3).toLongLong();
+                    const int output_count = query.value(4).toInt();
+                    const int address_count = query.value(5).toInt();
+                    const QString timestamp = QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"));
+                    rows.push_back(QVariantMap{
+                        {QStringLiteral("cells"), QVariantList{
+                            txid,
+                            explorerAmountText(amount_sats),
+                            timestamp,
+                            height,
+                            output_count,
+                            address_count}},
+                        {QStringLiteral("meta"), QVariantMap{
+                            {QStringLiteral("type"), QStringLiteral("transaction")},
+                            {QStringLiteral("id"), txid},
+                            {QStringLiteral("txid"), txid},
+                            {QStringLiteral("height"), height},
+                            {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(amount_sats)}}}
+                    });
+                }
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!local_error.isEmpty() && error) *error = local_error;
+    return rows;
+}
+
+void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins)
+{
+    const int bounded_coins = std::max(0, movement_threshold_coins);
+    const qint64 threshold_sats = static_cast<qint64>(bounded_coins) * 100000000LL;
+    QString rich_error;
+    QString movement_error;
+    m_explorer_rich_list = explorerRichListFromDb(&rich_error);
+    m_explorer_movements = explorerMovementsFromDb(threshold_sats, &movement_error);
+    if (!rich_error.isEmpty() || !movement_error.isEmpty()) {
+        QStringList details;
+        if (!rich_error.isEmpty()) details.push_back(QStringLiteral("Top 100: %1").arg(rich_error));
+        if (!movement_error.isEmpty()) details.push_back(QStringLiteral("Movements: %1").arg(movement_error));
+        m_explorer_analytics_status = QStringLiteral("Explorer analytics could not fully load. %1").arg(details.join(QStringLiteral(" ")));
+    } else {
+        m_explorer_analytics_status = QStringLiteral("Loaded Top 100 and %1 movement rows at %2+ DFC from the local SQLite index.")
+            .arg(QString::number(m_explorer_movements.size()), QString::number(bounded_coins));
+    }
+    Q_EMIT explorerChanged();
+}
+
 QString NuRpcService::explorerBlockHashAtHeight(int height) const
 {
     if (height < 0) return QString();
@@ -6367,6 +6551,9 @@ void NuRpcService::resetExplorerIndex()
     m_explorer_index_tip = 0;
     m_explorer_indexed_block_count = 0;
     m_explorer_indexed_output_count = 0;
+    m_explorer_rich_list.clear();
+    m_explorer_movements.clear();
+    m_explorer_analytics_status = QStringLiteral("Explorer analytics cleared with the local block index.");
     m_explorer_index_status = QStringLiteral("Index reset. Cached lookups were kept; block index tables were cleared.");
     Q_EMIT explorerChanged();
 }
@@ -6386,6 +6573,7 @@ void NuRpcService::explorerIndexStep()
         m_explorer_indexing = false;
         m_explorer_index_status = QStringLiteral("Index is current at block %1 with %2 blocks cached.")
             .arg(QString::number(m_explorer_index_tip), QString::number(m_explorer_indexed_block_count));
+        refreshExplorerAnalytics(5000);
         Q_EMIT explorerChanged();
         return;
     }
@@ -6462,6 +6650,139 @@ void NuRpcService::explorerIndexStep()
             Q_EMIT explorerChanged();
             scheduleExplorerIndexStep(120);
         });
+    });
+}
+
+void NuRpcService::refreshForensicsIrregularMessages()
+{
+    if (!m_rpc_connected) {
+        m_forensics_scanning = false;
+        m_forensics_request_in_flight = false;
+        m_forensics_scan_status = QStringLiteral("Connect to the local backend before scanning irregular messages.");
+        Q_EMIT forensicsChanged();
+        return;
+    }
+
+    m_forensics_irregular_messages.clear();
+    m_forensics_scanning = true;
+    m_forensics_request_in_flight = false;
+    m_forensics_scan_height = 0;
+    m_forensics_scan_tip = std::max(m_forensics_scan_tip, m_block_height);
+    m_forensics_scan_status = QStringLiteral("Starting irregular OP_RETURN scan.");
+    Q_EMIT forensicsChanged();
+    scheduleForensicsScanStep(0);
+}
+
+void NuRpcService::stopForensicsScan()
+{
+    m_forensics_scanning = false;
+    m_forensics_request_in_flight = false;
+    m_forensics_scan_status = QStringLiteral("Irregular message scan paused at block %1 with %2 flagged rows.")
+        .arg(QString::number(std::max(0, m_forensics_scan_height)),
+             QString::number(m_forensics_irregular_messages.size()));
+    Q_EMIT forensicsChanged();
+}
+
+void NuRpcService::scheduleForensicsScanStep(int delay_ms)
+{
+    if (!m_forensics_scanning || m_forensics_request_in_flight) return;
+    QTimer::singleShot(std::max(0, delay_ms), this, [this] {
+        forensicsScanStep();
+    });
+}
+
+void NuRpcService::forensicsScanStep()
+{
+    if (!m_forensics_scanning || m_forensics_request_in_flight) return;
+
+    constexpr int chunk_blocks = 25000;
+    constexpr int chunk_results = 500;
+    constexpr int display_cap = 5000;
+
+    if (m_forensics_irregular_messages.size() >= display_cap) {
+        m_forensics_scanning = false;
+        m_forensics_scan_status = QStringLiteral("Scan paused at the %1-row display cap. Narrow future filters before continuing.")
+            .arg(QString::number(display_cap));
+        Q_EMIT forensicsChanged();
+        return;
+    }
+
+    const int start_height = std::max(0, m_forensics_scan_height);
+    const double pct = m_forensics_scan_tip > 0
+        ? (100.0 * static_cast<double>(start_height) / static_cast<double>(m_forensics_scan_tip))
+        : 0.0;
+    m_forensics_request_in_flight = true;
+    m_forensics_scan_status = QStringLiteral("Scanning block %1 of %2 for irregular OP_RETURN messages (%3%).")
+        .arg(QString::number(start_height),
+             QString::number(std::max(0, m_forensics_scan_tip)),
+             QString::number(std::min(100.0, pct), 'f', 2));
+    Q_EMIT forensicsChanged();
+
+    rpcCall(QStringLiteral("scanirregularmessages"),
+            {start_height, -1, chunk_results, chunk_blocks},
+            false,
+            [this, start_height](const QJsonValue& result, const QString& error) {
+        m_forensics_request_in_flight = false;
+        if (!m_forensics_scanning) return;
+        if (!error.isEmpty()) {
+            m_forensics_scanning = false;
+            m_forensics_scan_status = QStringLiteral("Scan stopped at block %1: %2").arg(QString::number(start_height), error);
+            Q_EMIT forensicsChanged();
+            return;
+        }
+
+        const QJsonObject obj = result.toObject();
+        m_forensics_scan_tip = obj.value(QStringLiteral("tip")).toInt(m_forensics_scan_tip);
+        m_forensics_scan_height = obj.value(QStringLiteral("next_height")).toInt(start_height + chunk_blocks);
+        const int scanned_blocks = obj.value(QStringLiteral("scanned_blocks")).toInt();
+        const QJsonArray results = obj.value(QStringLiteral("results")).toArray();
+
+        QVariantList rows = m_forensics_irregular_messages;
+        rows.reserve(rows.size() + results.size());
+        for (const QJsonValue& value : results) {
+            const QJsonObject row = value.toObject();
+            const int height = row.value(QStringLiteral("block_height")).toInt();
+            const QString txid = row.value(QStringLiteral("txid")).toString();
+            const int vout = row.value(QStringLiteral("vout")).toInt();
+            const QString burned = row.value(QStringLiteral("burned_text")).toString(QStringLiteral("0.00000000")) + QStringLiteral(" DFC");
+            const QString decoded = row.value(QStringLiteral("decoded_text")).toString();
+            const QString reason = row.value(QStringLiteral("reason")).toString();
+            rows.push_back(QVariantMap{
+                {QStringLiteral("cells"), QVariantList{height, txid, burned, decoded, reason}},
+                {QStringLiteral("meta"), QVariantMap{
+                    {QStringLiteral("type"), QStringLiteral("transaction")},
+                    {QStringLiteral("id"), txid},
+                    {QStringLiteral("txid"), txid},
+                    {QStringLiteral("height"), height},
+                    {QStringLiteral("vout"), vout},
+                    {QStringLiteral("reason"), reason},
+                    {QStringLiteral("payloadHex"), row.value(QStringLiteral("payload_hex")).toString()},
+                    {QStringLiteral("scriptSize"), row.value(QStringLiteral("script_size")).toInt()}}}
+            });
+        }
+        m_forensics_irregular_messages = rows;
+
+        const bool complete = obj.value(QStringLiteral("complete")).toBool(false);
+        const double pct = m_forensics_scan_tip > 0
+            ? (100.0 * static_cast<double>(m_forensics_scan_height) / static_cast<double>(m_forensics_scan_tip))
+            : 0.0;
+        if (complete) {
+            m_forensics_scanning = false;
+            m_forensics_scan_status = QStringLiteral("Scan complete through block %1. Found %2 irregular message rows.")
+                .arg(QString::number(m_forensics_scan_tip),
+                     QString::number(m_forensics_irregular_messages.size()));
+            Q_EMIT forensicsChanged();
+            return;
+        }
+
+        m_forensics_scan_status = QStringLiteral("Scanned %1 blocks in this pass. Found %2 flagged rows so far; next block %3 of %4 (%5%).")
+            .arg(QString::number(scanned_blocks),
+                 QString::number(m_forensics_irregular_messages.size()),
+                 QString::number(m_forensics_scan_height),
+                 QString::number(m_forensics_scan_tip),
+                 QString::number(std::min(100.0, pct), 'f', 2));
+        Q_EMIT forensicsChanged();
+        scheduleForensicsScanStep(15);
     });
 }
 

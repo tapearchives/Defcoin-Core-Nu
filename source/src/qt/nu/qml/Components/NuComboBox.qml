@@ -57,8 +57,8 @@ Basic.ComboBox {
         Canvas {
             id: arrowCanvas
             anchors.centerIn: parent
-            width: 18
-            height: 18
+            width: 19
+            height: 19
 
             onPaint: {
                 var ctx = getContext("2d")
@@ -68,14 +68,10 @@ Basic.ComboBox {
                 ctx.lineJoin = "round"
                 ctx.strokeStyle = root.popup.visible || root.hovered || root.activeFocus ? NuTokens.textPrimary : NuTokens.textSecondary
                 ctx.beginPath()
-                ctx.moveTo(5.5, 7.5)
-                ctx.lineTo(9.0, 11.0)
-                ctx.lineTo(12.5, 7.5)
+                ctx.moveTo(5.2, 7.2)
+                ctx.lineTo(9.5, 11.4)
+                ctx.lineTo(13.8, 7.2)
                 ctx.stroke()
-                ctx.fillStyle = root.popup.visible || root.hovered || root.activeFocus ? NuTokens.textPrimary : NuTokens.textSecondary
-                ctx.beginPath()
-                ctx.arc(9.0, 13.4, 1.15, 0, Math.PI * 2)
-                ctx.fill()
             }
 
             Connections {

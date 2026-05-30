@@ -1,5 +1,26 @@
 # Defcoin Core Changelog
 
+## 26.5.5 Core Memories
+
+Defcoin Core Nu `26.5.5` adds the first Forensics view for average users who
+want to explore permanent OP_RETURN blockchain oddities without using RPC.
+
+### Added
+
+- Added a Forensics section with an `Irregular Messages` view.
+- Added a native `scanirregularmessages` RPC that scans active-chain `CBlock`
+  data in bounded chunks and flags nonstandard OP_RETURN outputs.
+- The Forensics table shows block height, transaction ID, burned DFC amount,
+  decoded text, and a concise irregularity label.
+- Flagged cases include nonzero value burned into OP_RETURN outputs,
+  OP_RETURN scripts above the standard relay size limit, active script opcodes,
+  and multiple OP_RETURN outputs in one transaction.
+
+### Changed
+
+- Updated visible Nu release metadata to `26.5.5`.
+- Added Forensics to the sidebar, View menu, app resources, and Build Notes.
+
 ## 26.5.2 Core Memories
 
 Defcoin Core Nu `26.5.2` is a focused Explorer and packaging polish release

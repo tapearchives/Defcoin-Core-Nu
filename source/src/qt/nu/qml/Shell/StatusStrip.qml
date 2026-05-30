@@ -11,7 +11,37 @@ Rectangle {
     radius: NuTokens.radiusMedium
     color: NuTokens.panelBase
     border.color: NuTokens.lineSubtle
-    implicitHeight: NuService.minerRunning ? 106 : 62
+    implicitHeight: contentColumn.implicitHeight + NuTokens.spaceSm * 2
+
+    function networkStatusLabel() {
+        if (!NuService.rpcConnected)
+            return NuService.connectionStatus === "Starting backend" ? "Starting backend..." : "Connecting to backend..."
+        if (NuService.networkState === "connected" && NuService.peerCount <= 0)
+            return "Peers connecting..."
+        if (NuService.networkState === "connected")
+            return "Network connected"
+        return "Network isolated"
+    }
+
+    function networkStatusColor() {
+        if (!NuService.rpcConnected)
+            return NuTokens.stateWarning
+        if (NuService.networkState === "connected" && NuService.peerCount <= 0)
+            return NuTokens.stateWarning
+        if (NuService.networkState === "connected")
+            return NuTokens.stateConnected
+        return NuTokens.stateError
+    }
+
+    function networkStatusHelp() {
+        if (!NuService.rpcConnected)
+            return "Nu is starting or connecting to the local backend. Peer counts will appear after RPC is ready."
+        if (NuService.networkState === "connected" && NuService.peerCount <= 0)
+            return "P2P networking is enabled, but the node has not completed a peer connection yet. This is normal for the first few seconds after launch."
+        if (NuService.networkState === "connected")
+            return "The backend reports active P2P networking and at least one peer connection."
+        return "Peer networking is disabled or no usable P2P state is available. Settings > Network can reconnect the node."
+    }
 
     function currentWalletIndex() {
         if (!NuService.walletSelected)
@@ -24,6 +54,7 @@ Rectangle {
     }
 
     ColumnLayout {
+        id: contentColumn
         anchors.fill: parent
         anchors.leftMargin: NuTokens.spaceLg
         anchors.rightMargin: NuTokens.spaceLg
@@ -31,14 +62,16 @@ Rectangle {
         anchors.bottomMargin: NuTokens.spaceSm
         spacing: NuTokens.spaceSm
 
-        RowLayout {
-            id: statusRow
+        Flow {
+            id: statusFlow
             Layout.fillWidth: true
-            Layout.preferredHeight: 44
+            Layout.preferredHeight: statusFlow.implicitHeight
             spacing: NuTokens.spaceLg
             NuStatusDot {
-                label: NuService.networkState === "connected" ? "Network connected" : "Network isolated"
-                stateColor: NuService.networkState === "connected" ? NuTokens.stateConnected : NuTokens.stateError
+                label: root.networkStatusLabel()
+                stateColor: root.networkStatusColor()
+                helpText: root.networkStatusHelp()
+                labelMaximumWidth: root.width < 900 ? 170 : 230
             }
 
             NuMetricRow {
@@ -66,17 +99,17 @@ Rectangle {
             NuMetricRow {
                 label: "Sync"
                 value: NuService.syncState
-                valueMaximumWidth: NuService.syncing ? 360 : 120
+                valueMaximumWidth: NuService.syncing ? (root.width < 900 ? 220 : 300) : 120
                 helpText: NuService.syncing
                           ? "Blockchain synchronization progress from Core's getblockchaininfo: verification progress, current block, known headers, and an ETA derived from recent progress."
                           : "The local chain is caught up to the best headers currently known by this node."
             }
 
-            Item { Layout.fillWidth: true }
-
             NuStatusDot {
                 label: NuService.walletLocked ? "Wallet locked" : "Wallet unlocked"
                 stateColor: NuService.walletLocked ? NuTokens.stateInactive : NuTokens.stateConnected
+                helpText: NuService.walletLocked ? "The active wallet is encrypted and locked." : "The active wallet is unlocked or not encrypted."
+                labelMaximumWidth: 170
             }
         }
 
@@ -84,7 +117,7 @@ Rectangle {
             id: miningBubble
             visible: NuService.minerRunning
             Layout.fillWidth: true
-            implicitHeight: visible ? 34 : 0
+            implicitHeight: visible ? Math.max(34, miningFlow.implicitHeight + NuTokens.spaceXs * 2) : 0
             radius: NuTokens.radiusSmall
             color: "#eef7ff"
             border.color: NuTokens.accentSky
@@ -98,15 +131,19 @@ Rectangle {
                 id: miningBubbleHover
             }
 
-            RowLayout {
+            Flow {
+                id: miningFlow
                 anchors.fill: parent
                 anchors.leftMargin: NuTokens.spaceMd
                 anchors.rightMargin: NuTokens.spaceMd
+                anchors.topMargin: NuTokens.spaceXs
+                anchors.bottomMargin: NuTokens.spaceXs
                 spacing: NuTokens.spaceLg
 
                 NuStatusDot {
                     label: "Mining State: " + NuService.miningStateText
                     stateColor: NuTokens.accentSky
+                    labelMaximumWidth: root.width < 900 ? 220 : 300
                 }
 
                 NuMetricRow {
@@ -124,7 +161,6 @@ Rectangle {
                     value: String(NuService.minerRejectedShares)
                 }
 
-                Item { Layout.fillWidth: true }
             }
         }
     }

@@ -25,8 +25,9 @@ Item {
         case "wallet": return 4
         case "mining": return 5
         case "explorer": return 6
-        case "node": return 7
-        case "settings": return 8
+        case "forensics": return 7
+        case "node": return 8
+        case "settings": return 9
         default: return 0
         }
     }
@@ -84,6 +85,7 @@ Item {
                     }
                     MiningView {}
                     ExplorerView {}
+                    ForensicsView {}
                     NodeView {
                         initialTab: root.nodeInitialTab
                         initialPeerView: root.peerInitialView

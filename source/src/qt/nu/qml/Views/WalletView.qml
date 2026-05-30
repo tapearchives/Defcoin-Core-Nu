@@ -396,19 +396,13 @@ ColumnLayout {
                         spacing: NuTokens.spaceSm
 
                         Label {
-                            text: "Active wallet"
-                            color: NuTokens.textPrimary
-                            font.pixelSize: NuTokens.fontBody
-                            font.weight: Font.DemiBold
-                        }
-
-                        Label {
                             Layout.fillWidth: true
                             text: NuService.walletSelected
-                                  ? NuService.walletDisplayName(NuService.currentWalletName)
-                                  : "No wallet selected. Create, restore, or open a wallet to view wallet-specific balances and transactions."
-                            color: NuService.walletSelected ? NuTokens.textPrimary : NuTokens.textSecondary
+                                  ? "Active wallet: " + NuService.walletDisplayName(NuService.currentWalletName)
+                                  : "Active wallet: none selected"
+                            color: NuTokens.textPrimary
                             font.pixelSize: NuTokens.fontBodyLarge
+                            font.weight: Font.DemiBold
                             wrapMode: Text.WordWrap
                         }
 

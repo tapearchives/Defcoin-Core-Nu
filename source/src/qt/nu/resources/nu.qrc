@@ -10,6 +10,7 @@
         <file>../qml/Components/NuCopyField.qml</file>
         <file>../qml/Components/NuDataTable.qml</file>
         <file>../qml/Components/NuDialog.qml</file>
+        <file>../qml/Components/NuInspectButton.qml</file>
         <file>../qml/Components/NuMetricRow.qml</file>
         <file>../qml/Components/NuMenuItem.qml</file>
         <file>../qml/Components/NuNavButton.qml</file>
@@ -26,6 +27,7 @@
         <file>../qml/Theme/qmldir</file>
         <file>../qml/Views/ActivityView.qml</file>
         <file>../qml/Views/ExplorerView.qml</file>
+        <file>../qml/Views/ForensicsView.qml</file>
         <file>../qml/Views/HomeView.qml</file>
         <file>../qml/Views/NodeView.qml</file>
         <file>../qml/Views/ReceiveView.qml</file>
@@ -35,6 +37,7 @@
         <file>../assets/icons/copy.svg</file>
         <file>../assets/icons/external-link.svg</file>
         <file>../assets/icons/explorer.svg</file>
+        <file>../assets/icons/forensics.svg</file>
         <file>../assets/icons/home.svg</file>
         <file>../assets/icons/isolated.svg</file>
         <file>../assets/icons/lock.svg</file>
