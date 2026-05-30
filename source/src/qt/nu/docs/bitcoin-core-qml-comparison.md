@@ -103,7 +103,7 @@ helps keyboard users and makes tooltip-on-focus behavior discoverable.
 ## Help Flow
 
 Bitcoin Core QML focuses on in-app pages and settings rather than a native OS
-help book. Nu 26.5.1 keeps release information in About and Build Notes.
+help book. Nu 26.5.2 keeps release information in About and Build Notes.
 
 ## Why Reference Bitcoin Core QML If No Code Is Copied?
 

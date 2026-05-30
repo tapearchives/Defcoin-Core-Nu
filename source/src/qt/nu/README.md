@@ -1,7 +1,7 @@
 # Defcoin Core Nu UI
 
 This folder contains the QML / Qt Quick implementation for Defcoin Core Nu
-26.5.1.
+26.5.2.
 
 The files here are deliberately kept separate from the current Qt Widgets
 application, so the working standard wallet behavior is unchanged while Nu is

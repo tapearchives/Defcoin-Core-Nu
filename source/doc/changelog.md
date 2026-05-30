@@ -1,5 +1,25 @@
 # Defcoin Core Changelog
 
+## 26.5.2 Core Memories
+
+Defcoin Core Nu `26.5.2` is a focused Explorer and packaging polish release
+for the current Nu line.
+
+### Added
+
+- Added a prominent Explorer search field that accepts block heights, block
+  hashes, transaction IDs, and supported Defcoin Base58 address encodings.
+- Added wallet-address Explorer links from transaction detail output, including
+  current `D...` addresses, canonical `M...` P2SH, legacy `3...` P2SH, and
+  compatibility `9...`/`A...` P2SH forms.
+
+### Changed
+
+- Updated public documentation and release metadata to the `26.5.2` release
+  identity.
+- Confirmed Nu packages bundle the Litecoin-equivalent Defcoin command-line
+  tool set: `defcoind`, `defcoin-cli`, `defcoin-tx`, and `defcoin-wallet`.
+
 ## 26.5.1 Core Memories
 
 Defcoin Core Nu `26.5.1` adds modern SQLite descriptor wallet creation,
