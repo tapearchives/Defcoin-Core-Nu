@@ -2311,6 +2311,10 @@ void NuRpcService::rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls
         callback({}, {}, m_last_error);
         return;
     }
+    if (calls.size() == 1) {
+        rpcBatchCallAsSingles(calls, wallet_scoped, std::move(callback));
+        return;
+    }
 
     QJsonArray batch;
     QHash<int, int> id_to_index;
@@ -2359,7 +2363,6 @@ void NuRpcService::rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls
                 .arg(content_type.isEmpty() ? QStringLiteral("unknown") : content_type)
                 .arg(body.size())
                 .arg(preview);
-            appendLaunchDiagnostic(QStringLiteral("%1 Retrying %2 RPC call(s) individually.").arg(malformed_message, QString::number(count)));
             rpcBatchCallAsSingles(calls_copy, wallet_scoped, [callback = std::move(callback), malformed_message](const QVector<QJsonValue>& single_results,
                                                                                                                 const QStringList& single_errors,
                                                                                                                 const QString& single_error) mutable {
