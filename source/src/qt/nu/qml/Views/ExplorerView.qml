@@ -15,6 +15,9 @@ ColumnLayout {
     property int movementPage: 0
     property int selectedRichRank: -1
     property int hoveredRichRank: -1
+    property bool active: false
+    property bool analyticsRequested: false
+    property bool summaryRequested: false
     property var timelineSnapshot: ({ rows: [], height: -1, status: "No Top 100 timeline snapshot loaded." })
     property bool timelinePlaying: false
     property bool top100EndInitialized: false
@@ -99,9 +102,18 @@ ColumnLayout {
         movementPageField.text = String(root.movementPage + 1)
     }
 
-    function refreshAnalytics() {
+    function refreshAnalytics(scope) {
         root.movementPage = 0
-        NuService.refreshExplorerAnalytics(root.movementThresholdCoins())
+        root.analyticsRequested = true
+        NuService.refreshExplorerAnalytics(root.movementThresholdCoins(), scope || "all")
+    }
+
+    function maybeRefreshAnalyticsForTab() {
+        if (!root.active || root.analyticsRequested || !explorerTabs) return
+        if (explorerTabs.currentIndex === 2)
+            root.refreshAnalytics("rich")
+        else if (explorerTabs.currentIndex === 3)
+            root.refreshAnalytics("movements")
     }
 
     function openRow(row) {
@@ -186,7 +198,13 @@ ColumnLayout {
         return isNaN(parsed) ? 0 : Math.max(0, parsed)
     }
 
-    Component.onCompleted: NuService.refreshExplorerAnalytics(root.movementThresholdCoins())
+    onActiveChanged: {
+        if (active && !root.summaryRequested) {
+            root.summaryRequested = true
+            NuService.refreshExplorerRecentLookups()
+        }
+        root.maybeRefreshAnalyticsForTab()
+    }
 
     onMovementPageChanged: {
         if (movementPageField)
@@ -306,6 +324,7 @@ ColumnLayout {
     NuTabBar {
         id: explorerTabs
         Layout.fillWidth: true
+        onCurrentIndexChanged: root.maybeRefreshAnalyticsForTab()
         NuTabButton { text: "Search" }
         NuTabButton { text: "Index" }
         NuTabButton { text: "Top 100" }
@@ -703,8 +722,8 @@ ColumnLayout {
                                          && NuService.explorerIndexTip > 0
                                          && NuService.explorerIndexHeight > NuService.explorerIndexTip
                                          && !NuService.explorerIndexing
-                                helpText: "Recalculate Top 100 and movement summaries after the local Explorer index is complete, usually after new blocks arrive."
-                                onClicked: root.refreshAnalytics()
+                                helpText: "Reload the Top 100 table after the local Explorer index is complete, usually after new blocks arrive."
+                                onClicked: root.refreshAnalytics("rich")
                             }
                             NuActionButton {
                                 width: 118
@@ -803,7 +822,7 @@ ColumnLayout {
                         helpText: "Minimum transaction output total to include in movement rows."
                         Keys.onPressed: (event) => {
                             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                root.refreshAnalytics()
+                                root.refreshAnalytics("movements")
                                 event.accepted = true
                             }
                         }
@@ -813,7 +832,7 @@ ColumnLayout {
                         text: "Refresh"
                         primary: true
                         helpText: "Reload movement rows using the selected DFC threshold."
-                        onClicked: root.refreshAnalytics()
+                        onClicked: root.refreshAnalytics("movements")
                     }
                 }
 

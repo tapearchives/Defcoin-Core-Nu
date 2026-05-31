@@ -1,8 +1,8 @@
 # Defcoin Core Changelog
 
-## 26.5.5q Core Memories
+## 26.5.5w Core Memories
 
-Defcoin Core Nu `26.5.5q` adds the first Forensics view for average users who
+Defcoin Core Nu `26.5.5w` adds the first Forensics view for average users who
 want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Added
@@ -43,9 +43,9 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Changed
 
-- Updated visible Nu release metadata to `26.5.5q`.
+- Updated visible Nu release metadata to `26.5.5w`.
 - Letter suffixes now identify every changed rebuild in this release line:
-  `26.5.5a`, `26.5.5b`, `26.5.5q`, and so on. The inherited Core client version
+  `26.5.5a`, `26.5.5b`, `26.5.5w`, and so on. The inherited Core client version
   remains `0.21.5.5`.
 - Added Forensics to the sidebar, View menu, app resources, and Build Notes.
 - Diagnostics > Status now reports sync method details, UDP transfer rate in
@@ -68,14 +68,28 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
 - The Explorer index control is now labeled `High intensity (uses more resources)`;
   when enabled, Nu uses larger Explorer/Top 100 batches, larger SQLite cache
   settings, fewer UI refreshes, and a best-effort process priority increase.
-- The UDP/TCP fast-sync selector now excludes TCP-only peer traffic from the
-  preference ratio and requires UDP warmup probes before declaring TCP favored.
+- The UDP/TCP fast-sync selector now compares only peers that can actually be
+  tested over both paths, with UDP warmup probes before declaring a preference.
 - Witness block-storage inspection now derives a bounded worker count from
   Core's `-par` setting, using independent block-body reads before aggregating
   results.
 - Explorer index status now separates live indexing progress from analytics
   summary text so the two messages do not flicker or briefly overwrite each
   other while the indexer is running.
+- Explorer Top 100 and movement analytics now refresh in a background worker
+  instead of running large SQLite scans on the UI thread.
+- Explorer analytics now load only the active heavy tab by default: Top 100 no
+  longer starts the movement query unless the Movements tab or full refresh is
+  requested.
+- Explorer no longer auto-runs a Top 100 refresh merely because the block index
+  is already current during app launch.
+- Explorer opens with only lightweight index counters and recent lookups. Expensive
+  Top 100 and movement analytics are deferred until Top 100 or Movements is
+  opened, or until the user explicitly refreshes stats.
+- Diagnostics > Log now shows both visible-row numbers and source debug-log
+  line numbers, and includes `Copy shown` plus `Save launch log` actions.
+- LAN workstation lookup now retries when LAN discovery is enabled and uses
+  host lookup, ping, and ARP hints before leaving workstation details blank.
 
 ### Fixed
 
@@ -86,6 +100,8 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
   local workstation names.
 - Explorer status content now reserves enough height for wrapped index messages,
   so status text cannot paint under the tab bar or buttons.
+- Opening Explorer after a full index no longer blocks on the movement summary
+  query before the view can repaint.
 
 ## 26.5.2 Core Memories
 

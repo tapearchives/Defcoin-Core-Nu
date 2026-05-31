@@ -272,20 +272,22 @@ ColumnLayout {
         return out
     }
 
-    function numberedLogLine(lineNumber, width, line) {
-        const label = lineNumber > 0 ? root.leftPadNumber(lineNumber, width) : root.leftPadNumber("-", width)
-        return label + " \u2502 " + String(line || "")
+    function numberedLogLine(viewLineNumber, viewWidth, debugLineNumber, debugWidth, line) {
+        const viewLabel = root.leftPadNumber(viewLineNumber, viewWidth)
+        const debugLabel = debugLineNumber > 0 ? root.leftPadNumber(debugLineNumber, debugWidth) : root.leftPadNumber("-", debugWidth)
+        return viewLabel + " \u2502 " + debugLabel + " \u2502 " + String(line || "")
     }
 
     function numberedLogText(lines) {
         const out = []
+        const viewWidth = String(Math.max(1, lines.length)).length
         var maxLineNumber = 1
         for (let maxIndex = 0; maxIndex < lines.length; ++maxIndex) {
             if (lines[maxIndex].lineNumber > maxLineNumber) maxLineNumber = lines[maxIndex].lineNumber
         }
-        const width = String(maxLineNumber).length
+        const debugWidth = String(maxLineNumber).length
         for (let i = 0; i < lines.length; ++i) {
-            out.push(root.numberedLogLine(lines[i].lineNumber, width, lines[i].line))
+            out.push(root.numberedLogLine(i + 1, viewWidth, lines[i].lineNumber, debugWidth, lines[i].line))
         }
         return out.join("\n")
     }
@@ -646,6 +648,18 @@ ColumnLayout {
                         }
                     }
                     NuActionButton {
+                        text: "Copy shown"
+                        Layout.preferredWidth: 118
+                        helpText: "Copy the currently visible filtered launch log lines."
+                        onClicked: NuService.copyText(launchLogText.text)
+                    }
+                    NuActionButton {
+                        text: "Save launch log"
+                        Layout.preferredWidth: 144
+                        helpText: "Save the currently visible filtered launch log as a text file with view and debug.log line numbers."
+                        onClicked: NuService.saveLaunchLog(launchLogText.text)
+                    }
+                    NuActionButton {
                         text: "Open debug.log"
                         Layout.preferredWidth: 148
                         helpText: "Open the backend debug.log file in the operating system's default log viewer. Nu startup diagnostics are written there with delimiter lines and mirrored here."
@@ -935,6 +949,16 @@ ColumnLayout {
                     text: "Lines: " + root.shownLogLineCount
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
+                }
+                NuActionButton {
+                    text: "Copy shown"
+                    Layout.preferredWidth: 118
+                    onClicked: NuService.copyText(popoutLogText.text)
+                }
+                NuActionButton {
+                    text: "Save launch log"
+                    Layout.preferredWidth: 144
+                    onClicked: NuService.saveLaunchLog(popoutLogText.text)
                 }
                 NuActionButton {
                     text: "Open debug.log"

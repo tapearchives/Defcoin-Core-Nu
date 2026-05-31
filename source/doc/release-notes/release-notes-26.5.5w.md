@@ -1,8 +1,8 @@
-# Defcoin Core Nu 26.5.5q Release Notes
+# Defcoin Core Nu 26.5.5w Release Notes
 
 Codename: `Core Memories`
 
-Defcoin Core Nu `26.5.5q` adds the first blockchain forensics surface to the
+Defcoin Core Nu `26.5.5w` adds the first blockchain forensics surface to the
 desktop wallet while keeping the chain, wallet, recovery, mining, and explorer
 behavior from the current `26.5` line.
 
@@ -68,9 +68,9 @@ behavior from the current `26.5` line.
 - Explorer indexing now has a clearer `High intensity (uses more resources)` mode.
   It uses larger Explorer and Top 100 batches, larger SQLite cache settings,
   fewer UI refreshes, and a best-effort process priority increase.
-- The fast-sync TCP/UDP selector no longer lets TCP-only peers bias the UDP
-  preference ratio. UDP-capable peers must get warmup probes before Nu declares
-  TCP favored.
+- The fast-sync TCP/UDP selector now compares only peers that can actually be
+  tested over both paths. UDP-capable peers get warmup probes before Nu declares
+  a preference.
 - Witness block-storage inspection now uses a bounded worker count derived from
   Core's `-par` script-verification setting, then aggregates independent block
   inspection results back into one ordered report.
@@ -79,10 +79,26 @@ behavior from the current `26.5` line.
   ratios.
 - Explorer index progress and analytics summary text are now shown as separate
   stable lines, eliminating the short-lived `Loaded Top...` repaint flicker.
+- Explorer Top 100 and movement analytics now refresh in a background worker
+  instead of running large SQLite scans on the UI thread. This targets the
+  beachball seen when opening Explorer after a completed full index.
+- Explorer analytics are deferred until the Explorer page is opened, so ordinary
+  app launch on Home no longer starts the expensive Top 100/movement summary
+  queries.
+- Explorer analytics are also scoped by tab: opening `Top 100` loads Top 100
+  data only, opening `Movements` loads movement rows only, and the explicit
+  `Refresh stats` action remains the full refresh.
+- Explorer no longer auto-runs the Top 100 refresh just because the block index
+  is already current at launch.
+- Diagnostics > Log now shows both visible-row numbers and source debug-log
+  line numbers, and includes reliable `Copy shown` and `Save launch log`
+  actions.
+- LAN workstation lookup now retries when LAN discovery is enabled and uses host
+  lookup, ping, and ARP hints before leaving workstation details blank.
 
 ## Build Suffix
 
-`26.5.5q` is the current changed rebuild in the `26.5.5` line. Future changed
+`26.5.5w` is the current changed rebuild in the `26.5.5` line. Future changed
 rebuilds in the same release line should use the next letter suffix
 (`26.5.5d`, `26.5.5e`, and so on), while the inherited Core client version
 stays `0.21.5.5`.

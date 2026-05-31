@@ -31,6 +31,7 @@
 #include <QNetworkRequest>
 #include <QPainter>
 #include <QPair>
+#include <QPointer>
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QRegularExpression>
@@ -889,6 +890,7 @@ QString parseLanPeerNameLookupOutput(const QString& output)
         QRegularExpression(QStringLiteral(R"(NameHost\s*:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption),
         QRegularExpression(QStringLiteral(R"(^\s*name:\s*([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(\bPinging\s+([A-Za-z0-9_.-]+)\s+\[)"), QRegularExpression::CaseInsensitiveOption),
+        QRegularExpression(QStringLiteral(R"(^\s*PING\s+([A-Za-z0-9_.-]+)\s+\()"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(\bPTR\s+([A-Za-z0-9_.-]+\.local)\.?)"), QRegularExpression::CaseInsensitiveOption),
         QRegularExpression(QStringLiteral(R"(^\s*(?:[0-9]{1,3}\.){3}[0-9]{1,3}\s+([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+<00>\s+UNIQUE\b)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
@@ -2736,6 +2738,8 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
     }
     commands.push_back({QStringLiteral("/usr/bin/dscacheutil"), {QStringLiteral("-q"), QStringLiteral("host"), QStringLiteral("-a"), QStringLiteral("ip_address"), address.toString()}});
     commands.push_back({QStringLiteral("/usr/bin/smbutil"), {QStringLiteral("status"), QStringLiteral("-ae"), address.toString()}});
+    commands.push_back({QStringLiteral("/sbin/ping"), {QStringLiteral("-c"), QStringLiteral("1"), QStringLiteral("-W"), QStringLiteral("1000"), address.toString()}});
+    commands.push_back({QStringLiteral("/usr/sbin/arp"), {QStringLiteral("-a"), address.toString()}});
 #elif defined(Q_OS_WIN)
     commands.push_back({QStringLiteral("powershell.exe"), {
         QStringLiteral("-NoProfile"),
@@ -2755,6 +2759,23 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
 
     m_peer_lan_lookup_pending.insert(key);
     m_peer_lan_lookup_attempted.insert(key);
+
+    QHostInfo::lookupHost(address.toString(), this, [this, key](const QHostInfo& info) {
+        if (info.error() != QHostInfo::NoError) return;
+        const QString name = sanitizedLanHostName(info.hostName());
+        if (name.isEmpty()) return;
+        bool changed = false;
+        if (m_peer_lan_name_by_host.value(key) != name) {
+            m_peer_lan_name_by_host.insert(key, name);
+            changed = true;
+        }
+        const QString detail = QStringLiteral("Name: %1").arg(name);
+        if (m_peer_lan_info_by_host.value(key).isEmpty()) {
+            m_peer_lan_info_by_host.insert(key, detail);
+            changed = true;
+        }
+        if (changed) refreshNode();
+    });
 
     auto command_list = std::make_shared<QVector<Command>>(commands);
     auto aggregate_name = std::make_shared<QString>();
@@ -3636,7 +3657,7 @@ QString NuRpcService::syncTransportDecisionSummary() const
     const QString udp_rate = m_fast_sync_udp_ewma_blocks_per_second > 0.0
         ? QStringLiteral("UDP %1 blk/s").arg(QString::number(m_fast_sync_udp_ewma_blocks_per_second, 'f', m_fast_sync_udp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
         : QStringLiteral("UDP warming");
-    return QStringLiteral("%1. %2 | %3 | UDP probe: %4 B datagram/%5 B chunk | retransmit/errors: %6")
+    return QStringLiteral("%1 | %2 | %3 | Probe %4/%5 B | Err %6")
         .arg(m_fast_sync_decision_summary,
              tcp_rate,
              udp_rate,
@@ -3696,7 +3717,7 @@ void NuRpcService::resetFastSyncProtocolWindow()
         m_fast_sync_tcp_quota_remaining = 1;
         m_fast_sync_udp_quota_remaining = 0;
         m_fast_sync_window_size = 2;
-        m_fast_sync_decision_summary = QStringLiteral("TCP/Core only; no UDP fast-sync peer has been observed.");
+        m_fast_sync_decision_summary = QStringLiteral("TCP/Core only");
         return;
     }
 
@@ -3710,7 +3731,7 @@ void NuRpcService::resetFastSyncProtocolWindow()
         m_fast_sync_udp_quota_remaining = 3;
         m_fast_sync_tcp_quota_remaining = 1;
         m_fast_sync_last_probe_ms = now;
-        m_fast_sync_decision_summary = QStringLiteral("UDP warmup %1/%2; TCP-only peer traffic is excluded from the selector.")
+        m_fast_sync_decision_summary = QStringLiteral("UDP warmup %1/%2")
             .arg(QString::number(udp_samples),
                  QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES));
         return;
@@ -3759,8 +3780,8 @@ void NuRpcService::resetFastSyncProtocolWindow()
                ? QStringLiteral("TCP favored %1:%2").arg(tcp_quota).arg(udp_quota)
                : QStringLiteral("TCP/UDP balanced 1:1"));
     m_fast_sync_decision_summary = udp_in_cooldown && !force_probe
-        ? QStringLiteral("UDP cooling down after errors; TCP/Core is favored")
-        : QStringLiteral("%1; TCP sample count capped against UDP-capable peers").arg(favored);
+        ? QStringLiteral("TCP favored; UDP cooling")
+        : favored;
 }
 
 bool NuRpcService::shouldAttemptUdpFastSync()
@@ -5193,6 +5214,7 @@ void NuRpcService::setLanNodeDiscoveryEnabled(bool enabled)
         m_peer_lan_lookup_pending.clear();
         m_peer_lan_lookup_attempted.clear();
     } else {
+        m_peer_lan_lookup_attempted.clear();
         ensureLanFastSyncSocket();
     }
     Q_EMIT settingsChanged();
@@ -7504,25 +7526,78 @@ QVariantList NuRpcService::explorerMovementsFromDb(qint64 threshold_sats, QStrin
     return rows;
 }
 
-void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins)
+void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins, const QString& scope)
 {
     const int bounded_coins = std::max(0, movement_threshold_coins);
     const qint64 threshold_sats = static_cast<qint64>(bounded_coins) * 100000000LL;
-    QString rich_error;
-    QString movement_error;
-    m_explorer_rich_list = explorerRichListFromDb(&rich_error);
-    m_explorer_movements = explorerMovementsFromDb(threshold_sats, &movement_error);
-    refreshExplorerTop100TimelineStats();
-    if (!rich_error.isEmpty() || !movement_error.isEmpty()) {
-        QStringList details;
-        if (!rich_error.isEmpty()) details.push_back(QStringLiteral("Top 100: %1").arg(rich_error));
-        if (!movement_error.isEmpty()) details.push_back(QStringLiteral("Movements: %1").arg(movement_error));
-        m_explorer_analytics_status = QStringLiteral("Explorer analytics could not fully load. %1").arg(details.join(QStringLiteral(" ")));
-    } else {
-        m_explorer_analytics_status = QStringLiteral("Loaded Top 100 and %1 movement rows at %2+ DFC from the local SQLite index.")
-            .arg(QString::number(m_explorer_movements.size()), QString::number(bounded_coins));
+    QString normalized_scope = scope.trimmed().toLower();
+    if (normalized_scope != QLatin1String("rich") &&
+        normalized_scope != QLatin1String("movements") &&
+        normalized_scope != QLatin1String("all")) {
+        normalized_scope = QStringLiteral("all");
     }
+    const bool load_rich = normalized_scope == QLatin1String("rich") || normalized_scope == QLatin1String("all");
+    const bool load_movements = normalized_scope == QLatin1String("movements") || normalized_scope == QLatin1String("all");
+
+    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+    if (m_explorer_analytics_refreshing) {
+        m_explorer_analytics_status = QStringLiteral("Explorer analytics are loading in the background.");
+        Q_EMIT explorerChanged();
+        return;
+    }
+    if (m_explorer_analytics_last_threshold_coins == bounded_coins &&
+        m_explorer_analytics_last_scope == normalized_scope &&
+        m_explorer_analytics_last_refresh_ms > 0 &&
+        now_ms - m_explorer_analytics_last_refresh_ms < 30000 &&
+        ((load_rich && !m_explorer_rich_list.isEmpty()) ||
+         (load_movements && !m_explorer_movements.isEmpty()))) {
+        return;
+    }
+
+    const int generation = ++m_explorer_analytics_generation;
+    m_explorer_analytics_refreshing = true;
+    m_explorer_analytics_status = QStringLiteral("Explorer analytics are loading in the background.");
     Q_EMIT explorerChanged();
+
+    QPointer<NuRpcService> guard(this);
+    QThread* thread = QThread::create([guard, bounded_coins, threshold_sats, generation, normalized_scope, load_rich, load_movements] {
+        if (!guard) return;
+        QString rich_error;
+        QString movement_error;
+        QVariantList rich_list;
+        QVariantList movements;
+        if (load_rich) rich_list = guard->explorerRichListFromDb(&rich_error);
+        if (load_movements) movements = guard->explorerMovementsFromDb(threshold_sats, &movement_error);
+        QMetaObject::invokeMethod(guard, [guard, generation, bounded_coins, normalized_scope, load_rich, load_movements, rich_list = std::move(rich_list), movements = std::move(movements), rich_error, movement_error]() mutable {
+            if (!guard || generation != guard->m_explorer_analytics_generation) return;
+            guard->m_explorer_analytics_refreshing = false;
+            guard->m_explorer_analytics_last_threshold_coins = bounded_coins;
+            guard->m_explorer_analytics_last_scope = normalized_scope;
+            guard->m_explorer_analytics_last_refresh_ms = QDateTime::currentMSecsSinceEpoch();
+            if (load_rich) guard->m_explorer_rich_list = std::move(rich_list);
+            if (load_movements) guard->m_explorer_movements = std::move(movements);
+            guard->refreshExplorerTop100TimelineStats();
+            if (!rich_error.isEmpty() || !movement_error.isEmpty()) {
+                QStringList details;
+                if (!rich_error.isEmpty()) details.push_back(QStringLiteral("Top 100: %1").arg(rich_error));
+                if (!movement_error.isEmpty()) details.push_back(QStringLiteral("Movements: %1").arg(movement_error));
+                guard->m_explorer_analytics_status = QStringLiteral("Explorer analytics could not fully load. %1").arg(details.join(QStringLiteral(" ")));
+            } else if (load_rich && load_movements) {
+                guard->m_explorer_analytics_status = QStringLiteral("Loaded Top 100 and %1 movement rows at %2+ DFC from the local SQLite index.")
+                    .arg(QString::number(guard->m_explorer_movements.size()), QString::number(bounded_coins));
+            } else if (load_rich) {
+                guard->m_explorer_analytics_status = QStringLiteral("Loaded Top 100 from the local SQLite index.");
+            } else if (load_movements) {
+                guard->m_explorer_analytics_status = QStringLiteral("Loaded %1 movement rows at %2+ DFC from the local SQLite index.")
+                    .arg(QString::number(guard->m_explorer_movements.size()), QString::number(bounded_coins));
+            } else {
+                guard->m_explorer_analytics_status = QStringLiteral("Explorer analytics are current.");
+            }
+            Q_EMIT guard->explorerChanged();
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start(QThread::LowPriority);
 }
 
 QString NuRpcService::explorerBlockHashAtHeight(int height) const
@@ -8386,7 +8461,6 @@ void NuRpcService::explorerIndexStep()
         releaseExplorerWriterLock();
         m_explorer_index_status = QStringLiteral("Index is current at block %1 with %2 blocks cached.")
             .arg(QString::number(m_explorer_index_tip), QString::number(m_explorer_indexed_block_count));
-        refreshExplorerAnalytics(5000);
         Q_EMIT explorerChanged();
         return;
     }
@@ -8856,7 +8930,7 @@ void NuRpcService::explorerTop100Step()
             ? QStringLiteral("Top 100 timeline complete through block %1 with %2 checkpoint rows.")
                   .arg(QString::number(m_explorer_top100_scan_end_height), QString::number(m_explorer_top100_events_written))
             : QStringLiteral("Top 100 timeline finished, but range status could not be saved: %1").arg(finish_error);
-        refreshExplorerAnalytics(5000);
+        refreshExplorerAnalytics(5000, QStringLiteral("rich"));
         Q_EMIT explorerChanged();
         return;
     }
@@ -10809,6 +10883,50 @@ void NuRpcService::openDebugLog()
         Q_EMIT userMessage(QStringLiteral("Debug log not opened"),
                            QStringLiteral("The operating system did not open:\n%1").arg(path));
     }
+}
+
+void NuRpcService::saveLaunchLog(const QString& text)
+{
+    const QString clean = text.left(4 * 1024 * 1024);
+    if (clean.trimmed().isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Launch log not saved"), QStringLiteral("There are no visible launch log lines to save."));
+        return;
+    }
+
+    QString dir_path = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (dir_path.isEmpty()) dir_path = QDir::homePath();
+    QDir dir(dir_path);
+    const QString file_name = QStringLiteral("Defcoin-Core-Nu-launch-log-%1.txt")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+    const QString path = dir.filePath(file_name);
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        Q_EMIT userMessage(QStringLiteral("Launch log not saved"), file.errorString());
+        return;
+    }
+    QTextStream out(&file);
+    out << "Shown line\tdebug.log line\tMessage\n";
+    const QRegularExpression numbered_line(QStringLiteral(R"(^\s*(\d+)\s+\x{2502}\s+([-\d]+)\s+\x{2502}\s?(.*)$)"));
+    const QStringList lines = clean.split(QLatin1Char('\n'));
+    for (const QString& line : lines) {
+        if (line.isEmpty()) continue;
+        const QRegularExpressionMatch match = numbered_line.match(line);
+        if (match.hasMatch()) {
+            QString message = match.captured(3);
+            message.replace(QLatin1Char('\t'), QStringLiteral("    "));
+            out << match.captured(1) << '\t' << match.captured(2) << '\t' << message << '\n';
+        } else {
+            QString message = line;
+            message.replace(QLatin1Char('\t'), QStringLiteral("    "));
+            out << '\t' << '\t' << message << '\n';
+        }
+    }
+    if (!file.commit()) {
+        Q_EMIT userMessage(QStringLiteral("Launch log not saved"), file.errorString());
+        return;
+    }
+    Q_EMIT userMessage(QStringLiteral("Launch log saved"), QStringLiteral("Saved to:\n%1").arg(path));
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
 void NuRpcService::requestTransactionDetails(const QString& txid)

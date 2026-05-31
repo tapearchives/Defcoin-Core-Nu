@@ -363,6 +363,7 @@ public:
     Q_INVOKABLE void signMessage(const QString& address, const QString& message);
     Q_INVOKABLE void verifyMessage(const QString& address, const QString& signature, const QString& message);
     Q_INVOKABLE void openDebugLog();
+    Q_INVOKABLE void saveLaunchLog(const QString& text);
     Q_INVOKABLE void openHelpManual(const QString& page = QString());
     Q_INVOKABLE QString helpManualHtml(const QString& page = QString()) const;
     Q_INVOKABLE void exportTransactionsCsv();
@@ -399,7 +400,7 @@ public:
     Q_INVOKABLE void searchExplorer(const QString& query);
     Q_INVOKABLE void openExplorerLink(const QString& link);
     Q_INVOKABLE void refreshExplorerRecentLookups();
-    Q_INVOKABLE void refreshExplorerAnalytics(int movement_threshold_coins = 5000);
+    Q_INVOKABLE void refreshExplorerAnalytics(int movement_threshold_coins = 5000, const QString& scope = QStringLiteral("all"));
     Q_INVOKABLE void startExplorerIndexing();
     Q_INVOKABLE void stopExplorerIndexing();
     Q_INVOKABLE void resetExplorerIndex();
@@ -900,6 +901,11 @@ private:
     QVariantList m_explorer_rich_list;
     QVariantList m_explorer_movements;
     QString m_explorer_analytics_status = QStringLiteral("Explorer analytics not loaded yet.");
+    int m_explorer_analytics_generation = 0;
+    bool m_explorer_analytics_refreshing = false;
+    int m_explorer_analytics_last_threshold_coins = -1;
+    QString m_explorer_analytics_last_scope;
+    qint64 m_explorer_analytics_last_refresh_ms = 0;
     bool m_explorer_indexing = false;
     bool m_explorer_index_request_in_flight = false;
     bool m_explorer_auto_index_requested = false;

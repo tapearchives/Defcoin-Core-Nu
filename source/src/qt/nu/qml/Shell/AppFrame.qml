@@ -84,7 +84,9 @@ Item {
                         onRestoreRecoveryWalletRequested: root.restoreRecoveryWalletRequested()
                     }
                     MiningView {}
-                    ExplorerView {}
+                    ExplorerView {
+                        active: root.currentRoute === "explorer"
+                    }
                     ForensicsView {}
                     NodeView {
                         initialTab: root.nodeInitialTab
