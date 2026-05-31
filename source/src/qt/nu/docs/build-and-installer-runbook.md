@@ -26,9 +26,9 @@ QT_WIN="$HOME/Qt/6.10.1/mingw_64"
 Finished deliverables should be staged outside source history:
 
 ```text
-$OUT/Nu-26.5.5m/apple-silicon/
-$OUT/Nu-26.5.5m/mac-intel/
-$OUT/Nu-26.5.5m/windows11-x86_64/
+$OUT/Nu-26.5.5n/apple-silicon/
+$OUT/Nu-26.5.5n/mac-intel/
+$OUT/Nu-26.5.5n/windows11-x86_64/
 ```
 
 ## macOS Qt Quick App
@@ -46,7 +46,7 @@ cmake -S src/qt/nu/app -B build/nu-qml-arm64 \
   -DDEFCOIN_NU_CLI_BINARY="$SRC/src/defcoin-cli" \
   -DDEFCOIN_NU_TX_BINARY="$SRC/src/defcoin-tx" \
   -DDEFCOIN_NU_WALLET_BINARY="$SRC/src/defcoin-wallet" \
-  -DDEFCOIN_NU_RELEASE_NAME="26.5.5m" \
+  -DDEFCOIN_NU_RELEASE_NAME="26.5.5n" \
   -DDEFCOIN_NU_ENABLE_HELP=OFF
 
 cmake --build build/nu-qml-arm64 --target DefcoinCoreNuResources -- -j1
@@ -66,8 +66,8 @@ Stage macOS bundles with the local staging helper:
 ```sh
 src/qt/nu/app/stage_macos_distribution.sh \
   "$SRC/build/nu-qml-arm64/DefcoinCoreNu.app" \
-  "$OUT/Nu-26.5.5m/apple-silicon" \
-  "26.5.5m" \
+  "$OUT/Nu-26.5.5n/apple-silicon" \
+  "26.5.5n" \
   "macOS-AppleSilicon"
 ```
 
@@ -105,7 +105,7 @@ cmake -S src/qt/nu/app -B build/nu-qml-win64 \
   -DDEFCOIN_NU_CLI_BINARY="$WIN_SRC/src/defcoin-cli.exe" \
   -DDEFCOIN_NU_TX_BINARY="$WIN_SRC/src/defcoin-tx.exe" \
   -DDEFCOIN_NU_WALLET_BINARY="$WIN_SRC/src/defcoin-wallet.exe" \
-  -DDEFCOIN_NU_RELEASE_NAME="26.5.5m" \
+  -DDEFCOIN_NU_RELEASE_NAME="26.5.5n" \
   -DDEFCOIN_NU_ENABLE_HELP=OFF \
   -DQt6_DIR="$QT_WIN/lib/cmake/Qt6" \
   -DCMAKE_BUILD_TYPE=Release
@@ -122,10 +122,10 @@ directly from the finish page.
 - Do not commit app bundles, installers, DMGs, ZIPs, or generated build trees.
 - Do not commit private credentials, wallet files, RPC cookies, `.env` files,
   or workstation-specific paths.
-- Keep the visible release version as `26.5.5m`.
+- Keep the visible release version as `26.5.5n`.
 - If a rebuild contains any source, UI, packaging, documentation, or behavior
   change, advance the visible release label with a letter suffix before staging
-  it: `26.5.5a`, `26.5.5b`, `26.5.5c`, and so on.
+  it: `26.5.5a`, `26.5.5b`, `26.5.5n`, and so on.
 - Do not change the inherited `0.21.5.5` Core client version for suffix-only Nu
   rebuilds; that number tracks the Litecoin/Core base.
 - Build IDs may include UTC timestamp, commit, and dirty/clean state, but

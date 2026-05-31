@@ -90,9 +90,11 @@ constexpr int EXPLORER_TOP100_MIN_PLAYBACK_CHECKPOINTS = 250;
 constexpr int EXPLORER_TOP100_LARGE_PLAYBACK_CHECKPOINTS = 500;
 constexpr qint64 EXPLORER_TOP100_UI_REFRESH_MS = 5000;
 constexpr quint16 LAN_FAST_SYNC_PORT = 10334;
-constexpr int LAN_FAST_SYNC_MAX_DATAGRAM_BYTES = 1232;
+constexpr int LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES = 1232;
+constexpr int LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES = 1472;
+constexpr int LAN_FAST_SYNC_MAX_DATAGRAM_BYTES = 16640;
 constexpr int LAN_FAST_SYNC_MAX_HEADER_BYTES = 768;
-constexpr int LAN_FAST_SYNC_CHUNK_BYTES = 768;
+constexpr int LAN_FAST_SYNC_MAX_CHUNK_BYTES = LAN_FAST_SYNC_MAX_DATAGRAM_BYTES - 448;
 constexpr int LAN_FAST_SYNC_MIN_CHUNK_BYTES = 128;
 constexpr int LAN_FAST_SYNC_MAX_CHUNKS_PER_BLOCK = 65536;
 constexpr int LAN_FAST_SYNC_MAX_DATAGRAMS_PER_READ = 96;
@@ -124,6 +126,18 @@ QByteArray doubleSha256(const QByteArray& bytes)
 QString lanFastSyncChecksum(const QByteArray& bytes)
 {
     return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+}
+
+QVector<int> lanFastSyncDatagramCandidates(bool lan_mode)
+{
+    return lan_mode
+        ? QVector<int>{LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES, 4096, 8192, 12000, 16000}
+        : QVector<int>{LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES, LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES};
+}
+
+int lanFastSyncChunkBytesForDatagram(int max_datagram)
+{
+    return qBound(LAN_FAST_SYNC_MIN_CHUNK_BYTES, max_datagram - 448, LAN_FAST_SYNC_MAX_CHUNK_BYTES);
 }
 
 QString explorerTop100Color(int rank)
@@ -158,16 +172,19 @@ bool isPrivateOrLocalFastSyncAddress(const QHostAddress& address)
     return false;
 }
 
-QByteArray lanFastSyncDatagram(const QJsonObject& header, const QByteArray& payload = QByteArray())
+QByteArray lanFastSyncDatagram(const QJsonObject& header,
+                               const QByteArray& payload = QByteArray(),
+                               int max_datagram = LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES)
 {
-    if (payload.size() > LAN_FAST_SYNC_CHUNK_BYTES) return QByteArray();
+    max_datagram = qBound(576, max_datagram, LAN_FAST_SYNC_MAX_DATAGRAM_BYTES);
+    if (payload.size() > LAN_FAST_SYNC_MAX_CHUNK_BYTES) return QByteArray();
     QJsonObject copy = header;
     copy.insert(QStringLiteral("payload_size"), payload.size());
     const QByteArray json = QJsonDocument(copy).toJson(QJsonDocument::Compact);
     if (json.isEmpty() || json.size() > LAN_FAST_SYNC_MAX_HEADER_BYTES) return QByteArray();
     QByteArray datagram;
     const int datagram_size = 10 + json.size() + payload.size();
-    if (datagram_size > LAN_FAST_SYNC_MAX_DATAGRAM_BYTES) return QByteArray();
+    if (datagram_size > max_datagram) return QByteArray();
     datagram.reserve(datagram_size);
     datagram.append("DFCLAN1\n", 8);
     datagram.append(json);
@@ -193,7 +210,7 @@ bool parseLanFastSyncDatagram(const QByteArray& datagram, QJsonObject* header, Q
     const QJsonValue payload_size_value = header->value(QStringLiteral("payload_size"));
     if (!payload_size_value.isDouble()) return false;
     const int payload_size = payload_size_value.toInt(-1);
-    if (payload_size < 0 || payload_size > LAN_FAST_SYNC_CHUNK_BYTES) return false;
+    if (payload_size < 0 || payload_size > LAN_FAST_SYNC_MAX_CHUNK_BYTES) return false;
     *payload = datagram.mid(split + 2);
     return payload_size == payload->size();
 }
@@ -3584,10 +3601,12 @@ QString NuRpcService::syncTransportDecisionSummary() const
     const QString udp_rate = m_fast_sync_udp_ewma_blocks_per_second > 0.0
         ? QStringLiteral("UDP %1 blk/s").arg(QString::number(m_fast_sync_udp_ewma_blocks_per_second, 'f', m_fast_sync_udp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
         : QStringLiteral("UDP warming");
-    return QStringLiteral("%1. %2 | %3 | retransmit/errors: %4")
+    return QStringLiteral("%1. %2 | %3 | UDP probe: %4 B datagram/%5 B chunk | retransmit/errors: %6")
         .arg(m_fast_sync_decision_summary,
              tcp_rate,
              udp_rate,
+             QString::number(currentFastSyncDatagramSize()),
+             QString::number(currentFastSyncChunkSize()),
              QString::number(m_lan_fast_sync_retransmit_errors));
 }
 
@@ -3739,6 +3758,43 @@ bool NuRpcService::isUdpFastSyncAllowedPeer(const QHostAddress& address) const
     return m_lan_node_discovery_enabled && isPrivateOrLocalFastSyncAddress(address);
 }
 
+bool NuRpcService::hasPrivateUdpFastSyncTarget() const
+{
+    if (m_lan_node_discovery_enabled) return true;
+    for (const QString& host : m_udp_fast_sync_peer_hosts) {
+        QHostAddress address;
+        if (address.setAddress(host) && isPrivateOrLocalFastSyncAddress(address)) return true;
+    }
+    return false;
+}
+
+int NuRpcService::currentFastSyncDatagramSize() const
+{
+    const QVector<int> candidates = lanFastSyncDatagramCandidates(hasPrivateUdpFastSyncTarget());
+    const int index = qBound(0, m_fast_sync_udp_datagram_index, candidates.size() - 1);
+    return candidates.value(index, LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES);
+}
+
+int NuRpcService::currentFastSyncChunkSize() const
+{
+    return lanFastSyncChunkBytesForDatagram(currentFastSyncDatagramSize());
+}
+
+void NuRpcService::tuneFastSyncDatagramAfterSuccess()
+{
+    const QVector<int> candidates = lanFastSyncDatagramCandidates(hasPrivateUdpFastSyncTarget());
+    if (m_fast_sync_udp_datagram_index < candidates.size() - 1) {
+        ++m_fast_sync_udp_datagram_index;
+    }
+}
+
+void NuRpcService::tuneFastSyncDatagramAfterFailure()
+{
+    if (m_fast_sync_udp_datagram_index > 0) {
+        --m_fast_sync_udp_datagram_index;
+    }
+}
+
 void NuRpcService::lanFastSyncTick()
 {
     if (!m_lan_fast_sync_enabled) {
@@ -3772,6 +3828,7 @@ void NuRpcService::lanFastSyncTick()
             ++m_lan_fast_sync_retransmit_errors;
             if (m_lan_fast_sync_retransmit_errors % LAN_FAST_SYNC_MAX_RETRIES_PER_BLOCK == 0) {
                 recordFastSyncUdpFailure();
+                tuneFastSyncDatagramAfterFailure();
                 for (const QString& host : std::as_const(m_udp_fast_sync_current_target_hosts)) {
                     if (!m_udp_fast_sync_available_peer_hosts.contains(host) &&
                         !m_udp_fast_sync_used_peer_hosts.contains(host)) {
@@ -3812,6 +3869,8 @@ void NuRpcService::requestLanFastSyncBlock(int height)
     m_lan_fast_sync_request_ms = QDateTime::currentMSecsSinceEpoch();
     m_lan_fast_sync_request_in_flight = true;
     m_udp_fast_sync_current_target_hosts.clear();
+    m_fast_sync_current_datagram_bytes = currentFastSyncDatagramSize();
+    m_fast_sync_current_chunk_bytes = currentFastSyncChunkSize();
 
     QJsonObject header;
     header.insert(QStringLiteral("type"), QStringLiteral("request-block"));
@@ -3821,8 +3880,10 @@ void NuRpcService::requestLanFastSyncBlock(int height)
     header.insert(QStringLiteral("height"), height);
     header.insert(QStringLiteral("tip"), m_block_height);
     header.insert(QStringLiteral("port"), int(LAN_FAST_SYNC_PORT));
-    header.insert(QStringLiteral("max_datagram"), LAN_FAST_SYNC_MAX_DATAGRAM_BYTES);
-    const QByteArray datagram = lanFastSyncDatagram(header);
+    header.insert(QStringLiteral("max_datagram"), m_fast_sync_current_datagram_bytes);
+    header.insert(QStringLiteral("chunk_bytes"), m_fast_sync_current_chunk_bytes);
+    header.insert(QStringLiteral("datagram_mode"), hasPrivateUdpFastSyncTarget() ? QStringLiteral("lan-probe") : QStringLiteral("safe-probe"));
+    const QByteArray datagram = lanFastSyncDatagram(header, QByteArray(), LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES);
     if (datagram.isEmpty()) {
         resetLanFastSyncTransfer(QStringLiteral("UDP fast sync could not build a safe request packet; TCP/Core fallback remains active."));
         return;
@@ -3832,6 +3893,10 @@ void NuRpcService::requestLanFastSyncBlock(int height)
     for (const QString& host : std::as_const(m_udp_fast_sync_peer_hosts)) {
         QHostAddress peer_address;
         if (!peer_address.setAddress(host)) continue;
+        if (m_fast_sync_current_datagram_bytes > LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES &&
+            !isPrivateOrLocalFastSyncAddress(peer_address)) {
+            continue;
+        }
         const QString key = normalizedFastSyncHost(peer_address);
         if (sent_targets.contains(key)) continue;
         const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, peer_address, LAN_FAST_SYNC_PORT);
@@ -3867,10 +3932,11 @@ void NuRpcService::requestLanFastSyncBlock(int height)
         resetLanFastSyncTransfer(QStringLiteral("UDP fast sync could not reach eligible peers; TCP/Core fallback remains active."));
         return;
     }
-    m_lan_fast_sync_status = QStringLiteral("UDP fast sync requesting block %1 from %2 target%3; TCP/Core fallback remains active.")
+    m_lan_fast_sync_status = QStringLiteral("UDP fast sync requesting block %1 from %2 target%3 at %4-byte datagrams; TCP/Core fallback remains active.")
         .arg(height)
         .arg(target_count)
-        .arg(target_count == 1 ? QString() : QStringLiteral("s"));
+        .arg(target_count == 1 ? QString() : QStringLiteral("s"))
+        .arg(m_fast_sync_current_datagram_bytes);
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
 }
@@ -3929,24 +3995,28 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
     }
     const int advertised_reply_port = header.value(QStringLiteral("port")).toInt(sender_port);
     const quint16 reply_port = sender_port > 0 ? sender_port : quint16(advertised_reply_port);
-    const int peer_max_datagram = qBound(576, header.value(QStringLiteral("max_datagram")).toInt(LAN_FAST_SYNC_MAX_DATAGRAM_BYTES), LAN_FAST_SYNC_MAX_DATAGRAM_BYTES);
-    rpcCall(QStringLiteral("getblockhash"), {height}, false, [this, request_id, height, sender, reply_port, peer_max_datagram](const QJsonValue& hash_result, const QString& hash_error) {
+    const int sender_datagram_cap = isPrivateOrLocalFastSyncAddress(sender)
+        ? LAN_FAST_SYNC_MAX_DATAGRAM_BYTES
+        : LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES;
+    const int peer_max_datagram = qBound(576, header.value(QStringLiteral("max_datagram")).toInt(LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES), sender_datagram_cap);
+    const int requested_chunk_bytes = header.value(QStringLiteral("chunk_bytes")).toInt(lanFastSyncChunkBytesForDatagram(peer_max_datagram));
+    const int peer_chunk_bytes = qBound(LAN_FAST_SYNC_MIN_CHUNK_BYTES,
+                                        qMin(requested_chunk_bytes, lanFastSyncChunkBytesForDatagram(peer_max_datagram)),
+                                        LAN_FAST_SYNC_MAX_CHUNK_BYTES);
+    rpcCall(QStringLiteral("getblockhash"), {height}, false, [this, request_id, height, sender, reply_port, peer_max_datagram, peer_chunk_bytes](const QJsonValue& hash_result, const QString& hash_error) {
         if (!hash_error.isEmpty() || !m_lan_fast_sync_socket) return;
         const QString hash = hash_result.toString();
         if (hash.isEmpty()) return;
-        rpcCall(QStringLiteral("getblock"), {hash, 0}, false, [this, request_id, height, sender, reply_port, hash, peer_max_datagram](const QJsonValue& block_result, const QString& block_error) {
+        rpcCall(QStringLiteral("getblock"), {hash, 0}, false, [this, request_id, height, sender, reply_port, hash, peer_max_datagram, peer_chunk_bytes](const QJsonValue& block_result, const QString& block_error) {
             if (!block_error.isEmpty() || !m_lan_fast_sync_socket) return;
             const QByteArray raw = QByteArray::fromHex(block_result.toString().toLatin1());
             if (raw.isEmpty() || raw.size() > LAN_FAST_SYNC_MAX_BLOCK_BYTES) return;
-            const int chunk_bytes = qBound(LAN_FAST_SYNC_MIN_CHUNK_BYTES,
-                                           peer_max_datagram - 448,
-                                           LAN_FAST_SYNC_CHUNK_BYTES);
-            const int total_chunks = (raw.size() + chunk_bytes - 1) / chunk_bytes;
+            const int total_chunks = (raw.size() + peer_chunk_bytes - 1) / peer_chunk_bytes;
             if (total_chunks <= 0 || total_chunks > LAN_FAST_SYNC_MAX_CHUNKS_PER_BLOCK) return;
             const QString block_checksum = lanFastSyncChecksum(raw);
             bool sent_any_chunk = false;
             for (int seq = 0; seq < total_chunks; ++seq) {
-                const QByteArray chunk = raw.mid(seq * chunk_bytes, chunk_bytes);
+                const QByteArray chunk = raw.mid(seq * peer_chunk_bytes, peer_chunk_bytes);
                 QJsonObject chunk_header;
                 chunk_header.insert(QStringLiteral("type"), QStringLiteral("block-chunk"));
                 chunk_header.insert(QStringLiteral("version"), 1);
@@ -3957,9 +4027,11 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
                 chunk_header.insert(QStringLiteral("seq"), seq);
                 chunk_header.insert(QStringLiteral("total"), total_chunks);
                 chunk_header.insert(QStringLiteral("block_size"), raw.size());
+                chunk_header.insert(QStringLiteral("chunk_bytes"), peer_chunk_bytes);
+                chunk_header.insert(QStringLiteral("max_datagram"), peer_max_datagram);
                 chunk_header.insert(QStringLiteral("block_checksum"), block_checksum);
                 chunk_header.insert(QStringLiteral("chunk_checksum"), lanFastSyncChecksum(chunk));
-                const QByteArray datagram = lanFastSyncDatagram(chunk_header, chunk);
+                const QByteArray datagram = lanFastSyncDatagram(chunk_header, chunk, peer_max_datagram);
                 if (!datagram.isEmpty() && datagram.size() <= peer_max_datagram) {
                     const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, sender, reply_port);
                     if (written > 0) {
@@ -3992,15 +4064,19 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     const int seq = header.value(QStringLiteral("seq")).toInt(-1);
     const int total = header.value(QStringLiteral("total")).toInt(-1);
     const int block_size = header.value(QStringLiteral("block_size")).toInt(-1);
-    if (payload.isEmpty() || payload.size() > LAN_FAST_SYNC_CHUNK_BYTES) return;
+    const int chunk_bytes = header.value(QStringLiteral("chunk_bytes")).toInt(m_fast_sync_current_chunk_bytes);
+    const int max_datagram = header.value(QStringLiteral("max_datagram")).toInt(m_fast_sync_current_datagram_bytes);
+    if (qBound(576, max_datagram, LAN_FAST_SYNC_MAX_DATAGRAM_BYTES) > m_fast_sync_current_datagram_bytes) return;
+    if (payload.isEmpty() || payload.size() > qMin(m_fast_sync_current_chunk_bytes, qBound(LAN_FAST_SYNC_MIN_CHUNK_BYTES, chunk_bytes, LAN_FAST_SYNC_MAX_CHUNK_BYTES))) return;
     if (seq < 0 || total <= 0 || total > LAN_FAST_SYNC_MAX_CHUNKS_PER_BLOCK || block_size <= 0 || block_size > LAN_FAST_SYNC_MAX_BLOCK_BYTES) return;
     if (seq >= total) return;
-    if (block_size > total * LAN_FAST_SYNC_CHUNK_BYTES) return;
+    if (block_size > total * m_fast_sync_current_chunk_bytes) return;
     const QString chunk_checksum = header.value(QStringLiteral("chunk_checksum")).toString();
     if (chunk_checksum.size() != 64) return;
     if (lanFastSyncChecksum(payload) != chunk_checksum) {
         ++m_lan_fast_sync_retransmit_errors;
         recordFastSyncUdpFailure();
+        tuneFastSyncDatagramAfterFailure();
         m_lan_fast_sync_request_ms = 0;
         return;
     }
@@ -4034,6 +4110,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     if (block.size() != m_lan_fast_sync_expected_size || lanFastSyncChecksum(block) != m_lan_fast_sync_block_checksum) {
         ++m_lan_fast_sync_retransmit_errors;
         recordFastSyncUdpFailure();
+        tuneFastSyncDatagramAfterFailure();
         resetLanFastSyncTransfer(QStringLiteral("UDP fast sync checksum mismatch at block %1; TCP/Core fallback remains active.").arg(height));
         return;
     }
@@ -4053,11 +4130,13 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
             m_lan_fast_sync_bytes_received += size;
             m_lan_fast_sync_last_progress_ms = QDateTime::currentMSecsSinceEpoch();
             recordFastSyncUdpSuccess(height, m_lan_fast_sync_request_ms > 0 ? m_lan_fast_sync_last_progress_ms - m_lan_fast_sync_request_ms : 1000);
+            tuneFastSyncDatagramAfterSuccess();
             resetLanFastSyncTransfer(QStringLiteral("UDP fast sync accepted block %1 through Core validation.").arg(height));
             QTimer::singleShot(0, this, &NuRpcService::refreshNode);
         } else {
             ++m_lan_fast_sync_retransmit_errors;
             recordFastSyncUdpFailure();
+            tuneFastSyncDatagramAfterFailure();
             resetLanFastSyncTransfer(QStringLiteral("UDP fast sync block %1 was not accepted (%2); TCP/Core fallback remains active.")
                 .arg(height)
                 .arg(error.isEmpty() ? result.toString(QStringLiteral("unknown result")) : error));

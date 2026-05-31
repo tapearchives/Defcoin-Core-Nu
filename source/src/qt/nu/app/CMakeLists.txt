@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(DefcoinCoreNuQml VERSION 26.5.5 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.5.5m" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.5.5n" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -238,6 +238,17 @@ if(APPLE)
         endforeach()
         set(DEFCOIN_NU_MACDEPLOYQT "${DEFCOIN_NU_QT_ROOT}/bin/macdeployqt")
         if(EXISTS "${DEFCOIN_NU_MACDEPLOYQT}")
+            execute_process(
+                COMMAND "${DEFCOIN_NU_MACDEPLOYQT}" -h
+                OUTPUT_VARIABLE DEFCOIN_NU_MACDEPLOYQT_HELP
+                ERROR_VARIABLE DEFCOIN_NU_MACDEPLOYQT_HELP
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_STRIP_TRAILING_WHITESPACE
+            )
+            set(DEFCOIN_NU_MACDEPLOYQT_CODESIGN_FLAGS "")
+            if(DEFCOIN_NU_MACDEPLOYQT_HELP MATCHES "-no-codesign")
+                list(APPEND DEFCOIN_NU_MACDEPLOYQT_CODESIGN_FLAGS -no-codesign)
+            endif()
             add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Frameworks"
                 COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns"
@@ -247,7 +258,7 @@ if(APPLE)
                     "-libpath=${DEFCOIN_NU_QT_ROOT}/lib"
                     -always-overwrite
                     -appstore-compliant
-                    -no-codesign
+                    ${DEFCOIN_NU_MACDEPLOYQT_CODESIGN_FLAGS}
                 COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_PLUGIN_ROOT}/imageformats" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/imageformats"
                 COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_PLUGIN_ROOT}/sqldrivers" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/sqldrivers"
                 COMMAND ${CMAKE_COMMAND} -E copy_directory "${DEFCOIN_NU_QT_PLUGIN_ROOT}/tls" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/tls"

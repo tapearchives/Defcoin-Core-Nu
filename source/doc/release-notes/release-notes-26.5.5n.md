@@ -1,8 +1,8 @@
-# Defcoin Core Nu 26.5.5c Release Notes
+# Defcoin Core Nu 26.5.5n Release Notes
 
 Codename: `Core Memories`
 
-Defcoin Core Nu `26.5.5c` adds the first blockchain forensics surface to the
+Defcoin Core Nu `26.5.5n` adds the first blockchain forensics surface to the
 desktop wallet while keeping the chain, wallet, recovery, mining, and explorer
 behavior from the current `26.5` line.
 
@@ -38,6 +38,9 @@ behavior from the current `26.5` line.
   Defcoin peers over IPv4 or IPv6 while the receiver still submits every
   assembled block through normal Core validation. LAN discovery additionally
   enables local broadcast.
+- Updated UDP fast sync to probe packet size adaptively: safe 1232/1472-byte
+  internet/default probes, plus 4096, 8192, 12000, and 16000-byte LAN/private
+  probes when the receiver confirms clean checksum-valid blocks.
 - Hardened UDP fast sync with datagram/header/payload caps, capability/version
   checks, bounded per-read processing, per-peer request throttling,
   duplicate-chunk rejection, and checksum validation before block assembly.
@@ -67,7 +70,7 @@ behavior from the current `26.5` line.
 
 ## Build Suffix
 
-`26.5.5c` is the current changed rebuild in the `26.5.5` line. Future changed
+`26.5.5n` is the current changed rebuild in the `26.5.5` line. Future changed
 rebuilds in the same release line should use the next letter suffix
 (`26.5.5d`, `26.5.5e`, and so on), while the inherited Core client version
 stays `0.21.5.5`.

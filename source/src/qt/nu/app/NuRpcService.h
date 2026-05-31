@@ -561,6 +561,11 @@ private:
     void handleLanFastSyncChunk(const QJsonObject& header, const QByteArray& payload, const QHostAddress& sender);
     void resetLanFastSyncTransfer(const QString& status);
     bool isUdpFastSyncAllowedPeer(const QHostAddress& address) const;
+    bool hasPrivateUdpFastSyncTarget() const;
+    int currentFastSyncDatagramSize() const;
+    int currentFastSyncChunkSize() const;
+    void tuneFastSyncDatagramAfterSuccess();
+    void tuneFastSyncDatagramAfterFailure();
     QString lanFastSyncMethodSummary() const;
     QString lanFastSyncRateSummary() const;
     QString syncTransportSpeedSummary() const;
@@ -884,6 +889,9 @@ private:
     qint64 m_fast_sync_last_probe_ms = 0;
     QString m_fast_sync_decision_summary = QStringLiteral("Fast sync selector warming up; TCP/Core and UDP will be sampled when available.");
     int m_fast_sync_last_udp_accepted_height = -1;
+    int m_fast_sync_udp_datagram_index = 0;
+    int m_fast_sync_current_datagram_bytes = 1232;
+    int m_fast_sync_current_chunk_bytes = 768;
     bool m_mask_balances = false;
     bool m_third_party_tx_urls_enabled = false;
     QString m_third_party_tx_url;
