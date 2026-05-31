@@ -214,6 +214,9 @@ ColumnLayout {
                     wrapMode: Text.WordWrap
                     readOnly: true
                     selectByMouse: true
+                    persistentSelection: true
+                    activeFocusOnTab: true
+                    focusPolicy: Qt.StrongFocus
                     background: Item {}
                     padding: 0
                 }

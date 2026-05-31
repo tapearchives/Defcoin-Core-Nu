@@ -19,6 +19,7 @@ ColumnLayout {
     property bool timelinePlaying: false
     property bool top100EndInitialized: false
     property bool top100EndEdited: false
+    property bool top100UpdatingEndField: false
     readonly property real indexProgress: NuService.explorerIndexTip > 0
                                           ? Math.max(0, Math.min(1, NuService.explorerIndexHeight / NuService.explorerIndexTip))
                                           : 0
@@ -27,7 +28,7 @@ ColumnLayout {
         target: NuService
         function onExplorerChanged() {
             if (!top100EndField || root.top100EndEdited || NuService.explorerIndexTip <= 0) return
-            if (top100EndField.text.length === 0 || top100EndField.text === "0")
+            if (!root.top100EndInitialized || top100EndField.text.length === 0)
                 root.initializeTop100EndField(true)
         }
     }
@@ -50,7 +51,10 @@ ColumnLayout {
     function initializeTop100EndField(force) {
         if (!top100EndField || (root.top100EndInitialized && root.top100EndEdited && !force)) return
         const tip = Math.max(0, NuService.explorerIndexTip)
+        if (tip <= 0 && !force) return
+        root.top100UpdatingEndField = true
         top100EndField.text = String(tip)
+        root.top100UpdatingEndField = false
         root.top100EndInitialized = true
         root.top100EndEdited = false
     }
@@ -174,6 +178,14 @@ ColumnLayout {
         if (timelinePie) timelinePie.requestPaint()
     }
 
+    function shareFromCell(cellText, row) {
+        const meta = row && row.meta ? row.meta : {}
+        if (meta.percentBasisPoints !== undefined && meta.percentBasisPoints !== null)
+            return Math.max(0, Number(meta.percentBasisPoints) / 100.0)
+        const parsed = parseFloat(String(cellText || "0").replace("%", ""))
+        return isNaN(parsed) ? 0 : Math.max(0, parsed)
+    }
+
     Component.onCompleted: NuService.refreshExplorerAnalytics(root.movementThresholdCoins())
 
     onMovementPageChanged: {
@@ -231,6 +243,9 @@ ColumnLayout {
                         wrapMode: Text.WordWrap
                         readOnly: true
                         selectByMouse: true
+                        persistentSelection: true
+                        activeFocusOnTab: true
+                        focusPolicy: Qt.StrongFocus
                         background: Item {}
                         padding: 0
                     }
@@ -242,6 +257,9 @@ ColumnLayout {
                         wrapMode: Text.WordWrap
                         readOnly: true
                         selectByMouse: true
+                        persistentSelection: true
+                        activeFocusOnTab: true
+                        focusPolicy: Qt.StrongFocus
                         background: Item {}
                         padding: 0
                     }
@@ -477,6 +495,10 @@ ColumnLayout {
                         validator: IntValidator { bottom: 0; top: 99999999 }
                         helpText: "Last block height to include. Leave this at the indexed tip for a full current timeline."
                         onTextEdited: root.top100EndEdited = true
+                        onTextChanged: {
+                            if (activeFocus && !root.top100UpdatingEndField)
+                                root.top100EndEdited = true
+                        }
                         Component.onCompleted: root.initializeTop100EndField(false)
                     }
                     NuActionButton {
@@ -813,11 +835,12 @@ ColumnLayout {
         repeat: true
         running: root.timelinePlaying && top100TimelineWindow.visible
         onTriggered: {
-            const next = Math.min(1, timelineRange.start + 0.01)
-            timelineRange.start = next
-            timelineRange.end = Math.min(1, Math.max(next + timelineRange.minSpan, timelineRange.end + 0.01))
-            root.loadTimelineSnapshotAtPosition(timelineRange.start)
-            if (next >= 1) root.timelinePlaying = false
+            const span = Math.max(timelineRange.minSpan, timelineRange.end - timelineRange.start)
+            const nextStart = Math.min(1 - span, timelineRange.start + 0.01)
+            timelineRange.start = nextStart
+            timelineRange.end = Math.min(1, nextStart + span)
+            root.loadTimelineSnapshotAtPosition((timelineRange.start + timelineRange.end) / 2)
+            if (timelineRange.end >= 1) root.timelinePlaying = false
         }
     }
 
@@ -852,8 +875,8 @@ ColumnLayout {
                     font.weight: Font.DemiBold
                 }
                 Label {
-                    Layout.maximumWidth: Math.max(240, top100TimelineWindow.width * 0.46)
-                    text: root.timelineSnapshotHeaderText()
+                    Layout.maximumWidth: Math.max(220, top100TimelineWindow.width * 0.32)
+                    text: NuService.explorerTop100TimelineEventCount + " sparse events"
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontBody
                     wrapMode: Text.WordWrap
@@ -869,7 +892,7 @@ ColumnLayout {
             Canvas {
                 id: timelinePie
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: Math.min(340, top100TimelineWindow.width - 80)
+                Layout.preferredWidth: Math.min(420, top100TimelineWindow.width - 80)
                 Layout.preferredHeight: Layout.preferredWidth
                 onPaint: {
                     const ctx = getContext("2d")
@@ -880,7 +903,7 @@ ColumnLayout {
                     const radius = Math.min(width, height) * 0.43
                     let totalPct = 0
                     for (let i = 0; i < rows.length; ++i)
-                        totalPct += Math.max(0, parseInt(String(rows[i].cells[3]).replace("%", "")) || 0)
+                        totalPct += root.shareFromCell(rows[i].cells[3], rows[i])
                     if (rows.length === 0 || totalPct <= 0) {
                         ctx.strokeStyle = NuTokens.lineSubtle
                         ctx.lineWidth = 2
@@ -896,7 +919,7 @@ ColumnLayout {
                     }
                     let start = -Math.PI / 2
                     for (let r = 0; r < rows.length; ++r) {
-                        const pct = Math.max(0, parseInt(String(rows[r].cells[3]).replace("%", "")) || 0)
+                        const pct = root.shareFromCell(rows[r].cells[3], rows[r])
                         if (pct <= 0) continue
                         const rank = Number(rows[r].cells[1] || (r + 1))
                         const selected = root.selectedRichRank === rank
@@ -932,18 +955,27 @@ ColumnLayout {
                     ctx.fillText("Top 100", cx, cy - 8)
                     ctx.font = "12px " + NuTokens.bodyFont
                     ctx.fillStyle = NuTokens.textSecondary
-                    ctx.fillText("whole-percent history", cx, cy + 12)
+                    ctx.fillText("timeline shares", cx, cy + 12)
                 }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: root.timelineSnapshotHeaderText()
+                color: NuTokens.textSecondary
+                font.pixelSize: NuTokens.fontBody
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
             }
 
             NuTimelineWindow {
                 id: timelineRange
                 Layout.fillWidth: true
-                label: "Block range"
+                label: ""
                 start: 0
                 end: 1
                 minSpan: 0.01
-                onViewportChanged: (s, e) => root.loadTimelineSnapshotAtPosition(s)
+                onViewportChanged: (s, e) => root.loadTimelineSnapshotAtPosition((s + e) / 2)
             }
 
             Label {

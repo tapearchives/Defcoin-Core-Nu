@@ -2338,12 +2338,15 @@ void NuRpcService::rpcBatchCallAsSingles(const QVector<QPair<QString, QJsonArray
 void NuRpcService::handleReply(QNetworkReply* reply)
 {
     const QByteArray body = reply->readAll();
+    const int http_status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QString content_type = reply->header(QNetworkRequest::ContentTypeHeader).toString();
     reply->deleteLater();
 
     bool property_id_ok = false;
     int id = reply->property("nuRpcId").toInt(&property_id_ok);
-    const QJsonDocument doc = QJsonDocument::fromJson(body);
-    const QJsonObject obj = doc.object();
+    QJsonParseError parse_error;
+    const QJsonDocument doc = QJsonDocument::fromJson(body, &parse_error);
+    const QJsonObject obj = doc.isObject() ? doc.object() : QJsonObject();
     if (!property_id_ok) {
         id = obj.value(QStringLiteral("id")).toInt();
     }
@@ -2353,7 +2356,7 @@ void NuRpcService::handleReply(QNetworkReply* reply)
     QString error;
     if (reply->error() != QNetworkReply::NoError) {
         error = reply->errorString();
-        if (!body.isEmpty()) {
+        if (!body.isEmpty() && doc.isObject()) {
             const QJsonValue rpc_error = obj.value(QStringLiteral("error"));
             if (rpc_error.isObject()) {
                 error = rpc_error.toObject().value(QStringLiteral("message")).toString(error);
@@ -2366,6 +2369,18 @@ void NuRpcService::handleReply(QNetworkReply* reply)
             error = QStringLiteral("Starting Defcoin backend. The wallet will connect when RPC is ready.");
             QTimer::singleShot(2500, this, &NuRpcService::refresh);
         }
+    } else if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
+        QString preview = QString::fromUtf8(body.left(240)).simplified();
+        if (preview.isEmpty()) preview = QStringLiteral("(empty body)");
+        const QString parse_detail = parse_error.error == QJsonParseError::NoError
+            ? QStringLiteral("RPC response was not a JSON object")
+            : parse_error.errorString();
+        error = QStringLiteral("RPC returned malformed JSON: %1. HTTP %2, content-type \"%3\", %4 bytes, preview: %5")
+            .arg(parse_detail,
+                 http_status > 0 ? QString::number(http_status) : QStringLiteral("unknown"),
+                 content_type.isEmpty() ? QStringLiteral("unknown") : content_type,
+                 QString::number(body.size()),
+                 preview);
     } else if (!obj.value(QStringLiteral("error")).isNull()) {
         const QJsonValue rpc_error = obj.value(QStringLiteral("error"));
         error = rpc_error.isObject() ? rpc_error.toObject().value(QStringLiteral("message")).toString() : QString::fromUtf8(QJsonDocument(rpc_error.toObject()).toJson());
@@ -4527,56 +4542,120 @@ void NuRpcService::repairWitnessBlockDataNow(int start_height, bool fix_missing_
     Q_EMIT forensicsChanged();
     Q_EMIT stateChanged();
 
-    rpcCall(QStringLiteral("repairwitnessblockdata"), {height, true, fix_missing_witness}, false, [this, height, fix_missing_witness](const QJsonValue& result, const QString& error) {
-        m_forensics_witness_repair_running = false;
-        if (!error.isEmpty()) {
-            appendLaunchDiagnostic(QStringLiteral("Live witness block data inspection failed from height %1: %2").arg(height).arg(error));
-            m_forensics_witness_repair_status = QStringLiteral("Inspection failed from block %1: %2").arg(QString::number(height), error);
-            Q_EMIT forensicsChanged();
-            Q_EMIT userMessage(QStringLiteral("Blockchain inspection failed"), error);
-            refreshNode();
-            return;
-        }
-
-        const QJsonObject obj = result.toObject();
-        const int before = obj.value(QStringLiteral("height_before")).toInt();
-        const int after = obj.value(QStringLiteral("height_after_rewind")).toInt();
-        const bool rewound = obj.value(QStringLiteral("rewound")).toBool();
-        const bool missing_found = obj.value(QStringLiteral("missing_witness_found")).toBool();
-        const int inspected = obj.value(QStringLiteral("inspected_blocks")).toInt();
-        const int first_missing = obj.value(QStringLiteral("first_missing_witness_height")).toInt(-1);
-        const QString next_step = obj.value(QStringLiteral("next_step")).toString();
-        m_forensics_witness_repair_inspected_blocks = inspected;
-        m_forensics_witness_repair_first_missing_height = first_missing;
-
-        appendLaunchDiagnostic(QStringLiteral("Live witness block data inspection completed from height %1. Inspected: %2. First missing witness height: %3. Height before: %4. Height after rewind: %5. Rewound: %6.")
-            .arg(height)
-            .arg(inspected)
-            .arg(first_missing > 0 ? QString::number(first_missing) : QStringLiteral("none"))
-            .arg(before)
-            .arg(after)
-            .arg(rewound ? QStringLiteral("yes") : QStringLiteral("no")));
-        QString detail = QStringLiteral("%1\n\nStart height: %2\nBlocks inspected: %3\nHeight before: %4\nHeight after rewind: %5")
-            .arg(next_step.isEmpty() ? QStringLiteral("Inspection completed.") : next_step)
-            .arg(height)
-            .arg(inspected)
-            .arg(before)
-            .arg(after);
-        if (missing_found) {
-            detail += QStringLiteral("\nFirst missing witness block: %1").arg(first_missing);
-            if (fix_missing_witness && rewound) {
-                detail += QStringLiteral("\n\nNu will continue syncing and redownloading block bodies in the normal sync flow.");
-            } else if (!fix_missing_witness) {
-                detail += QStringLiteral("\n\nNo data was changed because Fix missing witness data was off.");
+    const int chunk_size = 20000;
+    auto total_required_blocks = std::make_shared<int>(0);
+    auto total_block_bodies_read = std::make_shared<int>(0);
+    auto missing_count = std::make_shared<int>(0);
+    auto run_next = std::make_shared<std::function<void(int)>>();
+    *run_next = [this, height, fix_missing_witness, chunk_size, total_required_blocks, total_block_bodies_read, missing_count, run_next](int current_height) mutable {
+        rpcCall(QStringLiteral("scanwitnessblockdata"), {current_height, -1, chunk_size}, false,
+                [this, height, fix_missing_witness, total_required_blocks, total_block_bodies_read, missing_count, run_next](const QJsonValue& result, const QString& error) mutable {
+            if (!m_forensics_witness_repair_running) return;
+            if (!error.isEmpty()) {
+                m_forensics_witness_repair_running = false;
+                appendLaunchDiagnostic(QStringLiteral("Live witness block data inspection failed from height %1: %2").arg(height).arg(error));
+                m_forensics_witness_repair_status = QStringLiteral("Inspection failed from block %1: %2").arg(QString::number(height), error);
+                Q_EMIT forensicsChanged();
+                Q_EMIT userMessage(QStringLiteral("Blockchain inspection failed"), error);
+                refreshNode();
+                return;
             }
-        } else {
-            detail += QStringLiteral("\n\nNo missing witness block data was found in the selected active-chain range.");
-        }
-        m_forensics_witness_repair_status = detail;
-        Q_EMIT forensicsChanged();
-        Q_EMIT userMessage(QStringLiteral("Blockchain inspection complete"), detail);
-        refreshNode();
-    });
+
+            const QJsonObject obj = result.toObject();
+            const int inspected = obj.value(QStringLiteral("inspected_blocks")).toInt();
+            const int required = obj.value(QStringLiteral("witness_required_blocks")).toInt();
+            const int bodies_read = obj.value(QStringLiteral("block_bodies_read")).toInt();
+            const int next_height = obj.value(QStringLiteral("next_height")).toInt();
+            const int end_height = obj.value(QStringLiteral("end_height")).toInt();
+            const bool complete = obj.value(QStringLiteral("complete")).toBool();
+            const bool missing_found = obj.value(QStringLiteral("missing_witness_found")).toBool();
+            const int first_missing = obj.value(QStringLiteral("first_missing_witness_height")).toInt(-1);
+            const int chunk_missing = obj.value(QStringLiteral("missing_witness_count")).toInt();
+
+            m_forensics_witness_repair_inspected_blocks += inspected;
+            *total_required_blocks += required;
+            *total_block_bodies_read += bodies_read;
+            *missing_count += chunk_missing;
+            if (first_missing > 0 && m_forensics_witness_repair_first_missing_height < 0) {
+                m_forensics_witness_repair_first_missing_height = first_missing;
+            }
+            const double pct = end_height >= height
+                ? 100.0 * static_cast<double>(std::min(end_height, std::max(height, next_height) - 1) - height + 1) / static_cast<double>(std::max(1, end_height - height + 1))
+                : 100.0;
+            m_forensics_witness_repair_status = QStringLiteral("Inspecting witness-form block storage from height %1. Checked through %2 of %3 (%4%). Blocks inspected: %5. Witness-required blocks: %6. Block bodies read: %7. Missing witness blocks found: %8.")
+                .arg(QString::number(height),
+                     QString::number(std::max(height, next_height) - 1),
+                     QString::number(end_height),
+                     QString::number(std::min(100.0, std::max(0.0, pct)), 'f', 2),
+                     QString::number(m_forensics_witness_repair_inspected_blocks),
+                     QString::number(*total_required_blocks),
+                     QString::number(*total_block_bodies_read),
+                     QString::number(*missing_count));
+            Q_EMIT forensicsChanged();
+
+            if (missing_found && fix_missing_witness) {
+                m_forensics_witness_repair_status += QStringLiteral("\n\nMissing witness data begins at block %1. Rewinding from that height now so normal sync can redownload clean witness-form blocks.")
+                    .arg(QString::number(first_missing));
+                Q_EMIT forensicsChanged();
+                rpcCall(QStringLiteral("repairwitnessblockdata"), {first_missing, true, true}, false,
+                        [this, height, first_missing](const QJsonValue& repair_result, const QString& repair_error) {
+                    m_forensics_witness_repair_running = false;
+                    if (!repair_error.isEmpty()) {
+                        m_forensics_witness_repair_status = QStringLiteral("Repair failed after finding missing witness data at block %1: %2")
+                            .arg(QString::number(first_missing), repair_error);
+                        Q_EMIT forensicsChanged();
+                        Q_EMIT userMessage(QStringLiteral("Blockchain repair failed"), repair_error);
+                        refreshNode();
+                        return;
+                    }
+                    const QJsonObject repair = repair_result.toObject();
+                    const int before = repair.value(QStringLiteral("height_before")).toInt();
+                    const int after = repair.value(QStringLiteral("height_after_rewind")).toInt();
+                    const QString next_step = repair.value(QStringLiteral("next_step")).toString();
+                    m_forensics_witness_repair_status = QStringLiteral("%1\n\nStart height: %2\nFirst missing witness block: %3\nBlocks inspected before repair: %4\nHeight before: %5\nHeight after rewind: %6")
+                        .arg(next_step.isEmpty() ? QStringLiteral("Witness block repair completed.") : next_step,
+                             QString::number(height),
+                             QString::number(first_missing),
+                             QString::number(m_forensics_witness_repair_inspected_blocks),
+                             QString::number(before),
+                             QString::number(after));
+                    Q_EMIT forensicsChanged();
+                    Q_EMIT userMessage(QStringLiteral("Blockchain repair complete"), m_forensics_witness_repair_status);
+                    refreshNode();
+                });
+                return;
+            }
+
+            if (!complete) {
+                QTimer::singleShot(0, this, [run_next, next_height] { (*run_next)(next_height); });
+                return;
+            }
+
+            m_forensics_witness_repair_running = false;
+            const QString finding = m_forensics_witness_repair_first_missing_height > 0
+                ? QStringLiteral("Missing witness data was found beginning at block %1. No data was changed because Fix missing witness data was off.")
+                      .arg(QString::number(m_forensics_witness_repair_first_missing_height))
+                : QStringLiteral("No missing witness block data was found in the selected active-chain range.");
+            m_forensics_witness_repair_status = QStringLiteral("%1\n\nStart height: %2\nBlocks inspected: %3\nWitness-required blocks: %4\nBlock bodies read: %5\nMissing witness blocks found: %6")
+                .arg(finding,
+                     QString::number(height),
+                     QString::number(m_forensics_witness_repair_inspected_blocks),
+                     QString::number(*total_required_blocks),
+                     QString::number(*total_block_bodies_read),
+                     QString::number(*missing_count));
+            appendLaunchDiagnostic(QStringLiteral("Live witness block data inspection completed from height %1. Inspected: %2. Witness-required: %3. Block bodies read: %4. Missing witness count: %5. First missing witness height: %6.")
+                .arg(height)
+                .arg(m_forensics_witness_repair_inspected_blocks)
+                .arg(*total_required_blocks)
+                .arg(*total_block_bodies_read)
+                .arg(*missing_count)
+                .arg(m_forensics_witness_repair_first_missing_height > 0 ? QString::number(m_forensics_witness_repair_first_missing_height) : QStringLiteral("none")));
+            Q_EMIT forensicsChanged();
+            Q_EMIT userMessage(QStringLiteral("Blockchain inspection complete"), m_forensics_witness_repair_status);
+            refreshNode();
+        });
+    };
+    (*run_next)(height);
 }
 
 void NuRpcService::pingPeers()
@@ -8146,6 +8225,19 @@ bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height
             if (!ok) local_error = db.lastError().text();
             if (ok) {
                 QSqlQuery query(db);
+                QString scale = QString();
+                if (query.exec(QStringLiteral("SELECT value FROM explorer_meta WHERE key = 'top100_percent_scale'")) && query.next()) {
+                    scale = query.value(0).toString();
+                }
+                if (scale != QLatin1String("basis_points")) {
+                    ok = query.exec(QStringLiteral("DELETE FROM explorer_top100_events"));
+                    if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_top100_ranges"));
+                    if (ok) ok = query.exec(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('top100_percent_scale', 'basis_points')"));
+                    if (!ok) local_error = query.lastError().text();
+                }
+            }
+            if (ok) {
+                QSqlQuery query(db);
                 query.prepare(QStringLiteral("DELETE FROM explorer_top100_events WHERE height BETWEEN ? AND ?"));
                 query.addBindValue(start);
                 query.addBindValue(end);
@@ -8225,7 +8317,7 @@ bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool
     int rank = 1;
     for (auto it = m_explorer_top100_order.crbegin(); it != m_explorer_top100_order.crend() && rank <= 100; ++it, ++rank) {
         const int pct = m_explorer_top100_total_sats > 0
-            ? static_cast<int>(std::llround(100.0 * static_cast<double>(it->balance) / static_cast<double>(m_explorer_top100_total_sats)))
+            ? static_cast<int>(std::llround(10000.0 * static_cast<double>(it->balance) / static_cast<double>(m_explorer_top100_total_sats)))
             : 0;
         current_rows.push_back(qMakePair(it->address, pct));
     }
@@ -8271,6 +8363,12 @@ bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool
                 if (!ok) local_error = db.lastError().text();
             } else {
                 db.rollback();
+            }
+            if (ok) {
+                QSqlQuery meta_query(db);
+                meta_query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('top100_percent_scale', 'basis_points')"));
+                ok = meta_query.exec();
+                if (!ok) local_error = meta_query.lastError().text();
             }
         }
         db.close();
@@ -8584,10 +8682,15 @@ QVariantMap NuRpcService::explorerTop100Snapshot(int height) const
     const QString connection_name = QStringLiteral("nu_explorer_top100_snapshot_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
     int snapshot_height = -1;
     qint64 snapshot_time = 0;
+    bool basis_points = false;
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
         db.setDatabaseName(explorerDatabasePath());
         if (db.open()) {
+            QSqlQuery scale_query(db);
+            if (scale_query.exec(QStringLiteral("SELECT value FROM explorer_meta WHERE key = 'top100_percent_scale'")) && scale_query.next()) {
+                basis_points = scale_query.value(0).toString() == QLatin1String("basis_points");
+            }
             for (int rank = 1; rank <= 100; ++rank) {
                 QSqlQuery query(db);
                 query.prepare(QStringLiteral(
@@ -8603,18 +8706,23 @@ QVariantMap NuRpcService::explorerTop100Snapshot(int height) const
                     snapshot_height = std::max(snapshot_height, query.value(0).toInt());
                     snapshot_time = std::max<qint64>(snapshot_time, query.value(1).toLongLong());
                     const int pct = query.value(3).toInt();
+                    const int pct_basis_points = basis_points ? pct : pct * 100;
+                    const double pct_value = static_cast<double>(pct_basis_points) / 100.0;
+                    const QString pct_text = pct_value >= 10.0
+                        ? QString::number(pct_value, 'f', 1) + QStringLiteral("%")
+                        : QString::number(pct_value, 'f', 2) + QStringLiteral("%");
                     rows.push_back(QVariantMap{
                         {QStringLiteral("cells"), QVariantList{
                             explorerTop100Color(rank),
                             rank,
                             address,
-                            QString::number(pct) + QStringLiteral("%")}},
+                            pct_text}},
                         {QStringLiteral("meta"), QVariantMap{
                             {QStringLiteral("type"), QStringLiteral("address")},
                             {QStringLiteral("id"), address},
                             {QStringLiteral("rank"), rank},
                             {QStringLiteral("address"), address},
-                            {QStringLiteral("percentWhole"), pct},
+                            {QStringLiteral("percentBasisPoints"), pct_basis_points},
                             {QStringLiteral("color"), explorerTop100Color(rank)}}}});
                 }
             }

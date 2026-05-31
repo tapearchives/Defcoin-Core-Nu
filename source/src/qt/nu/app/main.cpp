@@ -11,6 +11,8 @@
 #include <QImage>
 #include <QIODevice>
 #include <QLinearGradient>
+#include <QLockFile>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
 #include <QGuiApplication>
@@ -18,6 +20,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QtQml/qqml.h>
+#include <QProcess>
 #include <QQuickStyle>
 #include <QDir>
 #include <QDebug>
@@ -29,6 +32,8 @@
 #include <QUrl>
 #include <QWidget>
 #include <QWindow>
+
+#include <memory>
 
 #if defined(Q_OS_WIN)
 #include <windows.h>
@@ -210,6 +215,59 @@ void activateSplashForUser(QSplashScreen* splash)
     }
 #endif
 }
+
+QString nuDefaultDataDir()
+{
+    if (!qEnvironmentVariableIsEmpty("DEFCOIN_DATADIR")) {
+        return QString::fromLocal8Bit(qgetenv("DEFCOIN_DATADIR"));
+    }
+#if defined(Q_OS_WIN)
+    return QDir(QString::fromLocal8Bit(qgetenv("APPDATA"))).filePath(QStringLiteral("Defcoin"));
+#elif defined(Q_OS_MACOS)
+    return QDir(QDir::homePath()).filePath(QStringLiteral("Library/Application Support/Defcoin"));
+#else
+    return QDir(QDir::homePath()).filePath(QStringLiteral(".defcoin"));
+#endif
+}
+
+bool anotherNuGuiProcessIsRunning()
+{
+#if defined(Q_OS_UNIX)
+    const qint64 current_pid = QCoreApplication::applicationPid();
+    QProcess pgrep;
+    pgrep.start(QStringLiteral("/usr/bin/pgrep"), {QStringLiteral("-x"), QStringLiteral("DefcoinCoreNu")});
+    if (!pgrep.waitForFinished(1000)) {
+        pgrep.kill();
+        pgrep.waitForFinished(250);
+        return false;
+    }
+    const QList<QByteArray> lines = pgrep.readAllStandardOutput().split('\n');
+    for (const QByteArray& line : lines) {
+        bool ok = false;
+        const qint64 pid = QString::fromLocal8Bit(line).trimmed().toLongLong(&ok);
+        if (ok && pid > 0 && pid != current_pid) return true;
+    }
+#if defined(Q_OS_MACOS)
+    QProcess ps;
+    ps.start(QStringLiteral("/bin/ps"), {QStringLiteral("-axo"), QStringLiteral("pid=,comm=")});
+    if (!ps.waitForFinished(1000)) {
+        ps.kill();
+        ps.waitForFinished(250);
+        return false;
+    }
+    const QList<QByteArray> ps_lines = ps.readAllStandardOutput().split('\n');
+    for (const QByteArray& line : ps_lines) {
+        const QString text = QString::fromLocal8Bit(line).trimmed();
+        if (!text.contains(QStringLiteral("DefcoinCoreNu"))) continue;
+        const int space = text.indexOf(QLatin1Char(' '));
+        bool ok = false;
+        const qint64 pid = text.left(space > 0 ? space : text.size()).trimmed().toLongLong(&ok);
+        if (ok && pid > 0 && pid != current_pid) return true;
+    }
+#endif
+#endif
+    return false;
+}
 }
 
 int main(int argc, char* argv[])
@@ -243,6 +301,26 @@ int main(int argc, char* argv[])
         buildSmokeTest;
     if (buildSmokeTest) {
         return 0;
+    }
+
+    std::unique_ptr<QLockFile> singleInstanceLock;
+    if (!smokeTest && !arguments.contains(QStringLiteral("--allow-multiple"))) {
+        const QString dataDir = nuDefaultDataDir();
+        QDir().mkpath(dataDir);
+        if (anotherNuGuiProcessIsRunning()) {
+            QMessageBox::warning(nullptr,
+                                 QStringLiteral("Defcoin Core Nu is already open"),
+                                 QStringLiteral("Another Defcoin Core Nu window appears to be running. Close the other Nu window before opening this build. This prevents two frontends from writing the same explorer cache or competing for wallet actions."));
+            return 2;
+        }
+        singleInstanceLock = std::make_unique<QLockFile>(QDir(dataDir).filePath(QStringLiteral("defcoin-core-nu-gui.lock")));
+        singleInstanceLock->setStaleLockTime(30000);
+        if (!singleInstanceLock->tryLock(100)) {
+            QMessageBox::warning(nullptr,
+                                 QStringLiteral("Defcoin Core Nu is already open"),
+                                 QStringLiteral("Another Defcoin Core Nu window is already using this data directory:\n\n%1\n\nClose the other Nu window before opening this build. This prevents two frontends from writing the same explorer cache or competing for wallet actions.").arg(dataDir));
+            return 2;
+        }
     }
 
     bool velopackHookLaunch = !qEnvironmentVariableIsEmpty("VELOPACK_FIRSTRUN") ||
