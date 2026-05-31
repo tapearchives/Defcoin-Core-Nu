@@ -293,7 +293,7 @@ ColumnLayout {
                 NuMetricRow { label: "Blocks"; value: String(NuService.explorerIndexedBlockCount) }
                 NuMetricRow { label: "Outputs"; value: String(NuService.explorerIndexedOutputCount) }
                 NuMetricRow { label: "Top 100"; value: String(NuService.explorerRichList.length) }
-                NuMetricRow { label: "Top 100 events"; value: String(NuService.explorerTop100TimelineEventCount) }
+                NuMetricRow { label: "Top 100 checkpoints"; value: String(NuService.explorerTop100TimelineEventCount) }
                 NuMetricRow { label: "Movements"; value: String(NuService.explorerMovements.length) }
             }
         }
@@ -467,6 +467,14 @@ ColumnLayout {
                     padding: 0
                 }
 
+                Label {
+                    Layout.fillWidth: true
+                    text: "Top 100 timeline can scan through block " + NuService.explorerIndexTip + ", the Explorer indexed height."
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    wrapMode: Text.WordWrap
+                }
+
                 Flow {
                     Layout.fillWidth: true
                     spacing: NuTokens.spaceMd
@@ -529,8 +537,15 @@ ColumnLayout {
                         text: "Clear timeline"
                         enabled: !NuService.explorerTop100Scanning && !NuService.explorerIndexing
                         danger: true
-                        helpText: "Delete only the sparse Top 100 over-time events and ranges."
+                        helpText: "Delete only the Top 100 over-time checkpoint rows and ranges."
                         onClicked: NuService.resetExplorerTop100Timeline()
+                    }
+                    NuCheckBox {
+                        text: "Focused indexing"
+                        checked: NuService.explorerTop100FocusedIndexing
+                        enabled: !NuService.explorerTop100Scanning
+                        helpText: "Uses larger SQLite batches and refreshes status less often so this task can use more local disk and CPU. Core P2P networking stays active."
+                        onToggled: NuService.explorerTop100FocusedIndexing = checked
                     }
                 }
 
@@ -681,7 +696,7 @@ ColumnLayout {
                             }
                             NuMetricRow { label: "Rows"; value: String(NuService.explorerRichList.length) }
                             NuMetricRow { label: "Coverage"; value: NuService.explorerIndexedBlockCount + " blocks" }
-                            NuMetricRow { label: "Timeline"; value: NuService.explorerTop100TimelineEventCount + " events" }
+                            NuMetricRow { label: "Timeline"; value: NuService.explorerTop100TimelineEventCount + " checkpoints" }
                         }
                     }
                 }
@@ -876,7 +891,7 @@ ColumnLayout {
                 }
                 Label {
                     Layout.maximumWidth: Math.max(220, top100TimelineWindow.width * 0.32)
-                    text: NuService.explorerTop100TimelineEventCount + " sparse events"
+                    text: NuService.explorerTop100TimelineEventCount + " checkpoints"
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontBody
                     wrapMode: Text.WordWrap
@@ -884,7 +899,7 @@ ColumnLayout {
                 NuActionButton {
                     Layout.preferredWidth: 94
                     text: root.timelinePlaying ? "Pause" : "Play"
-                    helpText: "Animate the pie chart forward through sparse Top 100 timeline events."
+                    helpText: "Animate the pie chart forward through stored Top 100 timeline checkpoints."
                     onClicked: root.timelinePlaying = !root.timelinePlaying
                 }
             }

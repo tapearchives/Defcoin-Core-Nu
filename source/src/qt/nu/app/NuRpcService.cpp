@@ -84,7 +84,11 @@ constexpr int RECOVERY_GAP_SCAN_BATCH_SIZE = 1024;
 constexpr int RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES = 65536;
 constexpr int EXPLORER_INDEX_BATCH_BLOCKS = 96;
 constexpr int EXPLORER_TOP100_CHUNK_BLOCKS = 2500;
-constexpr int EXPLORER_TOP100_ANCHOR_BLOCKS = 10000;
+constexpr int EXPLORER_TOP100_FOCUSED_CHUNK_BLOCKS = 25000;
+constexpr int EXPLORER_TOP100_MAX_ANCHOR_BLOCKS = 10000;
+constexpr int EXPLORER_TOP100_MIN_PLAYBACK_CHECKPOINTS = 250;
+constexpr int EXPLORER_TOP100_LARGE_PLAYBACK_CHECKPOINTS = 500;
+constexpr qint64 EXPLORER_TOP100_UI_REFRESH_MS = 5000;
 constexpr quint16 LAN_FAST_SYNC_PORT = 10334;
 constexpr int LAN_FAST_SYNC_MAX_DATAGRAM_BYTES = 1232;
 constexpr int LAN_FAST_SYNC_MAX_HEADER_BYTES = 768;
@@ -96,6 +100,10 @@ constexpr int LAN_FAST_SYNC_REQUEST_TIMEOUT_MS = 3000;
 constexpr int LAN_FAST_SYNC_MAX_RETRIES_PER_BLOCK = 3;
 constexpr int LAN_FAST_SYNC_MAX_BLOCK_BYTES = 8 * 1024 * 1024;
 constexpr int LAN_FAST_SYNC_MIN_REQUEST_INTERVAL_MS = 250;
+constexpr int FAST_SYNC_PROTOCOL_MAX_WINDOW = 32;
+constexpr int FAST_SYNC_PROTOCOL_PROBE_INTERVAL_MS = 30000;
+constexpr double FAST_SYNC_PROTOCOL_EWMA_ALPHA = 0.35;
+constexpr double FAST_SYNC_PROTOCOL_EXPLORATION_C = 0.35;
 constexpr char UDP_FAST_SYNC_CAPABILITY[] = "defcoin-nu-udp-fast-sync-v1";
 constexpr unsigned char DEFCOIN_CURRENT_WIF_PREFIX = 0xb0; // Defcoin v1.0.0+ private keys render as T...
 constexpr unsigned char DEFCOIN_LEGACY_WIF_PREFIX = 0x9e;  // Defcoin v0.22/Ian Coleman legacy entry renders as Q...
@@ -1545,6 +1553,7 @@ void NuRpcService::loadLocalSettings()
     }
     m_lan_node_discovery_enabled = nu_settings.value(QStringLiteral("LanNodeDiscoveryEnabled"), false).toBool();
     m_lan_fast_sync_enabled = nu_settings.value(QStringLiteral("LanFastSyncEnabled"), true).toBool();
+    m_explorer_top100_focused_indexing = nu_settings.value(QStringLiteral("ExplorerTop100FocusedIndexing"), false).toBool();
     m_upnp_connections_enabled = nu_settings.value(QStringLiteral("UpnpConnectionsEnabled"), false).toBool();
     m_lan_node_discovery_notice_acknowledged = nu_settings.value(QStringLiteral("LanNodeDiscoveryNoticeAcknowledged"), false).toBool();
     m_automatic_update_checks_enabled = nu_settings.value(QStringLiteral("AutomaticUpdateChecksEnabled"), true).toBool();
@@ -2392,6 +2401,9 @@ void NuRpcService::handleReply(QNetworkReply* reply)
 void NuRpcService::setError(const QString& message)
 {
     m_rpc_connected = false;
+    m_forensics_witness_capability_known = false;
+    m_forensics_witness_inspection_available = false;
+    m_forensics_witness_capability_probe_in_flight = false;
     m_connection_status = QStringLiteral("RPC not connected");
     m_last_error = message;
     m_syncing = false;
@@ -2412,6 +2424,7 @@ void NuRpcService::setError(const QString& message)
         trimLogLines();
         Q_EMIT logChanged();
     }
+    Q_EMIT forensicsChanged();
     Q_EMIT stateChanged();
 }
 
@@ -2434,6 +2447,31 @@ void NuRpcService::clearError()
             setNetworkActive(active);
         });
     }
+}
+
+void NuRpcService::probeBackendCapabilities()
+{
+    if (!m_rpc_connected || m_forensics_witness_capability_known || m_forensics_witness_capability_probe_in_flight) return;
+    m_forensics_witness_capability_probe_in_flight = true;
+    m_forensics_witness_repair_status = QStringLiteral("Checking backend witness-inspection support.");
+    Q_EMIT forensicsChanged();
+    rpcCall(QStringLiteral("help"), {QStringLiteral("scanwitnessblockdata")}, false, [this](const QJsonValue& result, const QString& error) {
+        m_forensics_witness_capability_probe_in_flight = false;
+        m_forensics_witness_capability_known = true;
+        m_forensics_witness_inspection_available = error.isEmpty() && result.isString()
+            && result.toString().contains(QStringLiteral("scanwitnessblockdata"));
+        if (m_forensics_witness_inspection_available) {
+            if (m_forensics_witness_repair_status == QLatin1String("Checking backend witness-inspection support.")) {
+                m_forensics_witness_repair_status = QStringLiteral("Witness data inspection is available.");
+            }
+            appendLaunchDiagnostic(QStringLiteral("Backend supports scanwitnessblockdata witness inspection RPC."));
+        } else {
+            m_forensics_witness_repair_status = QStringLiteral("This backend does not support witness inspection. Stop older defcoind instances and launch the bundled Nu backend.");
+            appendLaunchDiagnostic(QStringLiteral("Backend does not support scanwitnessblockdata witness inspection RPC: %1")
+                .arg(error.isEmpty() ? QStringLiteral("help text did not include method") : error));
+        }
+        Q_EMIT forensicsChanged();
+    });
 }
 
 void NuRpcService::clearWalletScopedState()
@@ -2793,6 +2831,7 @@ void NuRpcService::refreshNode()
             return;
         }
         clearError();
+        probeBackendCapabilities();
         const QJsonObject info = result.toObject();
         const bool active = info.value(QStringLiteral("networkactive")).toBool();
         m_peer_count = info.value(QStringLiteral("connections")).toInt();
@@ -2818,6 +2857,17 @@ void NuRpcService::refreshNode()
         const bool syncing = ibd || headers_ahead;
         const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
         const int blocks_behind = std::max(0, headers - m_block_height);
+        if (m_sync_last_sample_ms > 0 && now_ms > m_sync_last_sample_ms && m_sync_last_block_height >= 0 && m_block_height > m_sync_last_block_height) {
+            const int block_delta = m_block_height - m_sync_last_block_height;
+            const double seconds = double(now_ms - m_sync_last_sample_ms) / 1000.0;
+            const bool recent_udp_accept = m_fast_sync_last_udp_accepted_height >= (m_block_height - block_delta + 1)
+                && m_fast_sync_last_udp_accepted_height <= m_block_height
+                && m_lan_fast_sync_last_progress_ms > 0
+                && now_ms - m_lan_fast_sync_last_progress_ms < 10000;
+            if (!recent_udp_accept) {
+                recordFastSyncTcpProgress(block_delta, seconds);
+            }
+        }
         m_syncing = syncing;
         m_sync_progress_percent = qBound(0, int(std::round(progress * 100.0)), 100);
         const QString progress_text = QString::number(progress * 100.0, 'f', progress >= 0.999 ? 3 : 2) + QStringLiteral("%");
@@ -3060,6 +3110,7 @@ void NuRpcService::refreshNode()
         m_peers = detailed_rows;
         m_peer_count = detailed_rows.size();
         m_udp_fast_sync_peer_hosts = udp_fast_sync_peer_hosts;
+        resetFastSyncProtocolWindow();
         m_metric_peer_messages_sent = orderedMessageTypeStats(sent_message_bytes);
         m_metric_peer_messages_received = orderedMessageTypeStats(received_message_bytes);
         rebuildNodeMetrics();
@@ -3518,6 +3569,21 @@ QString NuRpcService::syncTransportSpeedSummary() const
     return parts.join(QStringLiteral(" | "));
 }
 
+QString NuRpcService::syncTransportDecisionSummary() const
+{
+    const QString tcp_rate = m_fast_sync_tcp_ewma_blocks_per_second > 0.0
+        ? QStringLiteral("TCP %1 blk/s").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
+        : QStringLiteral("TCP warming");
+    const QString udp_rate = m_fast_sync_udp_ewma_blocks_per_second > 0.0
+        ? QStringLiteral("UDP %1 blk/s").arg(QString::number(m_fast_sync_udp_ewma_blocks_per_second, 'f', m_fast_sync_udp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
+        : QStringLiteral("UDP warming");
+    return QStringLiteral("%1. %2 | %3 | retransmit/errors: %4")
+        .arg(m_fast_sync_decision_summary,
+             tcp_rate,
+             udp_rate,
+             QString::number(m_lan_fast_sync_retransmit_errors));
+}
+
 void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes)
 {
     if (sent_bytes <= 0 && received_bytes <= 0) return;
@@ -3528,6 +3594,117 @@ void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 receive
     m_lan_fast_sync_udp_last_activity_ms = now;
     if (sent_bytes > 0) m_lan_fast_sync_udp_bytes_sent += sent_bytes;
     if (received_bytes > 0) m_lan_fast_sync_udp_bytes_received += received_bytes;
+}
+
+void NuRpcService::recordFastSyncUdpSuccess(int height, qint64 latency_ms)
+{
+    const double seconds = qMax(0.001, double(latency_ms) / 1000.0);
+    const double sample = 1.0 / seconds;
+    m_fast_sync_udp_ewma_blocks_per_second = m_fast_sync_udp_ewma_blocks_per_second <= 0.0
+        ? sample
+        : (FAST_SYNC_PROTOCOL_EWMA_ALPHA * sample) + ((1.0 - FAST_SYNC_PROTOCOL_EWMA_ALPHA) * m_fast_sync_udp_ewma_blocks_per_second);
+    ++m_fast_sync_udp_successes;
+    m_fast_sync_last_udp_accepted_height = std::max(m_fast_sync_last_udp_accepted_height, height);
+    resetFastSyncProtocolWindow();
+}
+
+void NuRpcService::recordFastSyncUdpFailure()
+{
+    ++m_fast_sync_udp_failures;
+    const int consecutive_penalty = std::min(8, std::max(1, m_fast_sync_udp_failures - m_fast_sync_udp_successes + 1));
+    m_fast_sync_udp_cooldown_until_ms = QDateTime::currentMSecsSinceEpoch() + (1000LL << consecutive_penalty);
+    m_fast_sync_udp_ewma_blocks_per_second *= 0.5;
+    resetFastSyncProtocolWindow();
+}
+
+void NuRpcService::recordFastSyncTcpProgress(int blocks, double seconds)
+{
+    if (blocks <= 0 || seconds <= 0.0) return;
+    const double sample = static_cast<double>(blocks) / seconds;
+    m_fast_sync_tcp_ewma_blocks_per_second = m_fast_sync_tcp_ewma_blocks_per_second <= 0.0
+        ? sample
+        : (FAST_SYNC_PROTOCOL_EWMA_ALPHA * sample) + ((1.0 - FAST_SYNC_PROTOCOL_EWMA_ALPHA) * m_fast_sync_tcp_ewma_blocks_per_second);
+    m_fast_sync_tcp_successes += blocks;
+    resetFastSyncProtocolWindow();
+}
+
+void NuRpcService::resetFastSyncProtocolWindow()
+{
+    const bool udp_possible = m_lan_fast_sync_enabled && (!m_udp_fast_sync_peer_hosts.isEmpty() || m_lan_node_discovery_enabled);
+    if (!udp_possible) {
+        m_fast_sync_tcp_quota_remaining = 1;
+        m_fast_sync_udp_quota_remaining = 0;
+        m_fast_sync_window_size = 2;
+        m_fast_sync_decision_summary = QStringLiteral("TCP/Core only; no UDP fast-sync peer has been observed.");
+        return;
+    }
+
+    const int tcp_samples = m_fast_sync_tcp_successes + m_fast_sync_tcp_failures;
+    const int udp_samples = m_fast_sync_udp_successes + m_fast_sync_udp_failures;
+    const int total_samples = std::max(1, tcp_samples + udp_samples);
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const bool udp_in_cooldown = now < m_fast_sync_udp_cooldown_until_ms;
+    const bool force_probe = (now - m_fast_sync_last_probe_ms) >= FAST_SYNC_PROTOCOL_PROBE_INTERVAL_MS;
+
+    auto score = [total_samples](double ewma, int successes, int failures) {
+        const int samples = successes + failures;
+        const double rate = ewma > 0.0 ? ewma : 0.05;
+        const double reliability = static_cast<double>(successes + 1) / static_cast<double>(successes + failures + 2);
+        const double exploration = FAST_SYNC_PROTOCOL_EXPLORATION_C
+            * std::sqrt(std::log(static_cast<double>(total_samples) + 1.0) / static_cast<double>(samples + 1));
+        return rate * reliability + exploration;
+    };
+
+    const double tcp_score = score(m_fast_sync_tcp_ewma_blocks_per_second, m_fast_sync_tcp_successes, m_fast_sync_tcp_failures);
+    const double udp_score_raw = score(m_fast_sync_udp_ewma_blocks_per_second, m_fast_sync_udp_successes, m_fast_sync_udp_failures);
+    const double udp_score = udp_in_cooldown && !force_probe ? 0.0 : udp_score_raw;
+
+    if ((tcp_score > udp_score * 1.25 || udp_score > tcp_score * 1.25) && (m_fast_sync_tcp_failures + m_fast_sync_udp_failures) == 0) {
+        m_fast_sync_window_size = std::min(FAST_SYNC_PROTOCOL_MAX_WINDOW, std::max(2, m_fast_sync_window_size * 2));
+    } else {
+        m_fast_sync_window_size = std::max(2, std::min(m_fast_sync_window_size, FAST_SYNC_PROTOCOL_MAX_WINDOW));
+    }
+
+    const int window = std::max(2, std::min(FAST_SYNC_PROTOCOL_MAX_WINDOW, m_fast_sync_window_size));
+    int udp_quota = 1;
+    if (udp_score <= 0.0) {
+        udp_quota = force_probe ? 1 : 0;
+    } else {
+        udp_quota = qBound(1, int(std::llround(window * udp_score / std::max(0.0001, tcp_score + udp_score))), window - 1);
+    }
+    const int tcp_quota = std::max(1, window - udp_quota);
+    m_fast_sync_tcp_quota_remaining = tcp_quota;
+    m_fast_sync_udp_quota_remaining = udp_quota;
+    if (force_probe && udp_quota > 0) m_fast_sync_last_probe_ms = now;
+
+    const QString favored = udp_quota > tcp_quota
+        ? QStringLiteral("UDP favored %1:%2").arg(udp_quota).arg(tcp_quota)
+        : (tcp_quota > udp_quota
+               ? QStringLiteral("TCP favored %1:%2").arg(tcp_quota).arg(udp_quota)
+               : QStringLiteral("TCP/UDP balanced 1:1"));
+    m_fast_sync_decision_summary = udp_in_cooldown && !force_probe
+        ? QStringLiteral("UDP cooling down after errors; TCP/Core is favored")
+        : favored;
+}
+
+bool NuRpcService::shouldAttemptUdpFastSync()
+{
+    if (!m_lan_fast_sync_enabled) return false;
+    if (m_fast_sync_tcp_quota_remaining <= 0 && m_fast_sync_udp_quota_remaining <= 0) {
+        resetFastSyncProtocolWindow();
+    }
+    if (m_fast_sync_udp_quota_remaining > 0) {
+        --m_fast_sync_udp_quota_remaining;
+        return true;
+    }
+    if (m_fast_sync_tcp_quota_remaining > 0) {
+        --m_fast_sync_tcp_quota_remaining;
+    }
+    m_lan_fast_sync_status = QStringLiteral("%1. Letting TCP/Core fetch the next block before another UDP probe.")
+        .arg(m_fast_sync_decision_summary);
+    rebuildNodeMetrics();
+    Q_EMIT stateChanged();
+    return false;
 }
 
 void NuRpcService::resetLanFastSyncTransfer(const QString& status)
@@ -3587,6 +3764,7 @@ void NuRpcService::lanFastSyncTick()
         if (m_lan_fast_sync_request_ms > 0 && now - m_lan_fast_sync_request_ms > LAN_FAST_SYNC_REQUEST_TIMEOUT_MS) {
             ++m_lan_fast_sync_retransmit_errors;
             if (m_lan_fast_sync_retransmit_errors % LAN_FAST_SYNC_MAX_RETRIES_PER_BLOCK == 0) {
+                recordFastSyncUdpFailure();
                 for (const QString& host : std::as_const(m_udp_fast_sync_current_target_hosts)) {
                     if (!m_udp_fast_sync_available_peer_hosts.contains(host) &&
                         !m_udp_fast_sync_used_peer_hosts.contains(host)) {
@@ -3601,6 +3779,7 @@ void NuRpcService::lanFastSyncTick()
         return;
     }
 
+    if (!shouldAttemptUdpFastSync()) return;
     requestLanFastSyncBlock(next_height);
 }
 
@@ -3814,6 +3993,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     if (chunk_checksum.size() != 64) return;
     if (lanFastSyncChecksum(payload) != chunk_checksum) {
         ++m_lan_fast_sync_retransmit_errors;
+        recordFastSyncUdpFailure();
         m_lan_fast_sync_request_ms = 0;
         return;
     }
@@ -3846,6 +4026,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     }
     if (block.size() != m_lan_fast_sync_expected_size || lanFastSyncChecksum(block) != m_lan_fast_sync_block_checksum) {
         ++m_lan_fast_sync_retransmit_errors;
+        recordFastSyncUdpFailure();
         resetLanFastSyncTransfer(QStringLiteral("UDP fast sync checksum mismatch at block %1; TCP/Core fallback remains active.").arg(height));
         return;
     }
@@ -3864,10 +4045,12 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
             ++m_lan_fast_sync_blocks_received;
             m_lan_fast_sync_bytes_received += size;
             m_lan_fast_sync_last_progress_ms = QDateTime::currentMSecsSinceEpoch();
+            recordFastSyncUdpSuccess(height, m_lan_fast_sync_request_ms > 0 ? m_lan_fast_sync_last_progress_ms - m_lan_fast_sync_request_ms : 1000);
             resetLanFastSyncTransfer(QStringLiteral("UDP fast sync accepted block %1 through Core validation.").arg(height));
             QTimer::singleShot(0, this, &NuRpcService::refreshNode);
         } else {
             ++m_lan_fast_sync_retransmit_errors;
+            recordFastSyncUdpFailure();
             resetLanFastSyncTransfer(QStringLiteral("UDP fast sync block %1 was not accepted (%2); TCP/Core fallback remains active.")
                 .arg(height)
                 .arg(error.isEmpty() ? result.toString(QStringLiteral("unknown result")) : error));
@@ -4523,6 +4706,19 @@ void NuRpcService::repairWitnessBlockDataNow(int start_height, bool fix_missing_
                            QStringLiteral("A witness data inspection is already running. Wait for it to finish before starting another one."));
         return;
     }
+    if (m_forensics_witness_capability_known && !m_forensics_witness_inspection_available) {
+        const QString message = QStringLiteral("This backend does not support witness inspection. Stop older defcoind instances and launch the bundled Nu backend.");
+        m_forensics_witness_repair_status = message;
+        Q_EMIT forensicsChanged();
+        Q_EMIT userMessage(QStringLiteral("Witness inspection unavailable"), message);
+        return;
+    }
+    if (!m_forensics_witness_capability_known) {
+        probeBackendCapabilities();
+        Q_EMIT userMessage(QStringLiteral("Checking backend capability"),
+                           QStringLiteral("Nu is checking whether the active backend supports witness inspection. Try Inspect again after the check completes."));
+        return;
+    }
 
     appendLaunchDiagnostic(QStringLiteral("Live witness block data inspection requested from height %1. Fix missing witness data: %2.")
         .arg(height)
@@ -4554,9 +4750,17 @@ void NuRpcService::repairWitnessBlockDataNow(int start_height, bool fix_missing_
             if (!error.isEmpty()) {
                 m_forensics_witness_repair_running = false;
                 appendLaunchDiagnostic(QStringLiteral("Live witness block data inspection failed from height %1: %2").arg(height).arg(error));
-                m_forensics_witness_repair_status = QStringLiteral("Inspection failed from block %1: %2").arg(QString::number(height), error);
+                const bool method_missing = error.contains(QStringLiteral("Method not found"), Qt::CaseInsensitive)
+                    || error.contains(QStringLiteral("scanwitnessblockdata"), Qt::CaseInsensitive);
+                if (method_missing) {
+                    m_forensics_witness_capability_known = true;
+                    m_forensics_witness_inspection_available = false;
+                    m_forensics_witness_repair_status = QStringLiteral("This backend does not support witness inspection. Stop older defcoind instances and launch the bundled Nu backend.");
+                } else {
+                    m_forensics_witness_repair_status = QStringLiteral("Inspection failed from block %1: %2").arg(QString::number(height), error);
+                }
                 Q_EMIT forensicsChanged();
-                Q_EMIT userMessage(QStringLiteral("Blockchain inspection failed"), error);
+                Q_EMIT userMessage(QStringLiteral("Blockchain inspection failed"), m_forensics_witness_repair_status);
                 refreshNode();
                 return;
             }
@@ -4750,6 +4954,8 @@ void NuRpcService::rebuildNodeMetrics()
                   QStringLiteral("Blockchain sync progress, current sync state, and only the transport methods that have actually carried sync traffic during this Nu session.")),
         metricRow(QStringLiteral("Syncing speeds"), syncTransportSpeedSummary(),
                   QStringLiteral("Accumulated sync-session transport volume and average rate. TCP is measured from Core network byte deltas while the node is syncing. UDP is measured from valid fast-sync datagrams sent or received by Nu. Combined is TCP plus UDP.")),
+        metricRow(QStringLiteral("Fast-sync selector"), syncTransportDecisionSummary(),
+                  QStringLiteral("Adaptive TCP/UDP block-transfer preference. Nu uses recent accepted-block timing, reliability, and occasional probes so a slower protocol can recover if conditions change.")),
         metricRow(QStringLiteral("Network active"), m_metric_network_active,
                   QStringLiteral("Whether the backend currently allows peer network activity.")),
         metricRow(QStringLiteral("Connections"), QStringLiteral("Total: %1 | In: %2 | Out: %3")
@@ -4880,6 +5086,20 @@ void NuRpcService::setLanFastSyncEnabled(bool enabled)
     rebuildNodeMetrics();
     Q_EMIT settingsChanged();
     Q_EMIT stateChanged();
+}
+
+void NuRpcService::setExplorerTop100FocusedIndexing(bool enabled)
+{
+    if (m_explorer_top100_focused_indexing == enabled) return;
+    m_explorer_top100_focused_indexing = enabled;
+    QSettings().setValue(QStringLiteral("ExplorerTop100FocusedIndexing"), enabled);
+    if (m_explorer_top100_scanning) {
+        m_explorer_top100_status = enabled
+            ? QStringLiteral("Focused Top 100 indexing enabled. Nu will use larger SQLite batches and refresh the UI less often.")
+            : QStringLiteral("Focused Top 100 indexing disabled. Nu will return to cooperative batch sizing.");
+        Q_EMIT explorerChanged();
+    }
+    Q_EMIT settingsChanged();
 }
 
 void NuRpcService::setUpnpConnectionsEnabled(bool enabled)
@@ -8207,6 +8427,15 @@ bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height
     m_explorer_top100_previous_rows.clear();
     m_explorer_top100_total_sats = 0;
     m_explorer_top100_events_written = 0;
+    const int scan_blocks = std::max(1, end - start + 1);
+    const int target_checkpoints = scan_blocks >= 500000
+        ? EXPLORER_TOP100_LARGE_PLAYBACK_CHECKPOINTS
+        : EXPLORER_TOP100_MIN_PLAYBACK_CHECKPOINTS;
+    m_explorer_top100_checkpoint_interval_blocks = std::max(1, std::min(EXPLORER_TOP100_MAX_ANCHOR_BLOCKS,
+        scan_blocks / std::max(1, target_checkpoints)));
+    m_explorer_top100_next_checkpoint_height = start;
+    m_explorer_top100_last_rank_count = 0;
+    m_explorer_top100_last_ui_update_ms = 0;
 
     const QString connection_name = QStringLiteral("nu_explorer_top100_init_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
     bool ok = false;
@@ -8221,6 +8450,10 @@ bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height
             pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
             pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
             pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+            if (m_explorer_top100_focused_indexing) {
+                pragma.exec(QStringLiteral("PRAGMA cache_size=-262144"));
+                pragma.exec(QStringLiteral("PRAGMA mmap_size=268435456"));
+            }
             ok = db.transaction();
             if (!ok) local_error = db.lastError().text();
             if (ok) {
@@ -8305,8 +8538,12 @@ bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height
     m_explorer_top100_scan_height = start;
     m_explorer_top100_scan_end_height = end;
     m_explorer_top100_started_ms = QDateTime::currentMSecsSinceEpoch();
-    m_explorer_top100_status = QStringLiteral("Top 100 timeline scanning blocks %1-%2.")
-        .arg(QString::number(start), QString::number(end));
+    m_explorer_top100_status = QStringLiteral("Top 100 timeline checkpoints scanning blocks %1-%2 from the Explorer index. Playback anchors every ~%3 block%4%5.")
+        .arg(QString::number(start),
+             QString::number(end),
+             QString::number(m_explorer_top100_checkpoint_interval_blocks),
+             m_explorer_top100_checkpoint_interval_blocks == 1 ? QString() : QStringLiteral("s"),
+             m_explorer_top100_focused_indexing ? QStringLiteral(" Focused indexing is on.") : QString());
     return true;
 }
 
@@ -8322,7 +8559,19 @@ bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool
         current_rows.push_back(qMakePair(it->address, pct));
     }
 
-    if (!force_anchor && current_rows == m_explorer_top100_previous_rows) return true;
+    const int rank_count = current_rows.size();
+    bool milestone_anchor = false;
+    const int milestones[] = {10, 25, 50, 75, 100};
+    for (int threshold : milestones) {
+        if (m_explorer_top100_last_rank_count < threshold && rank_count >= threshold) {
+            milestone_anchor = true;
+            break;
+        }
+    }
+    const bool scheduled_anchor = height >= m_explorer_top100_next_checkpoint_height;
+    const bool effective_force_anchor = force_anchor || milestone_anchor || scheduled_anchor;
+
+    if (!effective_force_anchor && current_rows == m_explorer_top100_previous_rows) return true;
 
     const QString connection_name = QStringLiteral("nu_explorer_top100_events_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
     bool ok = false;
@@ -8346,14 +8595,14 @@ bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool
             for (int i = 0; ok && i < max_rows && i < 100; ++i) {
                 const QPair<QString, int> current = i < current_rows.size() ? current_rows.at(i) : qMakePair(QString(), 0);
                 const QPair<QString, int> previous = i < m_explorer_top100_previous_rows.size() ? m_explorer_top100_previous_rows.at(i) : qMakePair(QString(), -1);
-                if (!force_anchor && current == previous) continue;
+                if (!effective_force_anchor && current == previous) continue;
                 query.bindValue(0, height);
                 query.bindValue(1, QVariant::fromValue<qlonglong>(block_time));
                 query.bindValue(2, i + 1);
                 query.bindValue(3, current.first);
                 query.bindValue(4, current.second);
                 query.bindValue(5, i % EXPLORER_TOP100_COLORS.size());
-                query.bindValue(6, force_anchor ? 1 : 0);
+                query.bindValue(6, effective_force_anchor ? 1 : 0);
                 ok = query.exec();
                 if (!ok) local_error = query.lastError().text();
                 else ++m_explorer_top100_events_written;
@@ -8379,6 +8628,12 @@ bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool
         return false;
     }
     m_explorer_top100_previous_rows = current_rows;
+    m_explorer_top100_last_rank_count = std::max(m_explorer_top100_last_rank_count, rank_count);
+    if (effective_force_anchor) {
+        while (m_explorer_top100_next_checkpoint_height <= height) {
+            m_explorer_top100_next_checkpoint_height += std::max(1, m_explorer_top100_checkpoint_interval_blocks);
+        }
+    }
     return true;
 }
 
@@ -8429,7 +8684,7 @@ void NuRpcService::explorerTop100Step()
         m_explorer_top100_scanning = false;
         releaseExplorerWriterLock();
         m_explorer_top100_status = finish_error.isEmpty()
-            ? QStringLiteral("Top 100 timeline complete through block %1 with %2 sparse events.")
+            ? QStringLiteral("Top 100 timeline complete through block %1 with %2 checkpoint rows.")
                   .arg(QString::number(m_explorer_top100_scan_end_height), QString::number(m_explorer_top100_events_written))
             : QStringLiteral("Top 100 timeline finished, but range status could not be saved: %1").arg(finish_error);
         refreshExplorerAnalytics(5000);
@@ -8438,7 +8693,8 @@ void NuRpcService::explorerTop100Step()
     }
 
     const int chunk_start = m_explorer_top100_scan_height;
-    const int chunk_end = std::min(m_explorer_top100_scan_end_height, chunk_start + EXPLORER_TOP100_CHUNK_BLOCKS - 1);
+    const int chunk_size = m_explorer_top100_focused_indexing ? EXPLORER_TOP100_FOCUSED_CHUNK_BLOCKS : EXPLORER_TOP100_CHUNK_BLOCKS;
+    const int chunk_end = std::min(m_explorer_top100_scan_end_height, chunk_start + chunk_size - 1);
     const QString connection_name = QStringLiteral("nu_explorer_top100_scan_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
     bool ok = false;
     QString local_error;
@@ -8451,6 +8707,12 @@ void NuRpcService::explorerTop100Step()
         if (!db.open()) {
             local_error = db.lastError().text();
         } else {
+            QSqlQuery pragma(db);
+            pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+            if (m_explorer_top100_focused_indexing) {
+                pragma.exec(QStringLiteral("PRAGMA cache_size=-262144"));
+                pragma.exec(QStringLiteral("PRAGMA mmap_size=268435456"));
+            }
             QSqlQuery query(db);
             query.prepare(QStringLiteral(
                 "SELECT d.height, COALESCE(b.time, 0), d.address, d.delta_sats "
@@ -8469,7 +8731,7 @@ void NuRpcService::explorerTop100Step()
                     if (last_height >= 0 && height != last_height) {
                         const bool force_anchor = m_explorer_top100_previous_rows.isEmpty()
                             || last_height == m_explorer_top100_scan_start_height
-                            || (last_height % EXPLORER_TOP100_ANCHOR_BLOCKS) == 0;
+                            || last_height >= m_explorer_top100_scan_end_height;
                         if (!writeExplorerTop100Events(last_height, last_time, force_anchor, &local_error)) {
                             ok = false;
                             break;
@@ -8501,7 +8763,7 @@ void NuRpcService::explorerTop100Step()
     if (ok && last_height >= 0) {
         const bool force_anchor = m_explorer_top100_previous_rows.isEmpty()
             || last_height == m_explorer_top100_scan_start_height
-            || (last_height % EXPLORER_TOP100_ANCHOR_BLOCKS) == 0;
+            || chunk_end >= m_explorer_top100_scan_end_height;
         ok = writeExplorerTop100Events(last_height, last_time, force_anchor, &local_error);
     }
 
@@ -8521,15 +8783,20 @@ void NuRpcService::explorerTop100Step()
     const double blocks_per_second = 1000.0 * static_cast<double>(scanned_blocks) / static_cast<double>(elapsed_ms);
     const double pct = 100.0 * static_cast<double>(m_explorer_top100_scan_height - m_explorer_top100_scan_start_height)
         / static_cast<double>(std::max(1, m_explorer_top100_scan_end_height - m_explorer_top100_scan_start_height + 1));
-    m_explorer_top100_status = QStringLiteral("Top 100 timeline indexed through block %1 of %2 (%3%). %4 sparse events, %5 delta rows in last batch, %6 blocks/s.")
+    m_explorer_top100_status = QStringLiteral("Top 100 timeline checkpoints indexed through block %1 of %2 (%3%). %4 checkpoint rows, %5 delta rows in last batch, %6 blocks/s.%7")
         .arg(QString::number(chunk_end),
              QString::number(m_explorer_top100_scan_end_height),
              QString::number(std::min(100.0, pct), 'f', 2),
              QString::number(m_explorer_top100_events_written),
              QString::number(rows_read),
-             QString::number(blocks_per_second, 'f', blocks_per_second >= 100.0 ? 0 : 1));
-    refreshExplorerTop100TimelineStats();
-    Q_EMIT explorerChanged();
+             QString::number(blocks_per_second, 'f', blocks_per_second >= 100.0 ? 0 : 1),
+             m_explorer_top100_focused_indexing ? QStringLiteral(" Focused mode.") : QString());
+    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+    if (m_explorer_top100_last_ui_update_ms <= 0 || now_ms - m_explorer_top100_last_ui_update_ms >= EXPLORER_TOP100_UI_REFRESH_MS) {
+        m_explorer_top100_last_ui_update_ms = now_ms;
+        refreshExplorerTop100TimelineStats();
+        Q_EMIT explorerChanged();
+    }
     scheduleExplorerTop100Step(0);
 }
 
@@ -8735,7 +9002,7 @@ QVariantMap NuRpcService::explorerTop100Snapshot(int height) const
     out.insert(QStringLiteral("rows"), rows);
     out.insert(QStringLiteral("status"), rows.isEmpty()
         ? QStringLiteral("No Top 100 snapshot exists at or before this block.")
-        : QStringLiteral("Snapshot reconstructed from sparse Top 100 timeline events."));
+        : QStringLiteral("Snapshot reconstructed from Top 100 timeline checkpoints."));
     return out;
 }
 

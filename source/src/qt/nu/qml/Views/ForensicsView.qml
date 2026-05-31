@@ -318,7 +318,7 @@ ColumnLayout {
                     NuCheckBox {
                         id: witnessFixMissing
                         checked: true
-                        enabled: !NuService.forensicsWitnessRepairRunning
+                        enabled: !NuService.forensicsWitnessRepairRunning && NuService.forensicsWitnessInspectionAvailable
                         text: "Fix missing witness data"
                         helpText: "When enabled, Nu rewinds from the first block whose local stored body lacks witness data, then resumes normal syncing so that block data is redownloaded."
                     }
@@ -327,8 +327,10 @@ ColumnLayout {
                         Layout.preferredWidth: 132
                         text: NuService.forensicsWitnessRepairRunning ? "Inspecting" : "Inspect now"
                         primary: !NuService.forensicsWitnessRepairRunning
-                        enabled: !NuService.forensicsWitnessRepairRunning
-                        helpText: "Run the witness-storage inspection without scanning irregular OP_RETURN messages."
+                        enabled: !NuService.forensicsWitnessRepairRunning && NuService.forensicsWitnessInspectionAvailable
+                        helpText: NuService.forensicsWitnessInspectionAvailable
+                                  ? "Run the witness-storage inspection without scanning irregular OP_RETURN messages."
+                                  : "This active backend does not expose Nu's scanwitnessblockdata RPC. Stop older defcoind instances and launch the bundled Nu backend."
                         onClicked: NuService.repairWitnessBlockDataNow(root.witnessStartHeightValue(), witnessFixMissing.checked)
                     }
                 }

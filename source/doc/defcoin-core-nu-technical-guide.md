@@ -294,6 +294,12 @@ unsafe to graft into the Litecoin-derived net processing loop as a quick patch.
 The first Nu implementation is therefore a small optional mirror layer for
 eligible peers that can be disabled without changing Defcoin's chain rules.
 
+For local measurement, Nu also includes a standalone firehose tester under
+`source/src/qt/nu/tools/lan_firehose`. It advertises itself on the LAN, pairs
+with another firehose instance, alternates TCP and UDP transfer phases, sweeps
+payload sizes, and writes JSONL/CSV results. The tool is deliberately separate
+from wallet sync: it does not read keys, use RPC, or submit blocks.
+
 The Forensics view starts with `Irregular Messages`, a user-readable OP_RETURN
 oddity table. Its backend `scanirregularmessages` RPC scans active-chain
 `CBlock` data in bounded chunks and flags outputs that would normally be outside

@@ -1,4 +1,4 @@
-# Defcoin Core Nu 26.5.5j Functionality Map
+# Defcoin Core Nu 26.5.5k Functionality Map
 
 This map is the release checklist for preserving useful Litecoin Core wallet
 capabilities while reorganizing them into the Nu interface. Nu does not copy
@@ -63,6 +63,7 @@ review history, manage wallets, inspect the node, and configure the app.
 | Peer ping | Diagnostics > Peers | `ping` | Direct UI | Operational diagnostic kept close to peers. |
 | Network traffic | Diagnostics > Traffic | sampled `getnettotals` | Direct UI | At-a-glance connectivity health. |
 | UDP fast sync | Settings > Network, Diagnostics > Status | Nu UDP helper + backend `submitblock` | Experimental direct UI | Enabled by default. Connected-peer sub-MTU block mirroring can accelerate wallet catch-up over IPv4/IPv6 without bypassing Core validation or disabling TCP fallback. |
+| LAN firehose throughput tester | `tools/lan_firehose` | Standalone Python TCP/UDP tester | Developer diagnostic | Discovers another local firehose app, alternates TCP and UDP transfer phases, sweeps payload sizes, and writes JSONL/CSV results without touching wallet or chain data. |
 | Debug log tail | Diagnostics > Log | `debug.log` tail | Direct UI | Read-only, scoped diagnostics. |
 | Open full debug log | Diagnostics > Log | system open `debug.log` | Direct UI | Maintenance action stays with diagnostic log context. |
 | RPC console | Diagnostics > Console | local JSON-RPC | Direct UI for advanced users | Preserves full Litecoin/Defcoin command surface while keeping ordinary users on safer flows. |
@@ -79,6 +80,7 @@ review history, manage wallets, inspect the node, and configure the app.
 | Network connect/isolate control | Settings > Network and status strip | Implemented |
 | Dual magic migration control | Settings > Network | Implemented as startup option for accepting both legacy `fbc0b6db` and new `defc014e` peer message bytes. In dual mode, outbound handshakes prefer the new `defc014e` bytes while bounded legacy probes keep old-only Defcoin peers reachable; with dual mode off, the backend uses new Defcoin magic only. |
 | UDP fast sync | Settings > Network, Diagnostics > Status | Experimental helper using sub-MTU chunked UDP block transfer from connected Defcoin peers and normal `submitblock` validation. LAN discovery adds local broadcast; TCP/Core sync stays active as fallback. |
+| LAN firehose tester | `source/src/qt/nu/tools/lan_firehose` | Standalone developer diagnostic for measuring TCP/UDP LAN throughput and payload-size behavior before changing wallet fast-sync defaults. |
 | Network traffic graph | Diagnostics > Traffic | Implemented in neutral form |
 | Debug log tab/readout | Diagnostics > Log | Implemented |
 | Mask balances | Home | Implemented |

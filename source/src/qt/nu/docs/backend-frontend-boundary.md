@@ -1,6 +1,6 @@
 # Defcoin Core Nu Backend / Frontend Boundary
 
-Defcoin Core Nu 26.5.5j is a Qt Quick wallet interface on top of the
+Defcoin Core Nu 26.5.5k is a Qt Quick wallet interface on top of the
 Defcoin Core engine. The Nu UI is intentionally new; the money-critical engine
 is not.
 

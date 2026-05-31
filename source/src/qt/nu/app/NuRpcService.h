@@ -147,6 +147,7 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QVariantList explorerMovements READ explorerMovements NOTIFY explorerChanged)
     Q_PROPERTY(QString explorerAnalyticsStatus READ explorerAnalyticsStatus NOTIFY explorerChanged)
     Q_PROPERTY(bool explorerTop100Scanning READ explorerTop100Scanning NOTIFY explorerChanged)
+    Q_PROPERTY(bool explorerTop100FocusedIndexing READ explorerTop100FocusedIndexing WRITE setExplorerTop100FocusedIndexing NOTIFY settingsChanged)
     Q_PROPERTY(QString explorerTop100Status READ explorerTop100Status NOTIFY explorerChanged)
     Q_PROPERTY(int explorerTop100ScanHeight READ explorerTop100ScanHeight NOTIFY explorerChanged)
     Q_PROPERTY(int explorerTop100ScanEndHeight READ explorerTop100ScanEndHeight NOTIFY explorerChanged)
@@ -166,6 +167,7 @@ class NuRpcService final : public QObject
     Q_PROPERTY(int forensicsFirstMissingWitnessHeight READ forensicsFirstMissingWitnessHeight NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsMissingWitnessCount READ forensicsMissingWitnessCount NOTIFY forensicsChanged)
     Q_PROPERTY(bool forensicsWitnessRepairRunning READ forensicsWitnessRepairRunning NOTIFY forensicsChanged)
+    Q_PROPERTY(bool forensicsWitnessInspectionAvailable READ forensicsWitnessInspectionAvailable NOTIFY forensicsChanged)
     Q_PROPERTY(QString forensicsWitnessRepairStatus READ forensicsWitnessRepairStatus NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsWitnessRepairStartHeight READ forensicsWitnessRepairStartHeight NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsWitnessRepairInspectedBlocks READ forensicsWitnessRepairInspectedBlocks NOTIFY forensicsChanged)
@@ -287,6 +289,7 @@ public:
     QVariantList explorerMovements() const { return m_explorer_movements; }
     QString explorerAnalyticsStatus() const { return m_explorer_analytics_status; }
     bool explorerTop100Scanning() const { return m_explorer_top100_scanning; }
+    bool explorerTop100FocusedIndexing() const { return m_explorer_top100_focused_indexing; }
     QString explorerTop100Status() const { return m_explorer_top100_status; }
     int explorerTop100ScanHeight() const { return m_explorer_top100_scan_height; }
     int explorerTop100ScanEndHeight() const { return m_explorer_top100_scan_end_height; }
@@ -306,6 +309,7 @@ public:
     int forensicsFirstMissingWitnessHeight() const { return m_forensics_first_missing_witness_height; }
     int forensicsMissingWitnessCount() const { return m_forensics_missing_witness_count; }
     bool forensicsWitnessRepairRunning() const { return m_forensics_witness_repair_running; }
+    bool forensicsWitnessInspectionAvailable() const { return m_forensics_witness_inspection_available; }
     QString forensicsWitnessRepairStatus() const { return m_forensics_witness_repair_status; }
     int forensicsWitnessRepairStartHeight() const { return m_forensics_witness_repair_start_height; }
     int forensicsWitnessRepairInspectedBlocks() const { return m_forensics_witness_repair_inspected_blocks; }
@@ -400,6 +404,7 @@ public:
     Q_INVOKABLE void stopExplorerIndexing();
     Q_INVOKABLE void resetExplorerIndex();
     Q_INVOKABLE void startExplorerTop100Timeline(int start_height, int end_height);
+    Q_INVOKABLE void setExplorerTop100FocusedIndexing(bool enabled);
     Q_INVOKABLE void stopExplorerTop100Timeline();
     Q_INVOKABLE void resetExplorerTop100Timeline();
     Q_INVOKABLE void scanRemainingExplorerTop100Timeline();
@@ -559,7 +564,14 @@ private:
     QString lanFastSyncMethodSummary() const;
     QString lanFastSyncRateSummary() const;
     QString syncTransportSpeedSummary() const;
+    QString syncTransportDecisionSummary() const;
     void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes);
+    void recordFastSyncUdpSuccess(int height, qint64 latency_ms);
+    void recordFastSyncUdpFailure();
+    void recordFastSyncTcpProgress(int blocks, double seconds);
+    bool shouldAttemptUdpFastSync();
+    void resetFastSyncProtocolWindow();
+    void probeBackendCapabilities();
     void refreshDebugLog();
     void updateReceiveQr();
     QString receiveRequestSettingsKey() const;
@@ -858,6 +870,19 @@ private:
     qint64 m_lan_fast_sync_last_progress_ms = 0;
     bool m_lan_fast_sync_request_in_flight = false;
     bool m_lan_fast_sync_submit_in_flight = false;
+    int m_fast_sync_tcp_successes = 0;
+    int m_fast_sync_udp_successes = 0;
+    int m_fast_sync_tcp_failures = 0;
+    int m_fast_sync_udp_failures = 0;
+    double m_fast_sync_tcp_ewma_blocks_per_second = 0.0;
+    double m_fast_sync_udp_ewma_blocks_per_second = 0.0;
+    int m_fast_sync_tcp_quota_remaining = 1;
+    int m_fast_sync_udp_quota_remaining = 1;
+    int m_fast_sync_window_size = 2;
+    qint64 m_fast_sync_udp_cooldown_until_ms = 0;
+    qint64 m_fast_sync_last_probe_ms = 0;
+    QString m_fast_sync_decision_summary = QStringLiteral("Fast sync selector warming up; TCP/Core and UDP will be sampled when available.");
+    int m_fast_sync_last_udp_accepted_height = -1;
     bool m_mask_balances = false;
     bool m_third_party_tx_urls_enabled = false;
     QString m_third_party_tx_url;
@@ -891,6 +916,7 @@ private:
     };
     bool m_explorer_top100_scanning = false;
     bool m_explorer_top100_paused_by_user = false;
+    bool m_explorer_top100_focused_indexing = false;
     QString m_explorer_top100_status = QStringLiteral("Top 100 timeline not built yet.");
     int m_explorer_top100_scan_start_height = 0;
     int m_explorer_top100_scan_height = 0;
@@ -899,6 +925,10 @@ private:
     int m_explorer_top100_timeline_end_height = -1;
     int m_explorer_top100_timeline_event_count = 0;
     int m_explorer_top100_events_written = 0;
+    int m_explorer_top100_checkpoint_interval_blocks = 10000;
+    int m_explorer_top100_next_checkpoint_height = 0;
+    int m_explorer_top100_last_rank_count = 0;
+    qint64 m_explorer_top100_last_ui_update_ms = 0;
     qint64 m_explorer_top100_started_ms = 0;
     qint64 m_explorer_top100_total_sats = 0;
     QHash<QString, qint64> m_explorer_top100_balances;
@@ -915,6 +945,9 @@ private:
     QString m_forensics_scan_status = QStringLiteral("Irregular message scan not started.");
     QString m_forensics_scan_summary;
     bool m_forensics_witness_repair_running = false;
+    bool m_forensics_witness_inspection_available = false;
+    bool m_forensics_witness_capability_known = false;
+    bool m_forensics_witness_capability_probe_in_flight = false;
     QString m_forensics_witness_repair_status = QStringLiteral("Witness data inspection not started.");
     int m_forensics_witness_repair_start_height = 903168;
     int m_forensics_witness_repair_inspected_blocks = 0;
