@@ -27,7 +27,7 @@ import uuid
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 
 MAGIC = "DFCNU_FIREHOSE_V1"
@@ -86,10 +86,16 @@ class PhaseResult:
 @dataclass
 class SharedState:
     stop: threading.Event = field(default_factory=threading.Event)
+    incoming: threading.Event = field(default_factory=threading.Event)
     peers: Dict[str, Peer] = field(default_factory=dict)
+    peer_log_times: Dict[str, float] = field(default_factory=dict)
+    reported_peers: Set[str] = field(default_factory=set)
     results: List[PhaseResult] = field(default_factory=list)
     log_lock: threading.Lock = field(default_factory=threading.Lock)
     csv_lock: threading.Lock = field(default_factory=threading.Lock)
+    listener_lock: threading.Lock = field(default_factory=threading.Lock)
+    listeners_started: bool = False
+    debug_log_path: Optional[Path] = None
 
 
 def now_iso() -> str:
@@ -152,12 +158,49 @@ def safe_json_loads(data: bytes) -> Optional[dict]:
 def log_event(path: Optional[Path], event: dict, state: Optional[SharedState] = None) -> None:
     line = json.dumps({"at": now_iso(), **event}, sort_keys=True)
     if path is None:
-        return
+        json_path = None
+    else:
+        json_path = path
     lock = state.log_lock if state else threading.Lock()
     with lock:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        if json_path is not None:
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            with json_path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        if state and state.debug_log_path is not None:
+            state.debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with state.debug_log_path.open("a", encoding="utf-8") as f:
+                f.write(format_debug_event(event) + "\n")
+
+
+def format_debug_event(event: dict) -> str:
+    name = str(event.get("event", "event"))
+    prefix = f"[{now_iso()}] {name}"
+    if name == "start":
+        return f"{prefix}: mode={event.get('mode')} host={event.get('hostname')} node={str(event.get('node_id', ''))[:8]}"
+    if name == "peer_seen":
+        peer = event.get("peer") if isinstance(event.get("peer"), dict) else {}
+        return f"{prefix}: {peer.get('host', '?')} {peer.get('hostname', '')} {peer.get('os_name', '')} node={str(peer.get('node_id', ''))[:8]} first={event.get('first_seen')}"
+    if name in ("discovery_role_decision", "role_selected", "auto_hose_start", "auto_sink_wait", "auto_sink_promoted_to_hose"):
+        peer = event.get("peer") if isinstance(event.get("peer"), dict) else {}
+        return f"{prefix}: role={event.get('role', '')} peer={peer.get('host', '')} {peer.get('hostname', '')} local={str(event.get('local_node_id', ''))[:8]} peer_node={str(event.get('peer_node_id', peer.get('node_id', '')))[:8]}"
+    if name in ("tcp_listening", "udp_listening", "beacon_sender_started", "beacon_listener_started"):
+        return f"{prefix}: bind={event.get('bind', '0.0.0.0')} port={event.get('port')}"
+    if name in ("tcp_bind_error", "udp_bind_error", "beacon_bind_error", "beacon_send_error", "tcp_accept_error", "tcp_connection_error", "udp_recv_error"):
+        return f"{prefix}: {event.get('error')}"
+    if name in ("tcp_phase_result", "udp_phase_result", "hose_phase_result"):
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        return (
+            f"{prefix}: phase={result.get('phase')} role={result.get('role')} "
+            f"{str(result.get('protocol', '')).upper()} payload={result.get('payload_size')} "
+            f"sent={format_bytes(int(result.get('sent_bytes') or 0))} recv={format_bytes(int(result.get('recv_bytes') or 0))} "
+            f"rate={float(result.get('mbps') or 0.0):.2f} Mb/s note={result.get('note', '')}"
+        )
+    if name == "stop":
+        results = event.get("results") if isinstance(event.get("results"), list) else []
+        return f"{prefix}: result_count={len(results)}"
+    details = " ".join(f"{k}={v}" for k, v in event.items() if k != "event" and k != "phases")
+    return f"{prefix}: {details}".rstrip()
 
 
 def write_csv_result(path: Optional[Path], result: PhaseResult, state: SharedState) -> None:
@@ -227,14 +270,20 @@ def make_beacon(node_id: str, args: argparse.Namespace) -> bytes:
 
 def beacon_sender(args: argparse.Namespace, node_id: str, state: SharedState, log_path: Optional[Path]) -> None:
     if args.no_beacon:
+        log_event(log_path, {"event": "beacon_disabled"}, state)
         return
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     payload = make_beacon(node_id, args)
+    log_event(log_path, {"event": "beacon_sender_started", "port": args.beacon_port}, state)
+    sent_count = 0
     while not state.stop.is_set():
         for target in ("255.255.255.255",):
             try:
                 sock.sendto(payload, (target, args.beacon_port))
+                sent_count += 1
+                if sent_count == 1 or sent_count % 10 == 0:
+                    log_event(log_path, {"event": "beacon_sent", "target": target, "port": args.beacon_port, "count": sent_count}, state)
             except OSError as exc:
                 log_event(log_path, {"event": "beacon_send_error", "error": str(exc)}, state)
         state.stop.wait(1.0)
@@ -250,6 +299,7 @@ def beacon_listener(args: argparse.Namespace, node_id: str, state: SharedState, 
     except OSError as exc:
         log_event(log_path, {"event": "beacon_bind_error", "error": str(exc)}, state)
         return
+    log_event(log_path, {"event": "beacon_listener_started", "bind": args.bind, "port": args.beacon_port}, state)
     sock.settimeout(0.5)
     while not state.stop.is_set():
         try:
@@ -269,6 +319,7 @@ def beacon_listener(args: argparse.Namespace, node_id: str, state: SharedState, 
         peer_id = str(obj.get("node_id", ""))
         if not peer_id:
             continue
+        now = time.time()
         peer = Peer(
             node_id=peer_id,
             host=addr[0],
@@ -276,13 +327,20 @@ def beacon_listener(args: argparse.Namespace, node_id: str, state: SharedState, 
             tcp_port=int(obj.get("tcp_port", args.tcp_port)),
             udp_port=int(obj.get("udp_port", args.udp_port)),
             os_name=str(obj.get("os", "")),
-            last_seen=time.time(),
+            last_seen=now,
         )
+        first_seen = peer_id not in state.peers
         state.peers[peer_id] = peer
-        log_event(log_path, {"event": "peer_seen", "peer": peer.__dict__}, state)
+        last_log = state.peer_log_times.get(peer_id, 0.0)
+        if first_seen or now - last_log >= 10.0:
+            state.peer_log_times[peer_id] = now
+            log_event(log_path, {"event": "peer_seen", "first_seen": first_seen, "peer": peer.__dict__}, state)
+        if peer_id not in state.reported_peers:
+            state.reported_peers.add(peer_id)
+            print(f"Peer seen: {peer.host} {peer.hostname} {peer.os_name}".strip(), flush=True)
 
 
-def choose_peer(args: argparse.Namespace, node_id: str, state: SharedState) -> Tuple[str, Optional[Peer]]:
+def choose_peer(args: argparse.Namespace, node_id: str, state: SharedState, log_path: Optional[Path]) -> Tuple[str, Optional[Peer]]:
     if args.peer:
         peer = Peer(
             node_id="manual-peer",
@@ -292,25 +350,69 @@ def choose_peer(args: argparse.Namespace, node_id: str, state: SharedState) -> T
             udp_port=args.peer_udp_port or args.udp_port,
             last_seen=time.time(),
         )
+        log_event(log_path, {"event": "manual_peer_selected", "role": args.mode if args.mode != "auto" else "hose", "peer": peer.__dict__}, state)
         return args.mode if args.mode != "auto" else "hose", peer
     if args.mode in ("sink", "hose"):
+        log_event(log_path, {"event": "manual_role_selected", "role": args.mode}, state)
         return args.mode, None
     print("Waiting for another firehose app on the LAN. Use --peer <ip> for direct testing.", flush=True)
+    log_event(log_path, {"event": "discovery_wait_start", "timeout_s": args.discovery_timeout, "local_node_id": node_id}, state)
     deadline = time.time() + args.discovery_timeout
     while time.time() < deadline and not state.stop.is_set():
         fresh = [p for p in state.peers.values() if time.time() - p.last_seen < 10.0]
         if fresh:
             peer = sorted(fresh, key=lambda p: p.node_id)[0]
             role = "hose" if node_id > peer.node_id else "sink"
+            log_event(
+                log_path,
+                {
+                    "event": "discovery_role_decision",
+                    "role": role,
+                    "local_node_id": node_id,
+                    "peer_node_id": peer.node_id,
+                    "peer": peer.__dict__,
+                    "fresh_peer_count": len(fresh),
+                },
+                state,
+            )
             return role, peer
         time.sleep(0.25)
+    log_event(log_path, {"event": "discovery_timeout", "fallback_role": "sink", "known_peer_count": len(state.peers)}, state)
     return "sink", None
+
+
+def start_sink_listeners(
+    args: argparse.Namespace,
+    phases: List[Phase],
+    state: SharedState,
+    log_path: Optional[Path],
+    csv_path: Optional[Path],
+) -> None:
+    with state.listener_lock:
+        if state.listeners_started:
+            return
+        state.listeners_started = True
+    threading.Thread(target=tcp_server, args=(args, phases, state, log_path, csv_path), daemon=True).start()
+    threading.Thread(target=udp_receiver, args=(args, state, log_path, csv_path), daemon=True).start()
+
+
+def wait_for_sink_completion(args: argparse.Namespace, state: SharedState) -> None:
+    until = time.monotonic() + args.duration + args.discovery_timeout + 20.0
+    while time.monotonic() < until and not state.stop.is_set():
+        time.sleep(0.25)
 
 
 def tcp_server(args: argparse.Namespace, phases: List[Phase], state: SharedState, log_path: Optional[Path], csv_path: Optional[Path]) -> None:
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((args.bind, args.tcp_port))
+    try:
+        srv.bind((args.bind, args.tcp_port))
+    except OSError as exc:
+        message = f"TCP listen failed on {args.bind}:{args.tcp_port}: {exc}"
+        print(message, flush=True)
+        log_event(log_path, {"event": "tcp_bind_error", "bind": args.bind, "port": args.tcp_port, "error": str(exc)}, state)
+        state.stop.set()
+        return
     srv.listen(2)
     srv.settimeout(0.5)
     log_event(log_path, {"event": "tcp_listening", "port": args.tcp_port}, state)
@@ -318,6 +420,8 @@ def tcp_server(args: argparse.Namespace, phases: List[Phase], state: SharedState
     while not state.stop.is_set():
         try:
             conn, addr = srv.accept()
+            state.incoming.set()
+            log_event(log_path, {"event": "tcp_incoming", "peer": addr[0], "port": addr[1]}, state)
         except socket.timeout:
             continue
         except OSError as exc:
@@ -398,7 +502,14 @@ def handle_tcp_connection(
 def udp_receiver(args: argparse.Namespace, state: SharedState, log_path: Optional[Path], csv_path: Optional[Path]) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((args.bind, args.udp_port))
+    try:
+        sock.bind((args.bind, args.udp_port))
+    except OSError as exc:
+        message = f"UDP listen failed on {args.bind}:{args.udp_port}: {exc}"
+        print(message, flush=True)
+        log_event(log_path, {"event": "udp_bind_error", "bind": args.bind, "port": args.udp_port, "error": str(exc)}, state)
+        state.stop.set()
+        return
     sock.settimeout(0.25)
     log_event(log_path, {"event": "udp_listening", "port": args.udp_port}, state)
     active: Dict[int, dict] = {}
@@ -416,6 +527,9 @@ def udp_receiver(args: argparse.Namespace, state: SharedState, log_path: Optiona
             continue
         if len(data) < UDP_HEADER_BYTES or data[:8] != UDP_MAGIC:
             continue
+        if not state.incoming.is_set():
+            state.incoming.set()
+            log_event(log_path, {"event": "udp_incoming", "peer": addr[0], "port": addr[1]}, state)
         try:
             phase, seq, payload_len, checksum, end_ns = UDP_HEADER_STRUCT.unpack(data[8:UDP_HEADER_BYTES])
         except struct.error:
@@ -496,11 +610,8 @@ def run_sink(args: argparse.Namespace, phases: List[Phase], state: SharedState, 
         "Start another copy in auto mode or with --mode hose --peer <this-ip>.",
         flush=True,
     )
-    threading.Thread(target=tcp_server, args=(args, phases, state, log_path, csv_path), daemon=True).start()
-    threading.Thread(target=udp_receiver, args=(args, state, log_path, csv_path), daemon=True).start()
-    until = time.monotonic() + args.duration + args.discovery_timeout + 20.0
-    while time.monotonic() < until and not state.stop.is_set():
-        time.sleep(0.25)
+    start_sink_listeners(args, phases, state, log_path, csv_path)
+    wait_for_sink_completion(args, state)
 
 
 def send_tcp_phase(peer: Peer, phase: Phase, args: argparse.Namespace) -> PhaseResult:
@@ -508,7 +619,16 @@ def send_tcp_phase(peer: Peer, phase: Phase, args: argparse.Namespace) -> PhaseR
     sent = 0
     packets = 0
     started = time.monotonic()
-    with socket.create_connection((peer.host, peer.tcp_port), timeout=5.0) as sock:
+    connect_deadline = time.monotonic() + args.connect_retry_seconds
+    while True:
+        try:
+            sock = socket.create_connection((peer.host, peer.tcp_port), timeout=5.0)
+            break
+        except OSError:
+            if time.monotonic() >= connect_deadline:
+                raise
+            time.sleep(0.25)
+    with sock:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         header = json.dumps(
             {
@@ -616,6 +736,37 @@ def run_hose(args: argparse.Namespace, peer: Peer, phases: List[Phase], state: S
     state.stop.set()
 
 
+def run_auto(args: argparse.Namespace, role: str, peer: Optional[Peer], phases: List[Phase], state: SharedState, log_path: Optional[Path], csv_path: Optional[Path]) -> int:
+    # Auto nodes always listen. This makes one-way discovery and role-election
+    # races recoverable, while still letting one side become the primary sender.
+    start_sink_listeners(args, phases, state, log_path, csv_path)
+    if peer is None:
+        print("No auto peer discovered. Staying in sink mode so a later/manual hose can connect.", flush=True)
+        log_event(log_path, {"event": "auto_no_peer_sink_only"}, state)
+        wait_for_sink_completion(args, state)
+        return 0
+    if role == "hose":
+        log_event(log_path, {"event": "auto_hose_start", "peer": peer.__dict__}, state)
+        time.sleep(args.auto_hose_delay)
+        run_hose(args, peer, phases, state, log_path, csv_path)
+        return 0
+
+    print(
+        f"Auto selected sink for {peer.host}; waiting {args.auto_sink_grace:.1f}s for incoming traffic before fallback.",
+        flush=True,
+    )
+    log_event(log_path, {"event": "auto_sink_wait", "peer": peer.__dict__, "grace_s": args.auto_sink_grace}, state)
+    if state.incoming.wait(args.auto_sink_grace):
+        log_event(log_path, {"event": "auto_sink_incoming_detected"}, state)
+        wait_for_sink_completion(args, state)
+        return 0
+
+    print("No incoming traffic arrived; promoting this node to hose so auto mode cannot stall.", flush=True)
+    log_event(log_path, {"event": "auto_sink_promoted_to_hose", "peer": peer.__dict__}, state)
+    run_hose(args, peer, phases, state, log_path, csv_path)
+    return 0
+
+
 def default_log_path() -> Path:
     base = Path.home() / "Library" / "Application Support" / "Defcoin"
     if not base.exists():
@@ -639,6 +790,9 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--duration", type=float, default=DEFAULT_DURATION_SECONDS)
     parser.add_argument("--switch-seconds", type=float, default=DEFAULT_SWITCH_SECONDS)
     parser.add_argument("--discovery-timeout", type=float, default=20.0)
+    parser.add_argument("--auto-sink-grace", type=float, default=8.0, help="In auto mode, a selected sink promotes to hose if no test traffic arrives within this many seconds.")
+    parser.add_argument("--auto-hose-delay", type=float, default=0.75, help="Small auto-mode delay before hosing so the peer can finish opening listeners.")
+    parser.add_argument("--connect-retry-seconds", type=float, default=10.0, help="How long TCP hose mode retries connecting before marking a phase failed.")
     parser.add_argument("--phase-gap", type=float, default=0.15)
     parser.add_argument("--size-profile", choices=["practical", "conservative", "jumbo"], default="practical")
     parser.add_argument("--packet-sizes", default="", help="Comma-separated payload sizes. Overrides --size-profile.")
@@ -646,6 +800,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument("--no-beacon", action="store_true")
     parser.add_argument("--udp-checksum", action="store_true", help="Add a CRC32 payload check to UDP datagrams.")
     parser.add_argument("--log-jsonl", type=Path, default=None)
+    parser.add_argument("--debug-log", type=Path, default=None, help="Human-readable text log suitable for TextEdit/Console.")
     parser.add_argument("--csv", type=Path, default=None)
     return parser.parse_args(list(argv) if argv is not None else None)
 
@@ -654,8 +809,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_args(argv)
     if args.log_jsonl is None:
         args.log_jsonl = default_log_path()
+    if args.debug_log is None and args.log_jsonl is not None:
+        args.debug_log = args.log_jsonl.with_suffix(".log")
     node_id = str(uuid.uuid4())
     state = SharedState()
+    state.debug_log_path = args.debug_log
     phases = build_phases(args.duration, args.switch_seconds, size_profile(args.size_profile, args.packet_sizes))
 
     def stop_handler(_signum, _frame):
@@ -677,6 +835,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     )
     print(f"Defcoin Nu firehose node {node_id[:8]} on {local_hostname()}")
     print(f"JSONL log: {args.log_jsonl}")
+    if args.debug_log:
+        print(f"Text log: {args.debug_log}")
     if args.csv:
         print(f"CSV results: {args.csv}")
     print("Payload sizes:", ", ".join(str(p.payload_size) for p in phases))
@@ -684,21 +844,25 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     threading.Thread(target=beacon_sender, args=(args, node_id, state, args.log_jsonl), daemon=True).start()
     threading.Thread(target=beacon_listener, args=(args, node_id, state, args.log_jsonl), daemon=True).start()
 
-    role, peer = choose_peer(args, node_id, state)
+    role, peer = choose_peer(args, node_id, state, args.log_jsonl)
     print(f"Selected role: {role}")
     if peer:
         print(f"Peer: {peer.host} {peer.hostname} {peer.os_name}".strip())
     log_event(args.log_jsonl, {"event": "role_selected", "role": role, "peer": peer.__dict__ if peer else None}, state)
 
-    if role == "sink":
+    if args.mode == "auto":
+        return_code = run_auto(args, role, peer, phases, state, args.log_jsonl, args.csv)
+    elif role == "sink":
         run_sink(args, phases, state, args.log_jsonl, args.csv)
+        return_code = 0
     else:
         if not peer:
             print("No peer selected for hose mode. Use --peer <ip> or run another auto/sink firehose app.", file=sys.stderr)
             return 2
         run_hose(args, peer, phases, state, args.log_jsonl, args.csv)
+        return_code = 0
     log_event(args.log_jsonl, {"event": "stop", "results": [r.__dict__ for r in state.results]}, state)
-    return 0
+    return return_code
 
 
 if __name__ == "__main__":

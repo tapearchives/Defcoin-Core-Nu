@@ -8,14 +8,17 @@
 #include <QtCore/QTextStream>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QFont>
+#include <QtGui/QIcon>
 #include <QtGui/QPainter>
 #include <QtGui/QPen>
+#include <QtGui/QPixmap>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
+#include <QtWidgets/QDialog>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QFormLayout>
@@ -197,6 +200,7 @@ public:
     MainWindow()
     {
         setWindowTitle(QStringLiteral("LAN Firehose Throughput Test"));
+        setWindowIcon(QIcon(iconPath()));
         resize(1120, 780);
 
         m_process = new QProcess(this);
@@ -212,11 +216,30 @@ public:
         rootLayout->setContentsMargins(14, 12, 14, 12);
         rootLayout->setSpacing(10);
 
+        auto* mast = new QWidget(root);
+        auto* mastRow = new QHBoxLayout(mast);
+        mastRow->setContentsMargins(0, 0, 0, 0);
+        mastRow->setSpacing(12);
+        auto* icon = new QLabel(mast);
+        const QPixmap iconImage(iconPath());
+        if (!iconImage.isNull()) {
+            icon->setPixmap(iconImage.scaled(84, 84, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
+        icon->setFixedSize(90, 90);
+        icon->setAlignment(Qt::AlignCenter);
+        mastRow->addWidget(icon);
         auto* intro = new QLabel(QStringLiteral(
-            "LAN Firehose Throughput Test compares TCP and UDP transfer behavior between two machines. "
-            "It is a diagnostic tool only; it does not read wallets, use RPC, or submit blocks."));
+            "<b>LAN Firehose Throughput Test v%1</b><br>"
+            "Compare TCP and UDP transfer behavior between two machines. "
+            "This diagnostic tool does not read wallets, use RPC, or submit blocks.")
+            .arg(releaseName()));
         intro->setWordWrap(true);
-        rootLayout->addWidget(intro);
+        intro->setTextFormat(Qt::RichText);
+        mastRow->addWidget(intro, 1);
+        auto* about = new QPushButton(QStringLiteral("About"), mast);
+        connect(about, &QPushButton::clicked, this, &MainWindow::showAbout);
+        mastRow->addWidget(about, 0, Qt::AlignTop);
+        rootLayout->addWidget(mast);
 
         rootLayout->addWidget(buildControls());
         rootLayout->addWidget(buildStats());
@@ -312,8 +335,13 @@ private:
         m_stop = new QPushButton(QStringLiteral("Stop"), box);
         connect(m_stop, &QPushButton::clicked, this, &MainWindow::stopTest);
 
-        auto* openLog = new QPushButton(QStringLiteral("Open log"), box);
-        connect(openLog, &QPushButton::clicked, this, [this] { openPath(m_jsonlPath); });
+        auto* openLog = new QPushButton(QStringLiteral("Open text log"), box);
+        openLog->setToolTip(QStringLiteral("Open the readable .log file in the OS default text/log viewer. The JSONL sidecar remains available for machine parsing."));
+        connect(openLog, &QPushButton::clicked, this, [this] { openPath(m_debugLogPath); });
+
+        auto* openJson = new QPushButton(QStringLiteral("Open JSONL"), box);
+        openJson->setToolTip(QStringLiteral("Open the structured machine-readable event log."));
+        connect(openJson, &QPushButton::clicked, this, [this] { openPath(m_jsonlPath); });
 
         auto* openCsv = new QPushButton(QStringLiteral("Open CSV"), box);
         connect(openCsv, &QPushButton::clicked, this, [this] { openPath(m_csvPath); });
@@ -345,6 +373,7 @@ private:
         buttonRow->addWidget(m_stop);
         buttonRow->addStretch(1);
         buttonRow->addWidget(openLog);
+        buttonRow->addWidget(openJson);
         buttonRow->addWidget(openCsv);
         buttonRow->addWidget(clear);
         grid->addWidget(buttons, 4, 0, 1, 4);
@@ -395,6 +424,7 @@ private:
         QDir().mkpath(outDir.path());
         const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss"));
         m_jsonlPath = outDir.filePath(QStringLiteral("nu-firehose-%1.jsonl").arg(stamp));
+        m_debugLogPath = outDir.filePath(QStringLiteral("nu-firehose-%1.log").arg(stamp));
         m_csvPath = outDir.filePath(QStringLiteral("nu-firehose-%1.csv").arg(stamp));
 
         QStringList args;
@@ -404,6 +434,7 @@ private:
              << QStringLiteral("--switch-seconds") << QString::number(m_switchSeconds->value())
              << QStringLiteral("--size-profile") << m_profile->currentText()
              << QStringLiteral("--log-jsonl") << m_jsonlPath
+             << QStringLiteral("--debug-log") << m_debugLogPath
              << QStringLiteral("--csv") << m_csvPath;
         if (!m_peer->text().trimmed().isEmpty()) args << QStringLiteral("--peer") << m_peer->text().trimmed();
         if (!m_packetSizes->text().trimmed().isEmpty()) args << QStringLiteral("--packet-sizes") << m_packetSizes->text().trimmed();
@@ -574,16 +605,66 @@ private:
     {
         const QString appDir = QCoreApplication::applicationDirPath();
 #ifdef Q_OS_MACOS
-        const QString bundled = QDir(appDir).filePath(QStringLiteral("../Resources/lan_firehose/defcoin_lan_firehose.py"));
+        const QString bundled = QDir(appDir).filePath(QStringLiteral("../Resources/lan_firehose/LAN_Firehose_Throughput_Test.py"));
 #else
-        const QString bundled = QDir(appDir).filePath(QStringLiteral("lan_firehose/defcoin_lan_firehose.py"));
+        const QString bundled = QDir(appDir).filePath(QStringLiteral("lan_firehose/LAN_Firehose_Throughput_Test.py"));
 #endif
         if (QFile::exists(bundled)) return QDir::cleanPath(bundled);
 #ifdef DEFCOIN_FIREHOSE_SCRIPT_SRC
         return QStringLiteral(DEFCOIN_FIREHOSE_SCRIPT_SRC);
 #else
-        return QDir::cleanPath(QDir(appDir).filePath(QStringLiteral("../tools/lan_firehose/defcoin_lan_firehose.py")));
+        return QDir::cleanPath(QDir(appDir).filePath(QStringLiteral("../tools/lan_firehose/LAN_Firehose_Throughput_Test.py")));
 #endif
+    }
+
+    QString iconPath() const
+    {
+        const QString appDir = QCoreApplication::applicationDirPath();
+#ifdef Q_OS_MACOS
+        const QString bundled = QDir(appDir).filePath(QStringLiteral("../Resources/lan_firehose/firehose_icon.png"));
+#else
+        const QString bundled = QDir(appDir).filePath(QStringLiteral("lan_firehose/firehose_icon.png"));
+#endif
+        if (QFile::exists(bundled)) return QDir::cleanPath(bundled);
+        return QDir::cleanPath(QDir(appDir).filePath(QStringLiteral("../tools/lan_firehose/assets/firehose_icon.png")));
+    }
+
+    QString releaseName() const
+    {
+#ifdef DEFCOIN_FIREHOSE_RELEASE_NAME
+        return QStringLiteral(DEFCOIN_FIREHOSE_RELEASE_NAME);
+#else
+        return QStringLiteral("1.0.1");
+#endif
+    }
+
+    void showAbout()
+    {
+        QDialog dialog(this);
+        dialog.setWindowTitle(QStringLiteral("About LAN Firehose Throughput Test"));
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* icon = new QLabel(&dialog);
+        const QPixmap iconImage(iconPath());
+        if (!iconImage.isNull()) {
+            icon->setPixmap(iconImage.scaled(220, 220, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
+        icon->setAlignment(Qt::AlignCenter);
+        layout->addWidget(icon);
+        auto* text = new QLabel(QStringLiteral(
+            "<h2>LAN Firehose Throughput Test v%1</h2>"
+            "<p>Open diagnostic utility for measuring TCP and UDP throughput behavior between two machines.</p>"
+            "<p>The hydrant and binary-water icon is bundled as project artwork for this test app.</p>"
+            "<p>No wallet, blockchain, or RPC data is read by this utility.</p>")
+            .arg(releaseName()), &dialog);
+        text->setWordWrap(true);
+        text->setTextFormat(Qt::RichText);
+        text->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+        layout->addWidget(text);
+        auto* close = new QPushButton(QStringLiteral("Close"), &dialog);
+        connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+        layout->addWidget(close, 0, Qt::AlignRight);
+        dialog.resize(420, 460);
+        dialog.exec();
     }
 
     void openPath(const QString& path)
@@ -619,6 +700,7 @@ private:
     QPlainTextEdit* m_log = nullptr;
     QList<ResultRow> m_rows;
     QString m_jsonlPath;
+    QString m_debugLogPath;
     QString m_csvPath;
 };
 

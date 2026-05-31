@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 project(DefcoinCoreNuQml VERSION 26.5.5 LANGUAGES CXX)
 
 set(DEFCOIN_NU_RELEASE_NAME "26.5.5m" CACHE STRING "Visible Defcoin Core Nu release label")
-set(DEFCOIN_FIREHOSE_RELEASE_NAME "1.0.0" CACHE STRING "Visible LAN Firehose Throughput Test release label")
+set(DEFCOIN_FIREHOSE_RELEASE_NAME "1.0.1" CACHE STRING "Visible LAN Firehose Throughput Test release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -32,48 +32,62 @@ qt_add_executable(DefcoinCoreNu
     NuVelopackUpdater.h
 )
 
-qt_add_executable(DefcoinLanFirehose
+qt_add_executable(LAN_Firehose_Throughput_Test
     MACOSX_BUNDLE
     "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/LanFirehoseQt.cpp"
 )
 
-target_link_libraries(DefcoinLanFirehose
+target_link_libraries(LAN_Firehose_Throughput_Test
     PRIVATE
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets
 )
 
-target_compile_definitions(DefcoinLanFirehose PRIVATE
-    DEFCOIN_FIREHOSE_SCRIPT_SRC="${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/defcoin_lan_firehose.py"
+target_compile_definitions(LAN_Firehose_Throughput_Test PRIVATE
+    DEFCOIN_FIREHOSE_SCRIPT_SRC="${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/LAN_Firehose_Throughput_Test.py"
+    DEFCOIN_FIREHOSE_RELEASE_NAME="${DEFCOIN_FIREHOSE_RELEASE_NAME}"
 )
 
-set_target_properties(DefcoinLanFirehose PROPERTIES
-    MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinLanFirehose
+set_target_properties(LAN_Firehose_Throughput_Test PROPERTIES
+    MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.LANFirehoseThroughputTest
     OUTPUT_NAME "LAN_Firehose_Throughput_Test"
     MACOSX_BUNDLE_BUNDLE_NAME "LAN Firehose Throughput Test"
     MACOSX_BUNDLE_DISPLAY_NAME "LAN Firehose Throughput Test"
+    MACOSX_BUNDLE_ICON_FILE "LAN_Firehose_Throughput_Test.icns"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${DEFCOIN_FIREHOSE_RELEASE_NAME}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${DEFCOIN_FIREHOSE_RELEASE_NAME}"
 )
 
 if(APPLE)
-    set(DEFCOIN_FIREHOSE_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:DefcoinLanFirehose>/Contents/Resources/lan_firehose")
+    set(DEFCOIN_FIREHOSE_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:LAN_Firehose_Throughput_Test>/Contents/Resources/lan_firehose")
+    set(DEFCOIN_FIREHOSE_BUNDLE_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:LAN_Firehose_Throughput_Test>/Contents/Resources")
 else()
-    set(DEFCOIN_FIREHOSE_RESOURCE_DIR "$<TARGET_FILE_DIR:DefcoinLanFirehose>/lan_firehose")
+    set(DEFCOIN_FIREHOSE_RESOURCE_DIR "$<TARGET_FILE_DIR:LAN_Firehose_Throughput_Test>/lan_firehose")
+    set(DEFCOIN_FIREHOSE_BUNDLE_RESOURCE_DIR "$<TARGET_FILE_DIR:LAN_Firehose_Throughput_Test>/lan_firehose")
 endif()
 
-add_custom_command(TARGET DefcoinLanFirehose POST_BUILD
+add_custom_command(TARGET LAN_Firehose_Throughput_Test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_FIREHOSE_RESOURCE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_FIREHOSE_BUNDLE_RESOURCE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/defcoin_lan_firehose.py"
-        "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/defcoin_lan_firehose.py"
+        "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/LAN_Firehose_Throughput_Test.py"
+        "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/LAN_Firehose_Throughput_Test.py"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/README.md"
         "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/README.md"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/LION_PORT_NOTES.md"
         "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/LION_PORT_NOTES.md"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/assets/firehose_icon.png"
+        "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/firehose_icon.png"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/assets/firehose_icon.svg"
+        "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/firehose_icon.svg"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/assets/LAN_Firehose_Throughput_Test.icns"
+        "${DEFCOIN_FIREHOSE_BUNDLE_RESOURCE_DIR}/LAN_Firehose_Throughput_Test.icns"
     COMMENT "Bundling LAN firehose CLI for the Qt wrapper"
 )
 

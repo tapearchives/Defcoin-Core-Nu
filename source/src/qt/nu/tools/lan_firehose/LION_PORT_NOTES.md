@@ -2,7 +2,7 @@
 
 The Qt wrapper is intentionally simple so the Lion builder can port it without
 touching Nu wallet code. It is a standalone Qt Widgets app that launches the
-Python CLI tester from `Contents/Resources/lan_firehose/defcoin_lan_firehose.py`.
+Python CLI tester from `Contents/Resources/lan_firehose/LAN_Firehose_Throughput_Test.py`.
 
 ## Frontend Surface
 
@@ -38,6 +38,9 @@ Python CLI tester from `Contents/Resources/lan_firehose/defcoin_lan_firehose.py`
 - Confirm the window opens and the smoke-test argument exits cleanly.
 - Confirm Beacon starts without a peer.
 - Confirm Hose and Sink modes can discover one another on the LAN.
+- Confirm Auto mode does not stall if only one machine sees the other's beacon;
+  one side should promote from sink to hose after the quiet-sink grace period.
 - Run one 120-second test and verify TCP/UDP rows appear in both the table and
   chart.
-- Save a CSV and JSONL result file and verify both open in a text editor.
+- Save a CSV, JSONL, and `.log` result file and verify the `.log` opens in a
+  built-in OS text/log viewer.

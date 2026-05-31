@@ -1,8 +1,8 @@
 # LAN Firehose Throughput Test
 
-`defcoin_lan_firehose.py` is a standalone throughput tester for comparing TCP and
-UDP behavior between two machines. It is intentionally separate from the wallet:
-it does not read keys, does not use RPC, and does not submit blocks.
+`LAN_Firehose_Throughput_Test.py` is a standalone throughput tester for comparing
+TCP and UDP behavior between two machines. It is intentionally separate from the
+wallet: it does not read keys, does not use RPC, and does not submit blocks.
 
 `LAN_Firehose_Throughput_Test.app` is a native Qt wrapper for the same tester. It
 provides the common controls, live stdout, a results table, summary stats, and a
@@ -15,7 +15,7 @@ in one place.
 Build the wrapper from the existing Nu CMake tree:
 
 ```sh
-cmake --build source/build/nu-qml-arm64-26.5.5 --target DefcoinLanFirehose
+cmake --build source/build/nu-qml-arm64-26.5.5 --target LAN_Firehose_Throughput_Test
 ```
 
 Then open the generated app:
@@ -41,26 +41,27 @@ The wrapper supports:
 Run the same command on two machines on the same LAN:
 
 ```sh
-python3 defcoin_lan_firehose.py --mode auto --duration 120 --csv ~/Desktop/nu-firehose.csv
+python3 LAN_Firehose_Throughput_Test.py --mode auto --duration 120 --csv ~/Desktop/nu-firehose.csv
 ```
 
 Both instances broadcast a small discovery beacon. The two nodes choose one
 sender (`hose`) and one receiver (`sink`) deterministically, then run a 120
-second sweep. By default the test spends about 60 seconds on TCP and then 60
-seconds on UDP while stepping through practical payload sizes.
+second sweep. Auto mode also starts listeners on both sides and promotes a quiet
+sink to hose if no incoming traffic arrives, so one-way discovery does not leave
+both machines waiting forever.
 
 ## Direct loopback or manual peer test
 
 Start a sink:
 
 ```sh
-python3 defcoin_lan_firehose.py --mode sink --duration 30 --no-beacon
+python3 LAN_Firehose_Throughput_Test.py --mode sink --duration 30 --no-beacon
 ```
 
 Then start a sender:
 
 ```sh
-python3 defcoin_lan_firehose.py --mode hose --peer 127.0.0.1 --duration 30 --no-beacon
+python3 LAN_Firehose_Throughput_Test.py --mode hose --peer 127.0.0.1 --duration 30 --no-beacon
 ```
 
 ## Useful options
@@ -74,6 +75,7 @@ python3 defcoin_lan_firehose.py --mode hose --peer 127.0.0.1 --duration 30 --no-
 - `--token <text>` pairs only with another firehose instance using the same
   token.
 - `--log-jsonl <path>` writes structured phase and peer discovery events.
+- `--debug-log <path>` writes a readable `.log` sidecar for Console/TextEdit.
 - `--csv <path>` writes phase throughput rows.
 
 The live Nu UDP fast-sync path remains conservative and sub-MTU by default.
