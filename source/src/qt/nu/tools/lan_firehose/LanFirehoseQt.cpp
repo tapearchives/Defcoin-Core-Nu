@@ -1,6 +1,10 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStandardPaths>
@@ -14,6 +18,8 @@
 #include <QtGui/QPixmap>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtNetwork/QHostAddress>
+#include <QtNetwork/QUdpSocket>
 #include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
@@ -28,6 +34,7 @@
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QListWidget>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPlainTextEdit>
@@ -55,6 +62,16 @@ struct ResultRow {
     qint64 checksum_errors = 0;
     double mbps = 0.0;
     QString note;
+};
+
+struct PeerInfo {
+    QString nodeId;
+    QString host;
+    QString hostname;
+    QString mode;
+    QString osName;
+    int tcpPort = 10345;
+    int udpPort = 10346;
 };
 
 QString formatRate(double mbps)
@@ -231,6 +248,7 @@ public:
         auto* intro = new QLabel(QStringLiteral(
             "<b>LAN Firehose Throughput Test v%1</b><br>"
             "Compare TCP and UDP transfer behavior between two machines. "
+            "Use Spray to send test traffic and Catch to receive it. "
             "This diagnostic tool does not read wallets, use RPC, or submit blocks.")
             .arg(releaseName()));
         intro->setWordWrap(true);
@@ -292,12 +310,14 @@ private:
         grid->setColumnStretch(3, 1);
 
         m_mode = new QComboBox(box);
-        m_mode->addItems({QStringLiteral("auto"), QStringLiteral("sink"), QStringLiteral("hose")});
-        m_mode->setToolTip(QStringLiteral("Auto discovers another firehose app and picks hose/sink. Sink only receives. Hose sends to the peer field."));
+        m_mode->addItem(QStringLiteral("Auto pair"), QStringLiteral("auto"));
+        m_mode->addItem(QStringLiteral("Spray"), QStringLiteral("hose"));
+        m_mode->addItem(QStringLiteral("Catch"), QStringLiteral("sink"));
+        m_mode->setToolTip(QStringLiteral("Auto pair discovers another tester and picks a role. Spray sends test traffic. Catch receives and measures incoming traffic."));
 
         m_peer = new QLineEdit(box);
-        m_peer->setPlaceholderText(QStringLiteral("Peer IP for hose mode, e.g. 192.168.2.19"));
-        m_peer->setToolTip(QStringLiteral("Only needed for manual hose mode. Leave blank for auto LAN discovery."));
+        m_peer->setPlaceholderText(QStringLiteral("Target IP for Spray, e.g. 192.168.2.19"));
+        m_peer->setToolTip(QStringLiteral("Only needed for manual Spray mode. Leave blank to discover visible testers."));
 
         m_duration = new QSpinBox(box);
         m_duration->setRange(4, 3600);
@@ -326,7 +346,10 @@ private:
         m_udpChecksum->setToolTip(QStringLiteral("Adds a CRC32 payload check in the test packet. Useful for measuring checksum overhead."));
 
         m_noBeacon = new QCheckBox(QStringLiteral("No beacon"), box);
-        m_noBeacon->setToolTip(QStringLiteral("Disable LAN discovery beacon. Use this with manual sink/hose tests."));
+        m_noBeacon->setToolTip(QStringLiteral("Disable LAN discovery beacon. Use this with manual Spray/Catch tests."));
+
+        m_allTesters = new QCheckBox(QStringLiteral("Auto-connect all testers"), box);
+        m_allTesters->setToolTip(QStringLiteral("When several testers are discovered, Catch accepts all visible senders and Spray sends to all visible targets in sequence. Leave unchecked to choose one tester."));
 
         m_start = new QPushButton(QStringLiteral("Start"), box);
         m_start->setDefault(true);
@@ -349,9 +372,9 @@ private:
         auto* clear = new QPushButton(QStringLiteral("Clear"), box);
         connect(clear, &QPushButton::clicked, this, &MainWindow::clearResults);
 
-        grid->addWidget(new QLabel(QStringLiteral("Mode")), 0, 0);
+        grid->addWidget(new QLabel(QStringLiteral("Role")), 0, 0);
         grid->addWidget(m_mode, 0, 1);
-        grid->addWidget(new QLabel(QStringLiteral("Peer")), 0, 2);
+        grid->addWidget(new QLabel(QStringLiteral("Target")), 0, 2);
         grid->addWidget(m_peer, 0, 3);
         grid->addWidget(new QLabel(QStringLiteral("Duration")), 1, 0);
         grid->addWidget(m_duration, 1, 1);
@@ -365,6 +388,7 @@ private:
         grid->addWidget(m_token, 3, 1);
         grid->addWidget(m_udpChecksum, 3, 2);
         grid->addWidget(m_noBeacon, 3, 3);
+        grid->addWidget(m_allTesters, 4, 0, 1, 2);
 
         auto* buttons = new QWidget(box);
         auto* buttonRow = new QHBoxLayout(buttons);
@@ -376,7 +400,7 @@ private:
         buttonRow->addWidget(openJson);
         buttonRow->addWidget(openCsv);
         buttonRow->addWidget(clear);
-        grid->addWidget(buttons, 4, 0, 1, 4);
+        grid->addWidget(buttons, 5, 0, 1, 4);
         return box;
     }
 
@@ -420,6 +444,22 @@ private:
         if (m_process->state() != QProcess::NotRunning) return;
         clearResults();
 
+        QList<PeerInfo> discoveredPeers;
+        PeerInfo selectedPeer;
+        const QString modeValue = m_mode->currentData().toString();
+        const bool manualTarget = !m_peer->text().trimmed().isEmpty();
+        if (!manualTarget && !m_noBeacon->isChecked()) {
+            discoveredPeers = discoverPeers(1800);
+            if (!m_allTesters->isChecked() && discoveredPeers.size() > 1) {
+                if (!choosePeer(discoveredPeers, selectedPeer)) {
+                    m_status->setText(QStringLiteral("Cancelled"));
+                    return;
+                }
+            } else if (discoveredPeers.size() == 1) {
+                selectedPeer = discoveredPeers.first();
+            }
+        }
+
         const QDir outDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/firehose"));
         QDir().mkpath(outDir.path());
         const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss"));
@@ -429,19 +469,41 @@ private:
 
         QStringList args;
         args << scriptPath()
-             << QStringLiteral("--mode") << m_mode->currentText()
+             << QStringLiteral("--mode") << modeValue
              << QStringLiteral("--duration") << QString::number(m_duration->value())
              << QStringLiteral("--switch-seconds") << QString::number(m_switchSeconds->value())
              << QStringLiteral("--size-profile") << m_profile->currentText()
              << QStringLiteral("--log-jsonl") << m_jsonlPath
              << QStringLiteral("--debug-log") << m_debugLogPath
              << QStringLiteral("--csv") << m_csvPath;
-        if (!m_peer->text().trimmed().isEmpty()) args << QStringLiteral("--peer") << m_peer->text().trimmed();
+        if (manualTarget) {
+            args << QStringLiteral("--peer") << m_peer->text().trimmed();
+        } else if (m_allTesters->isChecked() && modeValue == QStringLiteral("hose") && !discoveredPeers.isEmpty()) {
+            args << QStringLiteral("--peers-json") << peersJson(discoveredPeers);
+        } else if (!selectedPeer.host.isEmpty()) {
+            if (modeValue == QStringLiteral("sink")) {
+                args << QStringLiteral("--accept-peer") << selectedPeer.host;
+            } else {
+                args << QStringLiteral("--peer") << selectedPeer.host
+                     << QStringLiteral("--peer-node-id") << selectedPeer.nodeId
+                     << QStringLiteral("--peer-hostname") << selectedPeer.hostname
+                     << QStringLiteral("--peer-tcp-port") << QString::number(selectedPeer.tcpPort)
+                     << QStringLiteral("--peer-udp-port") << QString::number(selectedPeer.udpPort);
+            }
+        }
         if (!m_packetSizes->text().trimmed().isEmpty()) args << QStringLiteral("--packet-sizes") << m_packetSizes->text().trimmed();
         if (!m_token->text().trimmed().isEmpty()) args << QStringLiteral("--token") << m_token->text().trimmed();
         if (m_noBeacon->isChecked()) args << QStringLiteral("--no-beacon");
         if (m_udpChecksum->isChecked()) args << QStringLiteral("--udp-checksum");
 
+        if (!discoveredPeers.isEmpty()) {
+            m_log->appendPlainText(QStringLiteral("Discovered %1 visible tester%2.")
+                .arg(discoveredPeers.size())
+                .arg(discoveredPeers.size() == 1 ? QString() : QStringLiteral("s")));
+        }
+        if (modeValue == QStringLiteral("sink") && m_allTesters->isChecked()) {
+            m_log->appendPlainText(QStringLiteral("Catch mode accepting all visible senders; UDP/TCP rows are separated by sender address."));
+        }
         m_log->appendPlainText(QStringLiteral("$ python3 %1").arg(args.join(QLatin1Char(' '))));
         m_process->start(QStringLiteral("python3"), args);
         if (!m_process->waitForStarted(3000)) {
@@ -667,6 +729,139 @@ private:
         dialog.exec();
     }
 
+    QList<PeerInfo> discoverPeers(int timeoutMs)
+    {
+        QList<PeerInfo> peers;
+        QUdpSocket socket;
+        if (!socket.bind(QHostAddress::AnyIPv4, 10344, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+            m_log->appendPlainText(QStringLiteral("Discovery listen failed: %1").arg(socket.errorString()));
+            return peers;
+        }
+
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < timeoutMs) {
+            if (!socket.waitForReadyRead(100)) continue;
+            while (socket.hasPendingDatagrams()) {
+                QByteArray datagram;
+                datagram.resize(static_cast<int>(socket.pendingDatagramSize()));
+                QHostAddress sender;
+                quint16 senderPort = 0;
+                socket.readDatagram(datagram.data(), datagram.size(), &sender, &senderPort);
+                Q_UNUSED(senderPort);
+
+                const QJsonDocument doc = QJsonDocument::fromJson(datagram);
+                if (!doc.isObject()) continue;
+                const QJsonObject obj = doc.object();
+                if (obj.value(QStringLiteral("magic")).toString() != QStringLiteral("DFCNU_FIREHOSE_BEACON_V1")) continue;
+                if (!m_token->text().trimmed().isEmpty() && obj.value(QStringLiteral("token")).toString() != m_token->text().trimmed()) continue;
+
+                PeerInfo peer;
+                peer.nodeId = obj.value(QStringLiteral("node_id")).toString();
+                peer.host = sender.toString();
+                peer.hostname = obj.value(QStringLiteral("hostname")).toString(peer.host);
+                peer.mode = obj.value(QStringLiteral("mode")).toString(QStringLiteral("unknown"));
+                peer.osName = obj.value(QStringLiteral("os")).toString();
+                peer.tcpPort = obj.value(QStringLiteral("tcp_port")).toInt(10345);
+                peer.udpPort = obj.value(QStringLiteral("udp_port")).toInt(10346);
+                if (peer.nodeId.isEmpty()) continue;
+
+                bool known = false;
+                for (PeerInfo& existing : peers) {
+                    if (existing.nodeId == peer.nodeId || (existing.host == peer.host && existing.tcpPort == peer.tcpPort && existing.udpPort == peer.udpPort)) {
+                        existing = peer;
+                        known = true;
+                        break;
+                    }
+                }
+                if (!known) peers.push_back(peer);
+            }
+        }
+        return peers;
+    }
+
+    bool choosePeer(const QList<PeerInfo>& peers, PeerInfo& selected)
+    {
+        QDialog dialog(this);
+        dialog.setWindowTitle(QStringLiteral("Choose Tester"));
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* message = new QLabel(QStringLiteral("Multiple LAN Firehose testers are visible. Choose one tester, or enable Auto-connect all testers to accept/send to all visible testers."), &dialog);
+        message->setWordWrap(true);
+        layout->addWidget(message);
+
+        auto* table = new QTableWidget(&dialog);
+        table->setColumnCount(5);
+        table->setHorizontalHeaderLabels({
+            QStringLiteral("Role"),
+            QStringLiteral("Host"),
+            QStringLiteral("Name"),
+            QStringLiteral("OS"),
+            QStringLiteral("Ports"),
+        });
+        table->setRowCount(peers.size());
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->setSelectionMode(QAbstractItemView::SingleSelection);
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        for (int row = 0; row < peers.size(); ++row) {
+            const PeerInfo& peer = peers.at(row);
+            const QString role = peer.mode == QStringLiteral("hose") ? QStringLiteral("Spray")
+                : peer.mode == QStringLiteral("sink") ? QStringLiteral("Catch")
+                : peer.mode == QStringLiteral("auto") ? QStringLiteral("Auto")
+                : QStringLiteral("Unknown");
+            const QStringList values = {
+                role,
+                peer.host,
+                peer.hostname,
+                peer.osName,
+                QStringLiteral("TCP %1 | UDP %2").arg(peer.tcpPort).arg(peer.udpPort),
+            };
+            for (int col = 0; col < values.size(); ++col) {
+                auto* item = new QTableWidgetItem(values.at(col));
+                table->setItem(row, col, item);
+            }
+        }
+        table->resizeColumnsToContents();
+        table->horizontalHeader()->setStretchLastSection(true);
+        if (!peers.isEmpty()) table->selectRow(0);
+        layout->addWidget(table);
+
+        auto* buttons = new QWidget(&dialog);
+        auto* row = new QHBoxLayout(buttons);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->addStretch(1);
+        auto* cancel = new QPushButton(QStringLiteral("Cancel"), buttons);
+        auto* use = new QPushButton(QStringLiteral("Use Selected"), buttons);
+        use->setDefault(true);
+        row->addWidget(cancel);
+        row->addWidget(use);
+        layout->addWidget(buttons);
+        connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+        connect(use, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+        dialog.resize(720, 360);
+        if (dialog.exec() != QDialog::Accepted) return false;
+        const int selectedRow = table->currentRow();
+        if (selectedRow < 0 || selectedRow >= peers.size()) return false;
+        selected = peers.at(selectedRow);
+        return true;
+    }
+
+    QString peersJson(const QList<PeerInfo>& peers) const
+    {
+        QJsonArray array;
+        for (const PeerInfo& peer : peers) {
+            QJsonObject obj;
+            obj.insert(QStringLiteral("node_id"), peer.nodeId);
+            obj.insert(QStringLiteral("host"), peer.host);
+            obj.insert(QStringLiteral("hostname"), peer.hostname);
+            obj.insert(QStringLiteral("os_name"), peer.osName);
+            obj.insert(QStringLiteral("tcp_port"), peer.tcpPort);
+            obj.insert(QStringLiteral("udp_port"), peer.udpPort);
+            array.push_back(obj);
+        }
+        return QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
+    }
+
     void openPath(const QString& path)
     {
         if (path.isEmpty() || !QFile::exists(path)) {
@@ -687,6 +882,7 @@ private:
     QLineEdit* m_token = nullptr;
     QCheckBox* m_udpChecksum = nullptr;
     QCheckBox* m_noBeacon = nullptr;
+    QCheckBox* m_allTesters = nullptr;
     QPushButton* m_start = nullptr;
     QPushButton* m_stop = nullptr;
     QLabel* m_status = nullptr;

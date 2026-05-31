@@ -7,8 +7,9 @@ Python CLI tester from `Contents/Resources/lan_firehose/LAN_Firehose_Throughput_
 ## Frontend Surface
 
 - Main file: `LanFirehoseQt.cpp`
-- UI stack: Qt Widgets only (`QMainWindow`, `QPushButton`, `QTableWidget`,
-  `QPlainTextEdit`, custom `QWidget::paintEvent` chart).
+- UI stack: Qt Widgets plus Qt Network for lightweight beacon discovery
+  (`QMainWindow`, `QPushButton`, `QTableWidget`, `QPlainTextEdit`,
+  `QUdpSocket`, custom `QWidget::paintEvent` chart).
 - No QML, Qt Quick, Qt Charts, OpenGL, or wallet RPC is required.
 - The app is safe to run beside Nu because it only opens its own TCP/UDP test
   sockets and writes local CSV/JSONL result files.
@@ -38,6 +39,10 @@ Python CLI tester from `Contents/Resources/lan_firehose/LAN_Firehose_Throughput_
 - Confirm the window opens and the smoke-test argument exits cleanly.
 - Confirm Beacon starts without a peer.
 - Confirm Hose and Sink modes can discover one another on the LAN.
+- Confirm the visible labels are Auto Pair, Spray, and Catch even though the CLI
+  compatibility values remain `auto`, `hose`, and `sink`.
+- Confirm the peer picker appears when more than one tester beacon is visible
+  and Auto-connect all testers is unchecked.
 - Confirm Auto mode does not stall if only one machine sees the other's beacon;
   one side should promote from sink to hose after the quiet-sink grace period.
 - Run one 120-second test and verify TCP/UDP rows appear in both the table and

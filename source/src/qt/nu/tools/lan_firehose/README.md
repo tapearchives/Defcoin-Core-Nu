@@ -26,8 +26,13 @@ open "source/build/nu-qml-arm64-26.5.5/LAN_Firehose_Throughput_Test.app"
 
 The wrapper supports:
 
-- Auto, sink, and hose modes.
-- Manual peer IP for direct hose tests.
+- Auto Pair, Spray, and Catch modes. The CLI still accepts `auto`, `hose`, and
+  `sink` for script compatibility.
+- Manual peer IP for direct Spray tests.
+- A peer picker when several testers are visible and Auto-connect all testers is
+  not enabled.
+- Auto-connect all testers. Catch accepts all visible senders, while Spray sends
+  to visible targets in sequence.
 - Duration, protocol switch timing, packet profile, and custom packet sizes.
 - Optional pairing token so two testers on the same LAN pair only with each
   other.
@@ -45,20 +50,26 @@ python3 LAN_Firehose_Throughput_Test.py --mode auto --duration 120 --csv ~/Deskt
 ```
 
 Both instances broadcast a small discovery beacon. The two nodes choose one
-sender (`hose`) and one receiver (`sink`) deterministically, then run a 120
+Spray side (`hose`) and one Catch side (`sink`) deterministically, then run a 120
 second sweep. Auto mode also starts listeners on both sides and promotes a quiet
-sink to hose if no incoming traffic arrives, so one-way discovery does not leave
+Catch side to Spray if no incoming traffic arrives, so one-way discovery does not leave
 both machines waiting forever.
+
+With more than two testers, the wrapper lists visible testers and asks which one
+to use unless Auto-connect all testers is checked. In Catch mode, incoming TCP
+rows are separated by connection and UDP rows are separated by sender IP. In
+Spray mode, Auto-connect all testers sends one complete sweep to each selected
+tester in sequence.
 
 ## Direct loopback or manual peer test
 
-Start a sink:
+Start a Catch receiver:
 
 ```sh
 python3 LAN_Firehose_Throughput_Test.py --mode sink --duration 30 --no-beacon
 ```
 
-Then start a sender:
+Then start a Spray sender:
 
 ```sh
 python3 LAN_Firehose_Throughput_Test.py --mode hose --peer 127.0.0.1 --duration 30 --no-beacon
@@ -74,6 +85,10 @@ python3 LAN_Firehose_Throughput_Test.py --mode hose --peer 127.0.0.1 --duration 
 - `--udp-checksum` adds CRC32 payload checks to UDP packets.
 - `--token <text>` pairs only with another firehose instance using the same
   token.
+- `--accept-peer <ip>` restricts Catch mode to one incoming peer. Repeat the
+  option for several allowed senders.
+- `--peers-json <json>` sends to several peers in sequence. The Qt wrapper uses
+  this when Auto-connect all testers is enabled in Spray mode.
 - `--log-jsonl <path>` writes structured phase and peer discovery events.
 - `--debug-log <path>` writes a readable `.log` sidecar for Console/TextEdit.
 - `--csv <path>` writes phase throughput rows.

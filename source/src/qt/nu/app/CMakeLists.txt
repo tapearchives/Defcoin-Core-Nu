@@ -41,6 +41,7 @@ target_link_libraries(LAN_Firehose_Throughput_Test
     PRIVATE
         Qt6::Core
         Qt6::Gui
+        Qt6::Network
         Qt6::Widgets
 )
 

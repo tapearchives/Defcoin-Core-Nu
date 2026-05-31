@@ -257,6 +257,7 @@ def make_beacon(node_id: str, args: argparse.Namespace) -> bytes:
             "magic": BEACON_MAGIC,
             "node_id": node_id,
             "hostname": local_hostname(),
+            "mode": args.mode,
             "os": f"{platform.system()} {platform.release()}",
             "tcp_port": args.tcp_port,
             "udp_port": args.udp_port,
@@ -343,15 +344,18 @@ def beacon_listener(args: argparse.Namespace, node_id: str, state: SharedState, 
 def choose_peer(args: argparse.Namespace, node_id: str, state: SharedState, log_path: Optional[Path]) -> Tuple[str, Optional[Peer]]:
     if args.peer:
         peer = Peer(
-            node_id="manual-peer",
+            node_id=args.peer_node_id or "manual-peer",
             host=args.peer,
-            hostname=args.peer,
+            hostname=args.peer_hostname or args.peer,
             tcp_port=args.peer_tcp_port or args.tcp_port,
             udp_port=args.peer_udp_port or args.udp_port,
             last_seen=time.time(),
         )
-        log_event(log_path, {"event": "manual_peer_selected", "role": args.mode if args.mode != "auto" else "hose", "peer": peer.__dict__}, state)
-        return args.mode if args.mode != "auto" else "hose", peer
+        role = args.mode
+        if role == "auto":
+            role = "hose" if peer.node_id == "manual-peer" or node_id > peer.node_id else "sink"
+        log_event(log_path, {"event": "manual_peer_selected", "role": role, "peer": peer.__dict__}, state)
+        return role, peer
     if args.mode in ("sink", "hose"):
         log_event(log_path, {"event": "manual_role_selected", "role": args.mode}, state)
         return args.mode, None
@@ -402,6 +406,13 @@ def wait_for_sink_completion(args: argparse.Namespace, state: SharedState) -> No
         time.sleep(0.25)
 
 
+def peer_allowed(args: argparse.Namespace, host: str) -> bool:
+    allowed = getattr(args, "accept_peer", None) or []
+    if not allowed:
+        return True
+    return host in set(allowed)
+
+
 def tcp_server(args: argparse.Namespace, phases: List[Phase], state: SharedState, log_path: Optional[Path], csv_path: Optional[Path]) -> None:
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -420,6 +431,10 @@ def tcp_server(args: argparse.Namespace, phases: List[Phase], state: SharedState
     while not state.stop.is_set():
         try:
             conn, addr = srv.accept()
+            if not peer_allowed(args, addr[0]):
+                log_event(log_path, {"event": "tcp_ignored_peer", "peer": addr[0], "port": addr[1]}, state)
+                conn.close()
+                continue
             state.incoming.set()
             log_event(log_path, {"event": "tcp_incoming", "peer": addr[0], "port": addr[1]}, state)
         except socket.timeout:
@@ -512,7 +527,7 @@ def udp_receiver(args: argparse.Namespace, state: SharedState, log_path: Optiona
         return
     sock.settimeout(0.25)
     log_event(log_path, {"event": "udp_listening", "port": args.udp_port}, state)
-    active: Dict[int, dict] = {}
+    active: Dict[Tuple[str, int], dict] = {}
     last_report = time.monotonic()
     while not state.stop.is_set():
         try:
@@ -524,6 +539,9 @@ def udp_receiver(args: argparse.Namespace, state: SharedState, log_path: Optiona
             continue
         except OSError as exc:
             log_event(log_path, {"event": "udp_recv_error", "error": str(exc)}, state)
+            continue
+        if not peer_allowed(args, addr[0]):
+            log_event(log_path, {"event": "udp_ignored_peer", "peer": addr[0], "port": addr[1]}, state)
             continue
         if len(data) < UDP_HEADER_BYTES or data[:8] != UDP_MAGIC:
             continue
@@ -537,8 +555,9 @@ def udp_receiver(args: argparse.Namespace, state: SharedState, log_path: Optiona
         payload = data[UDP_HEADER_BYTES:]
         if payload_len != len(payload):
             continue
+        phase_key = (addr[0], phase)
         entry = active.setdefault(
-            phase,
+            phase_key,
             {
                 "start": time.monotonic(),
                 "end": end_ns / 1_000_000_000.0,
@@ -564,8 +583,8 @@ def udp_receiver(args: argparse.Namespace, state: SharedState, log_path: Optiona
         entry["packets"] += 1
         if time.monotonic() >= entry["end"] + 0.5:
             finish_udp_phase(phase, entry, state, log_path, csv_path)
-            active.pop(phase, None)
-    for phase, entry in list(active.items()):
+            active.pop(phase_key, None)
+    for (_host, phase), entry in list(active.items()):
         finish_udp_phase(phase, entry, state, log_path, csv_path)
 
 
@@ -576,10 +595,11 @@ def finish_expired_udp_phases(
     csv_path: Optional[Path],
 ) -> None:
     now = time.monotonic()
-    for phase, entry in list(active.items()):
+    for key, entry in list(active.items()):
+        phase = key[1] if isinstance(key, tuple) else key
         if now >= entry["end"] + 0.5:
             finish_udp_phase(phase, entry, state, log_path, csv_path)
-            active.pop(phase, None)
+            active.pop(key, None)
 
 
 def finish_udp_phase(phase: int, entry: dict, state: SharedState, log_path: Optional[Path], csv_path: Optional[Path]) -> None:
@@ -705,7 +725,7 @@ def send_udp_phase(peer: Peer, phase: Phase, args: argparse.Namespace) -> PhaseR
     )
 
 
-def run_hose(args: argparse.Namespace, peer: Peer, phases: List[Phase], state: SharedState, log_path: Optional[Path], csv_path: Optional[Path]) -> None:
+def run_hose(args: argparse.Namespace, peer: Peer, phases: List[Phase], state: SharedState, log_path: Optional[Path], csv_path: Optional[Path], stop_when_done: bool = True) -> None:
     print(
         f"Firehose sending to {peer.host} ({peer.hostname or 'unknown host'}). "
         f"{len(phases)} phases over about {sum(p.duration for p in phases):.0f}s.",
@@ -733,6 +753,17 @@ def run_hose(args: argparse.Namespace, peer: Peer, phases: List[Phase], state: S
         log_event(log_path, {"event": "hose_phase_result", "result": result.__dict__}, state)
         print_result(result)
         time.sleep(args.phase_gap)
+    if stop_when_done:
+        state.stop.set()
+
+
+def run_hose_many(args: argparse.Namespace, peers: List[Peer], phases: List[Phase], state: SharedState, log_path: Optional[Path], csv_path: Optional[Path]) -> None:
+    print(f"Firehose sending to {len(peers)} testers in sequence.", flush=True)
+    log_event(log_path, {"event": "hose_many_start", "peers": [peer.__dict__ for peer in peers]}, state)
+    for peer in peers:
+        if state.stop.is_set():
+            break
+        run_hose(args, peer, phases, state, log_path, csv_path, stop_when_done=False)
     state.stop.set()
 
 
@@ -774,6 +805,36 @@ def default_log_path() -> Path:
     return base / f"nu-firehose-{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}.jsonl"
 
 
+def parse_peers_json(value: str, args: argparse.Namespace) -> List[Peer]:
+    if not value:
+        return []
+    try:
+        raw = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Bad --peers-json: {exc}") from exc
+    if not isinstance(raw, list):
+        raise SystemExit("Bad --peers-json: expected a JSON list")
+    peers: List[Peer] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        host = str(item.get("host", "")).strip()
+        if not host:
+            continue
+        peers.append(
+            Peer(
+                node_id=str(item.get("node_id", "")) or f"peer-{len(peers) + 1}",
+                host=host,
+                hostname=str(item.get("hostname", host)),
+                tcp_port=int(item.get("tcp_port", args.tcp_port) or args.tcp_port),
+                udp_port=int(item.get("udp_port", args.udp_port) or args.udp_port),
+                os_name=str(item.get("os_name", item.get("os", ""))),
+                last_seen=time.time(),
+            )
+        )
+    return peers
+
+
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Defcoin Core Nu LAN TCP/UDP throughput firehose tester.",
@@ -781,8 +842,12 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--mode", choices=["auto", "sink", "hose"], default="auto")
     parser.add_argument("--peer", help="Direct peer IP/host. Skips LAN auto role selection and sends to this host.")
+    parser.add_argument("--peer-node-id", default="")
+    parser.add_argument("--peer-hostname", default="")
     parser.add_argument("--peer-tcp-port", type=int, default=0)
     parser.add_argument("--peer-udp-port", type=int, default=0)
+    parser.add_argument("--peers-json", default="", help="JSON list of peer objects for spraying several testers sequentially.")
+    parser.add_argument("--accept-peer", action="append", default=[], help="Restrict Catch mode to a specific incoming peer IP. Repeat for more peers.")
     parser.add_argument("--bind", default="0.0.0.0")
     parser.add_argument("--beacon-port", type=int, default=DEFAULT_BEACON_PORT)
     parser.add_argument("--tcp-port", type=int, default=DEFAULT_TCP_PORT)
@@ -815,6 +880,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     state = SharedState()
     state.debug_log_path = args.debug_log
     phases = build_phases(args.duration, args.switch_seconds, size_profile(args.size_profile, args.packet_sizes))
+    explicit_peers = parse_peers_json(args.peers_json, args)
 
     def stop_handler(_signum, _frame):
         state.stop.set()
@@ -844,13 +910,20 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     threading.Thread(target=beacon_sender, args=(args, node_id, state, args.log_jsonl), daemon=True).start()
     threading.Thread(target=beacon_listener, args=(args, node_id, state, args.log_jsonl), daemon=True).start()
 
-    role, peer = choose_peer(args, node_id, state, args.log_jsonl)
+    if explicit_peers:
+        role, peer = "hose", explicit_peers[0]
+        log_event(args.log_jsonl, {"event": "manual_peer_list_selected", "peers": [p.__dict__ for p in explicit_peers]}, state)
+    else:
+        role, peer = choose_peer(args, node_id, state, args.log_jsonl)
     print(f"Selected role: {role}")
     if peer:
         print(f"Peer: {peer.host} {peer.hostname} {peer.os_name}".strip())
     log_event(args.log_jsonl, {"event": "role_selected", "role": role, "peer": peer.__dict__ if peer else None}, state)
 
-    if args.mode == "auto":
+    if explicit_peers:
+        run_hose_many(args, explicit_peers, phases, state, args.log_jsonl, args.csv)
+        return_code = 0
+    elif args.mode == "auto":
         return_code = run_auto(args, role, peer, phases, state, args.log_jsonl, args.csv)
     elif role == "sink":
         run_sink(args, phases, state, args.log_jsonl, args.csv)
