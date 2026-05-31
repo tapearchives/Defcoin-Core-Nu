@@ -4,6 +4,37 @@
 UDP behavior between two machines. It is intentionally separate from the wallet:
 it does not read keys, does not use RPC, and does not submit blocks.
 
+`DefcoinLanFirehose` is a native Qt wrapper for the same tester. It provides the
+common controls, live stdout, a results table, summary stats, and a small TCP/UDP
+throughput chart. The wrapper launches the Python CLI as a subprocess and reads
+the CSV/JSONL output files, so the measurement logic stays in one place.
+
+## Qt wrapper
+
+Build the wrapper from the existing Nu CMake tree:
+
+```sh
+cmake --build source/build/nu-qml-arm64-26.5.5 --target DefcoinLanFirehose
+```
+
+Then open the generated app:
+
+```sh
+open "source/build/nu-qml-arm64-26.5.5/DefcoinLanFirehose.app"
+```
+
+The wrapper supports:
+
+- Auto, sink, and hose modes.
+- Manual peer IP for direct hose tests.
+- Duration, protocol switch timing, packet profile, and custom packet sizes.
+- Optional pairing token so two testers on the same LAN pair only with each
+  other.
+- Optional UDP CRC32 payload checks.
+- Live TCP/UDP average, best phase, UDP loss/checksum counts, output table,
+  stdout log, and chart.
+- Open Log / Open CSV buttons for the generated diagnostic files.
+
 ## Typical LAN test
 
 Run the same command on two machines on the same LAN:

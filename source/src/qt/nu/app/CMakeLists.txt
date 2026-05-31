@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(DefcoinCoreNuQml VERSION 26.5.5 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.5.5k" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.5.5l" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -29,6 +29,47 @@ qt_add_executable(DefcoinCoreNu
     NuRpcService.h
     NuVelopackUpdater.cpp
     NuVelopackUpdater.h
+)
+
+qt_add_executable(DefcoinLanFirehose
+    MACOSX_BUNDLE
+    "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/LanFirehoseQt.cpp"
+)
+
+target_link_libraries(DefcoinLanFirehose
+    PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+)
+
+target_compile_definitions(DefcoinLanFirehose PRIVATE
+    DEFCOIN_FIREHOSE_SCRIPT_SRC="${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/defcoin_lan_firehose.py"
+)
+
+set_target_properties(DefcoinLanFirehose PROPERTIES
+    MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinLanFirehose
+    MACOSX_BUNDLE_BUNDLE_NAME "Defcoin Nu LAN Firehose"
+    MACOSX_BUNDLE_DISPLAY_NAME "Defcoin Nu LAN Firehose"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${DEFCOIN_NU_RELEASE_NAME}"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${DEFCOIN_NU_RELEASE_NAME}"
+)
+
+if(APPLE)
+    set(DEFCOIN_FIREHOSE_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:DefcoinLanFirehose>/Contents/Resources/lan_firehose")
+else()
+    set(DEFCOIN_FIREHOSE_RESOURCE_DIR "$<TARGET_FILE_DIR:DefcoinLanFirehose>/lan_firehose")
+endif()
+
+add_custom_command(TARGET DefcoinLanFirehose POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_FIREHOSE_RESOURCE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/defcoin_lan_firehose.py"
+        "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/defcoin_lan_firehose.py"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/README.md"
+        "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/README.md"
+    COMMENT "Bundling LAN firehose CLI for the Qt wrapper"
 )
 
 set(DEFCOIN_NU_ICON_MACOS "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/DefcoinCoreNuNuIcon.icns")
