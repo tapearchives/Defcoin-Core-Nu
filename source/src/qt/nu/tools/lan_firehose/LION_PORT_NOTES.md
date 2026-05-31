@@ -1,0 +1,43 @@
+# LAN Firehose Throughput Test - Lion Port Notes
+
+The Qt wrapper is intentionally simple so the Lion builder can port it without
+touching Nu wallet code. It is a standalone Qt Widgets app that launches the
+Python CLI tester from `Contents/Resources/lan_firehose/defcoin_lan_firehose.py`.
+
+## Frontend Surface
+
+- Main file: `LanFirehoseQt.cpp`
+- UI stack: Qt Widgets only (`QMainWindow`, `QPushButton`, `QTableWidget`,
+  `QPlainTextEdit`, custom `QWidget::paintEvent` chart).
+- No QML, Qt Quick, Qt Charts, OpenGL, or wallet RPC is required.
+- The app is safe to run beside Nu because it only opens its own TCP/UDP test
+  sockets and writes local CSV/JSONL result files.
+
+## Likely Qt 5.5 / 5.6 Adjustments
+
+- Build this wrapper as its own app target if the full Nu Qt 6 target is too
+  modern for Lion. The wrapper only needs `Core`, `Gui`, and `Widgets`.
+- Use a C++11 compiler setting for Lion if C++17 is not available. The wrapper
+  code avoids Nu-only C++17 dependencies.
+- `QHeaderView::setSectionResizeMode` exists in Qt 5, but if the exact Lion Qt
+  package complains, replace it with the older resize-mode spelling used by that
+  Qt build.
+- Keep the manual newline split in `readProcessOutput`; do not use
+  `Qt::SkipEmptyParts`, which is newer than some Qt 5.5-era enum locations.
+- `QStandardPaths::AppDataLocation` is used for result files. If the Lion Qt
+  build lacks it, switch to `QStandardPaths::DataLocation` or a folder beside
+  the app bundle.
+- Lion usually does not ship Python 3. Either bundle a compatible Python 3
+  runtime, add a small preferences field for the Python executable path, or
+  point the wrapper at the Python 3 used by the Lion builder environment.
+- Use the matching Lion-era `macdeployqt`; do not use hardened-runtime signing
+  expectations from modern macOS for the Lion app.
+
+## Port Checklist
+
+- Confirm the window opens and the smoke-test argument exits cleanly.
+- Confirm Beacon starts without a peer.
+- Confirm Hose and Sink modes can discover one another on the LAN.
+- Run one 120-second test and verify TCP/UDP rows appear in both the table and
+  chart.
+- Save a CSV and JSONL result file and verify both open in a text editor.

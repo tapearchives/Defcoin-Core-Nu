@@ -1,13 +1,14 @@
-# Defcoin Nu LAN Firehose
+# LAN Firehose Throughput Test
 
 `defcoin_lan_firehose.py` is a standalone throughput tester for comparing TCP and
 UDP behavior between two machines. It is intentionally separate from the wallet:
 it does not read keys, does not use RPC, and does not submit blocks.
 
-`DefcoinLanFirehose` is a native Qt wrapper for the same tester. It provides the
-common controls, live stdout, a results table, summary stats, and a small TCP/UDP
-throughput chart. The wrapper launches the Python CLI as a subprocess and reads
-the CSV/JSONL output files, so the measurement logic stays in one place.
+`LAN_Firehose_Throughput_Test.app` is a native Qt wrapper for the same tester. It
+provides the common controls, live stdout, a results table, summary stats, and a
+small TCP/UDP throughput chart. The wrapper launches the Python CLI as a
+subprocess and reads the CSV/JSONL output files, so the measurement logic stays
+in one place.
 
 ## Qt wrapper
 
@@ -20,7 +21,7 @@ cmake --build source/build/nu-qml-arm64-26.5.5 --target DefcoinLanFirehose
 Then open the generated app:
 
 ```sh
-open "source/build/nu-qml-arm64-26.5.5/DefcoinLanFirehose.app"
+open "source/build/nu-qml-arm64-26.5.5/LAN_Firehose_Throughput_Test.app"
 ```
 
 The wrapper supports:

@@ -99,8 +99,30 @@ ColumnLayout {
         let cells = []
         if (row && row.cells !== undefined) cells = row.cells.slice()
         else if (row) cells = row.slice()
-        if (cells.length === root.detailedPeerColumns.length - root.detailedLanColumnCount) {
+
+        function looksLikeLanMarker(value) {
+            const text = String(value === undefined || value === null ? "" : value).trim()
+            return text.length === 0 || text === "LAN" || text === "-"
+        }
+
+        function looksLikeFastSyncValue(value) {
+            const text = String(value === undefined || value === null ? "" : value).trim()
+            return text === "Yes" || text === "No" || text === "Off" || text === "TBA" || text === "Failed" || text === "-"
+        }
+
+        const hasLanCells = cells.length >= root.detailedLanColumnStart + root.detailedLanColumnCount
+                            && looksLikeLanMarker(cells[root.detailedLanColumnStart])
+                            && (String(cells[root.detailedLanColumnStart + 1]).indexOf("Name:") === 0
+                                || String(cells[root.detailedLanColumnStart + 1]).indexOf("OS:") === 0
+                                || String(cells[root.detailedLanColumnStart + 1]).indexOf("Scanning") === 0
+                                || String(cells[root.detailedLanColumnStart + 1]).trim() === "-"
+                                || String(cells[root.detailedLanColumnStart + 1]).trim().length === 0)
+        if (!hasLanCells && cells.length <= root.detailedPeerColumns.length - root.detailedLanColumnCount) {
             cells.splice(root.detailedLanColumnStart, 0, "", "-")
+        }
+        const fastSyncIndex = 11
+        if (cells.length > fastSyncIndex && !looksLikeFastSyncValue(cells[fastSyncIndex])) {
+            cells.splice(fastSyncIndex, 0, "TBA", "-")
         }
         while (cells.length < root.detailedPeerColumns.length) cells.push("")
         return cells

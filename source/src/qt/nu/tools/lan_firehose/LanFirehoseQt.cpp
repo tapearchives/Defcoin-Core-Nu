@@ -196,7 +196,7 @@ class MainWindow final : public QMainWindow {
 public:
     MainWindow()
     {
-        setWindowTitle(QStringLiteral("Defcoin Nu LAN Firehose"));
+        setWindowTitle(QStringLiteral("LAN Firehose Throughput Test"));
         resize(1120, 780);
 
         m_process = new QProcess(this);
@@ -213,7 +213,7 @@ public:
         rootLayout->setSpacing(10);
 
         auto* intro = new QLabel(QStringLiteral(
-            "LAN Firehose compares TCP and UDP transfer behavior between two machines. "
+            "LAN Firehose Throughput Test compares TCP and UDP transfer behavior between two machines. "
             "It is a diagnostic tool only; it does not read wallets, use RPC, or submit blocks."));
         intro->setWordWrap(true);
         rootLayout->addWidget(intro);
@@ -436,12 +436,15 @@ private:
     void readProcessOutput()
     {
         const QString text = QString::fromLocal8Bit(m_process->readAllStandardOutput());
-        for (const QString& line : text.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
-            m_log->appendPlainText(line);
-            if (line.startsWith(QStringLiteral("Selected role:"))) {
-                m_role->setText(line.mid(QStringLiteral("Selected role:").size()).trimmed());
-            } else if (line.startsWith(QStringLiteral("Peer:"))) {
-                m_role->setText(m_role->text() + QStringLiteral(" | ") + line.mid(5).trimmed());
+        const QStringList lines = text.split(QLatin1Char('\n'));
+        for (const QString& line : lines) {
+            const QString trimmed = line.trimmed();
+            if (trimmed.isEmpty()) continue;
+            m_log->appendPlainText(trimmed);
+            if (trimmed.startsWith(QStringLiteral("Selected role:"))) {
+                m_role->setText(trimmed.mid(QStringLiteral("Selected role:").size()).trimmed());
+            } else if (trimmed.startsWith(QStringLiteral("Peer:"))) {
+                m_role->setText(m_role->text() + QStringLiteral(" | ") + trimmed.mid(5).trimmed());
             }
         }
     }
@@ -624,7 +627,7 @@ private:
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("Defcoin Nu LAN Firehose"));
+    QApplication::setApplicationName(QStringLiteral("LAN Firehose Throughput Test"));
     QApplication::setOrganizationName(QStringLiteral("Defcoin Core"));
     QApplication::setFont(QFont(QStringLiteral("Arial")));
 

@@ -946,6 +946,7 @@ bool isVisibleLanPeer(const QString& host,
 }
 
 QString peerLanWorkstationInfo(const QString& host,
+                               const QString& reverse_dns,
                                const QHash<QString, QString>& lan_info_cache,
                                const QHash<QString, QString>& lan_name_cache,
                                const QHash<QString, QString>& dns_cache,
@@ -956,6 +957,8 @@ QString peerLanWorkstationInfo(const QString& host,
     if (!info.isEmpty()) return info;
     const QString name = lan_name_cache.value(key);
     if (!name.isEmpty()) return QStringLiteral("Name: %1").arg(name);
+    const QString reverse_alias = lanAliasFromDnsName(reverse_dns);
+    if (!reverse_alias.isEmpty()) return QStringLiteral("Name: %1").arg(reverse_alias.mid(4));
     const QString alias = lanAliasFromDnsName(dns_cache.value(key));
     if (!alias.isEmpty()) return QStringLiteral("Name: %1").arg(alias.mid(4));
     if (pending.contains(key)) return QStringLiteral("Scanning...");
@@ -1020,6 +1023,7 @@ QString peerDnsName(const QJsonObject& peer,
 
 QString peerDomainAlias(const QJsonObject& peer,
                         const QPair<QString, QString>& endpoint,
+                        const QString& reverse_dns,
                         const QHash<QString, QString>& dns_cache,
                         const QHash<QString, QString>& alias_cache,
                         const QHash<QString, QString>& lan_cache)
@@ -1031,6 +1035,9 @@ QString peerDomainAlias(const QJsonObject& peer,
         peer.value(QStringLiteral("fqdn")).toString(peer.value(QStringLiteral("addr_name")).toString()));
     const QString explicit_lan_alias = lanAliasFromDnsName(explicit_dns);
     if (!explicit_lan_alias.isEmpty()) return explicit_lan_alias;
+
+    const QString reverse_lan_alias = lanAliasFromDnsName(reverse_dns);
+    if (!reverse_lan_alias.isEmpty()) return reverse_lan_alias;
 
     const QString cached_lan_alias = lanAliasFromDnsName(dns_cache.value(normalizedPeerHost(endpoint.first)));
     if (!cached_lan_alias.isEmpty()) return cached_lan_alias;
@@ -3040,11 +3047,11 @@ void NuRpcService::refreshNode()
             const QString protocol_version = peerNumberText(peer, QStringLiteral("version"));
             const QString services = formatServices(peer.value(QStringLiteral("services")).toString());
             const QString reverse_dns = peerDnsName(peer, endpoint, m_peer_dns_name_by_host);
-            const QString known_dns = peerDomainAlias(peer, endpoint, m_peer_dns_name_by_host, m_peer_domain_alias_by_host, m_peer_lan_name_by_host);
+            const QString known_dns = peerDomainAlias(peer, endpoint, reverse_dns, m_peer_dns_name_by_host, m_peer_domain_alias_by_host, m_peer_lan_name_by_host);
             const bool lan_peer = m_lan_node_discovery_enabled && isVisibleLanPeer(endpoint.first, reverse_dns, known_dns, m_peer_lan_name_by_host, m_peer_lan_info_by_host);
             const QString lan_marker = lan_peer ? QStringLiteral("LAN") : QString();
             const QString workstation_info = lan_peer
-                ? peerLanWorkstationInfo(endpoint.first, m_peer_lan_info_by_host, m_peer_lan_name_by_host, m_peer_dns_name_by_host, m_peer_lan_lookup_pending)
+                ? peerLanWorkstationInfo(endpoint.first, reverse_dns, m_peer_lan_info_by_host, m_peer_lan_name_by_host, m_peer_dns_name_by_host, m_peer_lan_lookup_pending)
                 : QStringLiteral("-");
             const QJsonObject sent_per_msg = peer.value(QStringLiteral("bytessent_per_msg")).toObject();
             for (auto it = sent_per_msg.constBegin(); it != sent_per_msg.constEnd(); ++it) {
@@ -8082,8 +8089,9 @@ void NuRpcService::startExplorerIndexing()
     m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
     m_explorer_index_started_ms = QDateTime::currentMSecsSinceEpoch();
     m_explorer_index_started_block_count = m_explorer_indexed_block_count;
+    m_explorer_index_last_ui_update_ms = 0;
     m_explorer_index_status = QStringLiteral("Reading current chain height...");
-    Q_EMIT explorerChanged();
+    emitExplorerChangedThrottled(true);
 
     rpcCall(QStringLiteral("getblockcount"), {}, false, [this](const QJsonValue& result, const QString& error) {
         if (!m_explorer_indexing) return;
@@ -8119,7 +8127,7 @@ void NuRpcService::startExplorerIndexing()
                 m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
                 m_explorer_index_status = QStringLiteral("Detected stale indexed tip. Pruned back to block %1 and resuming.")
                     .arg(QString::number(std::max(0, highest - 1)));
-                Q_EMIT explorerChanged();
+                emitExplorerChangedThrottled(true);
                 scheduleExplorerIndexStep(0);
                 return;
             }
@@ -8202,6 +8210,16 @@ void NuRpcService::resetExplorerIndex()
     Q_EMIT explorerChanged();
 }
 
+void NuRpcService::emitExplorerChangedThrottled(bool force)
+{
+    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+    if (!force && m_explorer_index_last_ui_update_ms > 0 && now_ms - m_explorer_index_last_ui_update_ms < 2000) {
+        return;
+    }
+    m_explorer_index_last_ui_update_ms = now_ms;
+    Q_EMIT explorerChanged();
+}
+
 void NuRpcService::scheduleExplorerIndexStep(int delay_ms)
 {
     if (!m_explorer_indexing || m_explorer_index_request_in_flight) return;
@@ -8233,7 +8251,7 @@ void NuRpcService::explorerIndexStep()
              QString::number(end_height),
              QString::number(m_explorer_index_tip),
              QString::number(pct, 'f', 2));
-    Q_EMIT explorerChanged();
+    emitExplorerChangedThrottled(false);
 
     QVector<QPair<QString, QJsonArray>> hash_calls;
     hash_calls.reserve(batch_count);
@@ -8379,8 +8397,8 @@ void NuRpcService::explorerIndexStep()
                      QString::number(m_explorer_indexed_block_count),
                      QString::number(m_explorer_indexed_output_count),
                      rate_text);
-            Q_EMIT explorerChanged();
-            scheduleExplorerIndexStep(0);
+            emitExplorerChangedThrottled(false);
+            scheduleExplorerIndexStep(15);
         });
     });
 }

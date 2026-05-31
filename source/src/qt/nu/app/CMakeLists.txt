@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.24)
 
 project(DefcoinCoreNuQml VERSION 26.5.5 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.5.5l" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.5.5m" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_FIREHOSE_RELEASE_NAME "1.0.0" CACHE STRING "Visible LAN Firehose Throughput Test release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -49,10 +50,11 @@ target_compile_definitions(DefcoinLanFirehose PRIVATE
 
 set_target_properties(DefcoinLanFirehose PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinLanFirehose
-    MACOSX_BUNDLE_BUNDLE_NAME "Defcoin Nu LAN Firehose"
-    MACOSX_BUNDLE_DISPLAY_NAME "Defcoin Nu LAN Firehose"
-    MACOSX_BUNDLE_SHORT_VERSION_STRING "${DEFCOIN_NU_RELEASE_NAME}"
-    MACOSX_BUNDLE_BUNDLE_VERSION "${DEFCOIN_NU_RELEASE_NAME}"
+    OUTPUT_NAME "LAN_Firehose_Throughput_Test"
+    MACOSX_BUNDLE_BUNDLE_NAME "LAN Firehose Throughput Test"
+    MACOSX_BUNDLE_DISPLAY_NAME "LAN Firehose Throughput Test"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${DEFCOIN_FIREHOSE_RELEASE_NAME}"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${DEFCOIN_FIREHOSE_RELEASE_NAME}"
 )
 
 if(APPLE)
@@ -69,6 +71,9 @@ add_custom_command(TARGET DefcoinLanFirehose POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/README.md"
         "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/README.md"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_LIST_DIR}/../tools/lan_firehose/LION_PORT_NOTES.md"
+        "${DEFCOIN_FIREHOSE_RESOURCE_DIR}/LION_PORT_NOTES.md"
     COMMENT "Bundling LAN firehose CLI for the Qt wrapper"
 )
 

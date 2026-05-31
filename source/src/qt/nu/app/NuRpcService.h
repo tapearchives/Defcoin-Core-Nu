@@ -614,6 +614,7 @@ private:
     bool explorerPruneFromHeight(int height, QString* error = nullptr);
     bool storeExplorerBlock(const QJsonObject& block, QString* error = nullptr);
     bool storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* output_rows_written = nullptr, QString* error = nullptr);
+    void emitExplorerChangedThrottled(bool force = false);
     void scheduleExplorerIndexStep(int delay_ms = 0);
     void explorerIndexStep();
     void scheduleExplorerTop100Step(int delay_ms = 0);
@@ -902,6 +903,7 @@ private:
     int m_explorer_indexed_output_count = 0;
     qint64 m_explorer_index_started_ms = 0;
     int m_explorer_index_started_block_count = 0;
+    qint64 m_explorer_index_last_ui_update_ms = 0;
     std::unique_ptr<QLockFile> m_explorer_writer_lock;
     struct ExplorerTop100Entry {
         qint64 balance = 0;

@@ -214,8 +214,8 @@ ColumnLayout {
     NuPanel {
         id: explorerStatusPanel
         Layout.fillWidth: true
-        Layout.preferredHeight: Math.max(158, explorerStatusContent.implicitHeight + padding * 2)
-        Layout.minimumHeight: Math.max(158, explorerStatusContent.implicitHeight + padding * 2)
+        Layout.preferredHeight: Math.max(184, explorerStatusContent.implicitHeight + padding * 2)
+        Layout.minimumHeight: Math.max(184, explorerStatusContent.implicitHeight + padding * 2)
         ColumnLayout {
             id: explorerStatusContent
             anchors.fill: parent
@@ -237,6 +237,7 @@ ColumnLayout {
                     }
                     Basic.TextArea {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: Math.max(22, Math.min(44, contentHeight + 2))
                         text: NuService.explorerIndexStatus
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontSmall
@@ -248,9 +249,11 @@ ColumnLayout {
                         focusPolicy: Qt.StrongFocus
                         background: Item {}
                         padding: 0
+                        clip: true
                     }
                     Basic.TextArea {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: Math.max(22, Math.min(44, contentHeight + 2))
                         text: NuService.explorerAnalyticsStatus
                         color: NuTokens.textMuted
                         font.pixelSize: NuTokens.fontSmall
@@ -262,6 +265,7 @@ ColumnLayout {
                         focusPolicy: Qt.StrongFocus
                         background: Item {}
                         padding: 0
+                        clip: true
                     }
                 }
 
@@ -679,7 +683,11 @@ ColumnLayout {
                             NuActionButton {
                                 width: 150
                                 text: "Refresh Top 100"
-                                helpText: "Recalculate Top 100 and movement summaries from the local SQLite explorer index."
+                                enabled: NuService.explorerIndexedBlockCount > 0
+                                         && NuService.explorerIndexTip > 0
+                                         && NuService.explorerIndexHeight > NuService.explorerIndexTip
+                                         && !NuService.explorerIndexing
+                                helpText: "Recalculate Top 100 and movement summaries after the local Explorer index is complete, usually after new blocks arrive."
                                 onClicked: root.refreshAnalytics()
                             }
                             NuActionButton {
@@ -697,6 +705,14 @@ ColumnLayout {
                             NuMetricRow { label: "Rows"; value: String(NuService.explorerRichList.length) }
                             NuMetricRow { label: "Coverage"; value: NuService.explorerIndexedBlockCount + " blocks" }
                             NuMetricRow { label: "Timeline"; value: NuService.explorerTop100TimelineEventCount + " checkpoints" }
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: NuService.explorerIndexing || NuService.explorerIndexHeight <= NuService.explorerIndexTip
+                            text: "Refresh Top 100 enables after the Explorer index reaches the current chain tip; until then this pane shows the latest cached partial result."
+                            color: NuTokens.textMuted
+                            font.pixelSize: NuTokens.fontTiny
+                            wrapMode: Text.WordWrap
                         }
                     }
                 }

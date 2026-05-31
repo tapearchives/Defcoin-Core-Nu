@@ -77,7 +77,7 @@ ColumnLayout {
         id: forensicsTabs
         Layout.fillWidth: true
         NuTabButton { text: "Irregular Messages" }
-        NuTabButton { text: "Witness Repair" }
+        NuTabButton { text: "Fix Witness Data" }
     }
 
     StackLayout {
@@ -284,7 +284,7 @@ ColumnLayout {
 
                         Label {
                             Layout.fillWidth: true
-                            text: "Witness Repair"
+                            text: "Fix Witness Data"
                             color: NuTokens.textPrimary
                             font.pixelSize: NuTokens.fontTitle
                             font.weight: Font.DemiBold
