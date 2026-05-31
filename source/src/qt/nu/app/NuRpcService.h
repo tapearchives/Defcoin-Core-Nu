@@ -520,7 +520,7 @@ private:
     bool ensureBackendStarted();
     void stopOwnedBackend();
     void appendLaunchDiagnostic(const QString& message);
-    void appendDebugLogLineFromNu(const QString& message);
+    int appendDebugLogLineFromNu(const QString& message);
     void beginBackendDebugLogSection(bool write_to_debug_log);
     void appendLogLine(const QString& line, int debug_log_line_number = 0);
     void trimLogLines();
@@ -844,6 +844,9 @@ private:
     QString m_debug_log_path;
     qint64 m_debug_log_offset = -1;
     int m_debug_log_next_line_number = 1;
+    QString m_debug_log_append_path;
+    qint64 m_debug_log_append_size_hint = -1;
+    int m_debug_log_append_line_hint = 0;
     bool m_debug_log_collecting_continuation = false;
     bool m_launch_diagnostics_section_started = false;
     bool m_backend_log_section_started = false;

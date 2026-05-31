@@ -1744,36 +1744,60 @@ void NuRpcService::appendLaunchDiagnostic(const QString& message)
     if (!m_launch_diagnostics_section_started) {
         const QString marker = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
             + QStringLiteral(" ----- Nu startup diagnostics -----");
-        appendLogLine(marker);
-        appendDebugLogLineFromNu(QStringLiteral("----- Nu startup diagnostics -----"));
+        const int marker_debug_line = appendDebugLogLineFromNu(QStringLiteral("----- Nu startup diagnostics -----"));
+        appendLogLine(marker, marker_debug_line);
         m_launch_diagnostics_section_started = true;
     }
     const QString line = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
         + QStringLiteral(" Nu startup: ") + clean_message;
+    const int debug_line = appendDebugLogLineFromNu(QStringLiteral("Nu startup: %1").arg(clean_message));
     if (m_log_lines.isEmpty() || m_log_lines.constLast() != line) {
-        appendLogLine(line);
+        appendLogLine(line, debug_line);
     }
-    appendDebugLogLineFromNu(QStringLiteral("Nu startup: %1").arg(clean_message));
     trimLogLines();
     rebuildNodeMetrics();
     Q_EMIT logChanged();
     Q_EMIT stateChanged();
 }
 
-void NuRpcService::appendDebugLogLineFromNu(const QString& message)
+int NuRpcService::appendDebugLogLineFromNu(const QString& message)
 {
-    if (message.trimmed().isEmpty()) return;
+    if (message.trimmed().isEmpty()) return 0;
 
     const QString path = debugLogPath();
     const QFileInfo info(path);
     QDir().mkpath(info.absolutePath());
 
+    int next_line_number = 0;
+    const qint64 size_before = QFileInfo(path).exists() ? QFileInfo(path).size() : 0;
+    if (m_debug_log_append_path == path
+        && m_debug_log_append_size_hint == size_before
+        && m_debug_log_append_line_hint > 0) {
+        next_line_number = m_debug_log_append_line_hint + 1;
+    } else {
+        QFile read_file(path);
+        int existing_lines = 0;
+        if (read_file.open(QIODevice::ReadOnly)) {
+            while (!read_file.atEnd()) {
+                existing_lines += read_file.read(64 * 1024).count('\n');
+            }
+        }
+        next_line_number = existing_lines + 1;
+    }
+
     QFile file(path);
-    if (!file.open(QIODevice::Append | QIODevice::Text)) return;
+    if (!file.open(QIODevice::Append | QIODevice::Text)) return 0;
 
     QTextStream out(&file);
     out << QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyy-MM-ddTHH:mm:ssZ"))
         << ' ' << message << '\n';
+    out.flush();
+    file.flush();
+
+    m_debug_log_append_path = path;
+    m_debug_log_append_size_hint = QFileInfo(path).size();
+    m_debug_log_append_line_hint = next_line_number;
+    return next_line_number;
 }
 
 void NuRpcService::appendLogLine(const QString& line, int debug_log_line_number)
@@ -1802,7 +1826,10 @@ void NuRpcService::beginBackendDebugLogSection(bool write_to_debug_log)
         appendLogLine(marker);
     }
     if (write_to_debug_log) {
-        appendDebugLogLineFromNu(QStringLiteral("----- Backend debug.log follows -----"));
+        const int debug_line = appendDebugLogLineFromNu(QStringLiteral("----- Backend debug.log follows -----"));
+        if (!m_log_line_numbers.isEmpty() && !m_log_line_numbers.last().isValid()) {
+            m_log_line_numbers.last() = debug_line > 0 ? QVariant(debug_line) : QVariant();
+        }
     }
     m_backend_log_section_started = true;
 }
