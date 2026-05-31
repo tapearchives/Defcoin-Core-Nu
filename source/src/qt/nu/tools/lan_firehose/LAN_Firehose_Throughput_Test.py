@@ -527,7 +527,7 @@ def udp_receiver(args: argparse.Namespace, state: SharedState, log_path: Optiona
         return
     sock.settimeout(0.25)
     log_event(log_path, {"event": "udp_listening", "port": args.udp_port}, state)
-    active: Dict[Tuple[str, int], dict] = {}
+    active: Dict[Tuple[str, int, int], dict] = {}
     last_report = time.monotonic()
     while not state.stop.is_set():
         try:
@@ -555,7 +555,7 @@ def udp_receiver(args: argparse.Namespace, state: SharedState, log_path: Optiona
         payload = data[UDP_HEADER_BYTES:]
         if payload_len != len(payload):
             continue
-        phase_key = (addr[0], phase)
+        phase_key = (addr[0], addr[1], phase)
         entry = active.setdefault(
             phase_key,
             {
@@ -584,7 +584,8 @@ def udp_receiver(args: argparse.Namespace, state: SharedState, log_path: Optiona
         if time.monotonic() >= entry["end"] + 0.5:
             finish_udp_phase(phase, entry, state, log_path, csv_path)
             active.pop(phase_key, None)
-    for (_host, phase), entry in list(active.items()):
+    for key, entry in list(active.items()):
+        phase = key[2] if isinstance(key, tuple) and len(key) == 3 else key[1] if isinstance(key, tuple) else key
         finish_udp_phase(phase, entry, state, log_path, csv_path)
 
 
@@ -596,7 +597,7 @@ def finish_expired_udp_phases(
 ) -> None:
     now = time.monotonic()
     for key, entry in list(active.items()):
-        phase = key[1] if isinstance(key, tuple) else key
+        phase = key[2] if isinstance(key, tuple) and len(key) == 3 else key[1] if isinstance(key, tuple) else key
         if now >= entry["end"] + 0.5:
             finish_udp_phase(phase, entry, state, log_path, csv_path)
             active.pop(key, None)
@@ -758,12 +759,22 @@ def run_hose(args: argparse.Namespace, peer: Peer, phases: List[Phase], state: S
 
 
 def run_hose_many(args: argparse.Namespace, peers: List[Peer], phases: List[Phase], state: SharedState, log_path: Optional[Path], csv_path: Optional[Path]) -> None:
-    print(f"Firehose sending to {len(peers)} testers in sequence.", flush=True)
+    print(f"Firehose spraying {len(peers)} testers at once.", flush=True)
     log_event(log_path, {"event": "hose_many_start", "peers": [peer.__dict__ for peer in peers]}, state)
+    workers: List[threading.Thread] = []
     for peer in peers:
         if state.stop.is_set():
             break
-        run_hose(args, peer, phases, state, log_path, csv_path, stop_when_done=False)
+        worker = threading.Thread(
+            target=run_hose,
+            args=(args, peer, phases, state, log_path, csv_path, False),
+            daemon=True,
+        )
+        worker.start()
+        workers.append(worker)
+    for worker in workers:
+        while worker.is_alive() and not state.stop.is_set():
+            worker.join(timeout=0.25)
     state.stop.set()
 
 

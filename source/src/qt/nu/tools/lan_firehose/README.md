@@ -10,6 +10,12 @@ small TCP/UDP throughput chart. The wrapper launches the Python CLI as a
 subprocess and reads the CSV/JSONL output files, so the measurement logic stays
 in one place.
 
+When the Qt wrapper is open, it advertises an idle beacon containing its current
+role, IP-visible workstation name, OS string, and test ports. Auto Pair or Spray
+on one machine sends a small control packet to visible idle testers so they
+enter Catch mode automatically, then return to idle advertising when the test
+finishes.
+
 ## Qt wrapper
 
 Build the wrapper from the existing Nu CMake tree:
@@ -29,10 +35,10 @@ The wrapper supports:
 - Auto Pair, Spray, and Catch modes. The CLI still accepts `auto`, `hose`, and
   `sink` for script compatibility.
 - Manual peer IP for direct Spray tests.
-- A peer picker when several testers are visible and Auto-connect all testers is
-  not enabled.
-- Auto-connect all testers. Catch accepts all visible senders, while Spray sends
-  to visible targets in sequence.
+- Automatic all-visible-tester behavior by default. Auto Pair and Spray send to
+  all visible testers at once; Catch accepts all visible senders.
+- Manual one-to-one picker as an opt-in checkbox. The picker shows each visible
+  tester's IP address, discovered workstation name, role, OS string, and ports.
 - Duration, protocol switch timing, packet profile, and custom packet sizes.
 - Optional pairing token so two testers on the same LAN pair only with each
   other.
@@ -55,11 +61,12 @@ second sweep. Auto mode also starts listeners on both sides and promotes a quiet
 Catch side to Spray if no incoming traffic arrives, so one-way discovery does not leave
 both machines waiting forever.
 
-With more than two testers, the wrapper lists visible testers and asks which one
-to use unless Auto-connect all testers is checked. In Catch mode, incoming TCP
-rows are separated by connection and UDP rows are separated by sender IP. In
-Spray mode, Auto-connect all testers sends one complete sweep to each selected
-tester in sequence.
+With more than two testers, the default wrapper behavior is automatic: one Start
+from Auto Pair or Spray sends control packets to the visible idle testers, those
+testers enter Catch mode, and the starter sprays all targets concurrently. If
+`Manual pick one tester` is enabled, the wrapper shows a one-to-one picker
+instead. In Catch mode, incoming TCP rows are separated by connection and UDP
+rows are separated by sender IP and UDP source port.
 
 ## Direct loopback or manual peer test
 
