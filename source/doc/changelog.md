@@ -1,8 +1,8 @@
 # Defcoin Core Changelog
 
-## 26.5.5o Core Memories
+## 26.5.5p Core Memories
 
-Defcoin Core Nu `26.5.5o` adds the first Forensics view for average users who
+Defcoin Core Nu `26.5.5p` adds the first Forensics view for average users who
 want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Added
@@ -43,9 +43,9 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Changed
 
-- Updated visible Nu release metadata to `26.5.5o`.
+- Updated visible Nu release metadata to `26.5.5p`.
 - Letter suffixes now identify every changed rebuild in this release line:
-  `26.5.5a`, `26.5.5b`, `26.5.5o`, and so on. The inherited Core client version
+  `26.5.5a`, `26.5.5b`, `26.5.5p`, and so on. The inherited Core client version
   remains `0.21.5.5`.
 - Added Forensics to the sidebar, View menu, app resources, and Build Notes.
 - Diagnostics > Status now reports sync method details, UDP transfer rate in

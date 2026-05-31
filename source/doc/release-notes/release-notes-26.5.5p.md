@@ -1,8 +1,8 @@
-# Defcoin Core Nu 26.5.5o Release Notes
+# Defcoin Core Nu 26.5.5p Release Notes
 
 Codename: `Core Memories`
 
-Defcoin Core Nu `26.5.5o` adds the first blockchain forensics surface to the
+Defcoin Core Nu `26.5.5p` adds the first blockchain forensics surface to the
 desktop wallet while keeping the chain, wallet, recovery, mining, and explorer
 behavior from the current `26.5` line.
 
@@ -82,7 +82,7 @@ behavior from the current `26.5` line.
 
 ## Build Suffix
 
-`26.5.5o` is the current changed rebuild in the `26.5.5` line. Future changed
+`26.5.5p` is the current changed rebuild in the `26.5.5` line. Future changed
 rebuilds in the same release line should use the next letter suffix
 (`26.5.5d`, `26.5.5e`, and so on), while the inherited Core client version
 stays `0.21.5.5`.

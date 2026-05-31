@@ -85,7 +85,7 @@ constexpr int RECOVERY_GAP_SCAN_BATCH_SIZE = 1024;
 constexpr int RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES = 65536;
 constexpr int EXPLORER_INDEX_BATCH_BLOCKS = 96;
 constexpr int EXPLORER_INDEX_FOCUSED_BATCH_BLOCKS = 384;
-constexpr int EXPLORER_INDEX_COOPERATIVE_DELAY_MS = 75;
+constexpr int EXPLORER_INDEX_BUSY_COOPERATIVE_DELAY_MS = 150;
 constexpr int EXPLORER_INDEX_FOCUSED_DELAY_MS = 0;
 constexpr int EXPLORER_TOP100_CHUNK_BLOCKS = 2500;
 constexpr int EXPLORER_TOP100_FOCUSED_CHUNK_BLOCKS = 25000;
@@ -187,6 +187,24 @@ bool trySetProcessNiceForIndexing(bool focused)
     const int nice_value = focused ? -5 : 0;
     return setpriority(PRIO_PROCESS, 0, nice_value) == 0;
 #endif
+}
+
+bool systemLooksBusyForCooperativeIndexing()
+{
+#if defined(Q_OS_WIN)
+    return false;
+#else
+    double loadavg[1] = {0.0};
+    if (getloadavg(loadavg, 1) != 1) return false;
+    const int cores = std::max(1, QThread::idealThreadCount());
+    return loadavg[0] >= std::max(1.0, static_cast<double>(cores) * 0.70);
+#endif
+}
+
+int explorerIndexNextDelayMs(bool focused)
+{
+    if (focused) return EXPLORER_INDEX_FOCUSED_DELAY_MS;
+    return systemLooksBusyForCooperativeIndexing() ? EXPLORER_INDEX_BUSY_COOPERATIVE_DELAY_MS : 0;
 }
 
 QByteArray lanFastSyncDatagram(const QJsonObject& header,
@@ -8531,7 +8549,7 @@ void NuRpcService::explorerIndexStep()
                      QString::number(m_explorer_indexed_output_count),
                      rate_text);
             emitExplorerChangedThrottled(false);
-            scheduleExplorerIndexStep(m_explorer_top100_focused_indexing ? EXPLORER_INDEX_FOCUSED_DELAY_MS : EXPLORER_INDEX_COOPERATIVE_DELAY_MS);
+            scheduleExplorerIndexStep(explorerIndexNextDelayMs(m_explorer_top100_focused_indexing));
         });
     });
 }

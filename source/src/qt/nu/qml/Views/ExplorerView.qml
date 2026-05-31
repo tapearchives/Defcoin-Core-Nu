@@ -554,7 +554,7 @@ ColumnLayout {
                     NuCheckBox {
                         text: "Use more resources for indexing"
                         checked: NuService.explorerTop100FocusedIndexing
-                        helpText: "When enabled, Nu uses larger Explorer and Top 100 batches, larger SQLite cache settings, fewer UI refreshes, and tries to raise indexing priority. When off, indexing runs more cooperatively."
+                        helpText: "When enabled, Nu uses larger Explorer and Top 100 batches, larger SQLite cache settings, fewer UI refreshes, and tries to raise indexing priority. When off, indexing only backs off between batches when the system already looks busy."
                         onToggled: NuService.explorerTop100FocusedIndexing = checked
                     }
 
@@ -562,7 +562,7 @@ ColumnLayout {
                         Layout.fillWidth: true
                         text: NuService.explorerTop100FocusedIndexing
                               ? "Best for a dedicated indexing run on a mostly idle machine."
-                              : "Cooperative mode backs off between batches so the desktop stays responsive."
+                              : "Cooperative mode backs off only when system load is already high."
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontSmall
                         wrapMode: Text.WordWrap
