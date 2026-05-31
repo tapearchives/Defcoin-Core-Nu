@@ -1,8 +1,8 @@
 # Defcoin Core Changelog
 
-## 26.5.5n Core Memories
+## 26.5.5o Core Memories
 
-Defcoin Core Nu `26.5.5n` adds the first Forensics view for average users who
+Defcoin Core Nu `26.5.5o` adds the first Forensics view for average users who
 want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Added
@@ -38,12 +38,14 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
   caps, capability/version checks, bounded per-read processing, per-peer request
   throttling, duplicate-chunk rejection, and checksum validation before block
   assembly.
+- Added Top 100 rich-list header help for `Txs` and `UTXOs`, explaining how
+  transaction counts and spendable output counts differ.
 
 ### Changed
 
-- Updated visible Nu release metadata to `26.5.5n`.
+- Updated visible Nu release metadata to `26.5.5o`.
 - Letter suffixes now identify every changed rebuild in this release line:
-  `26.5.5a`, `26.5.5b`, `26.5.5n`, and so on. The inherited Core client version
+  `26.5.5a`, `26.5.5b`, `26.5.5o`, and so on. The inherited Core client version
   remains `0.21.5.5`.
 - Added Forensics to the sidebar, View menu, app resources, and Build Notes.
 - Diagnostics > Status now reports sync method details, UDP transfer rate in
@@ -63,6 +65,14 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
   `Failed` only after a UDP fast-sync exchange is attempted.
 - Explorer indexing now uses batched JSON-RPC calls and batched SQLite
   transactions instead of one delayed block request/write per UI tick.
+- The Explorer index control is now labeled `Use more resources for indexing`;
+  when enabled, Nu uses larger Explorer/Top 100 batches, larger SQLite cache
+  settings, fewer UI refreshes, and a best-effort process priority increase.
+- The UDP/TCP fast-sync selector now excludes TCP-only peer traffic from the
+  preference ratio and requires UDP warmup probes before declaring TCP favored.
+- Witness block-storage inspection now derives a bounded worker count from
+  Core's `-par` setting, using independent block-body reads before aggregating
+  results.
 - Explorer index status now separates live indexing progress from analytics
   summary text so the two messages do not flicker or briefly overwrite each
   other while the indexer is running.

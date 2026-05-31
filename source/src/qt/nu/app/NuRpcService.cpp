@@ -70,6 +70,7 @@
 
 #if !defined(Q_OS_WIN)
 #include <pwd.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #endif
 
@@ -83,6 +84,9 @@ constexpr qint64 TRAFFIC_CHART_BUCKET_MS = TRAFFIC_CHART_BUCKET_SECONDS * 1000;
 constexpr int RECOVERY_GAP_SCAN_BATCH_SIZE = 1024;
 constexpr int RECOVERY_GAP_SCAN_HARD_MAX_ADDRESSES = 65536;
 constexpr int EXPLORER_INDEX_BATCH_BLOCKS = 96;
+constexpr int EXPLORER_INDEX_FOCUSED_BATCH_BLOCKS = 384;
+constexpr int EXPLORER_INDEX_COOPERATIVE_DELAY_MS = 75;
+constexpr int EXPLORER_INDEX_FOCUSED_DELAY_MS = 0;
 constexpr int EXPLORER_TOP100_CHUNK_BLOCKS = 2500;
 constexpr int EXPLORER_TOP100_FOCUSED_CHUNK_BLOCKS = 25000;
 constexpr int EXPLORER_TOP100_MAX_ANCHOR_BLOCKS = 10000;
@@ -104,6 +108,8 @@ constexpr int LAN_FAST_SYNC_MAX_BLOCK_BYTES = 8 * 1024 * 1024;
 constexpr int LAN_FAST_SYNC_MIN_REQUEST_INTERVAL_MS = 250;
 constexpr int FAST_SYNC_PROTOCOL_MAX_WINDOW = 32;
 constexpr int FAST_SYNC_PROTOCOL_PROBE_INTERVAL_MS = 30000;
+constexpr int FAST_SYNC_PROTOCOL_MIN_UDP_PROBES = 4;
+constexpr int FAST_SYNC_PROTOCOL_TCP_SAMPLE_CAP_PER_UDP = 3;
 constexpr double FAST_SYNC_PROTOCOL_EWMA_ALPHA = 0.35;
 constexpr double FAST_SYNC_PROTOCOL_EXPLORATION_C = 0.35;
 constexpr char UDP_FAST_SYNC_CAPABILITY[] = "defcoin-nu-udp-fast-sync-v1";
@@ -170,6 +176,17 @@ bool isPrivateOrLocalFastSyncAddress(const QHostAddress& address)
         return bytes[0] == 0xfc || bytes[0] == 0xfd || (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80);
     }
     return false;
+}
+
+bool trySetProcessNiceForIndexing(bool focused)
+{
+#if defined(Q_OS_WIN)
+    Q_UNUSED(focused);
+    return false;
+#else
+    const int nice_value = focused ? -5 : 0;
+    return setpriority(PRIO_PROCESS, 0, nice_value) == 0;
+#endif
 }
 
 QByteArray lanFastSyncDatagram(const QJsonObject& header,
@@ -3665,12 +3682,27 @@ void NuRpcService::resetFastSyncProtocolWindow()
         return;
     }
 
-    const int tcp_samples = m_fast_sync_tcp_successes + m_fast_sync_tcp_failures;
     const int udp_samples = m_fast_sync_udp_successes + m_fast_sync_udp_failures;
-    const int total_samples = std::max(1, tcp_samples + udp_samples);
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const bool udp_in_cooldown = now < m_fast_sync_udp_cooldown_until_ms;
     const bool force_probe = (now - m_fast_sync_last_probe_ms) >= FAST_SYNC_PROTOCOL_PROBE_INTERVAL_MS;
+
+    if (!udp_in_cooldown && udp_samples < FAST_SYNC_PROTOCOL_MIN_UDP_PROBES) {
+        m_fast_sync_window_size = std::max(4, std::min(FAST_SYNC_PROTOCOL_MAX_WINDOW, m_fast_sync_window_size));
+        m_fast_sync_udp_quota_remaining = 3;
+        m_fast_sync_tcp_quota_remaining = 1;
+        m_fast_sync_last_probe_ms = now;
+        m_fast_sync_decision_summary = QStringLiteral("UDP warmup %1/%2; TCP-only peer traffic is excluded from the selector.")
+            .arg(QString::number(udp_samples),
+                 QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES));
+        return;
+    }
+
+    const int tcp_cap = std::max(1, std::max(udp_samples, 1) * FAST_SYNC_PROTOCOL_TCP_SAMPLE_CAP_PER_UDP);
+    const int effective_tcp_successes = std::min(m_fast_sync_tcp_successes, tcp_cap);
+    const int effective_tcp_failures = std::min(m_fast_sync_tcp_failures, std::max(0, tcp_cap - effective_tcp_successes));
+    const int effective_tcp_samples = effective_tcp_successes + effective_tcp_failures;
+    const int total_samples = std::max(1, effective_tcp_samples + udp_samples);
 
     auto score = [total_samples](double ewma, int successes, int failures) {
         const int samples = successes + failures;
@@ -3681,7 +3713,7 @@ void NuRpcService::resetFastSyncProtocolWindow()
         return rate * reliability + exploration;
     };
 
-    const double tcp_score = score(m_fast_sync_tcp_ewma_blocks_per_second, m_fast_sync_tcp_successes, m_fast_sync_tcp_failures);
+    const double tcp_score = score(m_fast_sync_tcp_ewma_blocks_per_second, effective_tcp_successes, effective_tcp_failures);
     const double udp_score_raw = score(m_fast_sync_udp_ewma_blocks_per_second, m_fast_sync_udp_successes, m_fast_sync_udp_failures);
     const double udp_score = udp_in_cooldown && !force_probe ? 0.0 : udp_score_raw;
 
@@ -3710,7 +3742,7 @@ void NuRpcService::resetFastSyncProtocolWindow()
                : QStringLiteral("TCP/UDP balanced 1:1"));
     m_fast_sync_decision_summary = udp_in_cooldown && !force_probe
         ? QStringLiteral("UDP cooling down after errors; TCP/Core is favored")
-        : favored;
+        : QStringLiteral("%1; TCP sample count capped against UDP-capable peers").arg(favored);
 }
 
 bool NuRpcService::shouldAttemptUdpFastSync()
@@ -4855,6 +4887,7 @@ void NuRpcService::repairWitnessBlockDataNow(int start_height, bool fix_missing_
             const int inspected = obj.value(QStringLiteral("inspected_blocks")).toInt();
             const int required = obj.value(QStringLiteral("witness_required_blocks")).toInt();
             const int bodies_read = obj.value(QStringLiteral("block_bodies_read")).toInt();
+            const int worker_threads = obj.value(QStringLiteral("worker_threads")).toInt(1);
             const int next_height = obj.value(QStringLiteral("next_height")).toInt();
             const int end_height = obj.value(QStringLiteral("end_height")).toInt();
             const bool complete = obj.value(QStringLiteral("complete")).toBool();
@@ -4872,7 +4905,7 @@ void NuRpcService::repairWitnessBlockDataNow(int start_height, bool fix_missing_
             const double pct = end_height >= height
                 ? 100.0 * static_cast<double>(std::min(end_height, std::max(height, next_height) - 1) - height + 1) / static_cast<double>(std::max(1, end_height - height + 1))
                 : 100.0;
-            m_forensics_witness_repair_status = QStringLiteral("Inspecting witness-form block storage from height %1. Checked through %2 of %3 (%4%). Blocks inspected: %5. Witness-required blocks: %6. Block bodies read: %7. Missing witness blocks found: %8.")
+            m_forensics_witness_repair_status = QStringLiteral("Inspecting witness-form block storage from height %1. Checked through %2 of %3 (%4%). Blocks inspected: %5. Witness-required blocks: %6. Block bodies read: %7. Missing witness blocks found: %8. Workers: %9.")
                 .arg(QString::number(height),
                      QString::number(std::max(height, next_height) - 1),
                      QString::number(end_height),
@@ -4880,7 +4913,8 @@ void NuRpcService::repairWitnessBlockDataNow(int start_height, bool fix_missing_
                      QString::number(m_forensics_witness_repair_inspected_blocks),
                      QString::number(*total_required_blocks),
                      QString::number(*total_block_bodies_read),
-                     QString::number(*missing_count));
+                     QString::number(*missing_count),
+                     QString::number(worker_threads));
             Q_EMIT forensicsChanged();
 
             if (missing_found && fix_missing_witness) {
@@ -5179,10 +5213,20 @@ void NuRpcService::setExplorerTop100FocusedIndexing(bool enabled)
     if (m_explorer_top100_focused_indexing == enabled) return;
     m_explorer_top100_focused_indexing = enabled;
     QSettings().setValue(QStringLiteral("ExplorerTop100FocusedIndexing"), enabled);
-    if (m_explorer_top100_scanning) {
-        m_explorer_top100_status = enabled
-            ? QStringLiteral("Focused Top 100 indexing enabled. Nu will use larger SQLite batches and refresh the UI less often.")
-            : QStringLiteral("Focused Top 100 indexing disabled. Nu will return to cooperative batch sizing.");
+    const bool priority_changed = trySetProcessNiceForIndexing(enabled);
+    if (m_explorer_top100_scanning || m_explorer_indexing) {
+        const QString priority_note = priority_changed
+            ? QStringLiteral(" Process priority adjusted.")
+            : (enabled ? QStringLiteral(" Process priority change was not permitted by the OS.") : QString());
+        const QString mode_note = enabled
+            ? QStringLiteral("High-resource indexing enabled. Nu will use larger SQLite batches, bigger cache settings, and fewer UI refreshes.")
+            : QStringLiteral("High-resource indexing disabled. Nu will return to cooperative batch sizing and lighter UI cadence.");
+        if (m_explorer_top100_scanning) {
+            m_explorer_top100_status = mode_note + priority_note;
+        }
+        if (m_explorer_indexing) {
+            m_explorer_index_status = mode_note + priority_note;
+        }
         Q_EMIT explorerChanged();
     }
     Q_EMIT settingsChanged();
@@ -7919,7 +7963,12 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
             pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
             pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
             pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
-            pragma.exec(QStringLiteral("PRAGMA cache_size=-131072"));
+            if (m_explorer_top100_focused_indexing) {
+                pragma.exec(QStringLiteral("PRAGMA cache_size=-262144"));
+                pragma.exec(QStringLiteral("PRAGMA mmap_size=268435456"));
+            } else {
+                pragma.exec(QStringLiteral("PRAGMA cache_size=-65536"));
+            }
             ok = db.transaction();
             if (!ok) local_error = db.lastError().text();
 
@@ -8170,6 +8219,9 @@ void NuRpcService::startExplorerIndexing()
     m_explorer_index_started_block_count = m_explorer_indexed_block_count;
     m_explorer_index_last_ui_update_ms = 0;
     m_explorer_index_status = QStringLiteral("Reading current chain height...");
+    if (m_explorer_top100_focused_indexing) {
+        trySetProcessNiceForIndexing(true);
+    }
     emitExplorerChangedThrottled(true);
 
     rpcCall(QStringLiteral("getblockcount"), {}, false, [this](const QJsonValue& result, const QString& error) {
@@ -8233,6 +8285,7 @@ void NuRpcService::stopExplorerIndexing()
         .arg(QString::number(std::max(0, m_explorer_index_height - 1)),
              QString::number(m_explorer_indexed_block_count));
     if (!m_explorer_top100_scanning) releaseExplorerWriterLock();
+    if (!m_explorer_top100_scanning) trySetProcessNiceForIndexing(false);
     Q_EMIT explorerChanged();
 }
 
@@ -8321,7 +8374,8 @@ void NuRpcService::explorerIndexStep()
     }
 
     const int start_height = m_explorer_index_height;
-    const int end_height = std::min(m_explorer_index_tip, start_height + EXPLORER_INDEX_BATCH_BLOCKS - 1);
+    const int index_batch_blocks = m_explorer_top100_focused_indexing ? EXPLORER_INDEX_FOCUSED_BATCH_BLOCKS : EXPLORER_INDEX_BATCH_BLOCKS;
+    const int end_height = std::min(m_explorer_index_tip, start_height + index_batch_blocks - 1);
     const int batch_count = end_height - start_height + 1;
     m_explorer_index_request_in_flight = true;
     const double pct = m_explorer_index_tip > 0 ? (100.0 * static_cast<double>(start_height) / static_cast<double>(m_explorer_index_tip)) : 0.0;
@@ -8477,7 +8531,7 @@ void NuRpcService::explorerIndexStep()
                      QString::number(m_explorer_indexed_output_count),
                      rate_text);
             emitExplorerChangedThrottled(false);
-            scheduleExplorerIndexStep(15);
+            scheduleExplorerIndexStep(m_explorer_top100_focused_indexing ? EXPLORER_INDEX_FOCUSED_DELAY_MS : EXPLORER_INDEX_COOPERATIVE_DELAY_MS);
         });
     });
 }
@@ -8640,7 +8694,7 @@ bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height
              QString::number(end),
              QString::number(m_explorer_top100_checkpoint_interval_blocks),
              m_explorer_top100_checkpoint_interval_blocks == 1 ? QString() : QStringLiteral("s"),
-             m_explorer_top100_focused_indexing ? QStringLiteral(" Focused indexing is on.") : QString());
+             m_explorer_top100_focused_indexing ? QStringLiteral(" High-resource indexing is on.") : QString());
     return true;
 }
 
@@ -8887,7 +8941,7 @@ void NuRpcService::explorerTop100Step()
              QString::number(m_explorer_top100_events_written),
              QString::number(rows_read),
              QString::number(blocks_per_second, 'f', blocks_per_second >= 100.0 ? 0 : 1),
-             m_explorer_top100_focused_indexing ? QStringLiteral(" Focused mode.") : QString());
+             m_explorer_top100_focused_indexing ? QStringLiteral(" High-resource mode.") : QString());
     const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
     if (m_explorer_top100_last_ui_update_ms <= 0 || now_ms - m_explorer_top100_last_ui_update_ms >= EXPLORER_TOP100_UI_REFRESH_MS) {
         m_explorer_top100_last_ui_update_ms = now_ms;

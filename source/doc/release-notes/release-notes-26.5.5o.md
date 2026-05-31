@@ -1,8 +1,8 @@
-# Defcoin Core Nu 26.5.5n Release Notes
+# Defcoin Core Nu 26.5.5o Release Notes
 
 Codename: `Core Memories`
 
-Defcoin Core Nu `26.5.5n` adds the first blockchain forensics surface to the
+Defcoin Core Nu `26.5.5o` adds the first blockchain forensics surface to the
 desktop wallet while keeping the chain, wallet, recovery, mining, and explorer
 behavior from the current `26.5` line.
 
@@ -65,12 +65,24 @@ behavior from the current `26.5` line.
 - Explorer indexing now processes blocks in batched RPC requests and batched
   SQLite writes. This removes the previous one-block-at-a-time 120 ms throttle
   and substantially improves initial index build speed on modern SSD systems.
+- Explorer indexing now has a clearer `Use more resources for indexing` mode.
+  It uses larger Explorer and Top 100 batches, larger SQLite cache settings,
+  fewer UI refreshes, and a best-effort process priority increase.
+- The fast-sync TCP/UDP selector no longer lets TCP-only peers bias the UDP
+  preference ratio. UDP-capable peers must get warmup probes before Nu declares
+  TCP favored.
+- Witness block-storage inspection now uses a bounded worker count derived from
+  Core's `-par` script-verification setting, then aggregates independent block
+  inspection results back into one ordered report.
+- Explorer Top 100 column headers now explain `Txs` and `UTXOs`, including why
+  high mining-payout addresses can show very different transaction and UTXO
+  ratios.
 - Explorer index progress and analytics summary text are now shown as separate
   stable lines, eliminating the short-lived `Loaded Top...` repaint flicker.
 
 ## Build Suffix
 
-`26.5.5n` is the current changed rebuild in the `26.5.5` line. Future changed
+`26.5.5o` is the current changed rebuild in the `26.5.5` line. Future changed
 rebuilds in the same release line should use the next letter suffix
 (`26.5.5d`, `26.5.5e`, and so on), while the inherited Core client version
 stays `0.21.5.5`.

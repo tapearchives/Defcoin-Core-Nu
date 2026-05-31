@@ -544,12 +544,28 @@ ColumnLayout {
                         helpText: "Delete only the Top 100 over-time checkpoint rows and ranges."
                         onClicked: NuService.resetExplorerTop100Timeline()
                     }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignLeft
+                    spacing: NuTokens.spaceMd
+
                     NuCheckBox {
-                        text: "Focused indexing"
+                        text: "Use more resources for indexing"
                         checked: NuService.explorerTop100FocusedIndexing
-                        enabled: !NuService.explorerTop100Scanning
-                        helpText: "Uses larger SQLite batches and refreshes status less often so this task can use more local disk and CPU. Core P2P networking stays active."
+                        helpText: "When enabled, Nu uses larger Explorer and Top 100 batches, larger SQLite cache settings, fewer UI refreshes, and tries to raise indexing priority. When off, indexing runs more cooperatively."
                         onToggled: NuService.explorerTop100FocusedIndexing = checked
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: NuService.explorerTop100FocusedIndexing
+                              ? "Best for a dedicated indexing run on a mostly idle machine."
+                              : "Cooperative mode backs off between batches so the desktop stays responsive."
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontSmall
+                        wrapMode: Text.WordWrap
                     }
                 }
 
@@ -722,6 +738,16 @@ ColumnLayout {
                     Layout.fillHeight: true
                     tableId: "internalExplorerRichList"
                     columns: ["", "Rank", "Address", "Balance", "Share", "Received", "Txs", "UTXOs"]
+                    columnTooltips: [
+                        "Pie-chart color used for this rich-list entry.",
+                        "Current rank by unspent balance.",
+                        "Defcoin address in the local Explorer index.",
+                        "Current unspent balance for this address.",
+                        "Share of the indexed spendable supply represented by this address.",
+                        "Total DFC received by outputs to this address in the local Explorer index.",
+                        "Transactions touching this address in the local Explorer index. One transaction can create or spend several outputs, so this is related to UTXOs but not the same count.",
+                        "Unspent transaction outputs currently controlled by this address. UTXOs are individual spendable pieces; mining payouts often create many small UTXOs, while later consolidation can reduce UTXOs without reducing transaction history."
+                    ]
                     columnTypes: ["swatch", "number", "address", "amount", "number", "amount", "number", "number"]
                     columnWeights: [0.25, 0.45, 3.1, 1.1, 0.75, 1.1, 0.55, 0.55]
                     rows: NuService.explorerRichList

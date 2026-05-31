@@ -48,6 +48,7 @@
 #include <algorithm>
 #include <cctype>
 #include <condition_variable>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -514,6 +515,59 @@ static bool BlockStorageMissingRequiredWitness(const CBlockIndex* pindex, const 
     return block.vtx.empty() || !block.vtx[0]->HasWitness();
 }
 
+static int NuIndexWorkerThreads()
+{
+    int script_threads = gArgs.GetArg("-par", DEFAULT_SCRIPTCHECK_THREADS);
+    if (script_threads <= 0) {
+        script_threads += GetNumCores();
+    }
+    script_threads = std::max(script_threads - 1, 0);
+    script_threads = std::min(script_threads, MAX_SCRIPTCHECK_THREADS);
+    return std::max(1, std::min(script_threads > 0 ? script_threads : 1, 8));
+}
+
+struct WitnessScanPartial {
+    int inspected_blocks{0};
+    int witness_required_blocks{0};
+    int block_bodies_read{0};
+    int first_missing_witness_height{-1};
+    int missing_witness_count{0};
+};
+
+static WitnessScanPartial InspectWitnessBlockRange(const std::vector<const CBlockIndex*>& indexes,
+                                                   size_t begin,
+                                                   size_t end,
+                                                   const Consensus::Params& consensus)
+{
+    WitnessScanPartial partial;
+    for (size_t i = begin; i < end; ++i) {
+        const CBlockIndex* pindex = indexes[i];
+        if (pindex == nullptr) continue;
+        ++partial.inspected_blocks;
+
+        if (pindex->nHeight < consensus.SegwitHeight) continue;
+        ++partial.witness_required_blocks;
+
+        bool missing_witness = false;
+        if (IsBlockPruned(pindex)) {
+            missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
+        } else {
+            CBlock block;
+            if (ReadBlockFromDisk(block, pindex, consensus)) {
+                ++partial.block_bodies_read;
+                missing_witness = BlockStorageMissingRequiredWitness(pindex, block, consensus);
+            } else {
+                missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
+            }
+        }
+
+        if (!missing_witness) continue;
+        if (partial.first_missing_witness_height < 0) partial.first_missing_witness_height = pindex->nHeight;
+        ++partial.missing_witness_count;
+    }
+    return partial;
+}
+
 static RPCHelpMan scanwitnessblockdata()
 {
     return RPCHelpMan{"scanwitnessblockdata",
@@ -534,6 +588,7 @@ static RPCHelpMan scanwitnessblockdata()
                         {RPCResult::Type::NUM, "inspected_blocks", "Number of active-chain block entries inspected."},
                         {RPCResult::Type::NUM, "witness_required_blocks", "Number of inspected blocks at or after SegWit activation."},
                         {RPCResult::Type::NUM, "block_bodies_read", "Number of local block bodies read from disk."},
+                        {RPCResult::Type::NUM, "worker_threads", "Worker threads used for independent block-body inspection, derived from -par and capped for disk safety."},
                         {RPCResult::Type::NUM, "next_height", "Next height to request when complete is false."},
                         {RPCResult::Type::BOOL, "complete", "Whether the requested range is fully inspected."},
                         {RPCResult::Type::BOOL, "missing_witness_found", "Whether this range found post-SegWit block storage without witness data."},
@@ -593,38 +648,37 @@ static RPCHelpMan scanwitnessblockdata()
         }
     }
 
+    const int block_count = static_cast<int>(indexes.size());
+    const int worker_count = std::max(1, std::min(NuIndexWorkerThreads(), block_count));
+    const size_t chunk = (indexes.size() + static_cast<size_t>(worker_count) - 1) / static_cast<size_t>(worker_count);
+    std::vector<std::future<WitnessScanPartial>> futures;
+    futures.reserve(worker_count);
+    for (int worker = 0; worker < worker_count; ++worker) {
+        const size_t begin = static_cast<size_t>(worker) * chunk;
+        if (begin >= indexes.size()) break;
+        const size_t end = std::min(indexes.size(), begin + chunk);
+        futures.emplace_back(std::async(std::launch::async, [&, begin, end]() {
+            return InspectWitnessBlockRange(indexes, begin, end, chainparams.GetConsensus());
+        }));
+    }
+
     int inspected_blocks = 0;
     int witness_required_blocks = 0;
     int block_bodies_read = 0;
-    int next_height = start_height;
+    const int next_height = scan_end_height + 1;
     int first_missing_witness_height = -1;
     int missing_witness_count = 0;
-
-    for (const CBlockIndex* pindex : indexes) {
-        if (pindex == nullptr) continue;
-        if (inspected_blocks > 0 && inspected_blocks % 2000 == 0) node.rpc_interruption_point();
-        ++inspected_blocks;
-        next_height = pindex->nHeight + 1;
-
-        if (pindex->nHeight < chainparams.GetConsensus().SegwitHeight) continue;
-        ++witness_required_blocks;
-
-        bool missing_witness = false;
-        if (IsBlockPruned(pindex)) {
-            missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
-        } else {
-            CBlock block;
-            if (ReadBlockFromDisk(block, pindex, chainparams.GetConsensus())) {
-                ++block_bodies_read;
-                missing_witness = BlockStorageMissingRequiredWitness(pindex, block, chainparams.GetConsensus());
-            } else {
-                missing_witness = !(pindex->nStatus & BLOCK_OPT_WITNESS);
-            }
+    for (auto& future : futures) {
+        node.rpc_interruption_point();
+        const WitnessScanPartial partial = future.get();
+        inspected_blocks += partial.inspected_blocks;
+        witness_required_blocks += partial.witness_required_blocks;
+        block_bodies_read += partial.block_bodies_read;
+        missing_witness_count += partial.missing_witness_count;
+        if (partial.first_missing_witness_height >= 0 &&
+            (first_missing_witness_height < 0 || partial.first_missing_witness_height < first_missing_witness_height)) {
+            first_missing_witness_height = partial.first_missing_witness_height;
         }
-
-        if (!missing_witness) continue;
-        if (first_missing_witness_height < 0) first_missing_witness_height = pindex->nHeight;
-        ++missing_witness_count;
     }
 
     UniValue result(UniValue::VOBJ);
@@ -635,6 +689,7 @@ static RPCHelpMan scanwitnessblockdata()
     result.pushKV("inspected_blocks", inspected_blocks);
     result.pushKV("witness_required_blocks", witness_required_blocks);
     result.pushKV("block_bodies_read", block_bodies_read);
+    result.pushKV("worker_threads", worker_count);
     result.pushKV("next_height", next_height);
     result.pushKV("complete", next_height > end_height);
     result.pushKV("missing_witness_found", first_missing_witness_height >= 0);

@@ -1,6 +1,6 @@
 # Defcoin Core Nu UI Implementation
 
-This directory contains the developer reference for Defcoin Core Nu 26.5.5n.
+This directory contains the developer reference for Defcoin Core Nu 26.5.5o.
 Nu is a Qt Quick interface that talks to the Defcoin Core backend through a
 small JSON-RPC service layer.
 

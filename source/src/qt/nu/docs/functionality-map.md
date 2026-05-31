@@ -1,4 +1,4 @@
-# Defcoin Core Nu 26.5.5n Functionality Map
+# Defcoin Core Nu 26.5.5o Functionality Map
 
 This map is the release checklist for preserving useful Litecoin Core wallet
 capabilities while reorganizing them into the Nu interface. Nu does not copy
