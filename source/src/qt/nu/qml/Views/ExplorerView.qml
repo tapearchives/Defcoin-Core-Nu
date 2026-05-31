@@ -552,16 +552,16 @@ ColumnLayout {
                     spacing: NuTokens.spaceMd
 
                     NuCheckBox {
-                        text: "Use more resources for indexing"
+                        text: "High intensity (uses more resources)"
                         checked: NuService.explorerTop100FocusedIndexing
-                        helpText: "When enabled, Nu uses larger Explorer and Top 100 batches, larger SQLite cache settings, fewer UI refreshes, and tries to raise indexing priority. When off, indexing only backs off between batches when the system already looks busy."
+                        helpText: "When enabled, Nu uses larger Explorer and Top 100 batches, larger SQLite cache settings, fewer UI refreshes, and tries to raise indexing priority. Use this for a dedicated indexing run on a mostly idle machine."
                         onToggled: NuService.explorerTop100FocusedIndexing = checked
                     }
 
                     Label {
                         Layout.fillWidth: true
                         text: NuService.explorerTop100FocusedIndexing
-                              ? "Best for a dedicated indexing run on a mostly idle machine."
+                              ? "High intensity is active; Nu will favor indexing speed over lighter background behavior."
                               : "Cooperative mode backs off only when system load is already high."
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontSmall

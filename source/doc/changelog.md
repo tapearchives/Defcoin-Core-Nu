@@ -1,8 +1,8 @@
 # Defcoin Core Changelog
 
-## 26.5.5p Core Memories
+## 26.5.5q Core Memories
 
-Defcoin Core Nu `26.5.5p` adds the first Forensics view for average users who
+Defcoin Core Nu `26.5.5q` adds the first Forensics view for average users who
 want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Added
@@ -43,9 +43,9 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
 
 ### Changed
 
-- Updated visible Nu release metadata to `26.5.5p`.
+- Updated visible Nu release metadata to `26.5.5q`.
 - Letter suffixes now identify every changed rebuild in this release line:
-  `26.5.5a`, `26.5.5b`, `26.5.5p`, and so on. The inherited Core client version
+  `26.5.5a`, `26.5.5b`, `26.5.5q`, and so on. The inherited Core client version
   remains `0.21.5.5`.
 - Added Forensics to the sidebar, View menu, app resources, and Build Notes.
 - Diagnostics > Status now reports sync method details, UDP transfer rate in
@@ -65,7 +65,7 @@ want to explore permanent OP_RETURN blockchain oddities without using RPC.
   `Failed` only after a UDP fast-sync exchange is attempted.
 - Explorer indexing now uses batched JSON-RPC calls and batched SQLite
   transactions instead of one delayed block request/write per UI tick.
-- The Explorer index control is now labeled `Use more resources for indexing`;
+- The Explorer index control is now labeled `High intensity (uses more resources)`;
   when enabled, Nu uses larger Explorer/Top 100 batches, larger SQLite cache
   settings, fewer UI refreshes, and a best-effort process priority increase.
 - The UDP/TCP fast-sync selector now excludes TCP-only peer traffic from the

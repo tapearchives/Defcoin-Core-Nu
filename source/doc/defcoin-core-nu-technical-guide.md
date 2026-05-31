@@ -8,7 +8,7 @@ attribution details in one place so they are not repeated across small notes.
 
 ## Overview
 
-Defcoin Core Nu `26.5.5p`, codename `Core Memories`, is a full-node desktop
+Defcoin Core Nu `26.5.5q`, codename `Core Memories`, is a full-node desktop
 wallet for the Defcoin network. It is derived from Litecoin Core `v0.21.5.5`
 and keeps the inherited Litecoin Core engine where that behavior is still
 correct for Defcoin. Nu adds a Qt Quick desktop shell, bundled backend launch
@@ -28,7 +28,7 @@ service. They should not be committed to source history.
 
 ## Release Identity
 
-- Release: `26.5.5p`
+- Release: `26.5.5q`
 - Codename: `Core Memories`
 - Backend baseline: Litecoin Core `v0.21.5.5`
 - Proof of work: Scrypt
@@ -39,9 +39,9 @@ service. They should not be committed to source history.
 - macOS bundle namespace: `org.defcoincore`
 
 The inherited numeric `CLIENT_VERSION` remains available where the upstream
-code expects it, but the public Defcoin Core Nu release identity is `26.5.5p`.
+code expects it, but the public Defcoin Core Nu release identity is `26.5.5q`.
 The peer User-Agent for this release should report a Defcoin prefix and the Nu
-release version, for example `/DefcoinCoreNu:26.5.5p/`.
+release version, for example `/DefcoinCoreNu:26.5.5q/`.
 
 ## Architecture
 
@@ -232,7 +232,7 @@ passes the request through RPC wrappers.
 
 ## Wallet Storage: BDB And SQL
 
-Nu `26.5.5p` follows Bitcoin Core's wallet-storage direction rather than
+Nu `26.5.5q` follows Bitcoin Core's wallet-storage direction rather than
 inventing a separate storage layer. Bitcoin Core v0.21 introduced SQLite-backed
 descriptor wallets, and current Bitcoin Core creates descriptor wallets in
 SQLite by default. Nu `26.5` and later keep that modern default while preserving
@@ -316,7 +316,7 @@ block data and does not change chain state.
 
 ## BIP39 Recovery Phrase Support
 
-Nu `26.5.5p` supports English BIP39 recovery phrases. Creation uses 12 words;
+Nu `26.5.5q` supports English BIP39 recovery phrases. Creation uses 12 words;
 restore accepts the standard BIP39 word counts of 12, 15, 18, 21, and 24 words.
 The implementation provides two user-facing paths:
 
@@ -421,7 +421,7 @@ cmake -S src/qt/nu/app -B build/nu-qml-macos \
   -DDEFCOIN_NU_CLI_BINARY="$SRC/src/defcoin-cli" \
   -DDEFCOIN_NU_TX_BINARY="$SRC/src/defcoin-tx" \
   -DDEFCOIN_NU_WALLET_BINARY="$SRC/src/defcoin-wallet" \
-  -DDEFCOIN_NU_RELEASE_NAME="26.5.5p" \
+  -DDEFCOIN_NU_RELEASE_NAME="26.5.5q" \
   -DDEFCOIN_NU_ENABLE_HELP=OFF
 
 cmake --build build/nu-qml-macos --target DefcoinCoreNuResources -- -j1
@@ -438,7 +438,7 @@ material.
 The Apple Silicon Nu release disk image is named:
 
 ```text
-Defcoin-Core-Nu-v26.5.5p-macOS-AppleSilicon.dmg
+Defcoin-Core-Nu-v26.5.5q-macOS-AppleSilicon.dmg
 ```
 
 ## Release And Publication Process
@@ -453,7 +453,7 @@ Before publishing:
 - seed lists include the five mainnet seed hosts above;
 - bundle metadata uses `org.defcoincore`;
 - `getnetworkinfo` reports a Defcoin User-Agent beginning with
-  `/DefcoinCoreNu:26.5.5p/`;
+  `/DefcoinCoreNu:26.5.5q/`;
 - platform packages are built from clean release inputs;
 - checksums and signatures are generated for release artifacts;
 - release notes describe only what ships in the release being published.
@@ -500,7 +500,7 @@ delivery, and release signing.
 - `README.md`: product overview, downloads, screenshots, and common build
   entry points.
 - `doc/README.md`: index of inherited and Defcoin-specific documentation.
-- `doc/release-notes/release-notes-26.5.5p.md`: current release notes.
+- `doc/release-notes/release-notes-26.5.5q.md`: current release notes.
 - `doc/license-and-attribution-notices.md`: license, dependency, artwork, and
   attribution notices.
 - `src/qt/nu/docs/`: Nu frontend implementation notes for developers.

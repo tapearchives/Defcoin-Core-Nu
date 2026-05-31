@@ -5237,8 +5237,8 @@ void NuRpcService::setExplorerTop100FocusedIndexing(bool enabled)
             ? QStringLiteral(" Process priority adjusted.")
             : (enabled ? QStringLiteral(" Process priority change was not permitted by the OS.") : QString());
         const QString mode_note = enabled
-            ? QStringLiteral("High-resource indexing enabled. Nu will use larger SQLite batches, bigger cache settings, and fewer UI refreshes.")
-            : QStringLiteral("High-resource indexing disabled. Nu will return to cooperative batch sizing and lighter UI cadence.");
+            ? QStringLiteral("High intensity indexing enabled. Nu will use larger SQLite batches, bigger cache settings, and fewer UI refreshes.")
+            : QStringLiteral("High intensity indexing disabled. Nu will return to cooperative batch sizing and lighter UI cadence.");
         if (m_explorer_top100_scanning) {
             m_explorer_top100_status = mode_note + priority_note;
         }
@@ -8712,7 +8712,7 @@ bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height
              QString::number(end),
              QString::number(m_explorer_top100_checkpoint_interval_blocks),
              m_explorer_top100_checkpoint_interval_blocks == 1 ? QString() : QStringLiteral("s"),
-             m_explorer_top100_focused_indexing ? QStringLiteral(" High-resource indexing is on.") : QString());
+             m_explorer_top100_focused_indexing ? QStringLiteral(" High intensity indexing is on.") : QString());
     return true;
 }
 
@@ -8959,7 +8959,7 @@ void NuRpcService::explorerTop100Step()
              QString::number(m_explorer_top100_events_written),
              QString::number(rows_read),
              QString::number(blocks_per_second, 'f', blocks_per_second >= 100.0 ? 0 : 1),
-             m_explorer_top100_focused_indexing ? QStringLiteral(" High-resource mode.") : QString());
+             m_explorer_top100_focused_indexing ? QStringLiteral(" High intensity mode.") : QString());
     const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
     if (m_explorer_top100_last_ui_update_ms <= 0 || now_ms - m_explorer_top100_last_ui_update_ms >= EXPLORER_TOP100_UI_REFRESH_MS) {
         m_explorer_top100_last_ui_update_ms = now_ms;
