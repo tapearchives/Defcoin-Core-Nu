@@ -302,9 +302,10 @@ int main(int argc, char* argv[])
     if (buildSmokeTest) {
         return 0;
     }
+    const bool allowMultiple = arguments.contains(QStringLiteral("--allow-multiple"));
 
     std::unique_ptr<QLockFile> singleInstanceLock;
-    if (!smokeTest && !arguments.contains(QStringLiteral("--allow-multiple"))) {
+    if (!smokeTest && !allowMultiple) {
         const QString dataDir = nuDefaultDataDir();
         QDir().mkpath(dataDir);
         if (anotherNuGuiProcessIsRunning()) {
@@ -384,6 +385,20 @@ int main(int argc, char* argv[])
     platform.setTrayIcon(appIcon);
     qmlRegisterSingletonInstance("Defcoin.Nu", 1, 0, "NuService", &service);
     qmlRegisterSingletonInstance("Defcoin.Nu", 1, 0, "NuPlatform", &platform);
+
+    bool duplicateGuiWarningShown = false;
+    if (!smokeTest && !allowMultiple) {
+        auto* duplicateGuiTimer = new QTimer(&app);
+        duplicateGuiTimer->setInterval(10000);
+        QObject::connect(duplicateGuiTimer, &QTimer::timeout, &app, [&duplicateGuiWarningShown] {
+            if (duplicateGuiWarningShown || !anotherNuGuiProcessIsRunning()) return;
+            duplicateGuiWarningShown = true;
+            QMessageBox::warning(nullptr,
+                                 QStringLiteral("Another Nu window is open"),
+                                 QStringLiteral("Another Defcoin Core Nu window is now running. Close one Nu window before doing wallet, explorer, or diagnostics work. Running two frontends against the same data directory can produce confusing status and competing wallet actions."));
+        });
+        duplicateGuiTimer->start();
+    }
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("NuBuildVersion"), QStringLiteral(DEFCOIN_NU_VERSION));
