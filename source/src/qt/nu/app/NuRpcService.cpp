@@ -60,6 +60,7 @@
 #include <cmath>
 #include <cctype>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -1587,6 +1588,124 @@ QJsonValue consoleTokenToJsonValue(const QString& token)
         if (ok) return value;
     }
     return trimmed;
+}
+
+QString rpcPromptForDisplay(const QString& method, const QString& params_json);
+
+struct ParsedConsoleCommand
+{
+    QString method;
+    QJsonArray params;
+    QString prompt;
+};
+
+QString paramsJsonForPrompt(const QJsonArray& params)
+{
+    if (params.isEmpty()) return QString();
+    return QString::fromUtf8(QJsonDocument(params).toJson(QJsonDocument::Compact));
+}
+
+bool parseConsoleCommandForRpc(QString command, QString params_json, ParsedConsoleCommand* parsed, QString* error)
+{
+    command = command.trimmed();
+    params_json = params_json.trimmed();
+    if (params_json.isEmpty() && command.startsWith(QLatin1Char('>'))) {
+        command = command.mid(1).trimmed();
+    }
+    if (params_json.isEmpty()
+        && command.size() >= 2
+        && ((command.startsWith(QLatin1Char('"')) && command.endsWith(QLatin1Char('"')))
+            || (command.startsWith(QLatin1Char('\'')) && command.endsWith(QLatin1Char('\''))))) {
+        command = command.mid(1, command.size() - 2).trimmed();
+    }
+    if (params_json.isEmpty() && command.contains(QRegularExpression(QStringLiteral("\\s")))) {
+        QString split_error;
+        const QStringList tokens = splitConsoleCommandLine(command, &split_error);
+        if (!split_error.isEmpty()) {
+            if (error) *error = split_error;
+            return false;
+        }
+        if (!tokens.isEmpty()) {
+            command = tokens.first();
+            QJsonArray parsed_params;
+            for (int i = 1; i < tokens.size(); ++i) {
+                parsed_params.push_back(consoleTokenToJsonValue(tokens.at(i)));
+            }
+            params_json = paramsJsonForPrompt(parsed_params);
+        }
+    }
+    if (command.isEmpty()) {
+        if (error) *error = QStringLiteral("Enter an RPC method name.");
+        return false;
+    }
+    if (!isSafeRpcMethodName(command)) {
+        if (error) *error = QStringLiteral("RPC method names may contain only letters, numbers, and underscores, up to 64 characters.");
+        return false;
+    }
+
+    constexpr int max_rpc_params_chars = 32768;
+    if (params_json.size() > max_rpc_params_chars) {
+        if (error) *error = QStringLiteral("RPC parameters are too large for the Nu console. Keep JSON parameter input under %1 characters.")
+            .arg(max_rpc_params_chars);
+        return false;
+    }
+
+    QJsonArray params;
+    if (!params_json.isEmpty()) {
+        QJsonParseError parse_error;
+        const QJsonDocument doc = QJsonDocument::fromJson(params_json.toUtf8(), &parse_error);
+        if (parse_error.error != QJsonParseError::NoError || !doc.isArray()) {
+            if (error) *error = QStringLiteral("Parameters must be a JSON array, for example: [\"address\", \"message\"]");
+            return false;
+        }
+        params = doc.array();
+    }
+
+    if (parsed) {
+        parsed->method = command;
+        parsed->params = params;
+        parsed->prompt = rpcPromptForDisplay(command, paramsJsonForPrompt(params));
+    }
+    return true;
+}
+
+QStringList splitConsolePasteCommands(const QString& text, QString* error)
+{
+    QString normalized = text.trimmed();
+    normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    normalized.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+
+    QStringList lines;
+    for (const QString& line : normalized.split(QLatin1Char('\n'))) {
+        const QString clean = line.trimmed();
+        if (!clean.isEmpty()) lines.push_back(clean);
+    }
+    if (lines.size() > 1) return lines;
+
+    QString split_error;
+    const QStringList tokens = splitConsoleCommandLine(normalized, &split_error);
+    if (!split_error.isEmpty()) {
+        if (error) *error = split_error;
+        return {};
+    }
+    if (tokens.size() <= 3 || tokens.first().compare(QStringLiteral("addnode"), Qt::CaseInsensitive) != 0) {
+        return {normalized};
+    }
+
+    QStringList commands;
+    int i = 0;
+    while (i < tokens.size()) {
+        if (i + 2 >= tokens.size() || tokens.at(i).compare(QStringLiteral("addnode"), Qt::CaseInsensitive) != 0) {
+            return {normalized};
+        }
+        const QString command = tokens.at(i + 2).toLower();
+        if (command != QLatin1String("add") && command != QLatin1String("remove") && command != QLatin1String("onetry")) {
+            return {normalized};
+        }
+        commands.push_back(QStringLiteral("addnode %1 %2").arg(tokens.at(i + 1), tokens.at(i + 2)));
+        i += 3;
+    }
+    return commands.size() > 1 ? commands : QStringList{normalized};
 }
 
 bool rpcMethodTakesSensitiveInput(const QString& method)
@@ -3899,10 +4018,62 @@ QString NuRpcService::syncTransportSpeedSummary() const
     };
 
     QStringList parts;
-    parts.push_back(QStringLiteral("TCP %1").arg(volume_rate(tcp_total, tcp_seconds)));
-    parts.push_back(QStringLiteral("UDP %1").arg(volume_rate(udp_total, udp_seconds)));
-    parts.push_back(QStringLiteral("Combined %1").arg(volume_rate(combined_total, combined_seconds)));
+    parts.push_back(QStringLiteral("combined %1").arg(volume_rate(combined_total, combined_seconds)));
+    parts.push_back(QStringLiteral("TCP blocks %1").arg(m_fast_sync_tcp_successes));
+    parts.push_back(QStringLiteral("UDP blocks %1").arg(m_lan_fast_sync_blocks_received));
+    parts.push_back(QStringLiteral("UDP failures %1").arg(m_fast_sync_udp_failures));
     return parts.join(QStringLiteral(" | "));
+}
+
+QString NuRpcService::fastSyncTcpSummary() const
+{
+    const qint64 total = m_sync_tcp_bytes_received + m_sync_tcp_bytes_sent;
+    const double seconds = total > 0 ? qMax(1.0, m_sync_tcp_active_seconds) : 0.0;
+    const QString avg = total > 0
+        ? QStringLiteral("%1/s avg over %2s")
+              .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
+                   QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1))
+        : QStringLiteral("-");
+    const QString ewma = m_fast_sync_tcp_ewma_blocks_per_second > 0.0
+        ? QStringLiteral("%1 blk/s recent").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
+        : QStringLiteral("recent warming");
+    return QStringLiteral("%1 | total %2 (in %3, out %4) | blocks %5 | %6 | samples %7 ok/%8 fail | packets Core-managed")
+        .arg(avg,
+             formatBytes(total),
+             formatBytes(m_sync_tcp_bytes_received),
+             formatBytes(m_sync_tcp_bytes_sent),
+             QString::number(m_fast_sync_tcp_successes),
+             ewma,
+             QString::number(m_fast_sync_tcp_successes),
+             QString::number(m_fast_sync_tcp_failures));
+}
+
+QString NuRpcService::fastSyncUdpSummary() const
+{
+    const qint64 total = m_lan_fast_sync_udp_bytes_received + m_lan_fast_sync_udp_bytes_sent;
+    const double seconds = (m_lan_fast_sync_udp_first_activity_ms > 0 && m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms)
+        ? qMax(1.0, double(m_lan_fast_sync_udp_last_activity_ms - m_lan_fast_sync_udp_first_activity_ms) / 1000.0)
+        : (total > 0 || m_fast_sync_udp_failures > 0 ? 1.0 : 0.0);
+    const QString avg = total > 0
+        ? QStringLiteral("%1/s avg over %2s")
+              .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
+                   QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1))
+        : QStringLiteral("-");
+    const QString ewma = m_fast_sync_udp_ewma_blocks_per_second > 0.0
+        ? QStringLiteral("%1 blk/s recent").arg(QString::number(m_fast_sync_udp_ewma_blocks_per_second, 'f', m_fast_sync_udp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
+        : QStringLiteral("recent warming");
+    return QStringLiteral("%1 | total %2 (in %3, out %4) | packets %5 in/%6 out | blocks %7 | %8 | samples %9 ok/%10 fail | retransmit/checksum %11")
+        .arg(avg,
+             formatBytes(total),
+             formatBytes(m_lan_fast_sync_udp_bytes_received),
+             formatBytes(m_lan_fast_sync_udp_bytes_sent),
+             QString::number(m_lan_fast_sync_udp_packets_received),
+             QString::number(m_lan_fast_sync_udp_packets_sent),
+             QString::number(m_lan_fast_sync_blocks_received),
+             ewma,
+             QString::number(m_fast_sync_udp_successes),
+             QString::number(m_fast_sync_udp_failures),
+             QString::number(m_lan_fast_sync_retransmit_errors));
 }
 
 QString NuRpcService::syncTransportDecisionSummary() const
@@ -3945,8 +4116,14 @@ void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 receive
         m_lan_fast_sync_udp_first_activity_ms = now;
     }
     m_lan_fast_sync_udp_last_activity_ms = now;
-    if (sent_bytes > 0) m_lan_fast_sync_udp_bytes_sent += sent_bytes;
-    if (received_bytes > 0) m_lan_fast_sync_udp_bytes_received += received_bytes;
+    if (sent_bytes > 0) {
+        m_lan_fast_sync_udp_bytes_sent += sent_bytes;
+        ++m_lan_fast_sync_udp_packets_sent;
+    }
+    if (received_bytes > 0) {
+        m_lan_fast_sync_udp_bytes_received += received_bytes;
+        ++m_lan_fast_sync_udp_packets_received;
+    }
 }
 
 void NuRpcService::recordFastSyncUdpSuccess(int height, qint64 latency_ms)
@@ -5313,70 +5490,63 @@ void NuRpcService::runRpcCommand(const QString& method, const QString& params_js
 {
     QString clean_method = method.trimmed();
     QString clean_params = params_json.trimmed();
-    if (clean_params.isEmpty() && clean_method.startsWith(QLatin1Char('>'))) {
-        clean_method = clean_method.mid(1).trimmed();
+    constexpr int max_console_command_chars = 32768;
+    if (clean_method.size() + clean_params.size() > max_console_command_chars) {
+        m_console_output += QStringLiteral("\n\n> [large paste omitted]\nConsole input is too large. Keep command input under %1 characters.")
+            .arg(QString::number(max_console_command_chars));
+        Q_EMIT consoleChanged();
+        return;
     }
-    if (clean_params.isEmpty()
-        && clean_method.size() >= 2
-        && ((clean_method.startsWith(QLatin1Char('"')) && clean_method.endsWith(QLatin1Char('"')))
-            || (clean_method.startsWith(QLatin1Char('\'')) && clean_method.endsWith(QLatin1Char('\''))))) {
-        clean_method = clean_method.mid(1, clean_method.size() - 2).trimmed();
+
+    QString batch_error;
+    const QStringList command_texts = clean_params.isEmpty()
+        ? splitConsolePasteCommands(clean_method, &batch_error)
+        : QStringList{clean_method};
+    if (!batch_error.isEmpty()) {
+        m_console_output += QStringLiteral("\n\n> %1\n%2")
+            .arg(singleLineLimited(clean_method, 120), batch_error);
+        Q_EMIT consoleChanged();
+        return;
     }
-    if (clean_params.isEmpty() && clean_method.contains(QRegularExpression(QStringLiteral("\\s")))) {
-        QString split_error;
-        const QStringList tokens = splitConsoleCommandLine(clean_method, &split_error);
-        if (!split_error.isEmpty()) {
+
+    auto parsed_commands = std::make_shared<QVector<ParsedConsoleCommand>>();
+    parsed_commands->reserve(command_texts.size());
+    for (const QString& command_text : command_texts) {
+        ParsedConsoleCommand parsed;
+        QString parse_error;
+        if (!parseConsoleCommandForRpc(command_text, command_texts.size() == 1 ? clean_params : QString(), &parsed, &parse_error)) {
             m_console_output += QStringLiteral("\n\n> %1\n%2")
-                .arg(singleLineLimited(clean_method, 120), split_error);
+                .arg(singleLineLimited(command_text, 120), parse_error);
             Q_EMIT consoleChanged();
             return;
         }
-        if (!tokens.isEmpty()) {
-            clean_method = tokens.first();
-            QJsonArray parsed_params;
-            for (int i = 1; i < tokens.size(); ++i) {
-                parsed_params.push_back(consoleTokenToJsonValue(tokens.at(i)));
-            }
-            clean_params = QString::fromUtf8(QJsonDocument(parsed_params).toJson(QJsonDocument::Compact));
-        }
+        parsed_commands->push_back(parsed);
     }
-    if (clean_method.isEmpty()) {
+
+    if (parsed_commands->isEmpty()) {
         m_console_output += QStringLiteral("\n\n> \nEnter an RPC method name.");
         Q_EMIT consoleChanged();
         return;
     }
-    if (!isSafeRpcMethodName(clean_method)) {
-        m_console_output += QStringLiteral("\n\n> %1\nRPC method names may contain only letters, numbers, and underscores, up to 64 characters.")
-            .arg(singleLineLimited(clean_method, 96));
-        Q_EMIT consoleChanged();
-        return;
-    }
 
-    QJsonArray params;
-    constexpr int max_rpc_params_chars = 32768;
-    if (clean_params.size() > max_rpc_params_chars) {
-        m_console_output += QStringLiteral("\n\n> %1 [params omitted]\nRPC parameters are too large for the Nu console. Keep JSON parameter input under %2 characters.")
-            .arg(clean_method, QString::number(max_rpc_params_chars));
-        Q_EMIT consoleChanged();
-        return;
-    }
-    if (!clean_params.isEmpty()) {
-        QJsonParseError parse_error;
-        const QJsonDocument doc = QJsonDocument::fromJson(clean_params.toUtf8(), &parse_error);
-        if (parse_error.error != QJsonParseError::NoError || !doc.isArray()) {
-            m_console_output += QStringLiteral("\n\n> %1\nParameters must be a JSON array, for example: [\"address\", \"message\"]")
-                .arg(rpcPromptForDisplay(clean_method, clean_params));
-            Q_EMIT consoleChanged();
-            return;
+    if (parsed_commands->size() > 1) {
+        if (m_console_output.startsWith(QStringLiteral("Enter an RPC method"))) {
+            m_console_output.clear();
         }
-        params = doc.array();
+        m_console_output += QStringLiteral("%1> [pasted batch]\nRunning %2 RPC commands.")
+            .arg(m_console_output.isEmpty() ? QString() : QStringLiteral("\n\n"),
+                 QString::number(parsed_commands->size()));
+        Q_EMIT consoleChanged();
     }
 
-    const QString prompt = rpcPromptForDisplay(clean_method, clean_params);
-    rpcCall(clean_method, params, wallet_scoped, [this, clean_method, prompt](const QJsonValue& result, const QString& error) {
+    auto run_next = std::make_shared<std::function<void(int)>>();
+    *run_next = [this, parsed_commands, wallet_scoped, run_next](int index) {
+        if (index >= parsed_commands->size()) return;
+        const ParsedConsoleCommand command = parsed_commands->at(index);
+        rpcCall(command.method, command.params, wallet_scoped, [this, command, run_next, index](const QJsonValue& result, const QString& error) {
         QString rendered;
         if (!error.isEmpty()) {
-            rendered = QStringLiteral("%1 failed:\n%2").arg(clean_method, error);
+            rendered = QStringLiteral("%1 failed:\n%2").arg(command.method, error);
         } else {
             QJsonDocument out_doc;
             if (result.isObject()) {
@@ -5401,13 +5571,16 @@ void NuRpcService::runRpcCommand(const QString& method, const QString& params_js
         if (m_console_output.startsWith(QStringLiteral("Enter an RPC method"))) {
             m_console_output.clear();
         }
-        m_console_output += QStringLiteral("%1> %2\n%3").arg(m_console_output.isEmpty() ? QString() : QStringLiteral("\n\n"), prompt, rendered.trimmed());
+        m_console_output += QStringLiteral("%1> %2\n%3").arg(m_console_output.isEmpty() ? QString() : QStringLiteral("\n\n"), command.prompt, rendered.trimmed());
         constexpr int max_console_chars = 80000;
         if (m_console_output.size() > max_console_chars) {
             m_console_output = m_console_output.right(max_console_chars);
         }
         Q_EMIT consoleChanged();
-    });
+            (*run_next)(index + 1);
+        });
+    };
+    (*run_next)(0);
 }
 
 void NuRpcService::rebuildNodeMetrics()
@@ -5420,7 +5593,11 @@ void NuRpcService::rebuildNodeMetrics()
         metricRow(QStringLiteral("Syncing"), sync_value,
                   QStringLiteral("Blockchain sync progress, current sync state, and only the transport methods that have actually carried sync traffic during this Nu session.")),
         metricRow(QStringLiteral("Syncing avg speeds"), syncTransportSpeedSummary(),
-                  QStringLiteral("Session-average sync throughput by transport. TCP uses Core network byte deltas while syncing. UDP uses fast-sync datagrams and includes timeout/retry time so failures reduce the average.")),
+                  QStringLiteral("Combined session-average sync throughput. UDP timing includes failed attempts and cooldown/retry time so failed probes reduce the average instead of being ignored.")),
+        metricRow(QStringLiteral("Fast Sync TCP"), fastSyncTcpSummary(),
+                  QStringLiteral("TCP/Core sync totals for this Nu session. Packet counts are Core-managed and not exposed here; block counts are inferred from active-chain height increases not attributed to UDP.")),
+        metricRow(QStringLiteral("Fast Sync UDP"), fastSyncUdpSummary(),
+                  QStringLiteral("UDP fast-sync totals for this Nu session. Average speed includes elapsed time from failed UDP attempts, checksum failures, timeouts, and retries so the protocol comparison is not inflated by ignoring failures.")),
         metricRow(QStringLiteral("Fast-sync favor"), syncTransportDecisionSummary(),
                   QStringLiteral("Adaptive TCP/UDP block-transfer preference. Nu uses recent accepted-block timing, reliability, and occasional probes so a slower protocol can recover if conditions change.")),
         metricRow(QStringLiteral("Fast-sync probe"), syncTransportProbeSummary(),

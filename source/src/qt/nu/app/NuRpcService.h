@@ -582,6 +582,8 @@ private:
     QString lanFastSyncMethodSummary() const;
     QString lanFastSyncRateSummary() const;
     QString syncTransportSpeedSummary() const;
+    QString fastSyncTcpSummary() const;
+    QString fastSyncUdpSummary() const;
     QString syncTransportDecisionSummary() const;
     QString syncTransportProbeSummary() const;
     void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes);
@@ -892,6 +894,8 @@ private:
     qint64 m_lan_fast_sync_bytes_received = 0;
     qint64 m_lan_fast_sync_udp_bytes_received = 0;
     qint64 m_lan_fast_sync_udp_bytes_sent = 0;
+    qint64 m_lan_fast_sync_udp_packets_received = 0;
+    qint64 m_lan_fast_sync_udp_packets_sent = 0;
     qint64 m_lan_fast_sync_udp_first_activity_ms = 0;
     qint64 m_lan_fast_sync_udp_last_activity_ms = 0;
     qint64 m_lan_fast_sync_started_ms = 0;
