@@ -1,6 +1,9 @@
 #include "NuRpcService.h"
 #include "NuPlatformIntegration.h"
 #include "NuVelopackUpdater.h"
+#if defined(__APPLE__)
+#include "MacHelp.h"
+#endif
 
 #include <QApplication>
 #include <QColor>
@@ -272,6 +275,9 @@ bool anotherNuGuiProcessIsRunning()
 
 int main(int argc, char* argv[])
 {
+#if defined(Q_OS_MACOS)
+    PrepareDefcoinNuMacLaunchState();
+#endif
     QApplication app(argc, argv);
     QApplication::setApplicationName("Defcoin Core Nu");
     QApplication::setApplicationDisplayName("Defcoin Core Nu");

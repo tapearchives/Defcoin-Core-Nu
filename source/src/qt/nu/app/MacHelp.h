@@ -4,5 +4,6 @@
 #include <QString>
 
 bool OpenDefcoinNuHelpBook(const QString& page);
+void PrepareDefcoinNuMacLaunchState();
 
 #endif // DEFCOIN_NU_MAC_HELP_H

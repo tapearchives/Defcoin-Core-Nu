@@ -5,6 +5,30 @@
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
 
+void PrepareDefcoinNuMacLaunchState()
+{
+    @autoreleasepool {
+        NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setBool:YES forKey:@"ApplePersistenceIgnoreState"];
+        [defaults setBool:NO forKey:@"NSQuitAlwaysKeepsWindows"];
+        [defaults setBool:NO forKey:@"NSWindowRestoresWorkspaceAtLaunch"];
+        [defaults synchronize];
+
+        NSArray<NSURL*>* libraryURLs = [[NSFileManager defaultManager] URLsForDirectory:NSLibraryDirectory
+                                                                              inDomains:NSUserDomainMask];
+        NSURL* libraryURL = [libraryURLs firstObject];
+        if (!libraryURL) {
+            return;
+        }
+
+        NSURL* savedStateURL = [[libraryURL URLByAppendingPathComponent:@"Saved Application State"
+                                                             isDirectory:YES]
+            URLByAppendingPathComponent:@"org.defcoincore.DefcoinCoreNu.savedState"
+                            isDirectory:YES];
+        [[NSFileManager defaultManager] removeItemAtURL:savedStateURL error:nil];
+    }
+}
+
 bool OpenDefcoinNuHelpBook(const QString& page)
 {
     @autoreleasepool {

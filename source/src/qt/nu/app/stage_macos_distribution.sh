@@ -49,7 +49,13 @@ done < <(otool -l "$APP_EXE" | awk '
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_EXE" 2>/dev/null || true
 xattr -cr "$DEST_APP" || true
 
-codesign --force --deep --sign - "$DEST_APP" >/dev/null
+find "$DEST_APP/Contents" -type f -print0 | while IFS= read -r -d '' candidate; do
+  if file -b "$candidate" | grep -q 'Mach-O'; then
+    chmod u+w "$candidate" 2>/dev/null || true
+    codesign --force --sign - --timestamp=none "$candidate" >/dev/null
+  fi
+done
+codesign --force --sign - --timestamp=none "$DEST_APP" >/dev/null
 codesign --verify --deep --strict --verbose=4 "$DEST_APP"
 
 DMG_STAGE="$(mktemp -d /tmp/defcoin-nu-dmg-stage.XXXXXX)"
