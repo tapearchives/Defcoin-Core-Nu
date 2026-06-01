@@ -425,13 +425,17 @@ public:
                                                     const QString& wif_mode,
                                                     int count);
     Q_INVOKABLE void createWalletWithRecoveryPhrase(const QString& wallet_name,
-                                                    const QString& phrase);
+                                                    const QString& phrase,
+                                                    bool encrypt = false,
+                                                    const QString& passphrase = QString());
     Q_INVOKABLE void restoreWalletFromRecoveryPhrase(const QString& wallet_name,
                                                      const QString& phrase,
                                                      const QString& mode,
                                                      const QString& derivation_path,
                                                      const QString& wif_mode,
-                                                     int range);
+                                                     int range,
+                                                     bool encrypt = false,
+                                                     const QString& passphrase = QString());
     Q_INVOKABLE void cancelRecovery();
     Q_INVOKABLE QVariantMap convertCompatibilityEncoding(const QString& text) const;
     Q_INVOKABLE void chooseMinerExecutable();
@@ -660,6 +664,7 @@ private:
     void importRecoveryDescriptorsWithRescan(const QVector<QPair<QString, QString>>& descriptors, int range);
     void importRecoveryDescriptorsUntilEmpty(const QVector<QPair<QString, QString>>& descriptors, int empty_gap);
     void summarizeCompletedRecoveryImport(int import_range, const QStringList& tried_methods = {});
+    void lockRecoveryWalletIfNeeded();
     QString currentNuVersion() const;
     QString selectedUpdateAssetNeedle() const;
     QString updateDownloadDirectory() const;
@@ -758,6 +763,7 @@ private:
     QString m_recovery_current_method;
     QString m_recovery_elapsed = QStringLiteral("Not running");
     QString m_recovery_eta = QStringLiteral("Unknown");
+    bool m_recovery_lock_after_restore = false;
     QElapsedTimer m_recovery_timer;
     PendingUpdate m_pending_update;
     QFile* m_update_download_file = nullptr;

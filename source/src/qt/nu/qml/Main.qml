@@ -1171,6 +1171,18 @@ ApplicationWindow {
                 messageDialog.open()
                 return false
             }
+            if (createRecoveryEncrypt.checked && createRecoveryPassphrase.text !== createRecoveryPassphraseConfirm.text) {
+                messageDialog.title = qsTr("Wallet not created")
+                messageDialog.text = qsTr("The wallet passphrase and confirmation do not match.")
+                messageDialog.open()
+                return false
+            }
+            if (createRecoveryEncrypt.checked && createRecoveryPassphrase.text.length < 8) {
+                messageDialog.title = qsTr("Wallet not created")
+                messageDialog.text = qsTr("Enter a wallet passphrase of at least 8 characters, or turn off Encrypt recovered wallet.")
+                messageDialog.open()
+                return false
+            }
             return true
         }
 
@@ -1200,6 +1212,39 @@ ApplicationWindow {
             maximumLength: 128
             helpText: qsTr("Use a new wallet name up to 128 characters. Recovery phrase creation never overwrites an existing wallet.")
             onAccepted: createRecoveryWalletDialog.requestAccept()
+        }
+
+        NuCheckBox {
+            id: createRecoveryEncrypt
+            text: qsTr("Encrypt recovered wallet")
+            checked: true
+            helpText: qsTr("Recommended. Encrypts the new recovery wallet before Nu sets its seed. You will need this passphrase to spend coins.")
+        }
+
+        NuTextField {
+            id: createRecoveryPassphrase
+            Layout.fillWidth: true
+            visible: createRecoveryEncrypt.checked
+            enabled: visible
+            echoMode: TextInput.Password
+            placeholderText: qsTr("Wallet passphrase")
+            helpText: qsTr("Use at least 8 characters. Nu uses it locally to encrypt and temporarily unlock the new wallet for seed setup.")
+            onAccepted: createRecoveryWalletDialog.requestAccept()
+            Keys.onReturnPressed: createRecoveryWalletDialog.requestAccept()
+            Keys.onEnterPressed: createRecoveryWalletDialog.requestAccept()
+        }
+
+        NuTextField {
+            id: createRecoveryPassphraseConfirm
+            Layout.fillWidth: true
+            visible: createRecoveryEncrypt.checked
+            enabled: visible
+            echoMode: TextInput.Password
+            placeholderText: qsTr("Confirm wallet passphrase")
+            helpText: qsTr("Re-enter the passphrase to catch typing mistakes before the recovery wallet is created.")
+            onAccepted: createRecoveryWalletDialog.requestAccept()
+            Keys.onReturnPressed: createRecoveryWalletDialog.requestAccept()
+            Keys.onEnterPressed: createRecoveryWalletDialog.requestAccept()
         }
 
         TextArea {
@@ -1262,10 +1307,16 @@ ApplicationWindow {
             }
         }
 
-        onAccepted: NuService.createWalletWithRecoveryPhrase(createRecoveryWalletName.text, generatedPhrase)
+        onAccepted: NuService.createWalletWithRecoveryPhrase(createRecoveryWalletName.text,
+                                                             generatedPhrase,
+                                                             createRecoveryEncrypt.checked,
+                                                             createRecoveryPassphrase.text)
         onClosed: {
             generatedPhrase = ""
             createRecoveryWalletName.text = ""
+            createRecoveryEncrypt.checked = true
+            createRecoveryPassphrase.text = ""
+            createRecoveryPassphraseConfirm.text = ""
             createRecoveryPhrase.text = ""
             createRecoveryPhraseConfirm.text = ""
         }
@@ -1643,6 +1694,18 @@ ApplicationWindow {
                 messageDialog.open()
                 return false
             }
+            if (restoreRecoveryEncrypt.checked && restoreRecoveryPassphrase.text !== restoreRecoveryPassphraseConfirm.text) {
+                messageDialog.title = qsTr("Wallet not restored")
+                messageDialog.text = qsTr("The wallet passphrase and confirmation do not match.")
+                messageDialog.open()
+                return false
+            }
+            if (restoreRecoveryEncrypt.checked && restoreRecoveryPassphrase.text.length < 8) {
+                messageDialog.title = qsTr("Wallet not restored")
+                messageDialog.text = qsTr("Enter a wallet passphrase of at least 8 characters, or turn off Encrypt recovered wallet.")
+                messageDialog.open()
+                return false
+            }
             return true
         }
 
@@ -1670,6 +1733,39 @@ ApplicationWindow {
             placeholderText: qsTr("New restored wallet name")
             maximumLength: 128
             helpText: qsTr("Use a new wallet name up to 128 characters. Restore never overwrites an existing wallet.")
+        }
+
+        NuCheckBox {
+            id: restoreRecoveryEncrypt
+            text: qsTr("Encrypt recovered wallet")
+            checked: true
+            helpText: qsTr("Recommended. Encrypts the newly created recovery wallet before imported keys are added. Nu temporarily unlocks it only long enough to import and rescan, then locks it again.")
+        }
+
+        NuTextField {
+            id: restoreRecoveryPassphrase
+            Layout.fillWidth: true
+            visible: restoreRecoveryEncrypt.checked
+            enabled: visible
+            echoMode: TextInput.Password
+            placeholderText: qsTr("Wallet passphrase")
+            helpText: qsTr("Use at least 8 characters. This protects the recovered private keys stored in the wallet file.")
+            onAccepted: restoreRecoveryWalletDialog.requestAccept()
+            Keys.onReturnPressed: restoreRecoveryWalletDialog.requestAccept()
+            Keys.onEnterPressed: restoreRecoveryWalletDialog.requestAccept()
+        }
+
+        NuTextField {
+            id: restoreRecoveryPassphraseConfirm
+            Layout.fillWidth: true
+            visible: restoreRecoveryEncrypt.checked
+            enabled: visible
+            echoMode: TextInput.Password
+            placeholderText: qsTr("Confirm wallet passphrase")
+            helpText: qsTr("Re-enter the wallet passphrase to catch typing mistakes before recovery starts.")
+            onAccepted: restoreRecoveryWalletDialog.requestAccept()
+            Keys.onReturnPressed: restoreRecoveryWalletDialog.requestAccept()
+            Keys.onEnterPressed: restoreRecoveryWalletDialog.requestAccept()
         }
 
         NuComboBox {
@@ -2285,10 +2381,15 @@ ApplicationWindow {
                                                       restoreRecoveryMode.currentIndex === 0 ? "auto" : (restoreRecoveryMode.currentIndex === 1 ? "external" : "core"),
                                                       restoreRecoveryPath.text,
                                                       restoreRecoveryWalletDialog.selectedWifMode(),
-                                                      restoreRecoveryWalletDialog.selectedImportRange())
+                                                      restoreRecoveryWalletDialog.selectedImportRange(),
+                                                      restoreRecoveryEncrypt.checked,
+                                                      restoreRecoveryPassphrase.text)
         }
         onClosed: {
             restoreRecoveryWalletName.text = ""
+            restoreRecoveryEncrypt.checked = true
+            restoreRecoveryPassphrase.text = ""
+            restoreRecoveryPassphraseConfirm.text = ""
             restoreRecoveryMode.currentIndex = 0
             restoreRecoveryPathPreset.currentIndex = 0
             restoreRecoveryPath.text = "m/44'/1337'/0'/0/*"

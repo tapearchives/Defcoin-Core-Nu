@@ -5809,6 +5809,7 @@ void NuRpcService::setRecoveryState(bool active, const QString& status, int prog
         m_recovery_finished == finished &&
         m_recovery_status == status &&
         m_recovery_progress == clean_progress) {
+        if (!active) lockRecoveryWalletIfNeeded();
         return;
     }
     m_recovery_active = active;
@@ -5816,6 +5817,7 @@ void NuRpcService::setRecoveryState(bool active, const QString& status, int prog
     m_recovery_status = status;
     m_recovery_progress = clean_progress;
     Q_EMIT recoveryChanged();
+    if (!active) lockRecoveryWalletIfNeeded();
 }
 
 void NuRpcService::setRecoveryCurrentMethod(const QString& method)
@@ -5897,6 +5899,18 @@ void NuRpcService::cancelRecovery()
     rpcCall(QStringLiteral("abortrescan"), {}, true, [this](const QJsonValue&, const QString& error) {
         if (!error.isEmpty() && !error.contains(QStringLiteral("not currently rescanning"), Qt::CaseInsensitive)) {
             appendLaunchDiagnostic(QStringLiteral("Recovery cancel: abortrescan returned: %1").arg(error));
+        }
+    });
+}
+
+void NuRpcService::lockRecoveryWalletIfNeeded()
+{
+    if (!m_recovery_lock_after_restore) return;
+    m_recovery_lock_after_restore = false;
+    if (!m_wallet_selected) return;
+    rpcCall(QStringLiteral("walletlock"), {}, true, [this](const QJsonValue&, const QString& error) {
+        if (!error.isEmpty() && !error.contains(QStringLiteral("unencrypted wallet"), Qt::CaseInsensitive)) {
+            appendLaunchDiagnostic(QStringLiteral("Recovery wallet lock: walletlock returned: %1").arg(error));
         }
     });
 }
@@ -10144,9 +10158,12 @@ void NuRpcService::createWallet(const QString& name,
     });
 }
 
-void NuRpcService::createWalletWithRecoveryPhrase(const QString& wallet_name, const QString& phrase)
+void NuRpcService::createWalletWithRecoveryPhrase(const QString& wallet_name,
+                                                  const QString& phrase,
+                                                  bool encrypt,
+                                                  const QString& passphrase)
 {
-    restoreWalletFromRecoveryPhrase(wallet_name, phrase, QStringLiteral("core"), QString(), QStringLiteral("current"), 0);
+    restoreWalletFromRecoveryPhrase(wallet_name, phrase, QStringLiteral("core"), QString(), QStringLiteral("current"), 0, encrypt, passphrase);
 }
 
 void NuRpcService::previewRecoveryPhraseAddresses(const QString& phrase,
@@ -10241,7 +10258,9 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
                                                    const QString& mode,
                                                    const QString& derivation_path,
                                                    const QString& wif_mode,
-                                                   int range)
+                                                   int range,
+                                                   bool encrypt,
+                                                   const QString& passphrase)
 {
     if (!requireLocalRecoveryRpc(QStringLiteral("Wallet not restored"))) return;
 
@@ -10262,6 +10281,12 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
         setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
         Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
                            QStringLiteral("Choose a new wallet name. Recovery never overwrites an existing wallet."));
+        return;
+    }
+    if (encrypt && passphrase.size() < 8) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                           QStringLiteral("Enter a wallet encryption passphrase of at least 8 characters, or turn off Encrypt recovered wallet."));
         return;
     }
 
@@ -10324,18 +10349,19 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
     create_params << clean_wallet_name
                   << false
                   << true
-                  << QJsonValue()
+                  << (encrypt ? QJsonValue(passphrase) : QJsonValue())
                   << false
                   << false
                   << true;
 
     setRecoveryState(true, QStringLiteral("Creating recovery wallet..."), 25);
-    rpcCall(QStringLiteral("createwallet"), create_params, false, [this, clean_wallet_name, wif, descriptors, descriptor_scan_mode, gap_scan_mode, range](const QJsonValue&, const QString& error) {
+    rpcCall(QStringLiteral("createwallet"), create_params, false, [this, clean_wallet_name, wif, descriptors, descriptor_scan_mode, gap_scan_mode, range, encrypt, passphrase](const QJsonValue&, const QString& error) {
         if (!error.isEmpty()) {
             setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
             Q_EMIT userMessage(QStringLiteral("Wallet not restored"), error);
             return;
         }
+        m_recovery_lock_after_restore = encrypt;
 
         const auto continue_restore = [this, clean_wallet_name, wif, descriptors, descriptor_scan_mode, gap_scan_mode, range]() {
             setCurrentWalletInternal(clean_wallet_name);
@@ -10362,15 +10388,32 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
             }
         };
 
-        setRecoveryState(true, QStringLiteral("Loading recovery wallet..."), 30);
-        rpcCall(QStringLiteral("loadwallet"), {clean_wallet_name, true}, false, [this, clean_wallet_name, continue_restore](const QJsonValue&, const QString& load_error) {
-            if (load_error.isEmpty() || load_error.contains(QStringLiteral("already loaded"), Qt::CaseInsensitive)) {
-                continue_restore();
-                return;
-            }
-            setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
-            Q_EMIT userMessage(QStringLiteral("Wallet not restored"), load_error);
-        });
+        const auto load_recovery_wallet = [this, clean_wallet_name, continue_restore, encrypt, passphrase]() {
+            setRecoveryState(true, QStringLiteral("Loading recovery wallet..."), 30);
+            rpcCall(QStringLiteral("loadwallet"), {clean_wallet_name, true}, false, [this, clean_wallet_name, continue_restore, encrypt, passphrase](const QJsonValue&, const QString& load_error) {
+                if (load_error.isEmpty() || load_error.contains(QStringLiteral("already loaded"), Qt::CaseInsensitive)) {
+                    setCurrentWalletInternal(clean_wallet_name);
+                    if (!encrypt) {
+                        continue_restore();
+                        return;
+                    }
+                    setRecoveryState(true, QStringLiteral("Unlocking encrypted recovery wallet for import..."), 35);
+                    rpcCall(QStringLiteral("walletpassphrase"), {passphrase, 86400}, true, [this, continue_restore](const QJsonValue&, const QString& unlock_error) {
+                        if (!unlock_error.isEmpty()) {
+                            setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                            Q_EMIT userMessage(QStringLiteral("Wallet not restored"), unlock_error);
+                            return;
+                        }
+                        continue_restore();
+                    });
+                    return;
+                }
+                setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                Q_EMIT userMessage(QStringLiteral("Wallet not restored"), load_error);
+            });
+        };
+
+        load_recovery_wallet();
     });
 }
 
