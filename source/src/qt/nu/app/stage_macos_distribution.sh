@@ -106,30 +106,36 @@ for x in range(0, rw, 24 * scale):
     for y in range(0, rh, 24 * scale):
         draw.ellipse([x, y, x + 1 * scale, y + 1 * scale], fill=(246, 246, 242, 22))
 
+def blurred_ellipse(size, center, radius, color, blur):
+    pad = (radius + blur + 4) * scale
+    layer = Image.new("RGBA", (rw + pad * 2, rh + pad * 2), (0, 0, 0, 0))
+    layer_draw = ImageDraw.Draw(layer, "RGBA")
+    cx = center[0] * scale + pad
+    cy = center[1] * scale + pad
+    rr = radius * scale
+    layer_draw.ellipse([cx - rr, cy - rr, cx + rr, cy + rr], fill=color)
+    layer = layer.filter(ImageFilter.GaussianBlur(blur * scale))
+    return layer.crop((pad, pad, pad + rw, pad + rh))
+
 purple_glow = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
-glow_draw = ImageDraw.Draw(purple_glow, "RGBA")
-for radius, alpha in [(310, 66), (240, 74), (180, 72), (120, 64)]:
-    glow_draw.ellipse(
-        [(-32 - radius) * scale, (18 - radius) * scale,
-         (-32 + radius) * scale, (18 + radius) * scale],
-        fill=(92, 41, 138, alpha),
-    )
-purple_glow = purple_glow.filter(ImageFilter.GaussianBlur(34 * scale))
+for radius, alpha in [(360, 54), (275, 62), (205, 64), (135, 54)]:
+    purple_glow.alpha_composite(blurred_ellipse((rw, rh), (-74, -22), radius, (92, 41, 138, alpha), 40))
 base.alpha_composite(purple_glow)
 
 if os.path.exists(logo_path):
     logo = Image.open(logo_path).convert("RGBA")
     logo = ImageEnhance.Contrast(logo).enhance(1.05)
-    logo.thumbnail((330 * scale, 330 * scale), Image.Resampling.LANCZOS)
-    glow = Image.new("RGBA", (logo.width + 80 * scale, logo.height + 80 * scale), (0, 0, 0, 0))
+    logo.thumbnail((292 * scale, 292 * scale), Image.Resampling.LANCZOS)
+    glow = Image.new("RGBA", (logo.width + 144 * scale, logo.height + 144 * scale), (0, 0, 0, 0))
     alpha = logo.getchannel("A")
     glow_alpha = Image.new("L", glow.size, 0)
-    glow_alpha.paste(alpha.filter(ImageFilter.GaussianBlur(18 * scale)), (40 * scale, 40 * scale))
+    glow_alpha.paste(alpha.filter(ImageFilter.GaussianBlur(22 * scale)), (72 * scale, 72 * scale))
     glow_layer = Image.new("RGBA", glow.size, (215, 196, 62, 0))
-    glow_layer.putalpha(glow_alpha.point(lambda p: int(p * 0.24)))
-    glow.alpha_composite(glow_layer, (40 * scale, 40 * scale))
-    glow.alpha_composite(logo, (40 * scale, 40 * scale))
-    base.alpha_composite(glow, (-82 * scale, -94 * scale))
+    glow_layer.putalpha(glow_alpha.point(lambda p: int(p * 0.18)))
+    glow.alpha_composite(glow_layer, (72 * scale, 72 * scale))
+    glow.alpha_composite(logo, (72 * scale, 72 * scale))
+    # Keep the coin stack clearly in the corner and away from the app icon.
+    base.alpha_composite(glow, (-170 * scale, -122 * scale))
 
 def font(size, bold=False):
     candidates = [
@@ -143,26 +149,73 @@ def font(size, bold=False):
             return ImageFont.truetype(path, size * scale)
     return ImageFont.load_default()
 
-title_font = font(52, True)
-subtitle_font = font(17, False)
-word_x = 252 * scale
-word_y = 58 * scale
-def_width = draw.textlength("DEF", font=title_font)
-draw.text((word_x + 3, word_y + 3), "DEF", font=title_font, fill=(0, 0, 0, 100))
-draw.text((word_x + def_width + 8 * scale + 3, word_y + 3), "COIN", font=title_font, fill=(0, 0, 0, 100))
-draw.text((word_x + 3, word_y + 51 * scale + 3), "CORE NU", font=title_font, fill=(0, 0, 0, 100))
-draw.text((word_x, word_y), "DEF", font=title_font, fill=(246, 246, 242, 255))
-draw.text((word_x + def_width + 8 * scale, word_y), "COIN", font=title_font, fill=(246, 246, 242, 255))
-draw.text((word_x, word_y + 51 * scale), "CORE NU", font=title_font, fill=(246, 246, 242, 255))
+def ui_font(size):
+    candidates = [
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size * scale)
+    return ImageFont.load_default()
 
-arrow_y = 268 * scale
+title_font = font(58, True)
+subtitle_font = ui_font(13)
+
+def draw_logo_wordmark(draw, x, y, fill, shadow=None):
+    # Mirrors main.cpp splash construction: Avenir Next Condensed ExtraBold,
+    # absolute letter spacing 1.15, DEF + COIN as separate runs with a 2 px join.
+    letter_spacing = 1.15 * scale
+    join_gap = 2 * scale
+    line_gap = 50 * scale
+    def draw_spaced(text, tx, ty, color):
+        cursor = tx
+        for ch in text:
+            draw.text((cursor, ty), ch, font=title_font, fill=color)
+            cursor += draw.textlength(ch, font=title_font) + letter_spacing
+        return cursor
+    def measure_spaced(text):
+        if not text:
+            return 0
+        return sum(draw.textlength(ch, font=title_font) for ch in text) + letter_spacing * max(0, len(text) - 1)
+    core_width = measure_spaced("CORE NU")
+    coin_width = measure_spaced("COIN")
+    def_width = measure_spaced("DEF")
+    def draw_lines(offset_x, offset_y, color):
+        draw_spaced("DEF", x + offset_x, y + offset_y, color)
+        draw_spaced("COIN", x + offset_x + def_width + join_gap, y + offset_y, color)
+        draw_spaced("CORE NU", x + offset_x, y + line_gap + offset_y, color)
+    if shadow:
+        draw_lines(3 * scale, 3 * scale, shadow)
+    draw_lines(0, 0, fill)
+    return max(def_width + join_gap + coin_width, core_width)
+
+word_x = 254 * scale
+word_y = 58 * scale
+draw_logo_wordmark(draw, word_x, word_y, (246, 246, 242, 255), (0, 0, 0, 110))
+
+# Finder draws icon labels in dark text. Add quiet light label fields behind
+# the text so names remain readable on the dark purple background.
+label_bg = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
+label_draw = ImageDraw.Draw(label_bg, "RGBA")
+for box in [
+    (150 * scale, 330 * scale, 288 * scale, 358 * scale),
+    (468 * scale, 330 * scale, 558 * scale, 358 * scale),
+]:
+    label_draw.rounded_rectangle(box, radius=8 * scale, fill=(246, 246, 242, 178))
+label_bg = label_bg.filter(ImageFilter.GaussianBlur(0.35 * scale))
+base.alpha_composite(label_bg)
+
+arrow_y = 250 * scale
 arrow = [
     (286 * scale, arrow_y - 7 * scale),
-    (404 * scale, arrow_y - 7 * scale),
-    (404 * scale, arrow_y - 20 * scale),
-    (438 * scale, arrow_y),
-    (404 * scale, arrow_y + 20 * scale),
-    (404 * scale, arrow_y + 7 * scale),
+    (406 * scale, arrow_y - 7 * scale),
+    (406 * scale, arrow_y - 20 * scale),
+    (440 * scale, arrow_y),
+    (406 * scale, arrow_y + 20 * scale),
+    (406 * scale, arrow_y + 7 * scale),
     (286 * scale, arrow_y + 7 * scale),
 ]
 draw.polygon([(x + 3 * scale, y + 3 * scale) for x, y in arrow], fill=(0, 0, 0, 70))
@@ -171,7 +224,7 @@ draw.polygon(arrow, fill=(92, 176, 223, 230))
 subtitle = "Drag to Applications"
 subtitle_box = draw.textbbox((0, 0), subtitle, font=subtitle_font)
 subtitle_width = subtitle_box[2] - subtitle_box[0]
-draw.text(((360 * scale) - (subtitle_width // 2), 218 * scale), subtitle, font=subtitle_font, fill=(220, 211, 236, 245))
+draw.text(((360 * scale) - (subtitle_width // 2), 214 * scale), subtitle, font=subtitle_font, fill=(220, 211, 236, 232))
 
 solid = Image.new("RGBA", (rw, rh), (18, 7, 28, 255))
 solid.alpha_composite(base)
@@ -183,10 +236,10 @@ PY
 else
   if command -v magick >/dev/null 2>&1; then
     magick -size 640x420 gradient:'#12071c-#210d2e' \
-      "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 330x330 -gravity NorthWest -geometry -82-94 -composite \
-      -fill '#f6f6f2' -pointsize 52 -gravity NorthWest -annotate +252+58 'DEFCOIN' \
-      -fill '#f6f6f2' -pointsize 52 -gravity NorthWest -annotate +252+109 'CORE NU' \
-      -fill '#dccfee' -pointsize 17 -gravity NorthWest -annotate +298+218 'Drag to Applications' \
+      "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -170-122 -composite \
+      -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+58 'DEFCOIN' \
+      -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+108 'CORE NU' \
+      -fill '#dccfee' -pointsize 15 -gravity NorthWest -annotate +302+214 'Drag to Applications' \
       "$DEST_DMG_BACKGROUND"
   else
     cp -p "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" "$DEST_DMG_BACKGROUND"
@@ -212,8 +265,8 @@ icon_size = 96
 text_size = 13
 arrange_by = None
 icon_locations = {
-    '${PRODUCT_NAME}.app': (210, 250),
-    'Applications': (510, 250),
+    '${PRODUCT_NAME}.app': (220, 250),
+    'Applications': (512, 250),
 }
 EOF
 

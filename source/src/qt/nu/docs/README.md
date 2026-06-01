@@ -45,6 +45,9 @@ wallet keys, signing, validation, and networking out of QML.
 See `build-and-installer-runbook.md` for the current local build, staging,
 installer, cleanup, and verification procedure.
 
+See `brand-logo-text.md` for the canonical Defcoin Core Nu wordmark font,
+kerning, and DMG layout rules.
+
 See `bitcoin-core-qml-comparison.md` for the architecture comparison with
 Bitcoin Core QML.
 
