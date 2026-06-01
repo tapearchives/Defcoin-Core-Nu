@@ -3806,13 +3806,13 @@ QString NuRpcService::syncTransportSpeedSummary() const
     auto volume_rate = [this](qint64 bytes, double seconds) {
         if (bytes <= 0) return QStringLiteral("-");
         const qint64 average_rate = static_cast<qint64>(std::llround(bytes / qMax(1.0, seconds)));
-        return QStringLiteral("%1 total, %2/s avg").arg(formatBytes(bytes), formatBytes(average_rate));
+        return QStringLiteral("%1/s avg (%2)").arg(formatBytes(average_rate), formatBytes(bytes));
     };
 
     QStringList parts;
-    parts.push_back(QStringLiteral("TCP: %1").arg(volume_rate(tcp_total, tcp_seconds)));
-    parts.push_back(QStringLiteral("UDP: %1").arg(volume_rate(udp_total, udp_seconds)));
-    parts.push_back(QStringLiteral("Combined: %1").arg(volume_rate(combined_total, combined_seconds)));
+    parts.push_back(QStringLiteral("TCP %1").arg(volume_rate(tcp_total, tcp_seconds)));
+    parts.push_back(QStringLiteral("UDP %1").arg(volume_rate(udp_total, udp_seconds)));
+    parts.push_back(QStringLiteral("Combined %1").arg(volume_rate(combined_total, combined_seconds)));
     return parts.join(QStringLiteral(" | "));
 }
 
@@ -3862,6 +3862,11 @@ void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 receive
 
 void NuRpcService::recordFastSyncUdpSuccess(int height, qint64 latency_ms)
 {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_lan_fast_sync_udp_first_activity_ms <= 0) {
+        m_lan_fast_sync_udp_first_activity_ms = now;
+    }
+    m_lan_fast_sync_udp_last_activity_ms = qMax(m_lan_fast_sync_udp_last_activity_ms, now);
     const double seconds = qMax(0.001, double(latency_ms) / 1000.0);
     const double sample = 1.0 / seconds;
     m_fast_sync_udp_ewma_blocks_per_second = m_fast_sync_udp_ewma_blocks_per_second <= 0.0
@@ -3874,9 +3879,14 @@ void NuRpcService::recordFastSyncUdpSuccess(int height, qint64 latency_ms)
 
 void NuRpcService::recordFastSyncUdpFailure()
 {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_lan_fast_sync_udp_first_activity_ms <= 0) {
+        m_lan_fast_sync_udp_first_activity_ms = now;
+    }
+    m_lan_fast_sync_udp_last_activity_ms = qMax(m_lan_fast_sync_udp_last_activity_ms, now);
     ++m_fast_sync_udp_failures;
     const int consecutive_penalty = std::min(8, std::max(1, m_fast_sync_udp_failures - m_fast_sync_udp_successes + 1));
-    m_fast_sync_udp_cooldown_until_ms = QDateTime::currentMSecsSinceEpoch() + (1000LL << consecutive_penalty);
+    m_fast_sync_udp_cooldown_until_ms = now + (1000LL << consecutive_penalty);
     m_fast_sync_udp_ewma_blocks_per_second *= 0.5;
     resetFastSyncProtocolWindow();
 }
@@ -5320,8 +5330,8 @@ void NuRpcService::rebuildNodeMetrics()
     m_node_metrics = {
         metricRow(QStringLiteral("Syncing"), sync_value,
                   QStringLiteral("Blockchain sync progress, current sync state, and only the transport methods that have actually carried sync traffic during this Nu session.")),
-        metricRow(QStringLiteral("Syncing speeds"), syncTransportSpeedSummary(),
-                  QStringLiteral("Accumulated sync-session transport volume and average rate. TCP is measured from Core network byte deltas while the node is syncing. UDP is measured from valid fast-sync datagrams sent or received by Nu. Combined is TCP plus UDP.")),
+        metricRow(QStringLiteral("Syncing avg speeds"), syncTransportSpeedSummary(),
+                  QStringLiteral("Session-average sync throughput by transport. TCP uses Core network byte deltas while syncing. UDP uses fast-sync datagrams and includes timeout/retry time so failures reduce the average.")),
         metricRow(QStringLiteral("Fast-sync favor"), syncTransportDecisionSummary(),
                   QStringLiteral("Adaptive TCP/UDP block-transfer preference. Nu uses recent accepted-block timing, reliability, and occasional probes so a slower protocol can recover if conditions change.")),
         metricRow(QStringLiteral("Fast-sync probe"), syncTransportProbeSummary(),
