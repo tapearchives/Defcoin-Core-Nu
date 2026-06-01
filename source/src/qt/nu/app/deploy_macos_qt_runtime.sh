@@ -25,6 +25,16 @@ copy_file() {
     /bin/cp -f -L "$src" "$dst"
 }
 
+require_file() {
+    src="$1"
+    dst="$2"
+    if [ ! -f "$src" ] && [ ! -L "$src" ]; then
+        echo "Required Qt runtime file not found: ${src}" >&2
+        exit 1
+    fi
+    copy_file "$src" "$dst"
+}
+
 copy_dir() {
     src="$1"
     dst="$2"
@@ -36,12 +46,22 @@ copy_dir() {
     /bin/cp -R -L "$src" "$dst"
 }
 
+require_dir() {
+    src="$1"
+    dst="$2"
+    if [ ! -d "$src" ]; then
+        echo "Required Qt runtime directory not found: ${src}" >&2
+        exit 1
+    fi
+    copy_dir "$src" "$dst"
+}
+
 copy_qml_file() {
-    copy_file "${qt_qml_root}/$1" "${qml_dir}/$1"
+    require_file "${qt_qml_root}/$1" "${qml_dir}/$1"
 }
 
 copy_qml_dir() {
-    copy_dir "${qt_qml_root}/$1" "${qml_dir}/$1"
+    require_dir "${qt_qml_root}/$1" "${qml_dir}/$1"
 }
 
 if [ ! -d "$qt_plugin_root" ]; then
@@ -61,16 +81,16 @@ fi
 # image loading, SVG icons, and TLS. Copy those runtime pieces explicitly so
 # macdeployqt does not pull unrelated Qt modules such as Pdf, 3D, Timeline, or
 # VirtualKeyboard into the bundle.
-copy_file "${qt_plugin_root}/platforms/libqcocoa.dylib" "${plugins_dir}/platforms/libqcocoa.dylib"
-copy_file "${qt_plugin_root}/styles/libqmacstyle.dylib" "${plugins_dir}/styles/libqmacstyle.dylib"
-copy_file "${qt_plugin_root}/sqldrivers/libqsqlite.dylib" "${plugins_dir}/sqldrivers/libqsqlite.dylib"
-copy_file "${qt_plugin_root}/tls/libqcertonlybackend.dylib" "${plugins_dir}/tls/libqcertonlybackend.dylib"
-copy_file "${qt_plugin_root}/tls/libqopensslbackend.dylib" "${plugins_dir}/tls/libqopensslbackend.dylib"
-copy_file "${qt_plugin_root}/tls/libqsecuretransportbackend.dylib" "${plugins_dir}/tls/libqsecuretransportbackend.dylib"
-copy_file "${qt_plugin_root}/iconengines/libqsvgicon.dylib" "${plugins_dir}/iconengines/libqsvgicon.dylib"
+require_file "${qt_plugin_root}/platforms/libqcocoa.dylib" "${plugins_dir}/platforms/libqcocoa.dylib"
+require_file "${qt_plugin_root}/styles/libqmacstyle.dylib" "${plugins_dir}/styles/libqmacstyle.dylib"
+require_file "${qt_plugin_root}/sqldrivers/libqsqlite.dylib" "${plugins_dir}/sqldrivers/libqsqlite.dylib"
+require_file "${qt_plugin_root}/tls/libqcertonlybackend.dylib" "${plugins_dir}/tls/libqcertonlybackend.dylib"
+require_file "${qt_plugin_root}/tls/libqopensslbackend.dylib" "${plugins_dir}/tls/libqopensslbackend.dylib"
+require_file "${qt_plugin_root}/tls/libqsecuretransportbackend.dylib" "${plugins_dir}/tls/libqsecuretransportbackend.dylib"
+require_file "${qt_plugin_root}/iconengines/libqsvgicon.dylib" "${plugins_dir}/iconengines/libqsvgicon.dylib"
 
 for image_plugin in libqgif.dylib libqicns.dylib libqico.dylib libqjpeg.dylib libqsvg.dylib libqwebp.dylib; do
-    copy_file "${qt_plugin_root}/imageformats/${image_plugin}" "${plugins_dir}/imageformats/${image_plugin}"
+    require_file "${qt_plugin_root}/imageformats/${image_plugin}" "${plugins_dir}/imageformats/${image_plugin}"
 done
 
 copy_qml_file "QtQuick/qmldir"
