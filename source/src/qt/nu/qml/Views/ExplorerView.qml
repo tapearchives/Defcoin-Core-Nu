@@ -246,14 +246,27 @@ ColumnLayout {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: NuTokens.spaceXs
-                    Label {
+                    RowLayout {
                         Layout.fillWidth: true
-                        text: "Explorer index status"
-                        color: NuTokens.textPrimary
-                        font.pixelSize: NuTokens.fontBodyLarge
-                        font.weight: Font.DemiBold
+                        spacing: NuTokens.spaceSm
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Explorer index status"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontBodyLarge
+                            font.weight: Font.DemiBold
+                        }
+                        NuActionButton {
+                            width: 74
+                            text: "Copy"
+                            helpText: "Copy the visible Explorer index and analytics status text."
+                            onClicked: {
+                                NuService.copyText(NuService.explorerIndexStatus + "\n" + NuService.explorerAnalyticsStatus)
+                            }
+                        }
                     }
                     Basic.TextArea {
+                        id: explorerIndexStatusArea
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.max(22, Math.min(44, contentHeight + 2))
                         text: NuService.explorerIndexStatus
@@ -268,8 +281,14 @@ ColumnLayout {
                         background: Item {}
                         padding: 0
                         clip: true
+                        Shortcut {
+                            sequences: [StandardKey.Copy]
+                            enabled: explorerIndexStatusArea.activeFocus && explorerIndexStatusArea.selectedText.length > 0
+                            onActivated: NuService.copyText(explorerIndexStatusArea.selectedText)
+                        }
                     }
                     Basic.TextArea {
+                        id: explorerAnalyticsStatusArea
                         Layout.fillWidth: true
                         Layout.preferredHeight: Math.max(22, Math.min(44, contentHeight + 2))
                         text: NuService.explorerAnalyticsStatus
@@ -284,6 +303,11 @@ ColumnLayout {
                         background: Item {}
                         padding: 0
                         clip: true
+                        Shortcut {
+                            sequences: [StandardKey.Copy]
+                            enabled: explorerAnalyticsStatusArea.activeFocus && explorerAnalyticsStatusArea.selectedText.length > 0
+                            onActivated: NuService.copyText(explorerAnalyticsStatusArea.selectedText)
+                        }
                     }
                 }
 
@@ -470,24 +494,46 @@ ColumnLayout {
                     color: NuTokens.lineSubtle
                 }
 
-                Label {
+                RowLayout {
                     Layout.fillWidth: true
-                    text: "Top 100 timeline index"
-                    color: NuTokens.textPrimary
-                    font.pixelSize: NuTokens.fontBodyLarge
-                    font.weight: Font.DemiBold
+                    spacing: NuTokens.spaceSm
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Top 100 timeline index"
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontBodyLarge
+                        font.weight: Font.DemiBold
+                    }
+                    NuActionButton {
+                        width: 74
+                        text: "Copy"
+                        helpText: "Copy the Top 100 timeline status or error text."
+                        onClicked: {
+                            NuService.copyText(NuService.explorerTop100Status)
+                        }
+                    }
                 }
 
                 Basic.TextArea {
+                    id: top100StatusArea
                     Layout.fillWidth: true
+                    Layout.preferredHeight: Math.max(24, Math.min(56, contentHeight + 2))
                     text: NuService.explorerTop100Status
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap
                     readOnly: true
                     selectByMouse: true
+                    persistentSelection: true
+                    activeFocusOnTab: true
+                    focusPolicy: Qt.StrongFocus
                     background: Item {}
                     padding: 0
+                    Shortcut {
+                        sequences: [StandardKey.Copy]
+                        enabled: top100StatusArea.activeFocus && top100StatusArea.selectedText.length > 0
+                        onActivated: NuService.copyText(top100StatusArea.selectedText)
+                    }
                 }
 
                 Label {

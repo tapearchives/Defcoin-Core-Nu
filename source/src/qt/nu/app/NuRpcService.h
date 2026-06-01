@@ -571,6 +571,7 @@ private:
     QString lanFastSyncRateSummary() const;
     QString syncTransportSpeedSummary() const;
     QString syncTransportDecisionSummary() const;
+    QString syncTransportProbeSummary() const;
     void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes);
     void recordFastSyncUdpSuccess(int height, qint64 latency_ms);
     void recordFastSyncUdpFailure();

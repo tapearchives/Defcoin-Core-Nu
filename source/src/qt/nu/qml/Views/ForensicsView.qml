@@ -207,6 +207,7 @@ ColumnLayout {
                 }
 
                 Basic.TextArea {
+                    id: forensicsScanStatusArea
                     Layout.fillWidth: true
                     text: NuService.forensicsScanStatus
                     color: NuTokens.textSecondary
@@ -219,6 +220,11 @@ ColumnLayout {
                     focusPolicy: Qt.StrongFocus
                     background: Item {}
                     padding: 0
+                    Shortcut {
+                        sequences: [StandardKey.Copy]
+                        enabled: forensicsScanStatusArea.activeFocus && forensicsScanStatusArea.selectedText.length > 0
+                        onActivated: NuService.copyText(forensicsScanStatusArea.selectedText)
+                    }
                 }
 
                 Label {
@@ -231,6 +237,7 @@ ColumnLayout {
                 }
 
                 Basic.TextArea {
+                    id: forensicsScanSummaryArea
                     Layout.fillWidth: true
                     visible: NuService.forensicsScanComplete && NuService.forensicsScanSummary.length > 0
                     text: NuService.forensicsScanSummary
@@ -241,6 +248,11 @@ ColumnLayout {
                     selectByMouse: true
                     background: Item {}
                     padding: 0
+                    Shortcut {
+                        sequences: [StandardKey.Copy]
+                        enabled: forensicsScanSummaryArea.activeFocus && forensicsScanSummaryArea.selectedText.length > 0
+                        onActivated: NuService.copyText(forensicsScanSummaryArea.selectedText)
+                    }
                 }
 
                 NuDataTable {
@@ -354,6 +366,7 @@ ColumnLayout {
                 }
 
                 Basic.TextArea {
+                    id: forensicsWitnessRepairStatusArea
                     Layout.fillWidth: true
                     text: NuService.forensicsWitnessRepairStatus
                     color: NuTokens.textPrimary
@@ -363,6 +376,11 @@ ColumnLayout {
                     selectByMouse: true
                     background: Item {}
                     padding: 0
+                    Shortcut {
+                        sequences: [StandardKey.Copy]
+                        enabled: forensicsWitnessRepairStatusArea.activeFocus && forensicsWitnessRepairStatusArea.selectedText.length > 0
+                        onActivated: NuService.copyText(forensicsWitnessRepairStatusArea.selectedText)
+                    }
                 }
 
                 Label {

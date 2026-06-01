@@ -3687,10 +3687,25 @@ QString NuRpcService::syncTransportDecisionSummary() const
     const QString udp_rate = m_fast_sync_udp_ewma_blocks_per_second > 0.0
         ? QStringLiteral("UDP %1 blk/s").arg(QString::number(m_fast_sync_udp_ewma_blocks_per_second, 'f', m_fast_sync_udp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
         : QStringLiteral("UDP warming");
-    return QStringLiteral("%1 | %2 | %3 | Probe %4/%5 B | Err %6")
-        .arg(m_fast_sync_decision_summary,
+    const QString favor = m_fast_sync_decision_summary.startsWith(QStringLiteral("UDP warmup"))
+        ? QStringLiteral("TCP/UDP probing %1:%2")
+              .arg(QString::number(std::max(0, m_fast_sync_tcp_quota_remaining)),
+                   QString::number(std::max(0, m_fast_sync_udp_quota_remaining)))
+        : m_fast_sync_decision_summary;
+    return QStringLiteral("%1 | %2 | %3")
+        .arg(favor,
              tcp_rate,
-             udp_rate,
+             udp_rate);
+}
+
+QString NuRpcService::syncTransportProbeSummary() const
+{
+    const int udp_samples = m_fast_sync_udp_successes + m_fast_sync_udp_failures;
+    const QString warmup = udp_samples < FAST_SYNC_PROTOCOL_MIN_UDP_PROBES
+        ? QStringLiteral("UDP samples %1/%2").arg(QString::number(udp_samples), QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES))
+        : QStringLiteral("UDP samples %1").arg(QString::number(udp_samples));
+    return QStringLiteral("%1 | probe %2/%3 B | retransmit/errors %4")
+        .arg(warmup,
              QString::number(currentFastSyncDatagramSize()),
              QString::number(currentFastSyncChunkSize()),
              QString::number(m_lan_fast_sync_retransmit_errors));
@@ -5143,8 +5158,10 @@ void NuRpcService::rebuildNodeMetrics()
                   QStringLiteral("Blockchain sync progress, current sync state, and only the transport methods that have actually carried sync traffic during this Nu session.")),
         metricRow(QStringLiteral("Syncing speeds"), syncTransportSpeedSummary(),
                   QStringLiteral("Accumulated sync-session transport volume and average rate. TCP is measured from Core network byte deltas while the node is syncing. UDP is measured from valid fast-sync datagrams sent or received by Nu. Combined is TCP plus UDP.")),
-        metricRow(QStringLiteral("Fast-sync selector"), syncTransportDecisionSummary(),
+        metricRow(QStringLiteral("Fast-sync favor"), syncTransportDecisionSummary(),
                   QStringLiteral("Adaptive TCP/UDP block-transfer preference. Nu uses recent accepted-block timing, reliability, and occasional probes so a slower protocol can recover if conditions change.")),
+        metricRow(QStringLiteral("Fast-sync probe"), syncTransportProbeSummary(),
+                  QStringLiteral("Current UDP probe size and UDP sample count. UDP only leaves warmup after Nu receives accepted block samples from fast-sync peers.")),
         metricRow(QStringLiteral("Network active"), m_metric_network_active,
                   QStringLiteral("Whether the backend currently allows peer network activity.")),
         metricRow(QStringLiteral("Connections"), QStringLiteral("Total: %1 | In: %2 | Out: %3")
@@ -8866,13 +8883,13 @@ bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool
             }
             const int max_rows = std::max(current_rows.size(), m_explorer_top100_previous_rows.size());
             for (int i = 0; ok && i < max_rows && i < 100; ++i) {
-                const QPair<QString, int> current = i < current_rows.size() ? current_rows.at(i) : qMakePair(QString(), 0);
+                const QPair<QString, int> current = i < current_rows.size() ? current_rows.at(i) : qMakePair(QStringLiteral(""), 0);
                 const QPair<QString, int> previous = i < m_explorer_top100_previous_rows.size() ? m_explorer_top100_previous_rows.at(i) : qMakePair(QString(), -1);
                 if (!effective_force_anchor && current == previous) continue;
                 query.bindValue(0, height);
                 query.bindValue(1, QVariant::fromValue<qlonglong>(block_time));
                 query.bindValue(2, i + 1);
-                query.bindValue(3, current.first);
+                query.bindValue(3, current.first.isNull() ? QStringLiteral("") : current.first);
                 query.bindValue(4, current.second);
                 query.bindValue(5, i % EXPLORER_TOP100_COLORS.size());
                 query.bindValue(6, effective_force_anchor ? 1 : 0);
