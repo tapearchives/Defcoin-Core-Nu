@@ -835,6 +835,7 @@ private:
     QSet<QString> m_peer_reverse_lookup_attempted;
     QSet<QString> m_peer_lan_lookup_pending;
     QSet<QString> m_peer_lan_lookup_attempted;
+    QHash<QString, qint64> m_peer_lan_lookup_last_attempt_ms;
     QSet<QString> m_udp_fast_sync_peer_hosts;
     QSet<QString> m_udp_fast_sync_attempted_peer_hosts;
     QSet<QString> m_udp_fast_sync_available_peer_hosts;

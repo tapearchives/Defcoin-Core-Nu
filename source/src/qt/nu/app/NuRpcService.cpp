@@ -802,8 +802,8 @@ bool isLikelySyntheticReverseDnsName(QString value)
     dotted.replace(QLatin1Char('-'), QLatin1Char('.'));
 
     static const QVector<QRegularExpression> synthetic_patterns{
-        QRegularExpression(QStringLiteral(R"(^syn-[0-9a-f-]+-res6-spectrum-com$)")),
-        QRegularExpression(QStringLiteral(R"((^|\.)res6\.spectrum\.com$)")),
+        QRegularExpression(QStringLiteral(R"(^syn-[a-z0-9-]+-res[0-9]+-spectrum-com$)")),
+        QRegularExpression(QStringLiteral(R"((^|\.)res[0-9]+\.spectrum\.com$)")),
         QRegularExpression(QStringLiteral(R"((^|\.)members\.linode\.com$)")),
         QRegularExpression(QStringLiteral(R"((^|\.)vultrusercontent\.com$)")),
         QRegularExpression(QStringLiteral(R"((^|\.)hsd[0-9]*\.)")),
@@ -966,6 +966,7 @@ QString parseLanPeerNameLookupOutput(const QString& output)
 {
     static const QVector<QRegularExpression> patterns{
         QRegularExpression(QStringLiteral(R"(NetBIOS\s+Name:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption),
+        QRegularExpression(QStringLiteral(R"(^\s*Server\s*:\s*([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(NameHost\s*:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption),
         QRegularExpression(QStringLiteral(R"(^\s*name:\s*([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(\bPinging\s+([A-Za-z0-9_.-]+)\s+\[)"), QRegularExpression::CaseInsensitiveOption),
@@ -973,6 +974,7 @@ QString parseLanPeerNameLookupOutput(const QString& output)
         QRegularExpression(QStringLiteral(R"(\bPTR\s+([A-Za-z0-9_.-]+\.local)\.?)"), QRegularExpression::CaseInsensitiveOption),
         QRegularExpression(QStringLiteral(R"(^\s*(?:[0-9]{1,3}\.){3}[0-9]{1,3}\s+([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+<00>\s+(?!(?:.*<GROUP>))(?:UNIQUE|-)\b.*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
+        QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+<20>\s+(?!(?:.*<GROUP>))(?:UNIQUE|-)\b.*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62}\.(?:localdomain|local|lan|home))\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)
     };
 
@@ -981,7 +983,7 @@ QString parseLanPeerNameLookupOutput(const QString& output)
         const QRegularExpressionMatch match = pattern.match(output);
         if (!match.hasMatch()) continue;
         const QString captured = match.captured(1);
-        const bool trusted_machine_name = i == 0 || i == 7;
+        const bool trusted_machine_name = i == 0 || i == 1 || i == 8 || i == 9;
         if (!trusted_machine_name && !isLocalStyleDnsName(captured)) continue;
         const QString name = lanWorkstationNameFromCandidate(captured);
         if (!name.isEmpty()) return name;
@@ -1021,8 +1023,11 @@ QStringList parseLanPeerFingerprintDetails(const QString& output)
         {QStringLiteral("Linux"), QRegularExpression(QStringLiteral(R"(\bOS=\[([^\]]*Linux[^\]]*)\])"), QRegularExpression::CaseInsensitiveOption)},
         {QStringLiteral("OS"), QRegularExpression(QStringLiteral(R"(\bOS=\[([^\]]+)\])"), QRegularExpression::CaseInsensitiveOption)},
         {QStringLiteral("Server"), QRegularExpression(QStringLiteral(R"(\bServer=\[([^\]]+)\])"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("Server"), QRegularExpression(QStringLiteral(R"(^\s*Server\s*:\s*([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("Workgroup"), QRegularExpression(QStringLiteral(R"(\bWorkgroup=\[([^\]]+)\])"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("Workgroup"), QRegularExpression(QStringLiteral(R"(^\s*Workgroup\s*:\s*([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("NetBIOS"), QRegularExpression(QStringLiteral(R"(NetBIOS\s+Name:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("NetBIOS"), QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+<20>\s+(?!(?:.*<GROUP>))(?:UNIQUE|-)\b.*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("OS"), QRegularExpression(QStringLiteral(R"(^\s*(?:Running|OS details):\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("Device"), QRegularExpression(QStringLiteral(R"(^\s*Device type:\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("MAC"), QRegularExpression(QStringLiteral(R"(^\s*MAC Address:\s*([0-9A-F:]{17}(?:\s+\([^)]+\))?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
@@ -1094,11 +1099,11 @@ bool isVisibleLanPeer(const QString& host,
                       const QHash<QString, QString>& lan_cache,
                       const QHash<QString, QString>& lan_info_cache)
 {
+    Q_UNUSED(reverse_dns);
+    Q_UNUSED(known_dns);
     const QString key = normalizedPeerHost(host);
     return isLikelyLanAddress(host) ||
            isOnLocalInterfaceSubnet(host) ||
-           !lanAliasFromDnsName(reverse_dns).isEmpty() ||
-           known_dns.startsWith(QStringLiteral("LAN:"), Qt::CaseInsensitive) ||
            lan_cache.contains(key) ||
            lan_info_cache.contains(key);
 }
@@ -1115,8 +1120,7 @@ QString peerLanWorkstationInfo(const QString& host,
     if (!info.isEmpty()) return info;
     const QString name = lan_name_cache.value(key);
     if (!name.isEmpty()) return QStringLiteral("Name: %1").arg(name);
-    const QString reverse_alias = lanAliasFromDnsName(reverse_dns);
-    if (!reverse_alias.isEmpty()) return QStringLiteral("Name: %1").arg(reverse_alias.mid(4));
+    Q_UNUSED(reverse_dns);
     const QString alias = lanAliasFromDnsName(dns_cache.value(key));
     if (!alias.isEmpty()) return QStringLiteral("Name: %1").arg(alias.mid(4));
     if (pending.contains(key)) return QStringLiteral("Scanning...");
@@ -3053,8 +3057,13 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
     if (!isLikelyLanAddress(host) && !has_local_dns_hint && !on_local_subnet) return;
 
     if ((m_peer_lan_name_by_host.contains(key) && m_peer_lan_info_by_host.contains(key)) ||
-        m_peer_lan_lookup_pending.contains(key) ||
-        m_peer_lan_lookup_attempted.contains(key)) {
+        m_peer_lan_lookup_pending.contains(key)) {
+        return;
+    }
+
+    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+    const qint64 last_attempt_ms = m_peer_lan_lookup_last_attempt_ms.value(key, 0);
+    if (last_attempt_ms > 0 && now_ms - last_attempt_ms < 60000) {
         return;
     }
 
@@ -3119,6 +3128,7 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
 
     m_peer_lan_lookup_pending.insert(key);
     m_peer_lan_lookup_attempted.insert(key);
+    m_peer_lan_lookup_last_attempt_ms.insert(key, now_ms);
 
     auto lan_lookup_id = std::make_shared<int>(-1);
     *lan_lookup_id = QHostInfo::lookupHost(address.toString(), this, [this, key, lan_lookup_id](const QHostInfo& info) {
@@ -5700,8 +5710,10 @@ void NuRpcService::setLanNodeDiscoveryEnabled(bool enabled)
         m_peer_lan_info_by_host.clear();
         m_peer_lan_lookup_pending.clear();
         m_peer_lan_lookup_attempted.clear();
+        m_peer_lan_lookup_last_attempt_ms.clear();
     } else {
         m_peer_lan_lookup_attempted.clear();
+        m_peer_lan_lookup_last_attempt_ms.clear();
         ensureLanFastSyncSocket();
     }
     Q_EMIT settingsChanged();
