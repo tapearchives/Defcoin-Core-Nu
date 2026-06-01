@@ -1,0 +1,21 @@
+[Unit]
+Description=Defcoin Core Nu UDP Fast Sync responder
+After=network-online.target defcoind.service
+Wants=network-online.target
+Requires=defcoind.service
+
+[Service]
+Type=simple
+User=dfcpool
+Group=dfcpool
+WorkingDirectory=/home/dfcpool
+ExecStart=/usr/bin/python3 /usr/local/sbin/defcoin-fast-syncd --conf /home/dfcpool/.defcoin/defcoin.conf --bind 0.0.0.0 --port 10334 --log /var/log/defcoin-fast-syncd.log
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target

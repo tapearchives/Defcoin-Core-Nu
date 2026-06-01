@@ -12,10 +12,15 @@ sender-reported speed. A received block is counted as successful only after the
 receiver reassembles it, verifies checksums, and submits it through the normal
 Core `submitblock` validation path.
 
-The current implementation lives in the Nu Qt/RPC service layer
+The desktop implementation lives in the Nu Qt/RPC service layer
 (`NuRpcService`). It mirrors raw active-chain blocks between eligible Nu peers
 over UDP while ordinary TCP/Core block download remains active as fallback and
 repair path.
+
+The public dc903 server implementation is a responder-only sidecar
+(`defcoin-fast-syncd`) that talks to the local `defcoind` over RPC. The sidecar
+does not replace Core P2P, does not mine, and does not validate blocks on behalf
+of clients. It only returns the raw active-chain block requested by a Nu wallet.
 
 ## Capability And Port
 
@@ -28,7 +33,8 @@ Nu currently discovers Fast Sync candidates from connected peers whose
 User-Agent begins with `DefcoinCoreNu`. Older `DefcoinCore` peers are not marked
 Fast Sync capable. A Nu peer starts as `TBA`, becomes `Yes` after a valid UDP
 Fast Sync response, and becomes `Failed` after a session attempt times out or
-fails without usable chunks.
+fails without usable chunks. The capability is then proven by UDP response and
+normal `submitblock` acceptance, not by the User-Agent string alone.
 
 LAN discovery may also send local broadcast requests when the user enables LAN
 node discovery. Broadcast is intentionally limited to private/local networks.
@@ -66,9 +72,12 @@ size is larger.
 
 ### Response
 
-The responder verifies that the requester is eligible, rate-limits requests by
-source host, fetches the active-chain block through RPC (`getblockhash`, then
-`getblock <hash> 0`), and sends one or more `type=block-chunk` datagrams.
+The responder verifies the request shape, rate-limits requests by source host,
+fetches the active-chain block through RPC (`getblockhash`, then
+`getblock <hash> 0`), and sends one or more `type=block-chunk` datagrams. The
+desktop responder additionally restricts response traffic to eligible Nu peers;
+the dc903 sidecar is public-facing and therefore relies on strict packet caps,
+rate limits, firewall scope, and Core's final validation on the receiving side.
 
 Each chunk header includes:
 
@@ -111,6 +120,12 @@ checksum failure, retransmit failure, or validation failure, Nu steps one
 candidate downward. This means the displayed probe pair such as
 `1472/1024 B` is the current datagram/chunk selection, not a permanent static
 setting.
+
+The responder does not choose an independent packet-size strategy. The Nu
+wallet requester sends `max_datagram` and `chunk_bytes`; the responder clamps
+those values to its safety limits and echoes the resulting values in each chunk.
+This keeps packet-size tuning based on receiver-confirmed success instead of
+server-side sender throughput.
 
 ## TCP/UDP Selection
 
@@ -160,25 +175,25 @@ Diagnostics exposes:
 UDP averages include time spent in failed attempts, timeouts, checksum failures,
 and retries so UDP cannot look artificially faster by ignoring failed work.
 
-## Server Deployment Boundary
+## Server Deployment
 
-The current code path is a Qt/RPC helper. It is suitable for desktop Nu peers,
-but a public server should not run a GUI just to provide Fast Sync.
+The server implementation is `source/src/qt/nu/tools/defcoin_fast_syncd.py`
+with the matching `defcoin-fast-syncd.service` systemd unit. It should run as
+the same unprivileged account that owns the local Defcoin data directory and
+read the existing RPC credentials from `defcoin.conf`.
 
-There are two safe server options:
+Deployment rules:
 
-1. Port the Fast Sync helper into the headless backend or a dedicated audited
-   sidecar daemon that talks to the local `defcoind` over RPC.
-2. Deploy that daemon on UDP `10334`, keep TCP/Core `10332` as the authoritative
-   P2P service, and expose the same capability/version/checksum/rate-limit
-   behavior documented above.
+1. Keep TCP/Core `10332` as the authoritative P2P service.
+2. Open UDP `10334` only for the Fast Sync responder.
+3. Start `defcoin-fast-syncd` after `defcoind.service`.
+4. Confirm `ss -lunp` shows UDP `10334`.
+5. Confirm a Nu wallet receives at least one validated block over UDP before
+   treating the server as deployed.
 
-Do not mark the dc903 server as Fast Sync deployed until the live host is
-running a headless implementation and at least one Nu wallet has accepted a
-validated block from it over UDP. The local development environment currently
-cannot update the live server because `gladjoe@50.116.19.40` rejects the local
-public key; a server deploy needs restored SSH access or a separate operator
-session.
+The server can serve larger datagrams to private/local requesters, but internet
+requesters are capped to the internet probe size. This avoids assuming jumbo UDP
+works across arbitrary public routes.
 
 ## Security Rules
 
@@ -189,4 +204,3 @@ session.
 - Never bypass `submitblock`.
 - Treat TCP/Core as the repair path.
 - Keep the UDP helper disableable from Settings.
-
