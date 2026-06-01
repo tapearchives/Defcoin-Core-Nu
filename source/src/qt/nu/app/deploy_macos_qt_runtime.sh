@@ -89,8 +89,12 @@ require_file "${qt_plugin_root}/tls/libqopensslbackend.dylib" "${plugins_dir}/tl
 require_file "${qt_plugin_root}/tls/libqsecuretransportbackend.dylib" "${plugins_dir}/tls/libqsecuretransportbackend.dylib"
 require_file "${qt_plugin_root}/iconengines/libqsvgicon.dylib" "${plugins_dir}/iconengines/libqsvgicon.dylib"
 
-for image_plugin in libqgif.dylib libqicns.dylib libqico.dylib libqjpeg.dylib libqsvg.dylib libqwebp.dylib; do
+for image_plugin in libqgif.dylib libqico.dylib libqjpeg.dylib libqsvg.dylib; do
     require_file "${qt_plugin_root}/imageformats/${image_plugin}" "${plugins_dir}/imageformats/${image_plugin}"
+done
+
+for image_plugin in libqicns.dylib libqwebp.dylib; do
+    copy_file "${qt_plugin_root}/imageformats/${image_plugin}" "${plugins_dir}/imageformats/${image_plugin}"
 done
 
 copy_qml_file "QtQuick/qmldir"

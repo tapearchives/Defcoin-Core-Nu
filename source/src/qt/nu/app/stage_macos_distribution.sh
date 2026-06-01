@@ -108,7 +108,7 @@ for y in range(64 * scale, rh, 62 * scale):
 if os.path.exists(logo_path):
     logo = Image.open(logo_path).convert("RGBA")
     logo = ImageEnhance.Contrast(logo).enhance(1.05)
-    logo.thumbnail((250 * scale, 250 * scale), Image.Resampling.LANCZOS)
+    logo.thumbnail((150 * scale, 150 * scale), Image.Resampling.LANCZOS)
     glow = Image.new("RGBA", (logo.width + 80 * scale, logo.height + 80 * scale), (0, 0, 0, 0))
     alpha = logo.getchannel("A")
     glow_alpha = Image.new("L", glow.size, 0)
@@ -117,7 +117,7 @@ if os.path.exists(logo_path):
     glow_layer.putalpha(glow_alpha.point(lambda p: int(p * 0.34)))
     glow.alpha_composite(glow_layer, (40 * scale, 40 * scale))
     glow.alpha_composite(logo, (40 * scale, 40 * scale))
-    base.alpha_composite(glow, (34 * scale, 54 * scale))
+    base.alpha_composite(glow, (-4 * scale, 12 * scale))
 
 def font(size, bold=False):
     candidates = [
@@ -137,13 +137,13 @@ draw.text((268 * scale, 112 * scale), "Drag to Applications", font=subtitle_font
 
 arrow_y = 252 * scale
 arrow = [
-    (272 * scale, arrow_y - 7 * scale),
-    (420 * scale, arrow_y - 7 * scale),
-    (420 * scale, arrow_y - 22 * scale),
-    (468 * scale, arrow_y),
-    (420 * scale, arrow_y + 22 * scale),
-    (420 * scale, arrow_y + 7 * scale),
-    (272 * scale, arrow_y + 7 * scale),
+    (286 * scale, arrow_y - 7 * scale),
+    (404 * scale, arrow_y - 7 * scale),
+    (404 * scale, arrow_y - 20 * scale),
+    (448 * scale, arrow_y),
+    (404 * scale, arrow_y + 20 * scale),
+    (404 * scale, arrow_y + 7 * scale),
+    (286 * scale, arrow_y + 7 * scale),
 ]
 draw.polygon([(x + 3 * scale, y + 3 * scale) for x, y in arrow], fill=(0, 0, 0, 70))
 draw.polygon(arrow, fill=(92, 176, 223, 230))
@@ -155,7 +155,7 @@ PY
 else
   if command -v magick >/dev/null 2>&1; then
     magick -size 640x420 gradient:'#08121e-#12263a' \
-      "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 250x250 -gravity West -geometry +40+0 -composite \
+      "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 150x150 -gravity NorthWest -geometry +36+52 -composite \
       -fill '#e2d453' -pointsize 34 -gravity NorthWest -annotate +266+70 'Defcoin Core Nu' \
       -fill '#d2dee5' -pointsize 15 -annotate +268+112 'Drag to Applications' \
       "$DEST_DMG_BACKGROUND"

@@ -18,6 +18,7 @@ ColumnLayout {
     property string selectedWealthGroup: ""
     property string selectedWhaleGroup: ""
     property bool active: false
+    property int preferredTab: 0
     property bool analyticsRequested: false
     property bool summaryRequested: false
     property var timelineSnapshot: ({ rows: [], height: -1, status: "No Top 100 timeline snapshot loaded." })
@@ -39,6 +40,12 @@ ColumnLayout {
                 root.initializeTop100EndField(true)
         }
     }
+
+    Component.onCompleted: Qt.callLater(function() {
+        if (explorerTabs)
+            explorerTabs.currentIndex = Math.max(0, Math.min(3, root.preferredTab))
+        root.maybeRefreshAnalyticsForTab()
+    })
 
     function indexPercentText() {
         if (NuService.explorerIndexTip <= 0) return "0.00%"
@@ -442,7 +449,9 @@ ColumnLayout {
         for (let n = 0; n < contacts.length; ++n) {
             const name = String(contacts[n].username || "")
             const pos = positions[name]
-            const nodeRadius = 14 + 24 * Math.sqrt(Number(balances[name] || 0) / maxBalance)
+            const balanceSats = Number(balances[name] || 0)
+            const nodeRadius = 18 + 28 * Math.sqrt(balanceSats / maxBalance)
+            const wholeDfc = Math.round(balanceSats / 100000000)
             ctx.fillStyle = "#f3d447"
             ctx.strokeStyle = NuTokens.textPrimary
             ctx.lineWidth = 2
@@ -454,7 +463,9 @@ ColumnLayout {
             ctx.font = "700 12px " + NuTokens.bodyFont
             ctx.textAlign = "center"
             ctx.textBaseline = "middle"
-            ctx.fillText(name, pos.x, pos.y)
+            ctx.fillText(name, pos.x, pos.y - 5)
+            ctx.font = "10px " + NuTokens.bodyFont
+            ctx.fillText(wholeDfc.toLocaleString() + " DFC", pos.x, pos.y + 9)
         }
         if (contacts.length === 0) {
             ctx.fillStyle = NuTokens.textSecondary

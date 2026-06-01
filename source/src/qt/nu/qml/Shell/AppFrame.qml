@@ -24,10 +24,8 @@ Item {
         case "activity": return 3
         case "wallet": return 4
         case "mining": return 5
-        case "explorer": return 6
-        case "forensics": return 7
-        case "node": return 8
-        case "settings": return 9
+        case "node": return 6
+        case "settings": return 7
         default: return 0
         }
     }
@@ -84,10 +82,6 @@ Item {
                         onRestoreRecoveryWalletRequested: root.restoreRecoveryWalletRequested()
                     }
                     MiningView {}
-                    ExplorerView {
-                        active: root.currentRoute === "explorer"
-                    }
-                    ForensicsView {}
                     NodeView {
                         initialTab: root.nodeInitialTab
                         initialPeerView: root.peerInitialView

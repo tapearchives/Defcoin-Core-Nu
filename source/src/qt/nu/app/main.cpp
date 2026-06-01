@@ -44,6 +44,25 @@
 
 namespace {
 constexpr bool kNuHelpEnabled = DEFCOIN_NU_HELP_ENABLED != 0;
+#ifndef DEFCOIN_NU_EXPFOR_APP
+#define DEFCOIN_NU_EXPFOR_APP 0
+#endif
+constexpr bool kExpForApp = DEFCOIN_NU_EXPFOR_APP != 0;
+
+QString productName()
+{
+    return kExpForApp ? QStringLiteral("Defcoin Core ExpFor") : QStringLiteral("Defcoin Core Nu");
+}
+
+QString productExecutableName()
+{
+    return kExpForApp ? QStringLiteral("DefcoinCoreExpFor") : QStringLiteral("DefcoinCoreNu");
+}
+
+QString productBundleIdentifier()
+{
+    return kExpForApp ? QStringLiteral("org.defcoincore.DefcoinCoreExpFor") : QStringLiteral("org.defcoincore.DefcoinCoreNu");
+}
 
 QHash<QString, QString> readBuildInfoProperties(const QString& resourceRoot)
 {
@@ -233,12 +252,12 @@ QString nuDefaultDataDir()
 #endif
 }
 
-bool anotherNuGuiProcessIsRunning()
+bool anotherGuiProcessIsRunning()
 {
 #if defined(Q_OS_UNIX)
     const qint64 current_pid = QCoreApplication::applicationPid();
     QProcess pgrep;
-    pgrep.start(QStringLiteral("/usr/bin/pgrep"), {QStringLiteral("-x"), QStringLiteral("DefcoinCoreNu")});
+    pgrep.start(QStringLiteral("/usr/bin/pgrep"), {QStringLiteral("-x"), productExecutableName()});
     if (!pgrep.waitForFinished(1000)) {
         pgrep.kill();
         pgrep.waitForFinished(250);
@@ -261,7 +280,7 @@ bool anotherNuGuiProcessIsRunning()
     const QList<QByteArray> ps_lines = ps.readAllStandardOutput().split('\n');
     for (const QByteArray& line : ps_lines) {
         const QString text = QString::fromLocal8Bit(line).trimmed();
-        if (!text.contains(QStringLiteral("DefcoinCoreNu"))) continue;
+        if (!text.contains(productExecutableName())) continue;
         const int space = text.indexOf(QLatin1Char(' '));
         bool ok = false;
         const qint64 pid = text.left(space > 0 ? space : text.size()).trimmed().toLongLong(&ok);
@@ -279,8 +298,8 @@ int main(int argc, char* argv[])
     PrepareDefcoinNuMacLaunchState();
 #endif
     QApplication app(argc, argv);
-    QApplication::setApplicationName("Defcoin Core Nu");
-    QApplication::setApplicationDisplayName("Defcoin Core Nu");
+    QApplication::setApplicationName(productName());
+    QApplication::setApplicationDisplayName(productName());
     QApplication::setOrganizationName("Defcoin Core");
     QApplication::setOrganizationDomain("defcoincore.org");
     QApplication::setFont(QFont(QStringLiteral("Arial")));
@@ -314,18 +333,18 @@ int main(int argc, char* argv[])
     if (!smokeTest && !allowMultiple) {
         const QString dataDir = nuDefaultDataDir();
         QDir().mkpath(dataDir);
-        if (anotherNuGuiProcessIsRunning()) {
+        if (anotherGuiProcessIsRunning()) {
             QMessageBox::warning(nullptr,
-                                 QStringLiteral("Defcoin Core Nu is already open"),
-                                 QStringLiteral("Another Defcoin Core Nu window appears to be running. Close the other Nu window before opening this build. This prevents two frontends from writing the same explorer cache or competing for wallet actions."));
+                                 QStringLiteral("%1 is already open").arg(productName()),
+                                 QStringLiteral("Another %1 window appears to be running. Close the other window before opening this build. This prevents two frontends from writing the same local cache or competing for actions.").arg(productName()));
             return 2;
         }
-        singleInstanceLock = std::make_unique<QLockFile>(QDir(dataDir).filePath(QStringLiteral("defcoin-core-nu-gui.lock")));
+        singleInstanceLock = std::make_unique<QLockFile>(QDir(dataDir).filePath(kExpForApp ? QStringLiteral("defcoin-core-expfor-gui.lock") : QStringLiteral("defcoin-core-nu-gui.lock")));
         singleInstanceLock->setStaleLockTime(30000);
         if (!singleInstanceLock->tryLock(100)) {
             QMessageBox::warning(nullptr,
-                                 QStringLiteral("Defcoin Core Nu is already open"),
-                                 QStringLiteral("Another Defcoin Core Nu window is already using this data directory:\n\n%1\n\nClose the other Nu window before opening this build. This prevents two frontends from writing the same explorer cache or competing for wallet actions.").arg(dataDir));
+                                 QStringLiteral("%1 is already open").arg(productName()),
+                                 QStringLiteral("Another %1 window is already using this data directory:\n\n%2\n\nClose the other window before opening this build.").arg(productName(), dataDir));
             return 2;
         }
     }
@@ -360,9 +379,9 @@ int main(int argc, char* argv[])
         displaySplash.fill(QColor("#05080a"));
         drawNuBrandSplash(displaySplash, resourceRoot);
         const QString splashText = QStringLiteral(
-            "Defcoin Core Nu v%1 • Core Memories • Backend: Litecoin Core v0.21.5.5 + Defcoin parameters\n"
+            "%1 v%2 • Core Memories • Backend: Litecoin Core v0.21.5.5 + Defcoin parameters\n"
             "© 2014-2026 Defcoin Core developers • © 2011-2026 Litecoin Core developers • © 2009-2026 Bitcoin Core developers")
-            .arg(QStringLiteral(DEFCOIN_NU_VERSION));
+            .arg(productName(), QStringLiteral(DEFCOIN_NU_VERSION));
         QPainter painter(&displaySplash);
         painter.setRenderHint(QPainter::TextAntialiasing, true);
         const QRect textRect(18, displaySplash.height() - 60, displaySplash.width() - 36, 50);
@@ -397,11 +416,11 @@ int main(int argc, char* argv[])
         auto* duplicateGuiTimer = new QTimer(&app);
         duplicateGuiTimer->setInterval(10000);
         QObject::connect(duplicateGuiTimer, &QTimer::timeout, &app, [&duplicateGuiWarningShown] {
-            if (duplicateGuiWarningShown || !anotherNuGuiProcessIsRunning()) return;
+            if (duplicateGuiWarningShown || !anotherGuiProcessIsRunning()) return;
             duplicateGuiWarningShown = true;
             QMessageBox::warning(nullptr,
-                                 QStringLiteral("Another Nu window is open"),
-                                 QStringLiteral("Another Defcoin Core Nu window is now running. Close one Nu window before doing wallet, explorer, or diagnostics work. Running two frontends against the same data directory can produce confusing status and competing wallet actions."));
+                                 QStringLiteral("Another %1 window is open").arg(productName()),
+                                 QStringLiteral("Another %1 window is now running. Close one window before doing local cache or wallet work.").arg(productName()));
         });
         duplicateGuiTimer->start();
     }
@@ -416,7 +435,7 @@ int main(int argc, char* argv[])
     engine.addImportPath(resourceRoot + "/qml");
     engine.addImportPath(resourceRoot);
 
-    const QUrl mainUrl = QUrl::fromLocalFile(resourceRoot + "/qml/Main.qml");
+    const QUrl mainUrl = QUrl::fromLocalFile(resourceRoot + (kExpForApp ? QStringLiteral("/qml/ExpForMain.qml") : QStringLiteral("/qml/Main.qml")));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] {
         QCoreApplication::exit(-1);
     }, Qt::QueuedConnection);
@@ -438,6 +457,23 @@ int main(int argc, char* argv[])
         const int routeIndex = arguments.indexOf("--route");
         if (routeIndex >= 0 && routeIndex + 1 < arguments.size()) {
             rootObject->setProperty("currentRoute", arguments.at(routeIndex + 1));
+        }
+        const int openAddressIndex = arguments.indexOf("--open-address");
+        const int openTxIndex = arguments.indexOf("--open-transaction");
+        const int openBlockIndex = arguments.indexOf("--open-block");
+        const int searchIndex = arguments.indexOf("--search");
+        if (openAddressIndex >= 0 && openAddressIndex + 1 < arguments.size()) {
+            rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
+            QTimer::singleShot(450, &service, [&service, value = arguments.at(openAddressIndex + 1)] { service.openAddressInExplorer(value); });
+        } else if (openTxIndex >= 0 && openTxIndex + 1 < arguments.size()) {
+            rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
+            QTimer::singleShot(450, &service, [&service, value = arguments.at(openTxIndex + 1)] { service.openTransactionInExplorer(value); });
+        } else if (openBlockIndex >= 0 && openBlockIndex + 1 < arguments.size()) {
+            rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
+            QTimer::singleShot(450, &service, [&service, value = arguments.at(openBlockIndex + 1)] { service.openBlockInExplorer(value); });
+        } else if (searchIndex >= 0 && searchIndex + 1 < arguments.size()) {
+            rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
+            QTimer::singleShot(450, &service, [&service, value = arguments.at(searchIndex + 1)] { service.searchExplorer(value); });
         }
         const int nodeTabIndex = arguments.indexOf("--node-tab");
         if (nodeTabIndex >= 0 && nodeTabIndex + 1 < arguments.size()) {

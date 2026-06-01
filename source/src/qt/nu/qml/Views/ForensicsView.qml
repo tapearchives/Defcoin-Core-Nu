@@ -82,6 +82,91 @@ ColumnLayout {
         }
     }
 
+    function contactBalanceMap() {
+        const out = ({})
+        for (let c = 0; c < NuService.explorerContacts.length; ++c) {
+            const contact = NuService.explorerContacts[c]
+            out[String(contact.username || "")] = 0
+        }
+        const ownerByAddress = ({})
+        for (let i = 0; i < NuService.explorerContacts.length; ++i) {
+            const contact = NuService.explorerContacts[i]
+            const addresses = contact.addresses || []
+            for (let a = 0; a < addresses.length; ++a)
+                ownerByAddress[String(addresses[a])] = String(contact.username || "")
+        }
+        for (let r = 0; r < NuService.explorerRichList.length; ++r) {
+            const meta = NuService.explorerRichList[r].meta || {}
+            const owner = ownerByAddress[String(meta.address || "")]
+            if (owner !== undefined) out[owner] += Number(meta.balanceSats || 0)
+        }
+        return out
+    }
+
+    function drawContactGraph(ctx, canvasWidth, canvasHeight) {
+        ctx.reset()
+        const contacts = NuService.explorerContacts
+        const relationships = NuService.explorerContactRelationships
+        const cx = canvasWidth / 2
+        const cy = canvasHeight / 2
+        const radius = Math.max(80, Math.min(canvasWidth, canvasHeight) * 0.34)
+        const balances = root.contactBalanceMap()
+        let maxBalance = 1
+        for (const name in balances) maxBalance = Math.max(maxBalance, Number(balances[name] || 0))
+        const positions = ({})
+        for (let i = 0; i < contacts.length; ++i) {
+            const name = String(contacts[i].username || "")
+            const angle = -Math.PI / 2 + Math.PI * 2 * i / Math.max(1, contacts.length)
+            positions[name] = { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius }
+        }
+        let maxFlow = 1
+        for (let e = 0; e < relationships.length; ++e)
+            maxFlow = Math.max(maxFlow, Number((relationships[e].meta || {}).amountSats || 0))
+        ctx.lineCap = "round"
+        for (let j = 0; j < relationships.length; ++j) {
+            const meta = relationships[j].meta || {}
+            const source = positions[String(meta.source || "")]
+            const target = positions[String(meta.target || "")]
+            const amount = Number(meta.amountSats || 0)
+            if (!source || !target || amount <= 0) continue
+            ctx.strokeStyle = "#48b7ff"
+            ctx.globalAlpha = 0.35
+            ctx.lineWidth = 1 + 8 * amount / maxFlow
+            ctx.beginPath()
+            ctx.moveTo(source.x, source.y)
+            ctx.lineTo(target.x, target.y)
+            ctx.stroke()
+        }
+        ctx.globalAlpha = 1
+        for (let n = 0; n < contacts.length; ++n) {
+            const name = String(contacts[n].username || "")
+            const pos = positions[name]
+            const balanceSats = Number(balances[name] || 0)
+            const nodeRadius = 18 + 28 * Math.sqrt(balanceSats / maxBalance)
+            const wholeDfc = Math.round(balanceSats / 100000000)
+            ctx.fillStyle = "#f3d447"
+            ctx.strokeStyle = NuTokens.textPrimary
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(pos.x, pos.y, nodeRadius, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+            ctx.fillStyle = NuTokens.textPrimary
+            ctx.font = "700 12px " + NuTokens.bodyFont
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            ctx.fillText(name, pos.x, pos.y - 5)
+            ctx.font = "10px " + NuTokens.bodyFont
+            ctx.fillText(wholeDfc.toLocaleString() + " DFC", pos.x, pos.y + 9)
+        }
+        if (contacts.length === 0) {
+            ctx.fillStyle = NuTokens.textSecondary
+            ctx.font = "13px " + NuTokens.bodyFont
+            ctx.textAlign = "center"
+            ctx.fillText("Add contacts to chart address relationships.", cx, cy)
+        }
+    }
+
     function progressText() {
         if (NuService.forensicsScanTip <= 0) return "0.00%"
         return (root.scanProgress * 100).toFixed(2) + "%"
@@ -477,7 +562,13 @@ ColumnLayout {
                         text: "Chart relationships"
                         primary: true
                         helpText: "Build an indexed relationship table from the saved Forensics Contacts."
-                        onClicked: NuService.refreshExplorerContactRelationships()
+                        onClicked: {
+                            NuService.refreshExplorerContactRelationships()
+                            contactGraphCanvas.requestPaint()
+                            contactGraphWindow.show()
+                            contactGraphWindow.raise()
+                            contactGraphWindow.requestActivate()
+                        }
                     }
                 }
 
@@ -653,7 +744,7 @@ ColumnLayout {
 
     Window {
         id: forensicsTableWindow
-        title: "Defcoin Core Nu - Irregular Messages"
+        title: "Irregular Messages"
         width: 1280
         height: 760
         minimumWidth: 860
@@ -754,6 +845,73 @@ ColumnLayout {
                 forceMonospace: true
                 fontPixelSize: root.popoutFontSize
                 onRowActivated: (row) => root.openRow(row)
+            }
+        }
+    }
+
+    Window {
+        id: contactGraphWindow
+        width: 1040
+        height: 760
+        minimumWidth: 760
+        minimumHeight: 560
+        visible: false
+        title: "Forensics Contact Relationship Graph"
+        color: NuTokens.backgroundBase
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: NuTokens.spaceMd
+            spacing: NuTokens.spaceMd
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: NuTokens.spaceMd
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Forensics Contact Relationship Graph"
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontTitle
+                    font.weight: Font.DemiBold
+                }
+
+                NuActionButton {
+                    Layout.preferredWidth: 110
+                    text: "Refresh"
+                    onClicked: {
+                        NuService.refreshExplorerContactRelationships()
+                        contactGraphCanvas.requestPaint()
+                    }
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: "Node size is based on saved addresses that also appear in the current Top 100. Each node shows rounded DFC. Line thickness is based on indexed direct spend flow between saved contact groups."
+                color: NuTokens.textSecondary
+                font.pixelSize: NuTokens.fontSmall
+                wrapMode: Text.WordWrap
+            }
+
+            Canvas {
+                id: contactGraphCanvas
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onPaint: root.drawContactGraph(getContext("2d"), width, height)
+            }
+
+            NuDataTable {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 170
+                tableId: "forensicsContactGraphFlows"
+                columns: ["From", "To", "Total Flow", "Txs"]
+                columnTypes: ["text", "text", "amount", "number"]
+                columnWeights: [1.0, 1.0, 1.0, 0.45]
+                rows: NuService.explorerContactRelationships
+                emptyText: "No indexed contact-to-contact flows found yet."
+                defaultSortColumn: 2
+                defaultSortAscending: false
             }
         }
     }

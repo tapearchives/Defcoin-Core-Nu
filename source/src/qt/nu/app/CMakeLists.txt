@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(DefcoinCoreNuQml VERSION 26.5.6 LANGUAGES CXX)
+project(DefcoinCoreNuQml VERSION 26.6.0 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.5.6" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.6" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -96,6 +96,68 @@ target_compile_definitions(DefcoinCoreNu PRIVATE
     DEFCOIN_NU_VERSION="${DEFCOIN_NU_RELEASE_NAME}"
     DEFCOIN_NU_HELP_ENABLED=${DEFCOIN_NU_HELP_ENABLED_VALUE}
     DEFCOIN_NU_VELOPACK_UPDATE_URL="${DEFCOIN_NU_VELOPACK_UPDATE_URL}"
+    DEFCOIN_NU_EXPFOR_APP=0
+)
+
+qt_add_executable(DefcoinCoreExpFor
+    MACOSX_BUNDLE
+    main.cpp
+    NuPlatformIntegration.cpp
+    NuPlatformIntegration.h
+    NuRpcService.cpp
+    NuRpcService.h
+    NuVelopackUpdater.cpp
+    NuVelopackUpdater.h
+)
+
+target_sources(DefcoinCoreExpFor PRIVATE ${DEFCOIN_NU_ICON_MACOS})
+
+if(WIN32)
+    target_sources(DefcoinCoreExpFor PRIVATE DefcoinCoreNu.rc)
+    target_link_options(DefcoinCoreExpFor PRIVATE -mwindows)
+endif()
+
+if(APPLE)
+    target_sources(DefcoinCoreExpFor PRIVATE MacHelp.h MacHelp.mm)
+    target_link_libraries(DefcoinCoreExpFor PRIVATE ${COCOA_LIBRARY} ${CARBON_LIBRARY})
+endif()
+
+target_link_libraries(DefcoinCoreExpFor
+    PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Network
+        Qt6::OpenGL
+        Qt6::Qml
+        Qt6::QmlMeta
+        Qt6::QmlModels
+        Qt6::QmlWorkerScript
+        Qt6::Quick
+        Qt6::QuickControls2
+        Qt6::QuickLayouts
+        Qt6::QuickTemplates2
+        Qt6::Sql
+        Qt6::Svg
+        Qt6::Widgets
+        ${QRENCODE_LIBRARY}
+)
+
+target_include_directories(DefcoinCoreExpFor PRIVATE ${QRENCODE_INCLUDE_DIR})
+
+set_target_properties(DefcoinCoreExpFor PROPERTIES
+    MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinCoreExpFor
+    MACOSX_BUNDLE_BUNDLE_NAME "Defcoin Core ExpFor"
+    MACOSX_BUNDLE_DISPLAY_NAME "Defcoin Core ExpFor"
+    MACOSX_BUNDLE_ICON_FILE "DefcoinCoreNuNuIcon"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${DEFCOIN_NU_RELEASE_NAME}"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${DEFCOIN_NU_RELEASE_NAME}"
+)
+
+target_compile_definitions(DefcoinCoreExpFor PRIVATE
+    DEFCOIN_NU_VERSION="${DEFCOIN_NU_RELEASE_NAME}"
+    DEFCOIN_NU_HELP_ENABLED=${DEFCOIN_NU_HELP_ENABLED_VALUE}
+    DEFCOIN_NU_VELOPACK_UPDATE_URL="${DEFCOIN_NU_VELOPACK_UPDATE_URL}"
+    DEFCOIN_NU_EXPFOR_APP=1
 )
 
 file(GLOB_RECURSE DEFCOIN_NU_QML_FILES CONFIGURE_DEPENDS

@@ -70,7 +70,7 @@ void NuPlatformIntegration::installMacApplicationMenu()
     m_mac_menu_bar->setNativeMenuBar(true);
     QMenu* app_menu = m_mac_menu_bar->addMenu(QApplication::applicationDisplayName());
 
-    QAction* about_action = app_menu->addAction(QObject::tr("About Defcoin Core Nu"));
+    QAction* about_action = app_menu->addAction(QObject::tr("About %1").arg(QApplication::applicationDisplayName()));
     about_action->setMenuRole(QAction::AboutRole);
     connect(about_action, &QAction::triggered, this, [this] { invokeRootMethod("openAboutSummary"); });
 
@@ -93,7 +93,7 @@ void NuPlatformIntegration::installMacApplicationMenu()
 
     app_menu->addSeparator();
 
-    QAction* quit_action = app_menu->addAction(QObject::tr("Quit Defcoin Core Nu"));
+    QAction* quit_action = app_menu->addAction(QObject::tr("Quit %1").arg(QApplication::applicationDisplayName()));
     quit_action->setShortcut(QKeySequence::Quit);
     quit_action->setMenuRole(QAction::QuitRole);
     connect(quit_action, &QAction::triggered, this, &NuPlatformIntegration::quitApplication);
@@ -130,7 +130,7 @@ void NuPlatformIntegration::showBackgroundNotice()
     if (!m_tray || m_background_notice_shown) return;
     m_background_notice_shown = true;
     m_tray->showMessage(QApplication::applicationDisplayName(),
-                        QObject::tr("Defcoin Core Nu is running in the background to keep your node synchronized."),
+                        QObject::tr("%1 is running in the background.").arg(QApplication::applicationDisplayName()),
                         QSystemTrayIcon::Information,
                         7000);
 }
@@ -159,7 +159,7 @@ void NuPlatformIntegration::ensureTrayIcon()
     if (m_tray || !trayAvailable()) return;
 
     m_tray_menu = new QMenu();
-    QAction* show_action = m_tray_menu->addAction(QObject::tr("Show Defcoin Core Nu"));
+    QAction* show_action = m_tray_menu->addAction(QObject::tr("Show %1").arg(QApplication::applicationDisplayName()));
     connect(show_action, &QAction::triggered, this, &NuPlatformIntegration::showMainWindow);
 
     m_status_action = m_tray_menu->addAction(QObject::tr("Node Status: %1").arg(currentNodeStatusText()));

@@ -170,18 +170,6 @@ Rectangle {
                     help: "Configure and monitor a local scrypt miner executable."
                 },
                 {
-                    route: "explorer",
-                    label: "Explorer",
-                    icon: "../../assets/icons/explorer.svg",
-                    help: "Search blocks, transactions, and wallet addresses with the local SQLite explorer cache."
-                },
-                {
-                    route: "forensics",
-                    label: "Forensics",
-                    icon: "../../assets/icons/forensics.svg",
-                    help: "Review irregular OP_RETURN messages and other blockchain oddities."
-                },
-                {
                     route: "node",
                     label: "Diagnostics",
                     icon: "../../assets/icons/node.svg",

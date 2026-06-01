@@ -207,7 +207,7 @@ ApplicationWindow {
              + "</ul>"
              + "<h2>What went into Nu</h2>"
              + "<ul>"
-             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, Explorer, Forensics, Diagnostics, and Settings.</li>"
+             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, Diagnostics, and Settings. Explorer and Forensics analysis now live in the separate Defcoin Core ExpFor app so Nu can stay wallet-first.</li>"
              + "<li>Visual system, copy, and interaction patterns are guided by Nothing-style restraint and Bitcoin Design Community wallet usability patterns.</li>"
              + "<li>Bundled backend autostart, RPC connection handling, launch diagnostics, and current-launch log viewing.</li>"
              + "<li><b>Enable LAN node discovery</b> is off by default. When enabled, macOS may ask for Local Network access so Nu can find Defcoin nodes on the same LAN, which can help another local wallet copy blockchain data faster. The permission does not grant access to wallet keys, passphrases, or private wallet data.</li>"
@@ -217,7 +217,7 @@ ApplicationWindow {
              + "<li>The address filter is endpoint-specific, not IP-wide. If the same host runs Litecoin Core on one port and Defcoin Core on another, Nu keeps the Defcoin endpoint eligible and can replace older same-IP non-Defcoin ports in addrman. Defcoin nodes on non-standard ports can still communicate and be retained after completing an actual Defcoin handshake.</li>"
              + "<li>Peer inspection with simple and detailed views, including actual per-peer magic bytes where reported by the backend.</li>"
              + "<li>Network diagnostics now include difficulty, 120-block network hashrate, chain-tip counts, sync progress, and top P2P message types where the backend reports them. [Thanks to packetloss404 / Ian S. Walmsley's v1.0.2 build.]</li>"
-             + "<li>Forensics now surfaces irregular OP_RETURN messages from local block data, including text payloads that burned DFC, bypassed standard relay size limits, used active script opcodes, or appeared multiple times in one transaction. The irregular-message table includes pause/resume scanning, a completion summary, BIP141 witness-commitment definitions, and a resizable pop-out table view. A separate Witness Repair tab handles post-903168 short-block inspection and repair without loading the irregular-message table.</li>"
+             + "<li>Defcoin Core ExpFor carries the Explorer and Forensics surfaces from Nu, including irregular OP_RETURN scans, Top 100 analytics, movements, contacts, relationship graphs, and index controls. Nu can hand address and transaction inspections to ExpFor when the internal explorer mode is selected.</li>"
              + "<li>BIP39 recovery phrase creation and restore workflows for Nu/Core HD wallets, plus an advanced preview-gated external derivation scan with Defcoin WIF compatibility options.</li>"
              + "<li>Local mining setup can select an external cpuminer-compatible executable, build scrypt stratum arguments, and monitor miner output without bundling miner binaries into the wallet app.</li>"
              + "<li>Wallet basics including receive requests, transaction inspection, PSBT tools, message signing, wallet backup, encryption, and optional third-party explorer links.</li>"
@@ -308,8 +308,6 @@ ApplicationWindow {
             "activity": "Transactions",
             "wallet": "Wallet",
             "mining": "Mining",
-            "explorer": "Explorer",
-            "forensics": "Forensics",
             "diagnostics": "Diagnostics",
             "settings": "Settings",
             "psbt": "Partially signed transactions"
@@ -422,9 +420,7 @@ ApplicationWindow {
             NuMenuItem { text: qsTr("Transactions"); shortcut: Qt.platform.os === "osx" ? "Meta+4" : "Ctrl+4"; onTriggered: frame.currentRoute = "activity" }
             NuMenuItem { text: qsTr("Wallet"); shortcut: Qt.platform.os === "osx" ? "Meta+5" : "Ctrl+5"; onTriggered: frame.currentRoute = "wallet" }
             NuMenuItem { text: qsTr("Mining"); shortcut: Qt.platform.os === "osx" ? "Meta+6" : "Ctrl+6"; onTriggered: frame.currentRoute = "mining" }
-            NuMenuItem { text: qsTr("Explorer"); shortcut: Qt.platform.os === "osx" ? "Meta+7" : "Ctrl+7"; onTriggered: frame.currentRoute = "explorer" }
-            NuMenuItem { text: qsTr("Forensics"); shortcut: Qt.platform.os === "osx" ? "Meta+8" : "Ctrl+8"; onTriggered: frame.currentRoute = "forensics" }
-            NuMenuItem { text: qsTr("Diagnostics"); shortcut: Qt.platform.os === "osx" ? "Meta+9" : "Ctrl+9"; onTriggered: root.openNode() }
+            NuMenuItem { text: qsTr("Diagnostics"); shortcut: Qt.platform.os === "osx" ? "Meta+7" : "Ctrl+7"; onTriggered: root.openNode() }
         }
 
         Menu {
@@ -561,7 +557,8 @@ ApplicationWindow {
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontTitle
                         font.weight: Font.DemiBold
-                        elide: Text.ElideRight
+                        wrapMode: Text.WrapAnywhere
+                        maximumLineCount: 2
                     }
                     NuActionButton {
                         text: qsTr("Close")

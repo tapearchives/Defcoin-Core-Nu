@@ -69,6 +69,10 @@
 #include "MacHelp.h"
 #endif
 
+#ifndef DEFCOIN_NU_EXPFOR_APP
+#define DEFCOIN_NU_EXPFOR_APP 0
+#endif
+
 #if !defined(Q_OS_WIN)
 #include <pwd.h>
 #include <sys/resource.h>
@@ -151,6 +155,36 @@ QString explorerTop100Color(int rank)
 {
     if (rank <= 0) return EXPLORER_TOP100_COLORS.last();
     return EXPLORER_TOP100_COLORS.at((rank - 1) % EXPLORER_TOP100_COLORS.size());
+}
+
+bool launchExpForLookup(const QString& option, const QString& value)
+{
+#if DEFCOIN_NU_EXPFOR_APP
+    Q_UNUSED(option);
+    Q_UNUSED(value);
+    return false;
+#else
+    if (option.trimmed().isEmpty() || value.trimmed().isEmpty()) return false;
+    const QStringList lookup_args{option, value.trimmed()};
+#if defined(Q_OS_MACOS)
+    QStringList open_args;
+    open_args << QStringLiteral("-b")
+              << QStringLiteral("org.defcoincore.DefcoinCoreExpFor")
+              << QStringLiteral("--args")
+              << lookup_args;
+    if (QProcess::startDetached(QStringLiteral("/usr/bin/open"), open_args)) return true;
+#endif
+    const QDir app_dir(QCoreApplication::applicationDirPath());
+#if defined(Q_OS_WIN)
+    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExpFor.exe"));
+#else
+    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExpFor"));
+#endif
+    const QFileInfo candidate_info(candidate);
+    if (candidate_info.exists() && candidate_info.isExecutable())
+        return QProcess::startDetached(candidate, lookup_args);
+    return false;
+#endif
 }
 
 QString normalizedFastSyncHost(const QHostAddress& address)
@@ -10055,6 +10089,9 @@ void NuRpcService::openTransactionInExplorer(const QString& txid)
         emitExplorerError(QStringLiteral("Transaction not opened"), QStringLiteral("Transaction IDs must be 64 hexadecimal characters."));
         return;
     }
+#if !DEFCOIN_NU_EXPFOR_APP
+    if (usingInternalExplorer() && launchExpForLookup(QStringLiteral("--open-transaction"), clean_txid)) return;
+#endif
     if (!usingInternalExplorer()) {
         const QString url = explorerUrlForTransaction(clean_txid);
         if (url.isEmpty()) {
@@ -10172,6 +10209,10 @@ void NuRpcService::openAddressInExplorer(const QString& address)
         return;
     }
 
+#if !DEFCOIN_NU_EXPFOR_APP
+    if (usingInternalExplorer() && launchExpForLookup(QStringLiteral("--open-address"), clean_address)) return;
+#endif
+
     if (usingInternalExplorer()) {
         bool indexed_found = false;
         const QString indexed_summary = explorerIndexedAddressHtml(clean_address, &indexed_found);
@@ -10247,6 +10288,9 @@ void NuRpcService::openBlockInExplorer(const QString& block_id)
         emitExplorerError(QStringLiteral("Block not opened"), QStringLiteral("Block lookups must use a non-negative height or a 64-character hexadecimal block hash."));
         return;
     }
+#if !DEFCOIN_NU_EXPFOR_APP
+    if (usingInternalExplorer() && launchExpForLookup(QStringLiteral("--open-block"), clean)) return;
+#endif
     if (!usingInternalExplorer()) {
         Q_EMIT userMessage(QStringLiteral("External block links unavailable"),
                            QStringLiteral("This explorer setting only defines transaction and address URL templates. Switch to the internal explorer for block lookups."));
@@ -10345,6 +10389,9 @@ void NuRpcService::searchExplorer(const QString& query)
         emitExplorerError(QStringLiteral("Explorer search"), QStringLiteral("Search input is too long. Enter a block height, 64-character hash, or Defcoin address."));
         return;
     }
+#if !DEFCOIN_NU_EXPFOR_APP
+    if (usingInternalExplorer() && launchExpForLookup(QStringLiteral("--search"), clean)) return;
+#endif
     bool is_height = false;
     clean.toInt(&is_height);
     if (is_height && !isNonNegativeBlockHeight(clean)) {
