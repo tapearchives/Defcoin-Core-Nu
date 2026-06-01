@@ -8,3 +8,6 @@ plist="$1"
 
 /usr/libexec/PlistBuddy -c "Set :NSWindowRestoresWorkspaceAtLaunch false" "$plist" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :NSWindowRestoresWorkspaceAtLaunch bool false" "$plist"
+
+/usr/libexec/PlistBuddy -c "Set :ApplePersistenceIgnoreState true" "$plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :ApplePersistenceIgnoreState bool true" "$plist"

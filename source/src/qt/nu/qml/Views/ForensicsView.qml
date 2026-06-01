@@ -31,6 +31,56 @@ ColumnLayout {
         "Printable text decoded from pushed OP_RETURN bytes. Non-text payloads are summarized in hex.",
         "Why Nu flagged this row as irregular compared with standard node relay policy."
     ]
+    property int selectedContactIndex: -1
+    property var selectedAddressBookKeys: []
+
+    function contactRows() {
+        const rows = []
+        for (let i = 0; i < NuService.explorerContacts.length; ++i) {
+            const contact = NuService.explorerContacts[i]
+            const addresses = contact.addresses || []
+            rows.push({
+                cells: [String(contact.username || ""), String(contact.addressText || ""), addresses.length],
+                meta: { index: i, username: String(contact.username || ""), addresses: addresses, addressText: String(contact.addressText || "") }
+            })
+        }
+        return rows
+    }
+
+    function selectContact(row) {
+        const meta = row && row.meta ? row.meta : {}
+        root.selectedContactIndex = Number(meta.index !== undefined ? meta.index : -1)
+        if (contactNameField) contactNameField.text = String(meta.username || "")
+        if (contactAddressArea) contactAddressArea.text = String(meta.addressText || "")
+    }
+
+    function clearContactEditor() {
+        root.selectedContactIndex = -1
+        if (contactNameField) contactNameField.text = ""
+        if (contactAddressArea) contactAddressArea.text = ""
+    }
+
+    function selectedAddressBookRows() {
+        const keys = root.selectedAddressBookKeys || []
+        const out = []
+        for (let r = 0; r < NuService.addressBook.length; ++r) {
+            const row = NuService.addressBook[r]
+            const cells = row && row.cells !== undefined ? row.cells : row
+            const address = cells && cells.length > 1 ? String(cells[1] || "") : ""
+            if (keys.indexOf(address) >= 0) out.push(row)
+        }
+        return out
+    }
+
+    function addSelectedAddressBookContacts() {
+        const rows = root.selectedAddressBookRows()
+        for (let i = 0; i < rows.length; ++i) {
+            const cells = rows[i] && rows[i].cells !== undefined ? rows[i].cells : rows[i]
+            const label = cells && cells.length > 0 ? String(cells[0] || "").trim() : ""
+            const address = cells && cells.length > 1 ? String(cells[1] || "").trim() : ""
+            if (address.length > 0) NuService.saveExplorerContact(label.length > 0 ? label : address, address, -1)
+        }
+    }
 
     function progressText() {
         if (NuService.forensicsScanTip <= 0) return "0.00%"
@@ -78,6 +128,7 @@ ColumnLayout {
         Layout.fillWidth: true
         NuTabButton { text: "Irregular Messages" }
         NuTabButton { text: "Fix Witness Data" }
+        NuTabButton { text: "Contacts" }
     }
 
     StackLayout {
@@ -392,6 +443,210 @@ ColumnLayout {
                 }
 
                 Item { Layout.fillHeight: true }
+            }
+        }
+
+        NuPanel {
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: NuTokens.spaceMd
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceMd
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceXs
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Forensics Contacts"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontTitle
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Local username-to-address groups for forensic relationship charts. Contacts stay on this machine and can be seeded from the active wallet address book."
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                    NuActionButton {
+                        Layout.preferredWidth: 160
+                        text: "Chart relationships"
+                        primary: true
+                        helpText: "Build an indexed relationship table from the saved Forensics Contacts."
+                        onClicked: NuService.refreshExplorerContactRelationships()
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 142
+                    spacing: NuTokens.spaceMd
+
+                    ColumnLayout {
+                        Layout.preferredWidth: Math.max(250, root.width * 0.25)
+                        Layout.fillHeight: true
+                        spacing: NuTokens.spaceXs
+                        Label { text: "Username"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontSmall }
+                        NuTextField {
+                            id: contactNameField
+                            Layout.fillWidth: true
+                            placeholderText: "username, handle, pool, or project"
+                            helpText: "Local display name for a person, pool, project, or address cluster."
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: NuTokens.spaceSm
+                            NuActionButton {
+                                Layout.fillWidth: true
+                                text: root.selectedContactIndex >= 0 ? "Update" : "Add"
+                                primary: true
+                                helpText: "Save this local contact with the listed addresses."
+                                onClicked: NuService.saveExplorerContact(contactNameField.text, contactAddressArea.text, root.selectedContactIndex)
+                            }
+                            NuActionButton {
+                                Layout.preferredWidth: 82
+                                text: "Clear"
+                                helpText: "Clear the contact editor."
+                                onClicked: root.clearContactEditor()
+                            }
+                            NuActionButton {
+                                Layout.preferredWidth: 92
+                                text: "Delete"
+                                danger: true
+                                enabled: root.selectedContactIndex >= 0
+                                helpText: "Delete the selected local contact mapping."
+                                onClicked: {
+                                    NuService.deleteExplorerContact(root.selectedContactIndex)
+                                    root.clearContactEditor()
+                                }
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: NuTokens.spaceXs
+                        Label { text: "Addresses"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontSmall }
+                        Basic.TextArea {
+                            id: contactAddressArea
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            placeholderText: "One or more Defcoin addresses, separated by commas or lines"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WrapAnywhere
+                            selectByMouse: true
+                            persistentSelection: true
+                            background: Rectangle {
+                                radius: NuTokens.radiusSmall
+                                color: NuTokens.panelBase
+                                border.color: contactAddressArea.activeFocus ? NuTokens.lineStrong : NuTokens.lineSubtle
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: NuTokens.spaceMd
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: NuTokens.spaceXs
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Saved contacts"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontBodyLarge
+                            font.weight: Font.DemiBold
+                        }
+                        NuDataTable {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            tableId: "forensicsContacts"
+                            columns: ["User", "Addresses", "Count"]
+                            columnTypes: ["text", "address", "number"]
+                            columnWeights: [1.0, 3.0, 0.45]
+                            rows: root.contactRows()
+                            emptyText: "No saved Forensics Contacts yet."
+                            rowSelectionEnabled: true
+                            plainClickSelectsRows: true
+                            rowKeyMetaField: "index"
+                            onRowSelectionChanged: (keys) => {
+                                if (keys.length === 0) {
+                                    root.clearContactEditor()
+                                    return
+                                }
+                                const wanted = Number(keys[0])
+                                const rows = root.contactRows()
+                                for (let i = 0; i < rows.length; ++i) {
+                                    if (Number((rows[i].meta || {}).index) === wanted) {
+                                        root.selectContact(rows[i])
+                                        return
+                                    }
+                                }
+                            }
+                            onRowActivated: (row) => root.selectContact(row)
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: NuTokens.spaceXs
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                Layout.fillWidth: true
+                                text: "Add from wallet address book"
+                                color: NuTokens.textPrimary
+                                font.pixelSize: NuTokens.fontBodyLarge
+                                font.weight: Font.DemiBold
+                            }
+                            NuActionButton {
+                                Layout.preferredWidth: 132
+                                text: "Add selected"
+                                enabled: root.selectedAddressBookKeys.length > 0
+                                helpText: "Copy selected active-wallet address-book entries into Forensics Contacts."
+                                onClicked: root.addSelectedAddressBookContacts()
+                            }
+                        }
+                        NuDataTable {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            tableId: "forensicsContactsAddressBook"
+                            columns: ["Label", "Address", "Type", "Received"]
+                            columnTypes: ["text", "address", "text", "amount"]
+                            columnWeights: [1.2, 3.0, 0.8, 1.1]
+                            rows: NuService.addressBook
+                            emptyText: "Open a wallet with address-book entries to seed Forensics Contacts."
+                            rowSelectionEnabled: true
+                            plainClickSelectsRows: true
+                            rowKeyMetaField: "address"
+                            onRowSelectionChanged: (keys) => root.selectedAddressBookKeys = keys
+                        }
+                    }
+                }
+
+                NuDataTable {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 150
+                    tableId: "forensicsContactRelationships"
+                    columns: ["From", "To", "Total Flow", "Txs"]
+                    columnTypes: ["text", "text", "amount", "number"]
+                    columnWeights: [1.0, 1.0, 1.0, 0.45]
+                    rows: NuService.explorerContactRelationships
+                    emptyText: "No indexed contact-to-contact flows found yet."
+                    defaultSortColumn: 2
+                    defaultSortAscending: false
+                }
             }
         }
     }

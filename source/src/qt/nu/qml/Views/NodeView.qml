@@ -299,12 +299,17 @@ ColumnLayout {
             "Warning",
             "failed|timeout|disconnect",
             "valid fork|stale|reorg|orphan",
+            "scriptPubKey Manager|sqlwallet|descriptor",
+            "wallet|loadwallet|createwallet|AddToWallet",
+            "block index|Reindex|FlushStateToDisk",
+            "witness|NODE_WITNESS|SegWit",
+            "RPC|ThreadRPCServer|HTTP",
+            "connect|disconnect|timeout|socket",
+            "fast sync|UDP|TCP",
             "UpdateTip",
             "seednode|dns seed|fixed seed",
             "receive version message",
-            "version ",
-            "wallet|AddToWallet",
-            "RPC"
+            "version "
         ]
         const last = String(NuService.logLastSearchPattern || "").trim()
         if (last.length > 0 && presets.indexOf(last) < 0) presets.push("Last: " + last)

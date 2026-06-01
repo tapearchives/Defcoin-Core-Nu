@@ -39,12 +39,17 @@ Basic.ComboBox {
     onHoveredChanged: if (!hovered) suppressToolTip = false
     onActiveFocusChanged: if (!activeFocus) suppressToolTip = false
 
-    contentItem: Text {
-        text: root.formattedText(root.currentText)
+    contentItem: TextInput {
+        text: root.editable ? root.editText : root.formattedText(root.currentText)
         color: NuTokens.textPrimary
         font: root.font
         verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
+        readOnly: !root.editable
+        selectByMouse: root.editable
+        selectedTextColor: NuTokens.textInverse
+        selectionColor: NuTokens.lineStrong
+        clip: true
+        onTextEdited: if (root.editable) root.editText = text
     }
 
     indicator: Item {

@@ -1764,8 +1764,11 @@ bool CWallet::CanGetAddresses(bool internal) const
 {
     LOCK(cs_wallet);
     if (m_spk_managers.empty()) return false;
+    const std::map<OutputType, ScriptPubKeyMan*>& spk_managers = internal ? m_internal_spk_managers : m_external_spk_managers;
     for (OutputType t : OUTPUT_TYPES) {
-        auto spk_man = GetScriptPubKeyMan(t, internal);
+        const auto it = spk_managers.find(t);
+        if (it == spk_managers.end()) continue;
+        auto spk_man = it->second;
         if (spk_man && spk_man->CanGetAddresses(t == OutputType::MWEB ? KeyPurpose::MWEB : (internal ? KeyPurpose::INTERNAL : KeyPurpose::EXTERNAL))) {
             return true;
         }

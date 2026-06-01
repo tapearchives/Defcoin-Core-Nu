@@ -15,6 +15,8 @@ ColumnLayout {
     property int movementPage: 0
     property int selectedRichRank: -1
     property int hoveredRichRank: -1
+    property string selectedWealthGroup: ""
+    property string selectedWhaleGroup: ""
     property bool active: false
     property bool analyticsRequested: false
     property bool summaryRequested: false
@@ -261,7 +263,36 @@ ColumnLayout {
         ]
     }
 
-    function drawDistributionPie(ctx, canvasWidth, canvasHeight, rows, title, subtitle) {
+    function distributionSliceAt(x, y, canvasWidth, canvasHeight, rows) {
+        const cx = canvasWidth / 2
+        const cy = canvasHeight / 2
+        const dx = x - cx
+        const dy = y - cy
+        const radius = Math.min(canvasWidth, canvasHeight) * 0.40
+        const distance = Math.sqrt(dx * dx + dy * dy)
+        if (distance > radius + 18) return ""
+        let total = 0
+        for (let i = 0; i < rows.length; ++i) {
+            const meta = rows[i].meta || {}
+            if (meta.includeInPie) total += Number(meta.sats || 0)
+        }
+        if (total <= 0) return ""
+        let angle = Math.atan2(dy, dx)
+        angle += Math.PI / 2
+        if (angle < 0) angle += Math.PI * 2
+        let start = 0
+        for (let r = 0; r < rows.length; ++r) {
+            const meta = rows[r].meta || {}
+            if (!meta.includeInPie) continue
+            const pct = Number(meta.sats || 0) / total
+            const end = start + Math.PI * 2 * pct
+            if (angle >= start && angle <= end) return String(meta.label || "")
+            start = end
+        }
+        return ""
+    }
+
+    function drawDistributionPie(ctx, canvasWidth, canvasHeight, rows, title, subtitle, selectedLabel) {
         ctx.reset()
         const cx = canvasWidth / 2
         const cy = canvasHeight / 2
@@ -291,15 +322,27 @@ ColumnLayout {
             const sats = Number(meta.sats || 0)
             if (sats <= 0) continue
             const end = start + Math.PI * 2 * sats / total
+            const selected = String(meta.label || "") === String(selectedLabel || "")
+            const mid = (start + end) / 2
+            const offset = selected ? 13 : 0
+            const sx = cx + Math.cos(mid) * offset
+            const sy = cy + Math.sin(mid) * offset
             ctx.beginPath()
-            ctx.moveTo(cx, cy)
-            ctx.arc(cx, cy, radius, start, end)
+            ctx.moveTo(sx, sy)
+            ctx.arc(sx, sy, radius, start, end)
             ctx.closePath()
             ctx.fillStyle = String(meta.color || "#7f8fa6")
             ctx.fill()
             ctx.strokeStyle = NuTokens.panelBase
             ctx.lineWidth = 2
             ctx.stroke()
+            if (selected) {
+                ctx.fillStyle = NuTokens.textPrimary
+                ctx.font = "700 12px " + NuTokens.bodyFont
+                ctx.textAlign = "center"
+                ctx.textBaseline = "middle"
+                ctx.fillText(Number(meta.percent || 0).toFixed(2) + "%", sx + Math.cos(mid) * radius * 0.68, sy + Math.sin(mid) * radius * 0.68)
+            }
             start = end
         }
         ctx.fillStyle = NuTokens.textPrimary
@@ -601,7 +644,6 @@ ColumnLayout {
         NuTabButton { text: "Index" }
         NuTabButton { text: "Top 100" }
         NuTabButton { text: "Movements" }
-        NuTabButton { text: "Contacts" }
     }
 
     StackLayout {
@@ -953,6 +995,14 @@ ColumnLayout {
                                 ctx.closePath()
                                 ctx.fillStyle = root.colorForRichRow(rows[s], s)
                                 ctx.fill()
+                                if (selected) {
+                                    const share = total > 0 ? (100 * sats / total) : 0
+                                    ctx.fillStyle = NuTokens.textPrimary
+                                    ctx.font = "700 12px " + NuTokens.bodyFont
+                                    ctx.textAlign = "center"
+                                    ctx.textBaseline = "middle"
+                                    ctx.fillText(share.toFixed(2) + "%", sx + Math.cos(mid) * radius * 0.70, sy + Math.sin(mid) * radius * 0.70)
+                                }
                                 start = end
                             }
                             if (used < total) {
@@ -1050,6 +1100,24 @@ ColumnLayout {
                             font.pixelSize: NuTokens.fontTiny
                             wrapMode: Text.WordWrap
                         }
+                        Basic.TextArea {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.max(22, Math.min(48, contentHeight + 2))
+                            text: NuService.explorerAnalyticsStatus
+                            color: NuTokens.textMuted
+                            font.pixelSize: NuTokens.fontTiny
+                            wrapMode: Text.WordWrap
+                            readOnly: true
+                            selectByMouse: true
+                            persistentSelection: true
+                            background: Item {}
+                            padding: 0
+                            Shortcut {
+                                sequences: [StandardKey.Copy]
+                                enabled: activeFocus && selectedText.length > 0
+                                onActivated: NuService.copyText(selectedText)
+                            }
+                        }
                     }
                 }
 
@@ -1112,11 +1180,20 @@ ColumnLayout {
                         id: wealthDistributionPie
                         Layout.preferredWidth: 260
                         Layout.preferredHeight: 260
-                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.wealthDistributionRows(), "Wealth", "distribution")
+                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.wealthDistributionRows(), "Wealth", "distribution", root.selectedWealthGroup)
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: (mouse) => {
+                                const label = root.distributionSliceAt(mouse.x, mouse.y, wealthDistributionPie.width, wealthDistributionPie.height, root.wealthDistributionRows())
+                                root.selectedWealthGroup = root.selectedWealthGroup === label ? "" : label
+                                wealthDistributionPie.requestPaint()
+                            }
+                        }
                     }
                     NuDataTable {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 300
+                        Layout.preferredHeight: 360
                         tableId: "internalExplorerWealthDistribution"
                         columns: ["", "Group", "Amount", "%"]
                         columnTypes: ["swatch", "text", "amount", "number"]
@@ -1124,6 +1201,13 @@ ColumnLayout {
                         rows: root.wealthDistributionRows()
                         emptyText: "Build the Explorer index and refresh Top 100 to calculate wealth distribution."
                         defaultSortColumn: -1
+                        rowSelectionEnabled: true
+                        plainClickSelectsRows: true
+                        rowKeyMetaField: "label"
+                        onRowSelectionChanged: (keys) => {
+                            root.selectedWealthGroup = keys.length > 0 ? String(keys[0]) : ""
+                            wealthDistributionPie.requestPaint()
+                        }
                     }
                 }
 
@@ -1150,7 +1234,16 @@ ColumnLayout {
                         id: whaleConcentrationPie
                         Layout.preferredWidth: 260
                         Layout.preferredHeight: 260
-                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.whaleConcentrationRows(), "Whale", "concentration")
+                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.whaleConcentrationRows(), "Whale", "concentration", root.selectedWhaleGroup)
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: (mouse) => {
+                                const label = root.distributionSliceAt(mouse.x, mouse.y, whaleConcentrationPie.width, whaleConcentrationPie.height, root.whaleConcentrationRows())
+                                root.selectedWhaleGroup = root.selectedWhaleGroup === label ? "" : label
+                                whaleConcentrationPie.requestPaint()
+                            }
+                        }
                     }
                     NuDataTable {
                         Layout.fillWidth: true
@@ -1162,6 +1255,13 @@ ColumnLayout {
                         rows: root.whaleConcentrationRows()
                         emptyText: "Build the Explorer index and refresh Top 100 to calculate concentration."
                         defaultSortColumn: -1
+                        rowSelectionEnabled: true
+                        plainClickSelectsRows: true
+                        rowKeyMetaField: "label"
+                        onRowSelectionChanged: (keys) => {
+                            root.selectedWhaleGroup = keys.length > 0 ? String(keys[0]) : ""
+                            whaleConcentrationPie.requestPaint()
+                        }
                     }
                 }
             }
@@ -1335,6 +1435,24 @@ ColumnLayout {
                             contactGraphWindow.show()
                             contactGraphWindow.raise()
                             contactGraphWindow.requestActivate()
+                        }
+                    }
+                    Basic.TextArea {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.max(22, Math.min(48, contentHeight + 2))
+                        text: NuService.explorerAnalyticsStatus
+                        color: NuTokens.textMuted
+                        font.pixelSize: NuTokens.fontTiny
+                        wrapMode: Text.WordWrap
+                        readOnly: true
+                        selectByMouse: true
+                        persistentSelection: true
+                        background: Item {}
+                        padding: 0
+                        Shortcut {
+                            sequences: [StandardKey.Copy]
+                            enabled: activeFocus && selectedText.length > 0
+                            onActivated: NuService.copyText(selectedText)
                         }
                     }
                 }

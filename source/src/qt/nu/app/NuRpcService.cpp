@@ -480,7 +480,13 @@ QStringList recognizedExplorerAddresses(const QStringList& candidates)
 {
     QStringList out;
     for (const QString& candidate : candidates) {
-        const QString address = candidate.trimmed();
+        QString address = candidate.trimmed();
+        if (address.startsWith(QStringLiteral("defcoin:"), Qt::CaseInsensitive)) {
+            address = address.mid(QStringLiteral("defcoin:").size());
+        }
+        const int query_index = address.indexOf(QLatin1Char('?'));
+        if (query_index >= 0) address = address.left(query_index);
+        address.remove(QRegularExpression(QStringLiteral(R"(^[<\[\("']+|[>\]\),"';:.]+$)")));
         if (isLikelyBase58AddressText(address) && !out.contains(address)) out.push_back(address);
     }
     return out;
@@ -1400,6 +1406,90 @@ bool isSafeRpcMethodName(const QString& method)
 {
     static const QRegularExpression method_re(QStringLiteral(R"(^[A-Za-z0-9_]{1,64}$)"));
     return method_re.match(method).hasMatch();
+}
+
+QStringList splitConsoleCommandLine(const QString& command, QString* error)
+{
+    QString text = command.trimmed();
+    if ((text.startsWith(QLatin1Char('"')) && text.endsWith(QLatin1Char('"'))) ||
+        (text.startsWith(QLatin1Char('\'')) && text.endsWith(QLatin1Char('\'')))) {
+        text = text.mid(1, text.size() - 2).trimmed();
+    }
+
+    QStringList tokens;
+    QString current;
+    QChar quote;
+    bool escape = false;
+    for (const QChar ch : text) {
+        if (escape) {
+            current.append(ch);
+            escape = false;
+            continue;
+        }
+        if (ch == QLatin1Char('\\')) {
+            escape = true;
+            continue;
+        }
+        if (!quote.isNull()) {
+            if (ch == quote) {
+                quote = QChar();
+            } else {
+                current.append(ch);
+            }
+            continue;
+        }
+        if (ch == QLatin1Char('"') || ch == QLatin1Char('\'')) {
+            quote = ch;
+            continue;
+        }
+        if (ch.isSpace()) {
+            if (!current.isEmpty()) {
+                tokens.push_back(current);
+                current.clear();
+            }
+            continue;
+        }
+        current.append(ch);
+    }
+    if (!quote.isNull()) {
+        if (error) *error = QStringLiteral("Unclosed quote in RPC console command.");
+        return {};
+    }
+    if (escape) current.append(QLatin1Char('\\'));
+    if (!current.isEmpty()) tokens.push_back(current);
+    return tokens;
+}
+
+QJsonValue consoleTokenToJsonValue(const QString& token)
+{
+    const QString trimmed = token.trimmed();
+    if (trimmed.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0) return true;
+    if (trimmed.compare(QStringLiteral("false"), Qt::CaseInsensitive) == 0) return false;
+    if (trimmed.compare(QStringLiteral("null"), Qt::CaseInsensitive) == 0) return QJsonValue();
+
+    if ((trimmed.startsWith(QLatin1Char('{')) && trimmed.endsWith(QLatin1Char('}'))) ||
+        (trimmed.startsWith(QLatin1Char('[')) && trimmed.endsWith(QLatin1Char(']')))) {
+        QJsonParseError parse_error;
+        const QJsonDocument doc = QJsonDocument::fromJson(trimmed.toUtf8(), &parse_error);
+        if (parse_error.error == QJsonParseError::NoError) {
+            if (doc.isObject()) return doc.object();
+            if (doc.isArray()) return doc.array();
+        }
+    }
+
+    static const QRegularExpression integer_re(QStringLiteral(R"(^-?(0|[1-9][0-9]*)$)"));
+    static const QRegularExpression decimal_re(QStringLiteral(R"(^-?(0|[1-9][0-9]*)\.[0-9]+$)"));
+    if (integer_re.match(trimmed).hasMatch()) {
+        bool ok = false;
+        const qint64 value = trimmed.toLongLong(&ok);
+        if (ok) return static_cast<double>(value);
+    }
+    if (decimal_re.match(trimmed).hasMatch()) {
+        bool ok = false;
+        const double value = trimmed.toDouble(&ok);
+        if (ok) return value;
+    }
+    return trimmed;
 }
 
 bool rpcMethodTakesSensitiveInput(const QString& method)
@@ -5076,7 +5166,26 @@ void NuRpcService::pingPeers()
 
 void NuRpcService::runRpcCommand(const QString& method, const QString& params_json, bool wallet_scoped)
 {
-    const QString clean_method = method.trimmed();
+    QString clean_method = method.trimmed();
+    QString clean_params = params_json.trimmed();
+    if (clean_params.isEmpty() && clean_method.contains(QRegularExpression(QStringLiteral("\\s")))) {
+        QString split_error;
+        const QStringList tokens = splitConsoleCommandLine(clean_method, &split_error);
+        if (!split_error.isEmpty()) {
+            m_console_output += QStringLiteral("\n\n> %1\n%2")
+                .arg(singleLineLimited(clean_method, 120), split_error);
+            Q_EMIT consoleChanged();
+            return;
+        }
+        if (!tokens.isEmpty()) {
+            clean_method = tokens.first();
+            QJsonArray parsed_params;
+            for (int i = 1; i < tokens.size(); ++i) {
+                parsed_params.push_back(consoleTokenToJsonValue(tokens.at(i)));
+            }
+            clean_params = QString::fromUtf8(QJsonDocument(parsed_params).toJson(QJsonDocument::Compact));
+        }
+    }
     if (clean_method.isEmpty()) {
         m_console_output += QStringLiteral("\n\n> \nEnter an RPC method name.");
         Q_EMIT consoleChanged();
@@ -5090,7 +5199,6 @@ void NuRpcService::runRpcCommand(const QString& method, const QString& params_js
     }
 
     QJsonArray params;
-    const QString clean_params = params_json.trimmed();
     constexpr int max_rpc_params_chars = 32768;
     if (clean_params.size() > max_rpc_params_chars) {
         m_console_output += QStringLiteral("\n\n> %1 [params omitted]\nRPC parameters are too large for the Nu console. Keep JSON parameter input under %2 characters.")
@@ -7720,44 +7828,47 @@ void NuRpcService::refreshExplorerContactRelationships()
             QStringList placeholders;
             QStringList addresses = owner_by_address.keys();
             for (int i = 0; i < addresses.size(); ++i) placeholders.push_back(QStringLiteral("?"));
-            QSqlQuery query(db);
-            query.prepare(QStringLiteral(
-                "SELECT spent.address AS source_address, received.address AS target_address, "
-                "COUNT(DISTINCT received.txid) AS tx_count, COALESCE(SUM(received.value_sats), 0) AS sent_sats "
-                "FROM explorer_tx_outputs spent "
-                "JOIN explorer_tx_outputs received ON spent.spent_by_txid = received.txid "
-                "WHERE spent.address IN (%1) AND received.address IN (%1) AND spent.address != received.address "
-                "GROUP BY spent.address, received.address "
-                "ORDER BY sent_sats DESC, tx_count DESC").arg(placeholders.join(QStringLiteral(","))));
-            for (const QString& address : addresses) query.addBindValue(address);
-            for (const QString& address : addresses) query.addBindValue(address);
-            if (query.exec()) {
-                QHash<QString, QPair<qint64, int>> aggregate;
-                while (query.next()) {
-                    const QString source_owner = owner_by_address.value(query.value(0).toString());
-                    const QString target_owner = owner_by_address.value(query.value(1).toString());
-                    if (source_owner.isEmpty() || target_owner.isEmpty() || source_owner == target_owner) continue;
-                    const QString key = source_owner + QStringLiteral("\n") + target_owner;
-                    auto current = aggregate.value(key, qMakePair<qint64, int>(0, 0));
-                    current.first += query.value(3).toLongLong();
-                    current.second += query.value(2).toInt();
-                    aggregate.insert(key, current);
-                }
-                for (auto it = aggregate.constBegin(); it != aggregate.constEnd(); ++it) {
-                    const QStringList parts = it.key().split(QLatin1Char('\n'));
-                    if (parts.size() != 2) continue;
-                    m_explorer_contact_relationships.push_back(QVariantMap{
-                        {QStringLiteral("cells"), QVariantList{parts.at(0), parts.at(1), explorerAmountText(it.value().first), it.value().second}},
-                        {QStringLiteral("meta"), QVariantMap{
-                            {QStringLiteral("source"), parts.at(0)},
-                            {QStringLiteral("target"), parts.at(1)},
-                            {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(it.value().first)},
-                            {QStringLiteral("txCount"), it.value().second}}}
-                    });
+            {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral(
+                    "SELECT spent.address AS source_address, received.address AS target_address, "
+                    "COUNT(DISTINCT received.txid) AS tx_count, COALESCE(SUM(received.value_sats), 0) AS sent_sats "
+                    "FROM explorer_tx_outputs spent "
+                    "JOIN explorer_tx_outputs received ON spent.spent_by_txid = received.txid "
+                    "WHERE spent.address IN (%1) AND received.address IN (%1) AND spent.address != received.address "
+                    "GROUP BY spent.address, received.address "
+                    "ORDER BY sent_sats DESC, tx_count DESC").arg(placeholders.join(QStringLiteral(","))));
+                for (const QString& address : addresses) query.addBindValue(address);
+                for (const QString& address : addresses) query.addBindValue(address);
+                if (query.exec()) {
+                    QHash<QString, QPair<qint64, int>> aggregate;
+                    while (query.next()) {
+                        const QString source_owner = owner_by_address.value(query.value(0).toString());
+                        const QString target_owner = owner_by_address.value(query.value(1).toString());
+                        if (source_owner.isEmpty() || target_owner.isEmpty() || source_owner == target_owner) continue;
+                        const QString key = source_owner + QStringLiteral("\n") + target_owner;
+                        auto current = aggregate.value(key, qMakePair<qint64, int>(0, 0));
+                        current.first += query.value(3).toLongLong();
+                        current.second += query.value(2).toInt();
+                        aggregate.insert(key, current);
+                    }
+                    for (auto it = aggregate.constBegin(); it != aggregate.constEnd(); ++it) {
+                        const QStringList parts = it.key().split(QLatin1Char('\n'));
+                        if (parts.size() != 2) continue;
+                        m_explorer_contact_relationships.push_back(QVariantMap{
+                            {QStringLiteral("cells"), QVariantList{parts.at(0), parts.at(1), explorerAmountText(it.value().first), it.value().second}},
+                            {QStringLiteral("meta"), QVariantMap{
+                                {QStringLiteral("source"), parts.at(0)},
+                                {QStringLiteral("target"), parts.at(1)},
+                                {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(it.value().first)},
+                                {QStringLiteral("txCount"), it.value().second}}}
+                        });
+                    }
                 }
             }
         }
         db.close();
+        db = QSqlDatabase();
         QSqlDatabase::removeDatabase(connection_name);
     }
 
@@ -7800,18 +7911,48 @@ void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins, const 
 
     const int generation = ++m_explorer_analytics_generation;
     m_explorer_analytics_refreshing = true;
-    m_explorer_analytics_status = QStringLiteral("Explorer analytics are loading in the background.");
+    const int total_steps = (load_rich ? 1 : 0) + (load_movements ? 1 : 0);
+    m_explorer_analytics_status = QStringLiteral("Explorer analytics loading: 0% complete. Starting %1%2.")
+        .arg(load_rich ? QStringLiteral("Top 100") : QString())
+        .arg(load_rich && load_movements ? QStringLiteral(" and Movements") : (load_movements ? QStringLiteral("Movements") : QString()));
     Q_EMIT explorerChanged();
 
     QPointer<NuRpcService> guard(this);
-    QThread* thread = QThread::create([guard, bounded_coins, threshold_sats, generation, normalized_scope, load_rich, load_movements] {
+    QThread* thread = QThread::create([guard, bounded_coins, threshold_sats, generation, normalized_scope, load_rich, load_movements, total_steps] {
         if (!guard) return;
         QString rich_error;
         QString movement_error;
         QVariantList rich_list;
         QVariantList movements;
-        if (load_rich) rich_list = guard->explorerRichListFromDb(&rich_error);
-        if (load_movements) movements = guard->explorerMovementsFromDb(threshold_sats, &movement_error);
+        int completed_steps = 0;
+        const qint64 started_ms = QDateTime::currentMSecsSinceEpoch();
+        auto publish_progress = [guard, generation, total_steps, started_ms](int completed, const QString& label) {
+            QMetaObject::invokeMethod(guard, [guard, generation, total_steps, started_ms, completed, label] {
+                if (!guard || generation != guard->m_explorer_analytics_generation || !guard->m_explorer_analytics_refreshing) return;
+                const int percent = total_steps > 0 ? std::clamp((completed * 100) / total_steps, 0, 99) : 0;
+                QString eta_text = QStringLiteral("ETA estimating");
+                if (completed > 0 && completed < total_steps) {
+                    const qint64 elapsed_ms = std::max<qint64>(1, QDateTime::currentMSecsSinceEpoch() - started_ms);
+                    const qint64 eta_ms = (elapsed_ms * (total_steps - completed)) / completed;
+                    eta_text = QStringLiteral("ETA %1").arg(formatDurationFromSeconds(eta_ms / 1000));
+                } else if (completed >= total_steps) {
+                    eta_text = QStringLiteral("ETA done");
+                }
+                guard->m_explorer_analytics_status = QStringLiteral("Explorer analytics loading: %1% complete. %2 %3.")
+                    .arg(QString::number(percent), label, eta_text);
+                Q_EMIT guard->explorerChanged();
+            }, Qt::QueuedConnection);
+        };
+        if (load_rich) {
+            publish_progress(completed_steps, QStringLiteral("Reading Top 100 balances from the local SQLite index."));
+            rich_list = guard->explorerRichListFromDb(&rich_error);
+            publish_progress(++completed_steps, QStringLiteral("Top 100 loaded; continuing analytics."));
+        }
+        if (load_movements) {
+            publish_progress(completed_steps, QStringLiteral("Reading movement rows from the local SQLite index."));
+            movements = guard->explorerMovementsFromDb(threshold_sats, &movement_error);
+            publish_progress(++completed_steps, QStringLiteral("Movement rows loaded; finalizing."));
+        }
         QMetaObject::invokeMethod(guard, [guard, generation, bounded_coins, normalized_scope, load_rich, load_movements, rich_list = std::move(rich_list), movements = std::move(movements), rich_error, movement_error]() mutable {
             if (!guard || generation != guard->m_explorer_analytics_generation) return;
             guard->m_explorer_analytics_refreshing = false;
