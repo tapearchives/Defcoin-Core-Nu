@@ -1249,11 +1249,11 @@ PeerTableModel::PeerTableModel(interfaces::Node& node, QObject* parent) :
     timer(nullptr)
 {
 #if ENABLE_DEFCOIN_FUN_UI
-    default_columns << tr("Node ID") << tr("IP Address: Port") << tr("Port") << tr("FQDN") << tr("Known DNS Name") << tr("Version") << tr("Svcs") << tr("Avg Ping") << tr("Ping Time") << tr("Jitter") << tr("Traffic Health") << tr("Sent") << tr("Rec'd") << tr("User Agent") << tr("UA Count") << tr("Geo") << tr("City, St")
+    default_columns << tr("Node ID") << tr("IP Address: Port") << tr("Port") << tr("FQDN") << tr("Seed/LAN Source") << tr("Version") << tr("Svcs") << tr("Avg Ping") << tr("Ping Time") << tr("Jitter") << tr("Traffic Health") << tr("Sent") << tr("Rec'd") << tr("User Agent") << tr("UA Count") << tr("Geo") << tr("City, St")
                     << tr("Permissions") << tr("Direction") << tr("Start Height") << tr("Synced Headers") << tr("Synced Blocks") << tr("Connection Time") << tr("Last Send") << tr("Last Receive")
                     << tr("Ping Wait") << tr("Min. Ping") << tr("Time Offset") << tr("AS Number") << tr("AS Name") << tr("AS Hosting Company") << tr("Seed") << tr("UniqID");
 #else
-    default_columns << tr("Node ID") << tr("IP Address: Port") << tr("Port") << tr("FQDN") << tr("Known DNS Name") << tr("Version") << tr("Svcs") << tr("Avg Ping") << tr("Ping Time") << tr("Jitter") << tr("Traffic Health") << tr("Sent") << tr("Rec'd") << tr("User Agent") << tr("UA Count") << tr("Geo") << tr("City, St")
+    default_columns << tr("Node ID") << tr("IP Address: Port") << tr("Port") << tr("FQDN") << tr("Seed/LAN Source") << tr("Version") << tr("Svcs") << tr("Avg Ping") << tr("Ping Time") << tr("Jitter") << tr("Traffic Health") << tr("Sent") << tr("Rec'd") << tr("User Agent") << tr("UA Count") << tr("Geo") << tr("City, St")
                     << tr("Permissions") << tr("Direction") << tr("Start Height") << tr("Synced Headers") << tr("Synced Blocks") << tr("Connection Time") << tr("Last Send") << tr("Last Receive")
                     << tr("Ping Wait") << tr("Min. Ping") << tr("Time Offset") << tr("AS Number") << tr("AS Name") << tr("AS Hosting Company") << tr("Seed");
 #endif
@@ -1699,7 +1699,7 @@ QVariant PeerTableModel::data(const QModelIndex &index, int role) const
     } else if (role == Qt::ToolTipRole && index.column() == Fqdn) {
         return tr("Reverse DNS for this peer. [NA: LAN] is shown when no local DNS name is available.");
     } else if (role == Qt::ToolTipRole && index.column() == CustomHostname) {
-        return tr("Known DNS name, configured seed, custom host label, or LAN device name associated with this peer.");
+        return tr("Configured seed/source domain, custom host label, or confirmed LAN workstation identity associated with this peer.");
     } else if (role == Qt::ToolTipRole && index.column() == Seed) {
         const QString seed_domain = seedDomainForAddress(rec->nodeStats.addr);
         return seed_domain.isEmpty() ? tr("This peer is not one of the configured seed domains.") : tr("Configured seed domain: %1").arg(seed_domain);
@@ -1746,7 +1746,7 @@ QVariant PeerTableModel::headerData(int section, Qt::Orientation orientation, in
             case Fqdn:
                 return tr("Fully qualified domain name from reverse DNS, or LAN when no local DNS name is available.");
             case CustomHostname:
-                return tr("Seed domain, custom host label, or LAN device name discovered through local naming tools.");
+                return tr("Seed/source domain, custom host label, or confirmed LAN workstation identity discovered through local naming tools.");
             case Services:
                 return tr("Service flags: N=NETWORK, NL=NETWORK_LIMITED, G=GETUTXO, B=BLOOM, W=WITNESS, CF=COMPACT_FILTERS. MWEB service bits may appear on inherited Litecoin peers but are not Defcoin mainnet features.");
             case PingHealth:

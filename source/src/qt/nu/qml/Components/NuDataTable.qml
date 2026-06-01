@@ -226,7 +226,7 @@ Rectangle {
     function cellHorizontalAlignment(row, index) {
         const type = columnType(index)
         if (type === "knownDns") {
-            return String(valueAt(row, index)).indexOf("LAN:") === 0 ? Text.AlignLeft : Text.AlignRight
+            return Text.AlignRight
         }
         if (centerAlignColumn(index)) return Text.AlignHCenter
         if (rightAlignColumn(index)) return Text.AlignRight
