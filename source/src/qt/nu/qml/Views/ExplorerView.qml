@@ -28,6 +28,8 @@ ColumnLayout {
     property bool top100UpdatingEndField: false
     property int selectedContactIndex: -1
     property string selectedContactName: ""
+    property int movementGraphLimit: 25
+    property string movementGraphSortMode: "Largest"
     readonly property real indexProgress: NuService.explorerIndexTip > 0
                                           ? Math.max(0, Math.min(1, NuService.explorerIndexHeight / NuService.explorerIndexTip))
                                           : 0
@@ -475,6 +477,196 @@ ColumnLayout {
         }
     }
 
+    function shortAddress(value) {
+        const text = String(value || "")
+        if (text.length <= 18) return text
+        return text.substring(0, 8) + "..." + text.substring(text.length - 6)
+    }
+
+    function movementGraphRows() {
+        const rows = NuService.explorerMovements.slice(0)
+        if (root.movementGraphSortMode === "Newest") {
+            rows.sort(function(a, b) {
+                return Number((b.meta || {}).time || 0) - Number((a.meta || {}).time || 0)
+            })
+        } else {
+            rows.sort(function(a, b) {
+                return Number((b.meta || {}).amountSats || 0) - Number((a.meta || {}).amountSats || 0)
+            })
+        }
+        return rows.slice(0, Math.max(1, Math.min(100, root.movementGraphLimit)))
+    }
+
+    function movementGraphData() {
+        const rows = root.movementGraphRows()
+        const nodeMap = ({})
+        const edgeMap = ({})
+        const maxNodes = 140
+        const maxEdges = 320
+        function ensureNode(address, amount) {
+            const key = String(address || "")
+            if (key.length === 0) return false
+            if (nodeMap[key] === undefined) {
+                if (Object.keys(nodeMap).length >= maxNodes) return false
+                nodeMap[key] = { address: key, amountSats: 0 }
+            }
+            nodeMap[key].amountSats += Number(amount || 0)
+            return true
+        }
+        for (let r = 0; r < rows.length; ++r) {
+            const meta = rows[r].meta || {}
+            const amount = Number(meta.amountSats || 0)
+            if (amount <= 0) continue
+            const sources = (meta.sourceAddresses || []).slice(0, 5)
+            const targets = (meta.targetAddresses || []).slice(0, 7)
+            if (sources.length === 0 || targets.length === 0) continue
+            const share = amount / Math.max(1, sources.length * targets.length)
+            for (let s = 0; s < sources.length; ++s) {
+                for (let t = 0; t < targets.length; ++t) {
+                    const source = String(sources[s] || "")
+                    const target = String(targets[t] || "")
+                    if (source.length === 0 || target.length === 0 || source === target) continue
+                    if (!ensureNode(source, share) || !ensureNode(target, share)) continue
+                    const key = source + "\n" + target
+                    if (edgeMap[key] === undefined)
+                        edgeMap[key] = { source: source, target: target, amountSats: 0, txCount: 0 }
+                    edgeMap[key].amountSats += share
+                    edgeMap[key].txCount += 1
+                }
+            }
+        }
+        let nodes = []
+        for (const nodeKey in nodeMap) nodes.push(nodeMap[nodeKey])
+        let edges = []
+        for (const edgeKey in edgeMap) edges.push(edgeMap[edgeKey])
+        edges.sort(function(a, b) { return Number(b.amountSats || 0) - Number(a.amountSats || 0) })
+        edges = edges.slice(0, maxEdges)
+        const used = ({})
+        for (let e = 0; e < edges.length; ++e) {
+            used[edges[e].source] = true
+            used[edges[e].target] = true
+        }
+        nodes = nodes.filter(function(node) { return used[node.address] === true })
+        return { nodes: nodes, edges: edges, rows: rows }
+    }
+
+    function drawMovementGraph(ctx, canvasWidth, canvasHeight) {
+        ctx.reset()
+        const data = root.movementGraphData()
+        const nodes = data.nodes
+        const edges = data.edges
+        const cx = canvasWidth / 2
+        const cy = canvasHeight / 2
+        if (nodes.length === 0 || edges.length === 0) {
+            ctx.fillStyle = NuTokens.textSecondary
+            ctx.font = "13px " + NuTokens.bodyFont
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            ctx.fillText("Refresh Movements, then choose how many transfers to chart.", cx, cy)
+            return
+        }
+
+        const positions = ({})
+        const velocities = ({})
+        const radius = Math.max(90, Math.min(canvasWidth, canvasHeight) * 0.34)
+        for (let i = 0; i < nodes.length; ++i) {
+            const angle = -Math.PI / 2 + Math.PI * 2 * i / Math.max(1, nodes.length)
+            positions[nodes[i].address] = {
+                x: cx + Math.cos(angle) * radius,
+                y: cy + Math.sin(angle) * radius
+            }
+            velocities[nodes[i].address] = { x: 0, y: 0 }
+        }
+
+        const k = Math.sqrt(Math.max(1, canvasWidth * canvasHeight / Math.max(1, nodes.length))) * 0.58
+        for (let iter = 0; iter < 48; ++iter) {
+            for (let a = 0; a < nodes.length; ++a) {
+                for (let b = a + 1; b < nodes.length; ++b) {
+                    const pa = positions[nodes[a].address]
+                    const pb = positions[nodes[b].address]
+                    let dx = pa.x - pb.x
+                    let dy = pa.y - pb.y
+                    let dist = Math.max(8, Math.sqrt(dx * dx + dy * dy))
+                    const force = (k * k) / dist * 0.028
+                    dx /= dist
+                    dy /= dist
+                    velocities[nodes[a].address].x += dx * force
+                    velocities[nodes[a].address].y += dy * force
+                    velocities[nodes[b].address].x -= dx * force
+                    velocities[nodes[b].address].y -= dy * force
+                }
+            }
+            for (let e = 0; e < edges.length; ++e) {
+                const ps = positions[edges[e].source]
+                const pt = positions[edges[e].target]
+                if (!ps || !pt) continue
+                let dx = pt.x - ps.x
+                let dy = pt.y - ps.y
+                let dist = Math.max(8, Math.sqrt(dx * dx + dy * dy))
+                const force = (dist * dist / k) * 0.0025
+                dx /= dist
+                dy /= dist
+                velocities[edges[e].source].x += dx * force
+                velocities[edges[e].source].y += dy * force
+                velocities[edges[e].target].x -= dx * force
+                velocities[edges[e].target].y -= dy * force
+            }
+            for (let n = 0; n < nodes.length; ++n) {
+                const key = nodes[n].address
+                const p = positions[key]
+                const v = velocities[key]
+                v.x *= 0.78
+                v.y *= 0.78
+                p.x = Math.max(36, Math.min(canvasWidth - 36, p.x + v.x))
+                p.y = Math.max(34, Math.min(canvasHeight - 34, p.y + v.y))
+            }
+        }
+
+        let maxEdge = 1
+        let maxNode = 1
+        for (let edgeIndex = 0; edgeIndex < edges.length; ++edgeIndex)
+            maxEdge = Math.max(maxEdge, Number(edges[edgeIndex].amountSats || 0))
+        for (let nodeIndex = 0; nodeIndex < nodes.length; ++nodeIndex)
+            maxNode = Math.max(maxNode, Number(nodes[nodeIndex].amountSats || 0))
+
+        ctx.lineCap = "round"
+        for (let edgeDraw = 0; edgeDraw < edges.length; ++edgeDraw) {
+            const edge = edges[edgeDraw]
+            const source = positions[edge.source]
+            const target = positions[edge.target]
+            if (!source || !target) continue
+            ctx.strokeStyle = "#48b7ff"
+            ctx.globalAlpha = 0.18 + 0.35 * Number(edge.amountSats || 0) / maxEdge
+            ctx.lineWidth = 0.8 + 7.0 * Math.sqrt(Number(edge.amountSats || 0) / maxEdge)
+            ctx.beginPath()
+            ctx.moveTo(source.x, source.y)
+            ctx.lineTo(target.x, target.y)
+            ctx.stroke()
+        }
+
+        ctx.globalAlpha = 1
+        for (let nodeDraw = 0; nodeDraw < nodes.length; ++nodeDraw) {
+            const node = nodes[nodeDraw]
+            const pos = positions[node.address]
+            const nodeRadius = 9 + 20 * Math.sqrt(Number(node.amountSats || 0) / maxNode)
+            const wholeDfc = Math.round(Number(node.amountSats || 0) / 100000000)
+            ctx.fillStyle = "#f3d447"
+            ctx.strokeStyle = NuTokens.textPrimary
+            ctx.lineWidth = 1.6
+            ctx.beginPath()
+            ctx.arc(pos.x, pos.y, nodeRadius, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+            ctx.fillStyle = NuTokens.textPrimary
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            ctx.font = "700 10px " + NuTokens.bodyFont
+            ctx.fillText(root.shortAddress(node.address), pos.x, pos.y - 3)
+            ctx.font = "9px " + NuTokens.bodyFont
+            ctx.fillText(wholeDfc.toLocaleString() + " DFC", pos.x, pos.y + 9)
+        }
+    }
+
     function timelineHeightForPosition(position) {
         const start = Math.max(0, NuService.explorerTop100TimelineStartHeight)
         const end = Math.max(start, NuService.explorerTop100TimelineEndHeight)
@@ -520,6 +712,8 @@ ColumnLayout {
                 whaleConcentrationPie.requestPaint()
             if (contactGraphCanvas)
                 contactGraphCanvas.requestPaint()
+            if (movementGraphCanvas)
+                movementGraphCanvas.requestPaint()
             if (timelinePie)
                 timelinePie.requestPaint()
         }
@@ -1328,6 +1522,92 @@ ColumnLayout {
                         primary: true
                         helpText: "Reload movement rows using the selected DFC threshold."
                         onClicked: root.refreshAnalytics("movements")
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 340
+                    color: NuTokens.backgroundBase
+                    border.color: NuTokens.lineSubtle
+                    border.width: 1
+                    radius: NuTokens.radiusSmall
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: NuTokens.spaceMd
+                        spacing: NuTokens.spaceSm
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: NuTokens.spaceMd
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Movement network"
+                                    color: NuTokens.textPrimary
+                                    font.pixelSize: NuTokens.fontBodyLarge
+                                    font.weight: Font.DemiBold
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Charts source-to-destination address flow from the loaded movement rows. Node size follows total plotted DFC flow."
+                                    color: NuTokens.textSecondary
+                                    font.pixelSize: NuTokens.fontSmall
+                                    wrapMode: Text.WordWrap
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Label {
+                                text: "Sort"
+                                color: NuTokens.textSecondary
+                                font.pixelSize: NuTokens.fontSmall
+                            }
+                            NuComboBox {
+                                id: movementGraphSort
+                                Layout.preferredWidth: 120
+                                model: ["Largest", "Newest"]
+                                currentIndex: root.movementGraphSortMode === "Newest" ? 1 : 0
+                                helpText: "Choose whether the graph uses the largest loaded movements or the newest loaded movements first."
+                                onActivated: {
+                                    root.movementGraphSortMode = currentText
+                                    movementGraphCanvas.requestPaint()
+                                }
+                            }
+
+                            Label {
+                                text: "Top " + root.movementGraphLimit
+                                color: NuTokens.textSecondary
+                                font.pixelSize: NuTokens.fontSmall
+                            }
+                            Basic.Slider {
+                                id: movementGraphLimitSlider
+                                Layout.preferredWidth: 170
+                                from: 5
+                                to: 100
+                                stepSize: 5
+                                snapMode: Basic.Slider.SnapAlways
+                                value: root.movementGraphLimit
+                                ToolTip.visible: hovered || pressed
+                                ToolTip.text: "Plot " + Math.round(value) + " movement transactions"
+                                ToolTip.delay: NuTokens.tooltipDelay
+                                onMoved: {
+                                    root.movementGraphLimit = Math.round(value)
+                                    movementGraphCanvas.requestPaint()
+                                }
+                            }
+                        }
+
+                        Canvas {
+                            id: movementGraphCanvas
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            onPaint: root.drawMovementGraph(getContext("2d"), width, height)
+                        }
                     }
                 }
 

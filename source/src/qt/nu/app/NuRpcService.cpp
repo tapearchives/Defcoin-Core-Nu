@@ -7694,7 +7694,19 @@ QVariantList NuRpcService::explorerMovementsFromDb(qint64 threshold_sats, QStrin
             QSqlQuery query(db);
             query.prepare(QStringLiteral(
                 "SELECT o.txid, o.block_height, b.time, COALESCE(SUM(o.value_sats), 0) AS amount_sats, "
-                "COUNT(*) AS output_count, COUNT(DISTINCT o.address) AS address_count "
+                "COUNT(*) AS output_count, COUNT(DISTINCT o.address) AS address_count, "
+                "(SELECT GROUP_CONCAT(source_address, '|') FROM ("
+                "  SELECT spent.address AS source_address "
+                "  FROM explorer_tx_outputs spent "
+                "  WHERE spent.spent_by_txid = o.txid AND spent.address != '' "
+                "  GROUP BY spent.address ORDER BY MAX(spent.value_sats) DESC LIMIT 12"
+                ")) AS source_addresses, "
+                "(SELECT GROUP_CONCAT(target_address, '|') FROM ("
+                "  SELECT target.address AS target_address "
+                "  FROM explorer_tx_outputs target "
+                "  WHERE target.txid = o.txid AND target.address != '' "
+                "  GROUP BY target.address ORDER BY MAX(target.value_sats) DESC LIMIT 12"
+                ")) AS target_addresses "
                 "FROM explorer_tx_outputs o "
                 "JOIN explorer_blocks b ON b.height = o.block_height "
                 "JOIN explorer_block_transactions t ON t.txid = o.txid AND t.block_height = o.block_height "
@@ -7714,6 +7726,14 @@ QVariantList NuRpcService::explorerMovementsFromDb(qint64 threshold_sats, QStrin
                     const qint64 amount_sats = query.value(3).toLongLong();
                     const int output_count = query.value(4).toInt();
                     const int address_count = query.value(5).toInt();
+                    QVariantList source_addresses;
+                    for (const QString& address : query.value(6).toString().split(QLatin1Char('|'), Qt::SkipEmptyParts)) {
+                        source_addresses.push_back(address);
+                    }
+                    QVariantList target_addresses;
+                    for (const QString& address : query.value(7).toString().split(QLatin1Char('|'), Qt::SkipEmptyParts)) {
+                        target_addresses.push_back(address);
+                    }
                     const QString timestamp = QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"));
                     rows.push_back(QVariantMap{
                         {QStringLiteral("cells"), QVariantList{
@@ -7728,7 +7748,10 @@ QVariantList NuRpcService::explorerMovementsFromDb(qint64 threshold_sats, QStrin
                             {QStringLiteral("id"), txid},
                             {QStringLiteral("txid"), txid},
                             {QStringLiteral("height"), height},
-                            {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(amount_sats)}}}
+                            {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
+                            {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(amount_sats)},
+                            {QStringLiteral("sourceAddresses"), source_addresses},
+                            {QStringLiteral("targetAddresses"), target_addresses}}}
                     });
                 }
             }
