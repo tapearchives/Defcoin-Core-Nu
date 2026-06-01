@@ -43,11 +43,17 @@ ColumnLayout {
         }
     }
 
-    Component.onCompleted: Qt.callLater(function() {
+    function applyPreferredTab() {
         if (explorerTabs)
             explorerTabs.currentIndex = Math.max(0, Math.min(3, root.preferredTab))
+    }
+
+    Component.onCompleted: Qt.callLater(function() {
+        root.applyPreferredTab()
         root.maybeRefreshAnalyticsForTab()
     })
+
+    onPreferredTabChanged: if (root.active) root.applyPreferredTab()
 
     function indexPercentText() {
         if (NuService.explorerIndexTip <= 0) return "0.00%"
@@ -691,6 +697,8 @@ ColumnLayout {
             root.summaryRequested = true
             NuService.refreshExplorerRecentLookups()
         }
+        if (active)
+            root.applyPreferredTab()
         root.maybeRefreshAnalyticsForTab()
     }
 

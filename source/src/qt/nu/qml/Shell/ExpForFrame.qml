@@ -11,13 +11,23 @@ Item {
     property string currentRoute: "forensics"
     property int nodeInitialTab: 0
     property int peerInitialView: 0
+    property bool forensicsLoaded: true
+    property bool explorerLoaded: false
 
     signal aboutRequested
 
+    onCurrentRouteChanged: {
+        if (currentRoute === "explorer" || currentRoute === "indexing")
+            explorerLoaded = true
+        else
+            forensicsLoaded = true
+    }
+
     function routeIndex(route) {
         switch (route) {
-        case "explorer": return 1
-        case "indexing": return 2
+        case "explorer":
+        case "indexing":
+            return 1
         default: return 0
         }
     }
@@ -53,16 +63,19 @@ Item {
                     Layout.fillHeight: true
                     currentIndex: root.routeIndex(root.currentRoute)
 
-                    ForensicsView {}
-
-                    ExplorerView {
-                        active: root.currentRoute === "explorer"
-                        preferredTab: 0
+                    Loader {
+                        active: root.forensicsLoaded
+                        asynchronous: true
+                        sourceComponent: ForensicsView {}
                     }
 
-                    ExplorerView {
-                        active: root.currentRoute === "indexing"
-                        preferredTab: 1
+                    Loader {
+                        active: root.explorerLoaded
+                        asynchronous: true
+                        sourceComponent: ExplorerView {
+                            active: root.currentRoute === "explorer" || root.currentRoute === "indexing"
+                            preferredTab: root.currentRoute === "indexing" ? 1 : 0
+                        }
                     }
                 }
             }
