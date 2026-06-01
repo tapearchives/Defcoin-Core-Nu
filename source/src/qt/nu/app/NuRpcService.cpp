@@ -1716,6 +1716,7 @@ NuRpcService::~NuRpcService()
     stopMiner();
     stopLanFastSyncSocket();
     stopExplorerTop100Timeline();
+    stopHelperProcesses();
     releaseExplorerWriterLock();
     stopOwnedBackend();
 }
@@ -1750,9 +1751,11 @@ void NuRpcService::loadLocalSettings()
     m_table_copy_custom_delimiter = m_table_copy_custom_delimiter.left(15);
     if (m_table_copy_custom_delimiter.isEmpty()) m_table_copy_custom_delimiter = QStringLiteral("|");
     m_log_verbosity = std::clamp(nu_settings.value(QStringLiteral("LogVerbosity"), 0).toInt(), 0, 3);
-    m_log_search_pattern = nu_settings.value(QStringLiteral("LogSearchPattern"), QString()).toString().left(160);
-    m_log_last_search_pattern = nu_settings.value(QStringLiteral("LogLastSearchPattern"), m_log_search_pattern).toString().left(160);
-    m_log_remove_pattern = nu_settings.value(QStringLiteral("LogRemovePattern"), QString()).toString().left(160);
+    m_log_last_search_pattern = nu_settings.value(QStringLiteral("LogLastSearchPattern"), QString()).toString().left(160);
+    m_log_search_pattern.clear();
+    m_log_remove_pattern.clear();
+    nu_settings.remove(QStringLiteral("LogSearchPattern"));
+    nu_settings.remove(QStringLiteral("LogRemovePattern"));
     m_forensics_accept_bip141_as_regular = nu_settings.value(QStringLiteral("ForensicsAcceptBip141AsRegular"), true).toBool();
     m_background_close_enabled = nu_settings.value(QStringLiteral("KeepRunningWhenClosedEnabled"), false).toBool();
     m_miner_executable = singleLineLimited(nu_settings.value(QStringLiteral("MinerExecutable"), QString()).toString(), 1024);
@@ -2887,12 +2890,6 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
         commands.push_back({nmap, {QStringLiteral("-O"), QStringLiteral("--osscan-limit"), QStringLiteral("--max-retries"), QStringLiteral("1"), QStringLiteral("--host-timeout"), QStringLiteral("5s"), QStringLiteral("-Pn"), address.toString()}});
     }
 #if defined(Q_OS_MACOS)
-    const QString ptr_name = reverseDnsNameForAddress(address);
-    if (!ptr_name.isEmpty()) {
-        commands.push_back({QStringLiteral("/usr/bin/dns-sd"), {QStringLiteral("-q"), ptr_name, QStringLiteral("PTR")}});
-    }
-    commands.push_back({QStringLiteral("/usr/bin/dscacheutil"), {QStringLiteral("-q"), QStringLiteral("host"), QStringLiteral("-a"), QStringLiteral("ip_address"), address.toString()}});
-    commands.push_back({QStringLiteral("/usr/bin/smbutil"), {QStringLiteral("status"), QStringLiteral("-ae"), address.toString()}});
     commands.push_back({QStringLiteral("/sbin/ping"), {QStringLiteral("-c"), QStringLiteral("1"), QStringLiteral("-W"), QStringLiteral("1000"), address.toString()}});
     commands.push_back({QStringLiteral("/usr/sbin/arp"), {QStringLiteral("-a"), address.toString()}});
 #elif defined(Q_OS_WIN)
@@ -2915,7 +2912,9 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
     m_peer_lan_lookup_pending.insert(key);
     m_peer_lan_lookup_attempted.insert(key);
 
-    QHostInfo::lookupHost(address.toString(), this, [this, key](const QHostInfo& info) {
+    auto lan_lookup_id = std::make_shared<int>(-1);
+    *lan_lookup_id = QHostInfo::lookupHost(address.toString(), this, [this, key, lan_lookup_id](const QHostInfo& info) {
+        if (*lan_lookup_id >= 0) m_host_lookup_ids.remove(*lan_lookup_id);
         if (info.error() != QHostInfo::NoError) return;
         const QString name = sanitizedLanHostName(info.hostName());
         if (name.isEmpty()) return;
@@ -2931,6 +2930,7 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
         }
         if (changed) refreshNode();
     });
+    if (*lan_lookup_id >= 0) m_host_lookup_ids.insert(*lan_lookup_id);
 
     auto command_list = std::make_shared<QVector<Command>>(commands);
     auto aggregate_name = std::make_shared<QString>();
@@ -2962,6 +2962,10 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
         }
 
         QProcess* process = new QProcess(this);
+        m_helper_processes.insert(process);
+        connect(process, &QObject::destroyed, this, [this, process] {
+            m_helper_processes.remove(process);
+        });
         QTimer* timeout = new QTimer(process);
         timeout->setSingleShot(true);
         auto completed = std::make_shared<bool>(false);
@@ -2970,10 +2974,14 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
             if (process->state() != QProcess::NotRunning) process->kill();
         });
 
-        const auto finish = [process, timeout, run_next, index, completed, aggregate_name, aggregate_details] {
+        const auto finish = [this, process, timeout, run_next, index, completed, aggregate_name, aggregate_details] {
             if (*completed) return;
             *completed = true;
             timeout->stop();
+            if (process->state() != QProcess::NotRunning) {
+                process->kill();
+                process->waitForFinished(500);
+            }
 
             const QString output = QString::fromLocal8Bit(process->readAllStandardOutput())
                 + QLatin1Char('\n')
@@ -2987,6 +2995,7 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
                 if (!aggregate_details->contains(detail, Qt::CaseInsensitive)) aggregate_details->push_back(detail);
             }
 
+            m_helper_processes.remove(process);
             process->deleteLater();
             (*run_next)(index + 1);
         };
@@ -3009,7 +3018,9 @@ void NuRpcService::scheduleConfiguredSeedAliasLookups()
     m_seed_alias_lookups_started = true;
 
     for (const QString& domain : configuredSeedDomains()) {
-        QHostInfo::lookupHost(domain, this, [this, domain](const QHostInfo& info) {
+        auto seed_lookup_id = std::make_shared<int>(-1);
+        *seed_lookup_id = QHostInfo::lookupHost(domain, this, [this, domain, seed_lookup_id](const QHostInfo& info) {
+            if (*seed_lookup_id >= 0) m_host_lookup_ids.remove(*seed_lookup_id);
             if (info.error() != QHostInfo::NoError) return;
 
             bool changed = false;
@@ -3026,6 +3037,7 @@ void NuRpcService::scheduleConfiguredSeedAliasLookups()
 
             if (changed) refreshNode();
         });
+        if (*seed_lookup_id >= 0) m_host_lookup_ids.insert(*seed_lookup_id);
     }
 }
 
@@ -5202,6 +5214,15 @@ void NuRpcService::runRpcCommand(const QString& method, const QString& params_js
 {
     QString clean_method = method.trimmed();
     QString clean_params = params_json.trimmed();
+    if (clean_params.isEmpty() && clean_method.startsWith(QLatin1Char('>'))) {
+        clean_method = clean_method.mid(1).trimmed();
+    }
+    if (clean_params.isEmpty()
+        && clean_method.size() >= 2
+        && ((clean_method.startsWith(QLatin1Char('"')) && clean_method.endsWith(QLatin1Char('"')))
+            || (clean_method.startsWith(QLatin1Char('\'')) && clean_method.endsWith(QLatin1Char('\''))))) {
+        clean_method = clean_method.mid(1, clean_method.size() - 2).trimmed();
+    }
     if (clean_params.isEmpty() && clean_method.contains(QRegularExpression(QStringLiteral("\\s")))) {
         QString split_error;
         const QStringList tokens = splitConsoleCommandLine(clean_method, &split_error);
@@ -5533,7 +5554,7 @@ void NuRpcService::setLogSearchPattern(const QString& pattern)
     if (m_log_search_pattern == value) return;
     m_log_search_pattern = value;
     QSettings settings;
-    settings.setValue(QStringLiteral("LogSearchPattern"), value);
+    settings.remove(QStringLiteral("LogSearchPattern"));
     if (!value.trimmed().isEmpty()) {
         m_log_last_search_pattern = value;
         settings.setValue(QStringLiteral("LogLastSearchPattern"), value);
@@ -5546,7 +5567,7 @@ void NuRpcService::setLogRemovePattern(const QString& pattern)
     const QString value = pattern.left(160);
     if (m_log_remove_pattern == value) return;
     m_log_remove_pattern = value;
-    QSettings().setValue(QStringLiteral("LogRemovePattern"), value);
+    QSettings().remove(QStringLiteral("LogRemovePattern"));
     Q_EMIT settingsChanged();
 }
 
@@ -11521,6 +11542,30 @@ QString NuRpcService::debugLogPath() const
 {
     const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
     return data_dir.filePath(QStringLiteral("debug.log"));
+}
+
+void NuRpcService::stopHelperProcesses()
+{
+    const QList<int> lookup_ids = m_host_lookup_ids.values();
+    for (int lookup_id : lookup_ids) {
+        QHostInfo::abortHostLookup(lookup_id);
+    }
+    m_host_lookup_ids.clear();
+
+    QSet<QProcess*> process_set = m_helper_processes;
+    const QList<QProcess*> child_processes = findChildren<QProcess*>();
+    for (QProcess* process : child_processes) process_set.insert(process);
+    const QList<QProcess*> processes = process_set.values();
+    for (QProcess* process : processes) {
+        if (!process || process == m_backend_process || process == m_miner_process) continue;
+        if (process->state() == QProcess::NotRunning) continue;
+        process->terminate();
+        if (!process->waitForFinished(150)) {
+            process->kill();
+            process->waitForFinished(500);
+        }
+    }
+    m_helper_processes.clear();
 }
 
 void NuRpcService::stopOwnedBackend()

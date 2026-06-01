@@ -379,6 +379,12 @@ ColumnLayout {
             out.push({ "lineNumber": lineNumber, "line": line })
         }
         root.shownLogLineCount = out.length
+        if (out.length === 0) {
+            if (NuService.logLines.length > 0) {
+                return "No launch log lines match the current Filter, Remove, and Verbosity settings. Clear the filters or set Verbosity to All details."
+            }
+            return "No launch log lines have been recorded yet. Nu startup diagnostics should appear here shortly."
+        }
         return root.numberedLogText(out)
     }
 
@@ -896,6 +902,18 @@ ColumnLayout {
                         font.family: NuTokens.monoFont
                         font.pixelSize: NuTokens.fontLog
                         background: Rectangle { color: NuTokens.backgroundBase; border.color: NuTokens.lineSubtle }
+                        Shortcut {
+                            sequences: [StandardKey.Copy]
+                            enabled: consoleOutput.activeFocus && consoleOutput.selectedText.length > 0
+                            onActivated: NuService.copyText(consoleOutput.selectedText)
+                        }
+                        Keys.onPressed: (event) => {
+                            if ((event.matches(StandardKey.Copy) || ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C)
+                                    || ((event.modifiers & Qt.MetaModifier) && event.key === Qt.Key_C)) && selectedText.length > 0) {
+                                NuService.copyText(selectedText)
+                                event.accepted = true
+                            }
+                        }
                     }
                 }
 

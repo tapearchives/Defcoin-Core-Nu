@@ -529,6 +529,7 @@ private:
     QString backendBinaryPath() const;
     QString debugLogPath() const;
     bool ensureBackendStarted();
+    void stopHelperProcesses();
     void stopOwnedBackend();
     void appendLaunchDiagnostic(const QString& message);
     int appendDebugLogLineFromNu(const QString& message);
@@ -826,6 +827,8 @@ private:
     QHash<QString, int> m_peer_domain_alias_priority_by_host;
     QHash<QString, QString> m_peer_lan_name_by_host;
     QHash<QString, QString> m_peer_lan_info_by_host;
+    QSet<QProcess*> m_helper_processes;
+    QSet<int> m_host_lookup_ids;
     QSet<QString> m_peer_reverse_lookup_pending;
     QSet<QString> m_peer_reverse_lookup_attempted;
     QSet<QString> m_peer_lan_lookup_pending;
