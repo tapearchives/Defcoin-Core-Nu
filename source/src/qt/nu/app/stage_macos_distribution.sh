@@ -89,46 +89,52 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 out_path, logo_path = sys.argv[1], sys.argv[2]
 width, height, scale = 640, 420, 2
 rw, rh = width * scale, height * scale
-base = Image.new("RGBA", (rw, rh), (248, 247, 252, 255))
+base = Image.new("RGBA", (rw, rh), (18, 7, 28, 255))
 draw = ImageDraw.Draw(base, "RGBA")
 
 for y in range(rh):
     t = y / max(rh - 1, 1)
-    r = int(248 + 2 * t)
-    g = int(247 + 3 * t)
-    b = int(252 + 1 * t)
+    r = int(18 + 15 * t)
+    g = int(7 + 6 * t)
+    b = int(28 + 18 * t)
     draw.line([(0, y), (rw, y)], fill=(r, g, b, 255))
 
-for x in range(-rh, rw + rh, 34 * scale):
-    draw.line([(x, 0), (x + 210 * scale, rh)], fill=(62, 35, 94, 18), width=1)
+for x in range(-rh, rw + rh, 28 * scale):
+    draw.line([(x, 0), (x + 188 * scale, rh)], fill=(246, 246, 242, 20), width=1)
+    draw.line([(x, rh), (x + 188 * scale, 0)], fill=(84, 42, 132, 32), width=1)
+for x in range(0, rw, 24 * scale):
+    for y in range(0, rh, 24 * scale):
+        draw.ellipse([x, y, x + 1 * scale, y + 1 * scale], fill=(246, 246, 242, 22))
 
 purple_glow = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
 glow_draw = ImageDraw.Draw(purple_glow, "RGBA")
-for radius, alpha in [(240, 40), (190, 46), (145, 52), (105, 50)]:
+for radius, alpha in [(310, 66), (240, 74), (180, 72), (120, 64)]:
     glow_draw.ellipse(
-        [(-90 - radius) * scale, (-24 - radius) * scale,
-         (-90 + radius) * scale, (-24 + radius) * scale],
-        fill=(58, 29, 86, alpha),
+        [(-32 - radius) * scale, (18 - radius) * scale,
+         (-32 + radius) * scale, (18 + radius) * scale],
+        fill=(92, 41, 138, alpha),
     )
-purple_glow = purple_glow.filter(ImageFilter.GaussianBlur(28 * scale))
+purple_glow = purple_glow.filter(ImageFilter.GaussianBlur(34 * scale))
 base.alpha_composite(purple_glow)
 
 if os.path.exists(logo_path):
     logo = Image.open(logo_path).convert("RGBA")
     logo = ImageEnhance.Contrast(logo).enhance(1.05)
-    logo.thumbnail((300 * scale, 300 * scale), Image.Resampling.LANCZOS)
+    logo.thumbnail((330 * scale, 330 * scale), Image.Resampling.LANCZOS)
     glow = Image.new("RGBA", (logo.width + 80 * scale, logo.height + 80 * scale), (0, 0, 0, 0))
     alpha = logo.getchannel("A")
     glow_alpha = Image.new("L", glow.size, 0)
     glow_alpha.paste(alpha.filter(ImageFilter.GaussianBlur(18 * scale)), (40 * scale, 40 * scale))
     glow_layer = Image.new("RGBA", glow.size, (215, 196, 62, 0))
-    glow_layer.putalpha(glow_alpha.point(lambda p: int(p * 0.20)))
+    glow_layer.putalpha(glow_alpha.point(lambda p: int(p * 0.24)))
     glow.alpha_composite(glow_layer, (40 * scale, 40 * scale))
     glow.alpha_composite(logo, (40 * scale, 40 * scale))
-    base.alpha_composite(glow, (-90 * scale, -82 * scale))
+    base.alpha_composite(glow, (-82 * scale, -94 * scale))
 
 def font(size, bold=False):
     candidates = [
+        "/System/Library/Fonts/Avenir Next Condensed.ttc",
+        "/System/Library/Fonts/Supplemental/Avenir Next Condensed.ttc",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Helvetica.ttf",
     ]
@@ -137,20 +143,27 @@ def font(size, bold=False):
             return ImageFont.truetype(path, size * scale)
     return ImageFont.load_default()
 
-title_font = font(34, True)
-subtitle_font = font(15, False)
-draw.text((260 * scale + 2, 72 * scale + 2), "Defcoin Core Nu", font=title_font, fill=(62, 35, 94, 95))
-draw.text((260 * scale, 72 * scale), "Defcoin Core Nu", font=title_font, fill=(198, 171, 63, 255))
+title_font = font(52, True)
+subtitle_font = font(17, False)
+word_x = 252 * scale
+word_y = 58 * scale
+def_width = draw.textlength("DEF", font=title_font)
+draw.text((word_x + 3, word_y + 3), "DEF", font=title_font, fill=(0, 0, 0, 100))
+draw.text((word_x + def_width + 8 * scale + 3, word_y + 3), "COIN", font=title_font, fill=(0, 0, 0, 100))
+draw.text((word_x + 3, word_y + 51 * scale + 3), "CORE NU", font=title_font, fill=(0, 0, 0, 100))
+draw.text((word_x, word_y), "DEF", font=title_font, fill=(246, 246, 242, 255))
+draw.text((word_x + def_width + 8 * scale, word_y), "COIN", font=title_font, fill=(246, 246, 242, 255))
+draw.text((word_x, word_y + 51 * scale), "CORE NU", font=title_font, fill=(246, 246, 242, 255))
 
-arrow_y = 252 * scale
+arrow_y = 268 * scale
 arrow = [
-    (284 * scale, arrow_y - 7 * scale),
-    (400 * scale, arrow_y - 7 * scale),
-    (400 * scale, arrow_y - 20 * scale),
-    (436 * scale, arrow_y),
-    (400 * scale, arrow_y + 20 * scale),
-    (400 * scale, arrow_y + 7 * scale),
-    (284 * scale, arrow_y + 7 * scale),
+    (286 * scale, arrow_y - 7 * scale),
+    (404 * scale, arrow_y - 7 * scale),
+    (404 * scale, arrow_y - 20 * scale),
+    (438 * scale, arrow_y),
+    (404 * scale, arrow_y + 20 * scale),
+    (404 * scale, arrow_y + 7 * scale),
+    (286 * scale, arrow_y + 7 * scale),
 ]
 draw.polygon([(x + 3 * scale, y + 3 * scale) for x, y in arrow], fill=(0, 0, 0, 70))
 draw.polygon(arrow, fill=(92, 176, 223, 230))
@@ -158,9 +171,9 @@ draw.polygon(arrow, fill=(92, 176, 223, 230))
 subtitle = "Drag to Applications"
 subtitle_box = draw.textbbox((0, 0), subtitle, font=subtitle_font)
 subtitle_width = subtitle_box[2] - subtitle_box[0]
-draw.text(((360 * scale) - (subtitle_width // 2), 218 * scale), subtitle, font=subtitle_font, fill=(74, 91, 105, 240))
+draw.text(((360 * scale) - (subtitle_width // 2), 218 * scale), subtitle, font=subtitle_font, fill=(220, 211, 236, 245))
 
-solid = Image.new("RGBA", (rw, rh), (248, 247, 252, 255))
+solid = Image.new("RGBA", (rw, rh), (18, 7, 28, 255))
 solid.alpha_composite(base)
 base = solid
 base = base.resize((width, height), Image.Resampling.LANCZOS)
@@ -169,10 +182,11 @@ base.save(out_path)
 PY
 else
   if command -v magick >/dev/null 2>&1; then
-    magick -size 640x420 gradient:'#f8f7fc-#fafaff' \
-      "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 300x300 -gravity NorthWest -geometry -90-82 -composite \
-      -fill '#c6ab3f' -pointsize 34 -gravity NorthWest -annotate +260+72 'Defcoin Core Nu' \
-      -fill '#4a5b69' -pointsize 15 -gravity NorthWest -annotate +300+218 'Drag to Applications' \
+    magick -size 640x420 gradient:'#12071c-#210d2e' \
+      "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 330x330 -gravity NorthWest -geometry -82-94 -composite \
+      -fill '#f6f6f2' -pointsize 52 -gravity NorthWest -annotate +252+58 'DEFCOIN' \
+      -fill '#f6f6f2' -pointsize 52 -gravity NorthWest -annotate +252+109 'CORE NU' \
+      -fill '#dccfee' -pointsize 17 -gravity NorthWest -annotate +298+218 'Drag to Applications' \
       "$DEST_DMG_BACKGROUND"
   else
     cp -p "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" "$DEST_DMG_BACKGROUND"

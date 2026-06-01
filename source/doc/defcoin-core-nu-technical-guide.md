@@ -269,27 +269,9 @@ observed from peers.
 
 Nu also includes an experimental UDP fast-sync helper. It is intentionally not a
 consensus or peer-protocol replacement. UDP fast sync is enabled by default, but
-it remains validation-preserving and optional. A syncing Nu wallet can request
-its next missing block on UDP port `10334` from connected `DefcoinCoreNu` peers
-over IPv4 or IPv6; older `DefcoinCore` peers are not marked fast-sync-capable.
-When LAN node discovery is also enabled, Nu may add local broadcast requests to
-find nearby helpers faster. A responding Nu wallet sends raw active-chain block
-bytes split into checksum-protected datagrams. Public internet peers start with
-safe 1232/1472-byte probes, while private/LAN peers may probe 1472, 4096, 8192,
-12000, and 16000-byte datagrams. Nu never trusts sender-side throughput alone:
-the receiver verifies each chunk checksum, verifies the full assembled block
-checksum, submits the block through normal Core validation, and only then records
-UDP success. Clean accepted UDP blocks step the probe size upward; checksum,
-timeout, retransmit, or validation failures step it back down. Core validation
-remains authoritative, and ordinary TCP block download remains active as the
-fallback and repair path. To avoid turning Nu into a generic UDP reflector,
-responses are limited to connected Nu peers, with private-network broadcast
-accepted only when LAN discovery is enabled. Packets also carry a Nu fast-sync
-capability string and version number, and malformed or oversized datagrams are
-dropped before any block assembly work. Diagnostics reports `No` for non-Nu
-peers, `TBA` for Nu peers before an exchange has been attempted, `Yes` after a
-valid UDP fast-sync response, and `Failed` after a session attempt times out
-without usable chunks.
+it remains validation-preserving and optional. See
+`src/qt/nu/docs/fast-sync-protocol.md` for the authoritative protocol,
+packet-size, diagnostics, and server deployment reference.
 
 Solana Agave, rust-libp2p, and go-ethereum QUIC transports were reviewed as
 design references, but Nu does not vendor or copy those stacks. They are

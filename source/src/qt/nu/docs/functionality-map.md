@@ -62,7 +62,7 @@ review history, manage wallets, inspect the node, and configure the app.
 | Peer table | Diagnostics > Peers | `getpeerinfo` | Direct UI | Diagnostic transparency without the old inspector-heavy layout. Includes the actual P2P magic bytes selected from the peer packet header. |
 | Peer ping | Diagnostics > Peers | `ping` | Direct UI | Operational diagnostic kept close to peers. |
 | Network traffic | Diagnostics > Traffic | sampled `getnettotals` | Direct UI | At-a-glance connectivity health. |
-| UDP fast sync | Settings > Network, Diagnostics > Status | Nu UDP helper + backend `submitblock` | Experimental direct UI | Enabled by default. Connected-peer sub-MTU block mirroring can accelerate wallet catch-up over IPv4/IPv6 without bypassing Core validation or disabling TCP fallback. |
+| UDP fast sync | Settings > Network, Diagnostics > Status | Nu UDP helper + backend `submitblock` | Experimental direct UI | Enabled by default. Connected-peer UDP block mirroring can accelerate wallet catch-up over IPv4/IPv6 without bypassing Core validation or disabling TCP fallback. See `fast-sync-protocol.md` for the authoritative protocol reference. |
 | LAN firehose throughput tester | `tools/lan_firehose` | Standalone Python tester plus Qt wrapper | Developer diagnostic | Discovers another local firehose app, alternates TCP and UDP transfer phases, sweeps payload sizes, and writes JSONL/CSV results without touching wallet or chain data. The Qt wrapper adds buttons, stats, a results table, stdout log, and a small TCP/UDP chart. |
 | Debug log tail | Diagnostics > Log | `debug.log` tail | Direct UI | Read-only, scoped diagnostics. |
 | Open full debug log | Diagnostics > Log | system open `debug.log` | Direct UI | Maintenance action stays with diagnostic log context. |
@@ -79,7 +79,7 @@ review history, manage wallets, inspect the node, and configure the app.
 | Defcoin-only peer user-agent filtering | Settings > Network, Diagnostics peer table | Implemented as `/Defcoin` prefix only |
 | Network connect/isolate control | Settings > Network and status strip | Implemented |
 | Dual magic migration control | Settings > Network | Implemented as startup option for accepting both legacy `fbc0b6db` and new `defc014e` peer message bytes. In dual mode, outbound handshakes prefer the new `defc014e` bytes while bounded legacy probes keep old-only Defcoin peers reachable; with dual mode off, the backend uses new Defcoin magic only. |
-| UDP fast sync | Settings > Network, Diagnostics > Status | Experimental helper using sub-MTU chunked UDP block transfer from connected Defcoin peers and normal `submitblock` validation. LAN discovery adds local broadcast; TCP/Core sync stays active as fallback. |
+| UDP fast sync | Settings > Network, Diagnostics > Status | Experimental helper using checksum-protected UDP block transfer from connected Defcoin peers and normal `submitblock` validation. LAN discovery adds local broadcast; TCP/Core sync stays active as fallback. See `fast-sync-protocol.md`. |
 | LAN firehose tester | `source/src/qt/nu/tools/lan_firehose` | Standalone developer diagnostic for measuring TCP/UDP LAN throughput and payload-size behavior before changing wallet fast-sync defaults. Includes both CLI and native Qt wrapper. |
 | Network traffic graph | Diagnostics > Traffic | Implemented in neutral form |
 | Debug log tab/readout | Diagnostics > Log | Implemented |

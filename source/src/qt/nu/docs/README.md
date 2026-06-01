@@ -47,3 +47,6 @@ installer, cleanup, and verification procedure.
 
 See `bitcoin-core-qml-comparison.md` for the architecture comparison with
 Bitcoin Core QML.
+
+See `fast-sync-protocol.md` for the authoritative Fast Sync protocol,
+packet-size, diagnostics, and server deployment reference.
