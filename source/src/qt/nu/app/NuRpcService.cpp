@@ -1653,6 +1653,7 @@ void NuRpcService::loadLocalSettings()
         if (m_explorer_mode == QLatin1String("legacy")) m_third_party_tx_url = explorerPresetUrl(2);
     }
     loadExplorerRecentLookups();
+    loadExplorerContacts();
 }
 
 QString NuRpcService::defaultDataDir() const
@@ -7450,6 +7451,7 @@ QVariantList NuRpcService::explorerRichListFromDb(QString* error) const
     }
 
     qint64 total_unspent_sats = 0;
+    int total_address_count = 0;
     const QString connection_name = QStringLiteral("nu_explorer_rich_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
     QString local_error;
     {
@@ -7463,6 +7465,13 @@ QVariantList NuRpcService::explorerRichListFromDb(QString* error) const
                     "SELECT COALESCE(SUM(CASE WHEN spent_by_txid IS NULL THEN value_sats ELSE 0 END), 0) "
                     "FROM explorer_tx_outputs")) && total_query.next()) {
                 total_unspent_sats = total_query.value(0).toLongLong();
+            }
+
+            QSqlQuery address_count_query(db);
+            if (address_count_query.exec(QStringLiteral(
+                    "SELECT COUNT(DISTINCT address) FROM explorer_tx_outputs WHERE address != ''")) &&
+                address_count_query.next()) {
+                total_address_count = address_count_query.value(0).toInt();
             }
 
             QSqlQuery query(db);
@@ -7507,7 +7516,9 @@ QVariantList NuRpcService::explorerRichListFromDb(QString* error) const
                             {QStringLiteral("color"), explorerTop100Color(rank)},
                             {QStringLiteral("balanceSats"), QVariant::fromValue<qlonglong>(balance_sats)},
                             {QStringLiteral("receivedSats"), QVariant::fromValue<qlonglong>(received_sats)},
-                            {QStringLiteral("sharePercent"), share}}}
+                            {QStringLiteral("sharePercent"), share},
+                            {QStringLiteral("totalUnspentSats"), QVariant::fromValue<qlonglong>(total_unspent_sats)},
+                            {QStringLiteral("totalAddressCount"), total_address_count}}}
                     });
                     ++rank;
                 }
@@ -7585,6 +7596,178 @@ QVariantList NuRpcService::explorerMovementsFromDb(qint64 threshold_sats, QStrin
     QSqlDatabase::removeDatabase(connection_name);
     if (!local_error.isEmpty() && error) *error = local_error;
     return rows;
+}
+
+void NuRpcService::loadExplorerContacts()
+{
+    m_explorer_contacts.clear();
+    const QByteArray raw = QSettings().value(QStringLiteral("ExplorerContactsJson"), QByteArray()).toByteArray();
+    if (!raw.isEmpty()) {
+        const QJsonDocument doc = QJsonDocument::fromJson(raw);
+        if (doc.isArray()) {
+            for (const QJsonValue& value : doc.array()) {
+                const QJsonObject object = value.toObject();
+                const QString username = singleLineLimited(object.value(QStringLiteral("username")).toString(), 96).trimmed();
+                const QJsonArray raw_addresses = object.value(QStringLiteral("addresses")).toArray();
+                QVariantList addresses;
+                QStringList address_strings;
+                QSet<QString> seen;
+                for (const QJsonValue& address_value : raw_addresses) {
+                    const QString address = singleLineLimited(address_value.toString(), 128).trimmed();
+                    if (address.isEmpty() || seen.contains(address)) continue;
+                    seen.insert(address);
+                    addresses.push_back(address);
+                    address_strings.push_back(address);
+                }
+                if (!username.isEmpty() && !addresses.isEmpty()) {
+                    m_explorer_contacts.push_back(QVariantMap{
+                        {QStringLiteral("username"), username},
+                        {QStringLiteral("addresses"), addresses},
+                        {QStringLiteral("addressText"), address_strings.join(QStringLiteral(", "))}});
+                }
+            }
+        }
+    }
+    refreshExplorerContactRelationships();
+}
+
+void NuRpcService::persistExplorerContacts()
+{
+    QJsonArray contacts;
+    for (const QVariant& value : m_explorer_contacts) {
+        const QVariantMap contact = value.toMap();
+        QJsonArray addresses;
+        for (const QVariant& address_value : contact.value(QStringLiteral("addresses")).toList()) {
+            const QString address = address_value.toString().trimmed();
+            if (!address.isEmpty()) addresses.push_back(address);
+        }
+        if (contact.value(QStringLiteral("username")).toString().trimmed().isEmpty() || addresses.isEmpty()) continue;
+        QJsonObject object;
+        object.insert(QStringLiteral("username"), contact.value(QStringLiteral("username")).toString().trimmed());
+        object.insert(QStringLiteral("addresses"), addresses);
+        contacts.push_back(object);
+    }
+    QSettings().setValue(QStringLiteral("ExplorerContactsJson"), QJsonDocument(contacts).toJson(QJsonDocument::Compact));
+}
+
+void NuRpcService::saveExplorerContact(const QString& username, const QString& addresses, int edit_index)
+{
+    const QString clean_name = singleLineLimited(username, 96).trimmed();
+    QStringList address_candidates = addresses.split(QRegularExpression(QStringLiteral("[,\\n\\r\\t ;]+")), Qt::SkipEmptyParts);
+    QStringList clean_addresses = recognizedExplorerAddresses(address_candidates);
+    clean_addresses.removeDuplicates();
+    if (clean_name.isEmpty() || clean_addresses.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Contact not saved"),
+                           QStringLiteral("Enter a username and at least one valid Defcoin address."));
+        return;
+    }
+
+    QVariantMap contact;
+    QVariantList address_list;
+    for (const QString& address : clean_addresses) address_list.push_back(address);
+    contact.insert(QStringLiteral("username"), clean_name);
+    contact.insert(QStringLiteral("addresses"), address_list);
+    contact.insert(QStringLiteral("addressText"), clean_addresses.join(QStringLiteral(", ")));
+
+    if (edit_index >= 0 && edit_index < m_explorer_contacts.size()) {
+        m_explorer_contacts[edit_index] = contact;
+    } else {
+        m_explorer_contacts.push_back(contact);
+    }
+    persistExplorerContacts();
+    refreshExplorerContactRelationships();
+    Q_EMIT userMessage(QStringLiteral("Contact saved"),
+                       QStringLiteral("%1 is linked to %2 address%3.")
+                           .arg(clean_name)
+                           .arg(clean_addresses.size())
+                           .arg(clean_addresses.size() == 1 ? QString() : QStringLiteral("es")));
+}
+
+void NuRpcService::deleteExplorerContact(int index)
+{
+    if (index < 0 || index >= m_explorer_contacts.size()) {
+        Q_EMIT userMessage(QStringLiteral("Contact not deleted"), QStringLiteral("Select a contact row to delete."));
+        return;
+    }
+    m_explorer_contacts.removeAt(index);
+    persistExplorerContacts();
+    refreshExplorerContactRelationships();
+}
+
+void NuRpcService::refreshExplorerContactRelationships()
+{
+    m_explorer_contact_relationships.clear();
+    QHash<QString, QString> owner_by_address;
+    QHash<QString, QStringList> addresses_by_owner;
+    for (const QVariant& value : m_explorer_contacts) {
+        const QVariantMap contact = value.toMap();
+        const QString username = contact.value(QStringLiteral("username")).toString().trimmed();
+        if (username.isEmpty()) continue;
+        for (const QVariant& address_value : contact.value(QStringLiteral("addresses")).toList()) {
+            const QString address = address_value.toString().trimmed();
+            if (address.isEmpty()) continue;
+            owner_by_address.insert(address, username);
+            addresses_by_owner[username].push_back(address);
+        }
+    }
+
+    QString error;
+    if (owner_by_address.size() >= 2 && ensureExplorerDatabase(&error)) {
+        const QString connection_name = QStringLiteral("nu_explorer_contacts_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QStringList placeholders;
+            QStringList addresses = owner_by_address.keys();
+            for (int i = 0; i < addresses.size(); ++i) placeholders.push_back(QStringLiteral("?"));
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral(
+                "SELECT spent.address AS source_address, received.address AS target_address, "
+                "COUNT(DISTINCT received.txid) AS tx_count, COALESCE(SUM(received.value_sats), 0) AS sent_sats "
+                "FROM explorer_tx_outputs spent "
+                "JOIN explorer_tx_outputs received ON spent.spent_by_txid = received.txid "
+                "WHERE spent.address IN (%1) AND received.address IN (%1) AND spent.address != received.address "
+                "GROUP BY spent.address, received.address "
+                "ORDER BY sent_sats DESC, tx_count DESC").arg(placeholders.join(QStringLiteral(","))));
+            for (const QString& address : addresses) query.addBindValue(address);
+            for (const QString& address : addresses) query.addBindValue(address);
+            if (query.exec()) {
+                QHash<QString, QPair<qint64, int>> aggregate;
+                while (query.next()) {
+                    const QString source_owner = owner_by_address.value(query.value(0).toString());
+                    const QString target_owner = owner_by_address.value(query.value(1).toString());
+                    if (source_owner.isEmpty() || target_owner.isEmpty() || source_owner == target_owner) continue;
+                    const QString key = source_owner + QStringLiteral("\n") + target_owner;
+                    auto current = aggregate.value(key, qMakePair<qint64, int>(0, 0));
+                    current.first += query.value(3).toLongLong();
+                    current.second += query.value(2).toInt();
+                    aggregate.insert(key, current);
+                }
+                for (auto it = aggregate.constBegin(); it != aggregate.constEnd(); ++it) {
+                    const QStringList parts = it.key().split(QLatin1Char('\n'));
+                    if (parts.size() != 2) continue;
+                    m_explorer_contact_relationships.push_back(QVariantMap{
+                        {QStringLiteral("cells"), QVariantList{parts.at(0), parts.at(1), explorerAmountText(it.value().first), it.value().second}},
+                        {QStringLiteral("meta"), QVariantMap{
+                            {QStringLiteral("source"), parts.at(0)},
+                            {QStringLiteral("target"), parts.at(1)},
+                            {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(it.value().first)},
+                            {QStringLiteral("txCount"), it.value().second}}}
+                    });
+                }
+            }
+        }
+        db.close();
+        QSqlDatabase::removeDatabase(connection_name);
+    }
+
+    if (m_explorer_contact_relationships.isEmpty() && owner_by_address.size() >= 2) {
+        m_explorer_contact_relationships.push_back(QVariantMap{
+            {QStringLiteral("cells"), QVariantList{QStringLiteral("No indexed flow"), QStringLiteral("No match"), QStringLiteral("0.00000000 DFC"), 0}},
+            {QStringLiteral("meta"), QVariantMap{{QStringLiteral("note"), QStringLiteral("No direct indexed spend flow between saved contacts yet.")}}}
+        });
+    }
+    Q_EMIT explorerChanged();
 }
 
 void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins, const QString& scope)

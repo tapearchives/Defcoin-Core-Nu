@@ -23,6 +23,8 @@ ColumnLayout {
     property bool top100EndInitialized: false
     property bool top100EndEdited: false
     property bool top100UpdatingEndField: false
+    property int selectedContactIndex: -1
+    property string selectedContactName: ""
     readonly property real indexProgress: NuService.explorerIndexTip > 0
                                           ? Math.max(0, Math.min(1, NuService.explorerIndexHeight / NuService.explorerIndexTip))
                                           : 0
@@ -179,6 +181,246 @@ ColumnLayout {
         return ""
     }
 
+    function formatDfcFromSats(sats) {
+        const value = Number(sats || 0) / 100000000.0
+        return value.toLocaleString(Qt.locale(), "f", 8) + " DFC"
+    }
+
+    function explorerSupplySats() {
+        if (NuService.explorerRichList.length > 0) {
+            const meta = NuService.explorerRichList[0].meta || {}
+            const total = Number(meta.totalUnspentSats || 0)
+            if (total > 0) return total
+        }
+        return root.richTotalSats()
+    }
+
+    function explorerAddressCountText() {
+        if (NuService.explorerRichList.length > 0) {
+            const meta = NuService.explorerRichList[0].meta || {}
+            const count = Number(meta.totalAddressCount || 0)
+            if (count > 0) return count.toLocaleString(Qt.locale(), "f", 0)
+        }
+        return "Not indexed"
+    }
+
+    function richRangeSats(firstRank, lastRank) {
+        let total = 0
+        for (let i = 0; i < NuService.explorerRichList.length; ++i) {
+            const row = NuService.explorerRichList[i]
+            const rank = Number((row.meta || {}).rank || 0)
+            if (rank >= firstRank && rank <= lastRank)
+                total += Number((row.meta || {}).balanceSats || 0)
+        }
+        return total
+    }
+
+    function distributionRow(color, label, sats, total, includeInPie) {
+        const percent = total > 0 ? (100.0 * Number(sats || 0) / total) : 0
+        return {
+            cells: [color, label, root.formatDfcFromSats(sats), percent.toFixed(2) + "%"],
+            meta: { color: color, label: label, sats: Number(sats || 0), percent: percent, includeInPie: includeInPie }
+        }
+    }
+
+    function wealthDistributionRows() {
+        const total = root.explorerSupplySats()
+        const top1_25 = root.richRangeSats(1, 25)
+        const top26_50 = root.richRangeSats(26, 50)
+        const top51_75 = root.richRangeSats(51, 75)
+        const top76_100 = root.richRangeSats(76, 100)
+        const top100 = top1_25 + top26_50 + top51_75 + top76_100
+        const rest = Math.max(0, total - top100)
+        return [
+            root.distributionRow("#db38b8", "Top 1-25", top1_25, total, true),
+            root.distributionRow("#48bd91", "Top 26-50", top26_50, total, true),
+            root.distributionRow("#3d9ddd", "Top 51-75", top51_75, total, true),
+            root.distributionRow("#ead934", "Top 76-100", top76_100, total, true),
+            root.distributionRow("#8b95a1", "101+", rest, total, true),
+            root.distributionRow("", "Top 1-100 Total", top100, total, false),
+            root.distributionRow("", "Total", total, total, false),
+            { cells: ["", "Total Wallet Addresses", root.explorerAddressCountText(), ""],
+              meta: { includeInPie: false, label: "Total Wallet Addresses" } }
+        ]
+    }
+
+    function whaleConcentrationRows() {
+        const total = root.explorerSupplySats()
+        const top1 = root.richRangeSats(1, 1)
+        const top2_10 = root.richRangeSats(2, 10)
+        const top11_25 = root.richRangeSats(11, 25)
+        const top26_100 = root.richRangeSats(26, 100)
+        const tracked = top1 + top2_10 + top11_25 + top26_100
+        const rest = Math.max(0, total - tracked)
+        return [
+            root.distributionRow("#f05d4f", "Largest address", top1, total, true),
+            root.distributionRow("#ff9f43", "Ranks 2-10", top2_10, total, true),
+            root.distributionRow("#f3d447", "Ranks 11-25", top11_25, total, true),
+            root.distributionRow("#48b7ff", "Ranks 26-100", top26_100, total, true),
+            root.distributionRow("#aeb6bf", "101+", rest, total, true)
+        ]
+    }
+
+    function drawDistributionPie(ctx, canvasWidth, canvasHeight, rows, title, subtitle) {
+        ctx.reset()
+        const cx = canvasWidth / 2
+        const cy = canvasHeight / 2
+        const radius = Math.min(canvasWidth, canvasHeight) * 0.40
+        let total = 0
+        for (let i = 0; i < rows.length; ++i) {
+            const meta = rows[i].meta || {}
+            if (meta.includeInPie) total += Number(meta.sats || 0)
+        }
+        if (total <= 0) {
+            ctx.strokeStyle = NuTokens.lineSubtle
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.fillStyle = NuTokens.textSecondary
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            ctx.font = "12px " + NuTokens.bodyFont
+            ctx.fillText("Build index", cx, cy)
+            return
+        }
+        let start = -Math.PI / 2
+        for (let r = 0; r < rows.length; ++r) {
+            const meta = rows[r].meta || {}
+            if (!meta.includeInPie) continue
+            const sats = Number(meta.sats || 0)
+            if (sats <= 0) continue
+            const end = start + Math.PI * 2 * sats / total
+            ctx.beginPath()
+            ctx.moveTo(cx, cy)
+            ctx.arc(cx, cy, radius, start, end)
+            ctx.closePath()
+            ctx.fillStyle = String(meta.color || "#7f8fa6")
+            ctx.fill()
+            ctx.strokeStyle = NuTokens.panelBase
+            ctx.lineWidth = 2
+            ctx.stroke()
+            start = end
+        }
+        ctx.fillStyle = NuTokens.textPrimary
+        ctx.textAlign = "center"
+        ctx.textBaseline = "middle"
+        ctx.font = "700 13px " + NuTokens.bodyFont
+        ctx.fillText(title, cx, cy - 8)
+        ctx.font = "11px " + NuTokens.bodyFont
+        ctx.fillStyle = NuTokens.textSecondary
+        ctx.fillText(subtitle, cx, cy + 10)
+    }
+
+    function contactRows() {
+        const rows = []
+        for (let i = 0; i < NuService.explorerContacts.length; ++i) {
+            const contact = NuService.explorerContacts[i]
+            const addresses = contact.addresses || []
+            rows.push({
+                cells: [String(contact.username || ""), String(contact.addressText || ""), addresses.length],
+                meta: { index: i, username: String(contact.username || ""), addresses: addresses, addressText: String(contact.addressText || "") }
+            })
+        }
+        return rows
+    }
+
+    function selectContact(row) {
+        const meta = row && row.meta ? row.meta : {}
+        root.selectedContactIndex = Number(meta.index !== undefined ? meta.index : -1)
+        root.selectedContactName = String(meta.username || "")
+        if (contactNameField) contactNameField.text = root.selectedContactName
+        if (contactAddressArea) contactAddressArea.text = String(meta.addressText || "")
+    }
+
+    function clearContactEditor() {
+        root.selectedContactIndex = -1
+        root.selectedContactName = ""
+        if (contactNameField) contactNameField.text = ""
+        if (contactAddressArea) contactAddressArea.text = ""
+    }
+
+    function contactBalanceMap() {
+        const out = ({})
+        for (let c = 0; c < NuService.explorerContacts.length; ++c) {
+            const contact = NuService.explorerContacts[c]
+            out[String(contact.username || "")] = 0
+        }
+        const ownerByAddress = ({})
+        for (let i = 0; i < NuService.explorerContacts.length; ++i) {
+            const contact = NuService.explorerContacts[i]
+            const addresses = contact.addresses || []
+            for (let a = 0; a < addresses.length; ++a)
+                ownerByAddress[String(addresses[a])] = String(contact.username || "")
+        }
+        for (let r = 0; r < NuService.explorerRichList.length; ++r) {
+            const meta = NuService.explorerRichList[r].meta || {}
+            const owner = ownerByAddress[String(meta.address || "")]
+            if (owner !== undefined) out[owner] += Number(meta.balanceSats || 0)
+        }
+        return out
+    }
+
+    function drawContactGraph(ctx, canvasWidth, canvasHeight) {
+        ctx.reset()
+        const contacts = NuService.explorerContacts
+        const relationships = NuService.explorerContactRelationships
+        const cx = canvasWidth / 2
+        const cy = canvasHeight / 2
+        const radius = Math.max(80, Math.min(canvasWidth, canvasHeight) * 0.34)
+        const balances = root.contactBalanceMap()
+        let maxBalance = 1
+        for (const name in balances) maxBalance = Math.max(maxBalance, Number(balances[name] || 0))
+        const positions = ({})
+        for (let i = 0; i < contacts.length; ++i) {
+            const name = String(contacts[i].username || "")
+            const angle = -Math.PI / 2 + Math.PI * 2 * i / Math.max(1, contacts.length)
+            positions[name] = { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius }
+        }
+        let maxFlow = 1
+        for (let e = 0; e < relationships.length; ++e)
+            maxFlow = Math.max(maxFlow, Number((relationships[e].meta || {}).amountSats || 0))
+        ctx.lineCap = "round"
+        for (let j = 0; j < relationships.length; ++j) {
+            const meta = relationships[j].meta || {}
+            const source = positions[String(meta.source || "")]
+            const target = positions[String(meta.target || "")]
+            const amount = Number(meta.amountSats || 0)
+            if (!source || !target || amount <= 0) continue
+            ctx.strokeStyle = "#48b7ff"
+            ctx.globalAlpha = 0.35
+            ctx.lineWidth = 1 + 8 * amount / maxFlow
+            ctx.beginPath()
+            ctx.moveTo(source.x, source.y)
+            ctx.lineTo(target.x, target.y)
+            ctx.stroke()
+        }
+        ctx.globalAlpha = 1
+        for (let n = 0; n < contacts.length; ++n) {
+            const name = String(contacts[n].username || "")
+            const pos = positions[name]
+            const nodeRadius = 14 + 24 * Math.sqrt(Number(balances[name] || 0) / maxBalance)
+            ctx.fillStyle = "#f3d447"
+            ctx.strokeStyle = NuTokens.textPrimary
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(pos.x, pos.y, nodeRadius, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+            ctx.fillStyle = NuTokens.textPrimary
+            ctx.font = "700 12px " + NuTokens.bodyFont
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            ctx.fillText(name, pos.x, pos.y)
+        }
+        if (contacts.length === 0) {
+            ctx.fillStyle = NuTokens.textSecondary
+            ctx.font = "13px " + NuTokens.bodyFont
+            ctx.textAlign = "center"
+            ctx.fillText("Add contacts to chart address relationships.", cx, cy)
+        }
+    }
+
     function timelineHeightForPosition(position) {
         const start = Math.max(0, NuService.explorerTop100TimelineStartHeight)
         const end = Math.max(start, NuService.explorerTop100TimelineEndHeight)
@@ -218,6 +460,12 @@ ColumnLayout {
                 root.movementPage = Math.max(0, root.movementPageCount(movementTableHost.rowsPerPage) - 1)
             if (richPie)
                 richPie.requestPaint()
+            if (wealthDistributionPie)
+                wealthDistributionPie.requestPaint()
+            if (whaleConcentrationPie)
+                whaleConcentrationPie.requestPaint()
+            if (contactGraphCanvas)
+                contactGraphCanvas.requestPaint()
             if (timelinePie)
                 timelinePie.requestPaint()
         }
@@ -353,6 +601,7 @@ ColumnLayout {
         NuTabButton { text: "Index" }
         NuTabButton { text: "Top 100" }
         NuTabButton { text: "Movements" }
+        NuTabButton { text: "Contacts" }
     }
 
     StackLayout {
@@ -647,8 +896,14 @@ ColumnLayout {
         }
 
         NuPanel {
-            ColumnLayout {
+            Basic.ScrollView {
+                id: top100Scroll
                 anchors.fill: parent
+                clip: true
+                contentWidth: availableWidth
+
+            ColumnLayout {
+                width: Math.max(820, top100Scroll.availableWidth)
                 spacing: NuTokens.spaceMd
 
                 RowLayout {
@@ -800,7 +1055,7 @@ ColumnLayout {
 
                 NuDataTable {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 520
                     tableId: "internalExplorerRichList"
                     columns: ["", "Rank", "Address", "Balance", "Share", "Received", "Txs", "UTXOs"]
                     columnTooltips: [
@@ -827,6 +1082,89 @@ ColumnLayout {
                     }
                     onRowActivated: (row) => root.openRow(row)
                 }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: NuTokens.lineSubtle
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Wealth Distribution"
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontBodyLarge
+                    font.weight: Font.DemiBold
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Grouped like the eIquidus rich-list view: four Top 100 bands plus every indexed address outside the Top 100."
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceLg
+                    Canvas {
+                        id: wealthDistributionPie
+                        Layout.preferredWidth: 260
+                        Layout.preferredHeight: 260
+                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.wealthDistributionRows(), "Wealth", "distribution")
+                    }
+                    NuDataTable {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 300
+                        tableId: "internalExplorerWealthDistribution"
+                        columns: ["", "Group", "Amount", "%"]
+                        columnTypes: ["swatch", "text", "amount", "number"]
+                        columnWeights: [0.25, 1.4, 1.2, 0.55]
+                        rows: root.wealthDistributionRows()
+                        emptyText: "Build the Explorer index and refresh Top 100 to calculate wealth distribution."
+                        defaultSortColumn: -1
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Whale Concentration"
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontBodyLarge
+                    font.weight: Font.DemiBold
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "A Pareto-style concentration view separates the largest address, the next nine addresses, the rest of the Top 25, the rest of the Top 100, and everyone else."
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceLg
+                    Canvas {
+                        id: whaleConcentrationPie
+                        Layout.preferredWidth: 260
+                        Layout.preferredHeight: 260
+                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.whaleConcentrationRows(), "Whale", "concentration")
+                    }
+                    NuDataTable {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 260
+                        tableId: "internalExplorerWhaleConcentration"
+                        columns: ["", "Group", "Amount", "%"]
+                        columnTypes: ["swatch", "text", "amount", "number"]
+                        columnWeights: [0.25, 1.4, 1.2, 0.55]
+                        rows: root.whaleConcentrationRows()
+                        emptyText: "Build the Explorer index and refresh Top 100 to calculate concentration."
+                        defaultSortColumn: -1
+                    }
+                }
+            }
             }
         }
 
@@ -945,6 +1283,175 @@ ColumnLayout {
                         enabled: root.movementPage < root.movementPageCount(movementTableHost.rowsPerPage) - 1
                         helpText: "Next movement page."
                         onClicked: root.movementPage = Math.min(root.movementPageCount(movementTableHost.rowsPerPage) - 1, root.movementPage + 1)
+                    }
+                }
+            }
+        }
+
+        NuPanel {
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: NuTokens.spaceMd
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceMd
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceXs
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Contact address map"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontBodyLarge
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Create local username-to-address groups, then chart indexed value flows between those saved contacts. Contact data stays in local Nu settings."
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                    NuActionButton {
+                        Layout.preferredWidth: 138
+                        text: "Pop out"
+                        helpText: "Open the contact editor in a separate window."
+                        onClicked: {
+                            contactEditorWindow.show()
+                            contactEditorWindow.raise()
+                            contactEditorWindow.requestActivate()
+                        }
+                    }
+                    NuActionButton {
+                        Layout.preferredWidth: 160
+                        text: "Chart relationships"
+                        primary: true
+                        helpText: "Build an indexed relationship graph from saved contact addresses."
+                        onClicked: {
+                            NuService.refreshExplorerContactRelationships()
+                            contactGraphCanvas.requestPaint()
+                            contactGraphWindow.show()
+                            contactGraphWindow.raise()
+                            contactGraphWindow.requestActivate()
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 150
+                    spacing: NuTokens.spaceMd
+
+                    ColumnLayout {
+                        Layout.preferredWidth: Math.max(260, root.width * 0.28)
+                        Layout.fillHeight: true
+                        spacing: NuTokens.spaceXs
+                        Label { text: "Username"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontSmall }
+                        NuTextField {
+                            id: contactNameField
+                            Layout.fillWidth: true
+                            placeholderText: "username, handle, or person"
+                            helpText: "Local display name for a person, pool, project, or account cluster."
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: NuTokens.spaceSm
+                            NuActionButton {
+                                Layout.fillWidth: true
+                                text: root.selectedContactIndex >= 0 ? "Update" : "Add"
+                                primary: true
+                                helpText: "Save this local contact with the listed addresses."
+                                onClicked: NuService.saveExplorerContact(contactNameField.text, contactAddressArea.text, root.selectedContactIndex)
+                            }
+                            NuActionButton {
+                                Layout.preferredWidth: 82
+                                text: "Clear"
+                                helpText: "Clear the contact editor."
+                                onClicked: root.clearContactEditor()
+                            }
+                            NuActionButton {
+                                Layout.preferredWidth: 92
+                                text: "Delete"
+                                danger: true
+                                enabled: root.selectedContactIndex >= 0
+                                helpText: "Delete the selected local contact mapping."
+                                onClicked: {
+                                    NuService.deleteExplorerContact(root.selectedContactIndex)
+                                    root.clearContactEditor()
+                                }
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: NuTokens.spaceXs
+                        Label { text: "Addresses"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontSmall }
+                        Basic.TextArea {
+                            id: contactAddressArea
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            placeholderText: "One or more Defcoin addresses, separated by commas or lines"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WrapAnywhere
+                            selectByMouse: true
+                            persistentSelection: true
+                            background: Rectangle {
+                                radius: NuTokens.radiusSmall
+                                color: NuTokens.panelBase
+                                border.color: contactAddressArea.activeFocus ? NuTokens.lineStrong : NuTokens.lineSubtle
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: NuTokens.spaceMd
+                    NuDataTable {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        tableId: "internalExplorerContacts"
+                        columns: ["User", "Addresses", "Count"]
+                        columnTypes: ["text", "address", "number"]
+                        columnWeights: [1.0, 3.0, 0.45]
+                        rows: root.contactRows()
+                        emptyText: "No saved contact mappings yet."
+                        rowSelectionEnabled: true
+                        plainClickSelectsRows: true
+                        rowKeyMetaField: "index"
+                        onRowSelectionChanged: (keys) => {
+                            if (keys.length === 0) {
+                                root.clearContactEditor()
+                                return
+                            }
+                            const wanted = Number(keys[0])
+                            const rows = root.contactRows()
+                            for (let i = 0; i < rows.length; ++i) {
+                                if (Number((rows[i].meta || {}).index) === wanted) {
+                                    root.selectContact(rows[i])
+                                    return
+                                }
+                            }
+                        }
+                        onRowActivated: (row) => root.selectContact(row)
+                    }
+                    NuDataTable {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        tableId: "internalExplorerContactRelationships"
+                        columns: ["From", "To", "Total Flow", "Txs"]
+                        columnTypes: ["text", "text", "amount", "number"]
+                        columnWeights: [1.0, 1.0, 1.0, 0.45]
+                        rows: NuService.explorerContactRelationships
+                        emptyText: "No indexed contact-to-contact flows found yet."
+                        defaultSortColumn: 2
+                        defaultSortAscending: false
                     }
                 }
             }
@@ -1131,6 +1638,163 @@ ColumnLayout {
 
             onVisibleChanged: {
                 if (!visible) root.timelinePlaying = false
+            }
+        }
+
+        Window {
+            id: contactEditorWindow
+            width: 920
+            height: 640
+            minimumWidth: 720
+            minimumHeight: 500
+            visible: false
+            title: "Explorer Contacts"
+            color: NuTokens.backgroundBase
+            property int selectedIndex: -1
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: NuTokens.spaceMd
+                spacing: NuTokens.spaceMd
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Explorer Contacts"
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontTitle
+                    font.weight: Font.DemiBold
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "Local contact mappings can group one or more addresses under a username, handle, pool, or project name."
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceMd
+                    NuTextField {
+                        id: contactEditorNameField
+                        Layout.preferredWidth: 240
+                        placeholderText: "username"
+                    }
+                    NuTextField {
+                        id: contactEditorAddressField
+                        Layout.fillWidth: true
+                        placeholderText: "addresses, comma separated"
+                    }
+                    NuActionButton {
+                        Layout.preferredWidth: 90
+                        text: contactEditorWindow.selectedIndex >= 0 ? "Update" : "Save"
+                        primary: true
+                        onClicked: NuService.saveExplorerContact(contactEditorNameField.text, contactEditorAddressField.text, contactEditorWindow.selectedIndex)
+                    }
+                    NuActionButton {
+                        Layout.preferredWidth: 82
+                        text: "New"
+                        onClicked: {
+                            contactEditorWindow.selectedIndex = -1
+                            contactEditorNameField.text = ""
+                            contactEditorAddressField.text = ""
+                        }
+                    }
+                    NuActionButton {
+                        Layout.preferredWidth: 88
+                        text: "Delete"
+                        danger: true
+                        enabled: contactEditorWindow.selectedIndex >= 0
+                        onClicked: {
+                            NuService.deleteExplorerContact(contactEditorWindow.selectedIndex)
+                            contactEditorWindow.selectedIndex = -1
+                            contactEditorNameField.text = ""
+                            contactEditorAddressField.text = ""
+                        }
+                    }
+                }
+
+                NuDataTable {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    tableId: "internalExplorerContactsPopout"
+                    columns: ["User", "Addresses", "Count"]
+                    columnTypes: ["text", "address", "number"]
+                    columnWeights: [1.0, 3.4, 0.45]
+                    rows: root.contactRows()
+                    emptyText: "No saved contact mappings yet."
+                    rowSelectionEnabled: true
+                    plainClickSelectsRows: true
+                    rowKeyMetaField: "index"
+                    onRowActivated: (row) => {
+                        const meta = row.meta || {}
+                        contactEditorWindow.selectedIndex = Number(meta.index !== undefined ? meta.index : -1)
+                        contactEditorNameField.text = String(meta.username || "")
+                        contactEditorAddressField.text = String(meta.addressText || "")
+                    }
+                }
+            }
+        }
+
+        Window {
+            id: contactGraphWindow
+            width: 1040
+            height: 760
+            minimumWidth: 760
+            minimumHeight: 560
+            visible: false
+            title: "Contact Relationship Graph"
+            color: NuTokens.backgroundBase
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: NuTokens.spaceMd
+                spacing: NuTokens.spaceMd
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: NuTokens.spaceMd
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Contact Relationship Graph"
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTitle
+                        font.weight: Font.DemiBold
+                    }
+                    NuActionButton {
+                        Layout.preferredWidth: 110
+                        text: "Refresh"
+                        onClicked: {
+                            NuService.refreshExplorerContactRelationships()
+                            contactGraphCanvas.requestPaint()
+                        }
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "Node size is based on saved addresses that also appear in the current Top 100. Line thickness is based on indexed direct spend flow between saved contact groups."
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    wrapMode: Text.WordWrap
+                }
+                Canvas {
+                    id: contactGraphCanvas
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    onPaint: root.drawContactGraph(getContext("2d"), width, height)
+                }
+                NuDataTable {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 170
+                    tableId: "internalExplorerContactGraphFlows"
+                    columns: ["From", "To", "Total Flow", "Txs"]
+                    columnTypes: ["text", "text", "amount", "number"]
+                    columnWeights: [1.0, 1.0, 1.0, 0.45]
+                    rows: NuService.explorerContactRelationships
+                    emptyText: "No indexed contact-to-contact flows found yet."
+                    defaultSortColumn: 2
+                    defaultSortAscending: false
+                }
             }
         }
     }

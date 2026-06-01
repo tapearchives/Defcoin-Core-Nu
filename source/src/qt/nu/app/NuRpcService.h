@@ -145,6 +145,8 @@ class NuRpcService final : public QObject
     Q_PROPERTY(int explorerIndexedOutputCount READ explorerIndexedOutputCount NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerRichList READ explorerRichList NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerMovements READ explorerMovements NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList explorerContacts READ explorerContacts NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList explorerContactRelationships READ explorerContactRelationships NOTIFY explorerChanged)
     Q_PROPERTY(QString explorerAnalyticsStatus READ explorerAnalyticsStatus NOTIFY explorerChanged)
     Q_PROPERTY(bool explorerTop100Scanning READ explorerTop100Scanning NOTIFY explorerChanged)
     Q_PROPERTY(bool explorerTop100FocusedIndexing READ explorerTop100FocusedIndexing WRITE setExplorerTop100FocusedIndexing NOTIFY settingsChanged)
@@ -287,6 +289,8 @@ public:
     int explorerIndexedOutputCount() const { return m_explorer_indexed_output_count; }
     QVariantList explorerRichList() const { return m_explorer_rich_list; }
     QVariantList explorerMovements() const { return m_explorer_movements; }
+    QVariantList explorerContacts() const { return m_explorer_contacts; }
+    QVariantList explorerContactRelationships() const { return m_explorer_contact_relationships; }
     QString explorerAnalyticsStatus() const { return m_explorer_analytics_status; }
     bool explorerTop100Scanning() const { return m_explorer_top100_scanning; }
     bool explorerTop100FocusedIndexing() const { return m_explorer_top100_focused_indexing; }
@@ -410,6 +414,9 @@ public:
     Q_INVOKABLE void resetExplorerTop100Timeline();
     Q_INVOKABLE void scanRemainingExplorerTop100Timeline();
     Q_INVOKABLE QVariantMap explorerTop100Snapshot(int height) const;
+    Q_INVOKABLE void saveExplorerContact(const QString& username, const QString& addresses, int edit_index = -1);
+    Q_INVOKABLE void deleteExplorerContact(int index);
+    Q_INVOKABLE void refreshExplorerContactRelationships();
     Q_INVOKABLE void refreshForensicsIrregularMessages();
     Q_INVOKABLE void startForensicsIrregularMessages(int start_height);
     Q_INVOKABLE void stopForensicsScan();
@@ -616,6 +623,8 @@ private:
     int explorerIndexedOutputCountFromDb() const;
     QVariantList explorerRichListFromDb(QString* error = nullptr) const;
     QVariantList explorerMovementsFromDb(qint64 threshold_sats, QString* error = nullptr) const;
+    void loadExplorerContacts();
+    void persistExplorerContacts();
     void refreshExplorerTop100TimelineStats();
     QString explorerBlockHashAtHeight(int height) const;
     QString explorerBlockHashForTransaction(const QString& txid) const;
@@ -910,6 +919,8 @@ private:
     QVariantList m_explorer_recent_lookups;
     QVariantList m_explorer_rich_list;
     QVariantList m_explorer_movements;
+    QVariantList m_explorer_contacts;
+    QVariantList m_explorer_contact_relationships;
     QString m_explorer_analytics_status = QStringLiteral("Explorer analytics not loaded yet.");
     int m_explorer_analytics_generation = 0;
     bool m_explorer_analytics_refreshing = false;
