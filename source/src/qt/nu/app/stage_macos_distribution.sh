@@ -44,6 +44,8 @@ ditto "$BUILT_APP" "$DEST_APP"
 chmod -R u+w "$DEST_APP"
 rm -f "$DEST_APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
 "$(dirname "$0")/bundle_macos_backend_deps.sh" "$DEST_APP"
+PYTHON_FOR_QT_REPAIR="${DEFCOIN_NU_PACKAGING_PYTHON:-$(command -v python3)}"
+"$PYTHON_FOR_QT_REPAIR" "$(dirname "$0")/repair_macos_qt_bundle.py" /opt/homebrew "$DEST_APP"
 
 APP_EXE="$DEST_APP/Contents/MacOS/$APP_EXECUTABLE_NAME"
 while IFS= read -r rpath; do

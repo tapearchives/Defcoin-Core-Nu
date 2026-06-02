@@ -1,5 +1,15 @@
 # Defcoin Core Changelog
 
+## 26.6.1c Core Memories
+
+Defcoin Core Nu `26.6.1c` is a packaging correction over `26.6.1b`.
+
+- Fixed Apple Silicon distribution staging so app bundles run only against
+  bundled Qt frameworks, preventing launch crashes from mixed Homebrew/bundled
+  Qt loads.
+- Carries the detailed Peers table alignment and workstation de-duplication
+  fixes from `26.6.1b`.
+
 ## 26.6.1b Core Memories
 
 Defcoin Core Nu `26.6.1b` is a small diagnostics polish rebuild over
