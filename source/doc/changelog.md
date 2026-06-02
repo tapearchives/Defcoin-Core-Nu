@@ -1,5 +1,34 @@
 # Defcoin Core Changelog
 
+## 26.6.1 Core Memories
+
+Defcoin Core Nu `26.6.1` improves Apple Silicon validation performance and
+modern-machine initial sync behavior while preserving the inherited Core client
+build identity.
+
+### Added
+
+- Added Apple Silicon SHA256 acceleration using Bitcoin Core-derived ARM SHA2
+  intrinsics for SHA256 and SHA256D64.
+- Added automatic Nu-managed backend `-dbcache` sizing from available RAM when
+  `defcoin.conf` does not already specify a cache value.
+- Added release-note coverage for the Apple Silicon benchmark and server
+  compatibility verification.
+
+### Changed
+
+- Raised the 64-bit `-dbcache` maximum to `32768` MiB.
+- Updated the dc903 server-visible subversion label to `/DefcoinCoreNu:26.6.1/`
+  while preserving the existing Fast Sync and witness compatibility services.
+
+### Verified
+
+- On a Mac Mini M4 Pro, the SHA256D64 validation-style benchmark measured
+  `1232.94 MiB/s` with the ARM SHA2 path versus `187.53 MiB/s` with the generic
+  path, a `6.6x` improvement, with matching output checksum
+  `118af3313ef2c383` over the same 1 GiB workload.
+- The backend startup log selects `arm_shani(1way,2way)` on Apple Silicon.
+
 ## 26.5.5w Core Memories
 
 Defcoin Core Nu `26.5.5w` adds the first Forensics view for average users who

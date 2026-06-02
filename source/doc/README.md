@@ -1,6 +1,6 @@
 # Defcoin Core Nu Documentation
 
-Defcoin Core Nu `26.5.5w`, codename `Core Memories`, is the current packaged
+Defcoin Core Nu `26.6.1`, codename `Core Memories`, is the current packaged
 full-node desktop wallet for the Defcoin network. The root
 [README](../../README.md) is the product landing page; this directory keeps build,
 developer, release, and inherited upstream reference material.
@@ -24,6 +24,7 @@ implementation details, start with the consolidated
 ## Defcoin-Specific Release Docs
 
 - [Defcoin Core Nu Technical Guide](defcoin-core-nu-technical-guide.md)
+- [Defcoin Core Nu 26.6.1 Release Notes](release-notes/release-notes-26.6.1.md)
 - [Defcoin Core Nu 26.5.5w Release Notes](release-notes/release-notes-26.5.5w.md)
 - [Changelog](changelog.md)
 - [License And Attribution Notices](license-and-attribution-notices.md)
