@@ -426,13 +426,12 @@ class FastSyncDaemon:
         for peer in peers:
             if not isinstance(peer, dict):
                 continue
-            subver = peer.get("subver") or peer.get("cleanSubVer") or ""
             has_fast_sync_service = peer_advertises_fast_sync_service(peer)
-            if not has_fast_sync_service and not is_nu_subver(subver):
+            if not has_fast_sync_service:
                 continue
             host = peer_host_from_addr(peer.get("addr", ""))
             if host:
-                allowed[host] = "service-bit" if has_fast_sync_service else subver
+                allowed[host] = "service-bit"
         self.allowed_nu_hosts = allowed
         self.stats["peer_allowlist_refreshes"] += 1
         logging.debug("Nu UDP peer allowlist hosts=%s", sorted(allowed.keys()))

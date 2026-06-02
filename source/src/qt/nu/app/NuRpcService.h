@@ -702,6 +702,7 @@ private:
     static QString formatBytes(qint64 bytes);
     static QString formatPing(const QJsonValue& seconds);
     static QString formatServices(const QString& services_hex);
+    static QString formatServiceDetails(const QString& services_hex);
     static QString trimUserAgent(QString subver);
     static bool isDefcoinUserAgent(QString subver);
     static bool isDefcoinCoreNuUserAgent(QString subver);

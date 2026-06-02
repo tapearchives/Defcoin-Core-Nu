@@ -160,7 +160,7 @@ Rectangle {
         return type === "ipport" || type === "address" || type === "hash"
                || type === "number" || type === "bytes" || type === "duration" || type === "date"
                || name === "port" || name.indexOf("magic") >= 0 || name.indexOf("version") >= 0
-               || name === "svcs" || name.indexOf("height") >= 0 || name.indexOf("headers") >= 0
+               || name === "svcs" || name === "services" || name.indexOf("height") >= 0 || name.indexOf("headers") >= 0
                || name.indexOf("blocks") >= 0
     }
 
@@ -206,7 +206,7 @@ Rectangle {
         return name === "dir." || name === "dir" || name.indexOf("direction") >= 0
                || name === "port"
                || name.indexOf("magic") >= 0 || name.indexOf("protocol") >= 0
-               || name === "version" || name === "svcs"
+               || name === "version" || name === "svcs" || name === "services"
     }
 
     function centerAlignColumn(index) {

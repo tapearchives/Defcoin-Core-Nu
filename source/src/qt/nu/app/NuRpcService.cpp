@@ -3772,7 +3772,7 @@ void NuRpcService::refreshNode()
             QHostAddress udp_fast_sync_address;
             QString udp_fast_sync_host_key;
             const bool fast_sync_service_candidate = peerServicesAdvertiseFastSync(peer.value(QStringLiteral("services")).toString());
-            const bool nu_fast_sync_candidate = (fast_sync_service_candidate || isDefcoinCoreNuUserAgent(subver)) &&
+            const bool nu_fast_sync_candidate = fast_sync_service_candidate &&
                 udp_fast_sync_address.setAddress(endpoint.first);
             if (nu_fast_sync_candidate) {
                 udp_fast_sync_host_key = normalizedFastSyncHost(udp_fast_sync_address);
@@ -3812,7 +3812,9 @@ void NuRpcService::refreshNode()
             const QString magic = fallbackDash(peer.value(QStringLiteral("p2p_magic")).toString(
                 peer.value(QStringLiteral("magic")).toString(QStringLiteral("pending"))));
             const QString protocol_version = peerNumberText(peer, QStringLiteral("version"));
-            const QString services = formatServices(peer.value(QStringLiteral("services")).toString());
+            const QString services_hex = peer.value(QStringLiteral("services")).toString();
+            const QString services = formatServices(services_hex);
+            const QString service_details = formatServiceDetails(services_hex);
             const QString reverse_dns = peerDnsName(peer, endpoint, m_peer_dns_name_by_host);
             const QString known_dns = peerDomainAlias(peer, endpoint, reverse_dns, m_peer_dns_name_by_host, m_peer_domain_alias_by_host, m_peer_lan_name_by_host);
             const bool lan_peer = m_lan_node_discovery_enabled && isVisibleLanPeer(endpoint.first, reverse_dns, known_dns, m_peer_lan_name_by_host, m_peer_lan_info_by_host);
@@ -3842,6 +3844,10 @@ void NuRpcService::refreshNode()
                 received,
                 subver
             }));
+
+            QVariantList cell_tooltips;
+            for (int i = 0; i < 29; ++i) cell_tooltips << QString();
+            cell_tooltips[9] = service_details;
 
             detailed_rows.push_back(tableRow({
                 node_id,
@@ -3877,7 +3883,8 @@ void NuRpcService::refreshNode()
                     : QStringLiteral("-")
             }, {
                 {QStringLiteral("reverseDnsSort"), reverseDomainSortNotation(reverse_dns)},
-                {QStringLiteral("knownDnsSort"), lan_peer ? source_or_lan_name.toLower() : reverseDomainSortNotation(source_or_lan_name)}
+                {QStringLiteral("knownDnsSort"), lan_peer ? source_or_lan_name.toLower() : reverseDomainSortNotation(source_or_lan_name)},
+                {QStringLiteral("cellTooltips"), cell_tooltips}
             }));
         }
         m_peer_rows_simple = simple_rows;
@@ -12848,6 +12855,40 @@ QString NuRpcService::formatServices(const QString& services_hex)
     if (services & (1ULL << 24)) codes << QStringLiteral("M");
     if (services & (1ULL << 29)) codes << QStringLiteral("FS");
     return codes.isEmpty() ? services_hex : codes.join(QLatin1Char(' '));
+}
+
+QString NuRpcService::formatServiceDetails(const QString& services_hex)
+{
+    bool ok = false;
+    const qulonglong services = services_hex.trimmed().toULongLong(&ok, 16);
+    if (!ok) return QStringLiteral("Service bits could not be parsed from this peer.");
+    if (services == 0) return QStringLiteral("No service bits advertised.");
+
+    QStringList names;
+    auto append = [&names, services](int bit, const QString& name, const QString& meaning) {
+        if (services & (1ULL << bit)) {
+            names << QStringLiteral("bit %1: %2 - %3").arg(bit).arg(name, meaning);
+        }
+    };
+    append(0, QStringLiteral("NODE_NETWORK"), QStringLiteral("serves the full block chain"));
+    append(1, QStringLiteral("NODE_GETUTXO"), QStringLiteral("supports the historical getutxo service bit"));
+    append(2, QStringLiteral("NODE_BLOOM"), QStringLiteral("supports BIP37 bloom-filter client requests"));
+    append(3, QStringLiteral("NODE_WITNESS"), QStringLiteral("can serve witness-serialized blocks and transactions"));
+    append(6, QStringLiteral("NODE_COMPACT_FILTERS"), QStringLiteral("can serve BIP157/158 compact block filters"));
+    append(10, QStringLiteral("NODE_NETWORK_LIMITED"), QStringLiteral("serves at least the recent block history"));
+    append(23, QStringLiteral("NODE_MWEB_LIGHT_CLIENT"), QStringLiteral("Litecoin MWEB light-client service bit"));
+    append(24, QStringLiteral("NODE_MWEB"), QStringLiteral("Litecoin MWEB service bit"));
+    append(29, QStringLiteral("NODE_DEFCOIN_FASTSYNC"), QStringLiteral("Defcoin Nu UDP fast-sync capable"));
+
+    qulonglong known = 0;
+    for (int bit : {0, 1, 2, 3, 6, 10, 23, 24, 29}) {
+        known |= (1ULL << bit);
+    }
+    const qulonglong unknown = services & ~known;
+    if (unknown != 0) {
+        names << QStringLiteral("unknown bits: 0x%1").arg(QString::number(unknown, 16));
+    }
+    return names.join(QStringLiteral("\n"));
 }
 
 QString NuRpcService::trimUserAgent(QString subver)

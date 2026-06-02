@@ -46,8 +46,8 @@ ColumnLayout {
     readonly property int detailedLanColumnStart: 4
     readonly property int detailedLanColumnCount: 1
     property bool showLanPeerColumns: NuService.lanNodeDiscoveryEnabled
-    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "LAN", "Reverse\nDNS Name", "Seed Source /\nLAN Workstation Name", "Protocol\nVersion", "Magic", "Svcs", "Fast\nSync\nAvail", "Methods", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
-    property var detailedPeerTypes: ["number", "text", "ipport", "number", "lan", "reverseDns", "seedLanSource", "number", "text", "text", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
+    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "LAN", "Reverse\nDNS Name", "Seed Source /\nLAN Workstation Name", "Protocol\nVersion", "Magic", "Services", "Fast\nSync\nAvail", "Methods", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
+    property var detailedPeerTypes: ["number", "text", "ipport", "number", "lan", "reverseDns", "seedLanSource", "number", "text", "center", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
     property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "lan", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "transportMethods", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
     property var detailedPeerSortMetaFields: ["", "", "", "", "", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
     property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 0.2, 1.05, 1.3, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
@@ -63,8 +63,8 @@ ColumnLayout {
         "Configured seed/source domain or confirmed LAN workstation name associated with this peer address. LAN names come from local naming probes such as Bonjour, SMB/NetBIOS, host-name resolution, and optional nmap output.",
         "P2P protocol version reported by the peer.",
         "Actual network message-start bytes selected for this peer, such as defc014e or fbc0b6db.",
-        "Compact service flags advertised by the peer, such as N for NODE_NETWORK or W for witness support.",
-        "UDP fast-sync capability state. Old non-Nu peers show No. Nu peers start as TBA until this session receives a valid UDP fast-sync response, then switch to Yes or Failed.",
+        "Compact service flags advertised by the peer. Hover an entry for the full service-bit names and meanings.",
+        "UDP fast-sync capability state. Peers must advertise NODE_DEFCOIN_FASTSYNC, bit 29, before Nu counts them as UDP fast-sync candidates. TBA means the service bit is present but this session has not yet received a valid UDP response.",
         "Transport methods that have successfully exchanged data with this peer during this Nu session: TCP means Core P2P bytes; UDP means fast-sync block data; TCP+UDP means both.",
         "Current round-trip latency reported by the backend.",
         "Best observed ping for this connection.",
@@ -141,7 +141,16 @@ ColumnLayout {
             for (let i = 0; i < cells.length; ++i) {
                 if (i < root.detailedLanColumnStart || i >= root.detailedLanColumnStart + root.detailedLanColumnCount) filtered.push(cells[i])
             }
-            rows.push({ "cells": filtered, "meta": meta })
+            let filteredMeta = ({})
+            for (let key in meta) filteredMeta[key] = meta[key]
+            if (meta.cellTooltips !== undefined && meta.cellTooltips !== null) {
+                let filteredTips = []
+                for (let i = 0; i < meta.cellTooltips.length; ++i) {
+                    if (i < root.detailedLanColumnStart || i >= root.detailedLanColumnStart + root.detailedLanColumnCount) filteredTips.push(meta.cellTooltips[i])
+                }
+                filteredMeta.cellTooltips = filteredTips
+            }
+            rows.push({ "cells": filtered, "meta": filteredMeta })
         }
         return rows
     }
