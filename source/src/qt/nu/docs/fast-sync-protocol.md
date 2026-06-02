@@ -238,7 +238,29 @@ works across arbitrary public routes.
 Fast Sync currently prioritizes safe transport coordination, bounded packet
 handling, receiver-confirmed checksums, and normal Core block validation. The
 next hardening layer should evaluate authenticated encryption for UDP after the
-basic transport proves stable.
+basic transport proves stable. The same review should also cover normal TCP P2P
+transport because this Litecoin-era codebase does not currently treat ordinary
+TCP block sync as SSL/TLS-encrypted transport.
+
+TCP is still materially more mature than the UDP helper because it already uses
+Core's peer handshake, peer identity, inventory/getdata flow, block in-flight
+tracking, timeout handling, misbehavior/disconnect paths, traffic accounting,
+and full block validation. UDP should continue borrowing those protections where
+they fit instead of growing a separate hidden scheduler or trust model.
+
+Reusable TCP/Core protections to keep applying to UDP:
+
+- Reserve UDP-requested blocks through Core's in-flight table before sending the
+  UDP request.
+- Request block data only from connected peers whose headers indicate they
+  should have that block.
+- Keep one clear active owner for a requested block; release it on timeout,
+  checksum failure, validation failure, or completion.
+- Feed completed blocks through normal Core validation instead of trusting the
+  UDP sender.
+- Mirror Core-style rate, timeout, and memory-pressure limits rather than
+  buffering unbounded out-of-order chunks.
+- Treat TCP/Core as the repair and fallback path whenever UDP is ambiguous.
 
 Candidate approaches:
 
@@ -260,3 +282,8 @@ data must still pass the same reservation, checksum, size-cap, timeout, and
 `submitblock` validation path. The first goal remains preventing spoofing,
 amplification, memory pressure, duplicate requests, and unsafe packet handling;
 secrecy is a useful later improvement, not the primary safety boundary.
+
+Future TCP hardening should evaluate whether Bitcoin Core's BIP324 v2 encrypted
+transport can be ported cleanly into Defcoin Core Nu. If that work is feasible,
+prefer sharing the authenticated session/key material with UDP Fast Sync instead
+of inventing an unrelated UDP-only cryptographic identity.
