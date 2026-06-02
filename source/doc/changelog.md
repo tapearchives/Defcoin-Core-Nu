@@ -1,5 +1,19 @@
 # Defcoin Core Changelog
 
+## 26.6.1a Core Memories
+
+Defcoin Core Nu `26.6.1a` is a Tahoe polish rebuild over `26.6.1`.
+
+### Changed
+
+- Improved LAN workstation-name display by preferring human-readable Macintosh
+  share names, removing source-label prefixes, and de-duplicating equivalent
+  Bonjour, SMB, and NetBIOS identities.
+- Updated Nu combo boxes so clicking anywhere in the displayed text opens the
+  pick list, matching normal desktop combo-box behavior.
+- Adjusted the macOS DMG background label backplates to sit under Finder icon
+  text on the dark theme background.
+
 ## 26.6.1 Core Memories
 
 Defcoin Core Nu `26.6.1` improves Apple Silicon validation performance and

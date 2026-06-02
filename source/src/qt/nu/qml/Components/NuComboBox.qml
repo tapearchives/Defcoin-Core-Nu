@@ -50,6 +50,17 @@ Basic.ComboBox {
         selectionColor: NuTokens.lineStrong
         clip: true
         onTextEdited: if (root.editable) root.editText = text
+
+        MouseArea {
+            anchors.fill: parent
+            visible: !root.editable
+            acceptedButtons: Qt.LeftButton
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.forceActiveFocus()
+                root.popup.open()
+            }
+        }
     }
 
     indicator: Item {

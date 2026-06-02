@@ -240,8 +240,8 @@ def finder_label_box(center_x, center_y, label):
     return (left, top, right, bottom)
 
 for box in [
-    finder_label_box(220, 346, f"{product_name}.app"),
-    finder_label_box(512, 346, "Applications"),
+    finder_label_box(220, 328, f"{product_name}.app"),
+    finder_label_box(512, 328, "Applications"),
 ]:
     label_draw.rounded_rectangle(box, radius=8 * scale, fill=(246, 246, 242, 178))
 label_bg = label_bg.filter(ImageFilter.GaussianBlur(0.35 * scale))

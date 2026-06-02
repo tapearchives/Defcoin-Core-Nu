@@ -1083,6 +1083,30 @@ QString lanWorkstationNameFromCandidate(const QString& value)
     return name;
 }
 
+QString lanWorkstationIdentityKey(QString value)
+{
+    value = lanWorkstationNameFromCandidate(value);
+    if (value.isEmpty()) return QString();
+    value = normalizeDnsName(value).toLower();
+    value.replace(QStringLiteral("\\032"), QStringLiteral(" "));
+    value.remove(QRegularExpression(QStringLiteral(R"([ ._'’()-])")));
+    return value;
+}
+
+bool lanWorkstationNameIsHumanPreferred(const QString& value)
+{
+    return value.contains(QLatin1Char(' '));
+}
+
+int lanWorkstationDisplayRank(const QString& value)
+{
+    if (value.contains(QLatin1Char(':'))) return 3;
+    if (lanWorkstationNameIsHumanPreferred(value)) return 0;
+    const QString key = lanWorkstationIdentityKey(value);
+    if (!key.isEmpty()) return 1;
+    return 2;
+}
+
 bool isLocalStyleDnsName(QString value)
 {
     value = normalizeDnsName(value);
@@ -1160,10 +1184,27 @@ QStringList parseLanPeerFingerprintDetails(const QString& output)
             label = QStringLiteral("Name");
         }
         if (label == QLatin1String("MAC")) return;
-        const QString item = label == QLatin1String("Name")
+        const bool identity_label = label == QLatin1String("Name") ||
+                                    label == QLatin1String("Server") ||
+                                    label == QLatin1String("NetBIOS");
+        const QString item = identity_label
             ? value
             : QStringLiteral("%1: %2").arg(label, value);
-        if (!details.contains(item, Qt::CaseInsensitive)) details.push_back(item);
+        const QString item_key = identity_label ? lanWorkstationIdentityKey(value) : item.toLower();
+        if (item_key.isEmpty()) return;
+
+        for (int i = 0; i < details.size(); ++i) {
+            const QString existing = details.at(i);
+            const QString existing_key = identity_label ? lanWorkstationIdentityKey(existing) : existing.toLower();
+            if (existing_key != item_key) continue;
+            if (identity_label &&
+                lanWorkstationNameIsHumanPreferred(value) &&
+                !lanWorkstationNameIsHumanPreferred(existing)) {
+                details[i] = item;
+            }
+            return;
+        }
+        details.push_back(item);
     };
 
     const QString name = parseLanPeerNameLookupOutput(output);
@@ -1206,6 +1247,10 @@ QStringList parseLanPeerFingerprintDetails(const QString& output)
     if (output.contains(QStringLiteral("Linux"), Qt::CaseInsensitive) && !details.join(QString()).contains(QStringLiteral("Linux"), Qt::CaseInsensitive)) {
         addDetail(QStringLiteral("OS"), QStringLiteral("Linux"));
     }
+
+    std::stable_sort(details.begin(), details.end(), [](const QString& a, const QString& b) {
+        return lanWorkstationDisplayRank(a) < lanWorkstationDisplayRank(b);
+    });
 
     return details;
 }
