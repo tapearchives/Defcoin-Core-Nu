@@ -68,6 +68,13 @@
 #include <utility>
 #if defined(Q_OS_MACOS)
 #include "MacHelp.h"
+#include <mach/mach.h>
+#include <sys/sysctl.h>
+#elif defined(Q_OS_WIN)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #endif
 
 #ifndef DEFCOIN_NU_EXPFOR_APP
@@ -119,6 +126,9 @@ constexpr int FAST_SYNC_PROTOCOL_MIN_UDP_PROBES = 4;
 constexpr int FAST_SYNC_PROTOCOL_TCP_SAMPLE_CAP_PER_UDP = 3;
 constexpr double FAST_SYNC_PROTOCOL_EWMA_ALPHA = 0.35;
 constexpr double FAST_SYNC_PROTOCOL_EXPLORATION_C = 0.35;
+constexpr int AUTO_DBCACHE_MIN_MIB = 450;
+constexpr int AUTO_DBCACHE_64BIT_MAX_MIB = 32768;
+constexpr int AUTO_DBCACHE_32BIT_MAX_MIB = 1024;
 constexpr char UDP_FAST_SYNC_CAPABILITY[] = "defcoin-nu-udp-fast-sync-v1";
 constexpr unsigned char DEFCOIN_CURRENT_WIF_PREFIX = 0xb0; // Defcoin v1.0.0+ private keys render as T...
 constexpr unsigned char DEFCOIN_LEGACY_WIF_PREFIX = 0x9e;  // Defcoin v0.22/Ian Coleman legacy entry renders as Q...
@@ -249,6 +259,109 @@ int explorerIndexNextDelayMs(bool focused)
 {
     if (focused) return EXPLORER_INDEX_FOCUSED_DELAY_MS;
     return systemLooksBusyForCooperativeIndexing() ? EXPLORER_INDEX_BUSY_COOPERATIVE_DELAY_MS : 0;
+}
+
+qint64 availableMemoryMiB()
+{
+#if defined(Q_OS_MACOS)
+    vm_size_t page_size = 0;
+    if (host_page_size(mach_host_self(), &page_size) != KERN_SUCCESS || page_size == 0) return 0;
+    vm_statistics64_data_t stats{};
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&stats), &count) != KERN_SUCCESS) return 0;
+    const quint64 pages = static_cast<quint64>(stats.free_count)
+        + static_cast<quint64>(stats.inactive_count)
+#if defined(VM_PAGE_SPECULATIVE_COUNT)
+        + static_cast<quint64>(stats.speculative_count)
+#endif
+        ;
+    return static_cast<qint64>((pages * static_cast<quint64>(page_size)) / (1024ULL * 1024ULL));
+#elif defined(Q_OS_WIN)
+    MEMORYSTATUSEX status{};
+    status.dwLength = sizeof(status);
+    if (!GlobalMemoryStatusEx(&status)) return 0;
+    return static_cast<qint64>(status.ullAvailPhys / (1024ULL * 1024ULL));
+#elif defined(Q_OS_LINUX)
+    QFile meminfo(QStringLiteral("/proc/meminfo"));
+    if (!meminfo.open(QIODevice::ReadOnly | QIODevice::Text)) return 0;
+    while (!meminfo.atEnd()) {
+        const QString line = QString::fromLatin1(meminfo.readLine()).trimmed();
+        if (!line.startsWith(QStringLiteral("MemAvailable:"))) continue;
+        const QStringList parts = line.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+        if (parts.size() < 2) return 0;
+        bool ok = false;
+        const qint64 kib = parts.at(1).toLongLong(&ok);
+        return ok ? kib / 1024 : 0;
+    }
+    return 0;
+#else
+    return 0;
+#endif
+}
+
+bool defcoinConfHasDbCache(const QString& data_dir)
+{
+    QFile conf(QDir(data_dir).filePath(QStringLiteral("defcoin.conf")));
+    if (!conf.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
+    const QRegularExpression dbcache_line(QStringLiteral("^\\s*(?:defcoin\\.)?dbcache\\s*="), QRegularExpression::CaseInsensitiveOption);
+    while (!conf.atEnd()) {
+        QString line = QString::fromUtf8(conf.readLine());
+        const int hash_index = line.indexOf(QLatin1Char('#'));
+        if (hash_index >= 0) line.truncate(hash_index);
+        const int semicolon_index = line.indexOf(QLatin1Char(';'));
+        if (semicolon_index >= 0) line.truncate(semicolon_index);
+        if (dbcache_line.match(line).hasMatch()) return true;
+    }
+    return false;
+}
+
+int autoDbCacheMiB(qint64 available_mib)
+{
+    if (available_mib <= 0) return 0;
+    const int max_cache = sizeof(void*) > 4 ? AUTO_DBCACHE_64BIT_MAX_MIB : AUTO_DBCACHE_32BIT_MAX_MIB;
+    if (available_mib < 2048) return 0;
+
+    // Keep enough RAM for the GUI, OS file cache, peers, wallet rescans, and other apps.
+    const qint64 reserved_mib = std::max<qint64>(2048, available_mib / 4);
+    const qint64 usable_mib = available_mib > reserved_mib ? available_mib - reserved_mib : 0;
+    if (usable_mib < AUTO_DBCACHE_MIN_MIB) return 0;
+
+    // A bigger dbcache helps most during IBD, but swapping is worse than disk reads.
+    const qint64 target_mib = std::min<qint64>(usable_mib, available_mib * 3 / 5);
+    return qBound(AUTO_DBCACHE_MIN_MIB, static_cast<int>(target_mib), max_cache);
+}
+
+QString autoDbCacheLaunchArg(const QString& data_dir, QString* note)
+{
+    if (note) note->clear();
+    const QByteArray env = qgetenv("DEFCOIN_NU_DBCACHE_MB");
+    if (!env.isEmpty()) {
+        bool ok = false;
+        const int requested = QString::fromLatin1(env).trimmed().toInt(&ok);
+        const int max_cache = sizeof(void*) > 4 ? AUTO_DBCACHE_64BIT_MAX_MIB : AUTO_DBCACHE_32BIT_MAX_MIB;
+        if (ok && requested >= AUTO_DBCACHE_MIN_MIB) {
+            const int cache_mib = qBound(AUTO_DBCACHE_MIN_MIB, requested, max_cache);
+            if (note) *note = QStringLiteral("Database cache selected from DEFCOIN_NU_DBCACHE_MB: %1 MiB.").arg(cache_mib);
+            return QStringLiteral("-dbcache=%1").arg(cache_mib);
+        }
+        if (note) *note = QStringLiteral("Ignored invalid DEFCOIN_NU_DBCACHE_MB value '%1'.").arg(QString::fromLatin1(env).left(64));
+    }
+
+    if (defcoinConfHasDbCache(data_dir)) {
+        if (note) *note = QStringLiteral("Database cache is set in defcoin.conf; Nu will not override it.");
+        return QString();
+    }
+
+    const qint64 available_mib = availableMemoryMiB();
+    const int cache_mib = autoDbCacheMiB(available_mib);
+    if (cache_mib <= 0) {
+        if (note) *note = available_mib > 0
+            ? QStringLiteral("Available RAM is %1 MiB; using Core's default database cache.").arg(available_mib)
+            : QStringLiteral("Available RAM could not be measured; using Core's default database cache.");
+        return QString();
+    }
+    if (note) *note = QStringLiteral("Auto database cache: %1 MiB selected from %2 MiB available RAM.").arg(cache_mib).arg(available_mib);
+    return QStringLiteral("-dbcache=%1").arg(cache_mib);
 }
 
 QByteArray lanFastSyncDatagram(const QJsonObject& header,
@@ -2302,6 +2415,10 @@ bool NuRpcService::ensureBackendStarted()
          << QStringLiteral("-rpcport=%1").arg(m_rpc_port)
          << QStringLiteral("-rpcbind=127.0.0.1")
          << QStringLiteral("-rpcallowip=127.0.0.1");
+    QString dbcache_note;
+    const QString dbcache_arg = autoDbCacheLaunchArg(m_data_dir, &dbcache_note);
+    if (!dbcache_note.isEmpty()) appendLaunchDiagnostic(dbcache_note);
+    if (!dbcache_arg.isEmpty()) args << dbcache_arg;
     appendLaunchDiagnostic(QStringLiteral("Historical Defcoin SegWit is active; post-activation blocks require witness-capable peers. Witness storage repair is never started automatically by Nu."));
 
     const QFileInfo legacy_default_wallet(QDir(m_data_dir).filePath(QStringLiteral("wallet.dat")));
