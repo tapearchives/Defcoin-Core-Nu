@@ -151,8 +151,8 @@ if os.path.exists(logo_path):
     logo = Image.open(logo_path).convert("RGBA")
     logo = ImageEnhance.Contrast(logo).enhance(1.05)
     logo.thumbnail((292 * scale, 292 * scale), Image.Resampling.LANCZOS)
-    coin_x = -48 * scale
-    coin_y = -82 * scale
+    coin_x = -72 * scale
+    coin_y = -28 * scale
     coin_layer = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
     alpha_composite_clipped(coin_layer, logo, coin_x, coin_y)
     glow_alpha = coin_layer.getchannel("A").filter(ImageFilter.GaussianBlur(58 * scale))
@@ -232,7 +232,7 @@ label_font = ui_font(13)
 def finder_label_box(center_x, center_y, label):
     label_width = draw.textlength(label, font=label_font) / scale
     box_width = max(88, min(248, label_width + 24))
-    box_height = 24
+    box_height = 34
     left = int((center_x - box_width / 2) * scale)
     right = int((center_x + box_width / 2) * scale)
     top = int((center_y - box_height / 2) * scale)
@@ -240,8 +240,8 @@ def finder_label_box(center_x, center_y, label):
     return (left, top, right, bottom)
 
 for box in [
-    finder_label_box(220, 343, f"{product_name}.app"),
-    finder_label_box(512, 343, "Applications"),
+    finder_label_box(220, 346, f"{product_name}.app"),
+    finder_label_box(512, 346, "Applications"),
 ]:
     label_draw.rounded_rectangle(box, radius=8 * scale, fill=(246, 246, 242, 178))
 label_bg = label_bg.filter(ImageFilter.GaussianBlur(0.35 * scale))
@@ -276,7 +276,7 @@ else
   if command -v magick >/dev/null 2>&1; then
     if [ -n "$WORDMARK_THIRD_LINE" ]; then
       magick -size 640x420 gradient:'#12071c-#210d2e' \
-        "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -48-82 -composite \
+        "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -72-28 -composite \
         -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+34 'DEFCOIN' \
         -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+84 'CORE NU' \
         -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+134 "$WORDMARK_THIRD_LINE" \
@@ -284,7 +284,7 @@ else
         "$DEST_DMG_BACKGROUND"
     else
       magick -size 640x420 gradient:'#12071c-#210d2e' \
-        "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -48-82 -composite \
+        "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -72-28 -composite \
         -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+58 'DEFCOIN' \
         -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+108 'CORE NU' \
         -fill '#dccfee' -pointsize 17 -gravity NorthWest -annotate +294+197 'Drag to Applications' \

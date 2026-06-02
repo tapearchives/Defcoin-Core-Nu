@@ -1892,6 +1892,11 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         }
     }
 
+    // Advertise Defcoin Nu's optional UDP Fast Sync capability as an
+    // unauthenticated hint. Clients still require a valid UDP response and
+    // normal Core block validation before treating the peer as usable.
+    nLocalServices = ServiceFlags(nLocalServices | NODE_DEFCOIN_FASTSYNC);
+
     // ********************************************************* Step 11: import blocks
 
     if (!CheckDiskSpace(GetDataDir())) {

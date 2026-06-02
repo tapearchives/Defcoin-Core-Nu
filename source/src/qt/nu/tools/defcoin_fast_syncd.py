@@ -26,6 +26,7 @@ from collections import OrderedDict
 PREFIX = b"DFCLAN1\n"
 CAPABILITY = "defcoin-nu-udp-fast-sync-v1"
 PROTOCOL_VERSION = 1
+FAST_SYNC_SERVICE_BIT = 1 << 29
 
 UDP_PORT = 10334
 SAFE_DATAGRAM_BYTES = 1232
@@ -113,6 +114,18 @@ def is_nu_subver(subver):
     if not isinstance(subver, str):
         return False
     return "DefcoinCoreNu" in subver
+
+
+def peer_advertises_fast_sync_service(peer):
+    services = peer.get("services")
+    try:
+        if isinstance(services, str):
+            services_value = int(services.strip() or "0", 16)
+        else:
+            services_value = int(services or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(services_value & FAST_SYNC_SERVICE_BIT)
 
 
 def chunk_bytes_for_datagram(max_datagram):
@@ -414,11 +427,12 @@ class FastSyncDaemon:
             if not isinstance(peer, dict):
                 continue
             subver = peer.get("subver") or peer.get("cleanSubVer") or ""
-            if not is_nu_subver(subver):
+            has_fast_sync_service = peer_advertises_fast_sync_service(peer)
+            if not has_fast_sync_service and not is_nu_subver(subver):
                 continue
             host = peer_host_from_addr(peer.get("addr", ""))
             if host:
-                allowed[host] = subver
+                allowed[host] = "service-bit" if has_fast_sync_service else subver
         self.allowed_nu_hosts = allowed
         self.stats["peer_allowlist_refreshes"] += 1
         logging.debug("Nu UDP peer allowlist hosts=%s", sorted(allowed.keys()))

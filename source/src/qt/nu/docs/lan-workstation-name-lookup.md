@@ -30,12 +30,26 @@ The Mac path that finally produced useful Macintosh workstation names was:
 This avoids treating provider reverse-DNS strings or synthetic IPv6 reverse
 names as workstation names.
 
-## Windows IPv6 Caveat
+## Windows IPv6 Bridge
 
-On macOS, a Windows 11 peer reachable only by IPv6 may still show no workstation
-name if it does not advertise a usable name through Bonjour/mDNS, local DNS, or
-SMB/NetBIOS lookup tools. The neighbor table can expose a MAC address such as
-`00:e0:4c:...`, but that is not a workstation name and should be suppressed.
+A Windows peer can arrive in `getpeerinfo` as an IPv6 address while its useful
+workstation name is exposed only by SMB/NetBIOS over IPv4. The macOS bridge is:
+
+1. Use `ndp -an` to map the peer IPv6 address to a neighbor MAC.
+2. Use `arp -an` to find an IPv4 address with the same MAC.
+3. Run `smbutil status -ae <ipv4>` against that IPv4 address.
+4. Prefer the `0x00 UNIQUE [Workstation Service]` name over generic service or
+   domain names.
+
+This fixed the local node-27 case:
+
+- Peer IPv6: `2603:808c:f40:200::70`
+- Neighbor MAC: `00:e0:4c:68:01:44`
+- Matching IPv4: `192.168.3.69`
+- SMB workstation name: `WHISPER`
+
+The neighbor MAC is useful only as a lookup bridge. It must not be displayed as
+the workstation name.
 
 If a future pass needs stronger Windows naming, add a dedicated LLMNR/NBNS/WS-D
 probe helper and keep the result bounded, LAN-only, and display-clean.

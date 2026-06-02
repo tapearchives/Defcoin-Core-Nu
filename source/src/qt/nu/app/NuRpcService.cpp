@@ -141,6 +141,13 @@ QString lanFastSyncChecksum(const QByteArray& bytes)
     return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
 }
 
+bool peerServicesAdvertiseFastSync(const QString& services_hex)
+{
+    bool ok = false;
+    const qulonglong services = services_hex.trimmed().toULongLong(&ok, 16);
+    return ok && (services & (1ULL << 29));
+}
+
 QVector<int> lanFastSyncDatagramCandidates(bool lan_mode)
 {
     return lan_mode
@@ -988,6 +995,8 @@ QString parseLanPeerNameLookupOutput(const QString& output)
     static const QVector<QRegularExpression> patterns{
         QRegularExpression(QStringLiteral(R"(^\s*Bonjour\s+Name:\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(NetBIOS\s+Name:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption),
+        QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+0x00\s+UNIQUE\b.*\[Workstation Service\].*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
+        QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+0x20\s+UNIQUE\b.*\[File/Print Server Service\].*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(^\s*Server\s*:\s*([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(NameHost\s*:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption),
         QRegularExpression(QStringLiteral(R"(^\s*name:\s*([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
@@ -1005,7 +1014,7 @@ QString parseLanPeerNameLookupOutput(const QString& output)
         const QRegularExpressionMatch match = pattern.match(output);
         if (!match.hasMatch()) continue;
         const QString captured = match.captured(1);
-        const bool trusted_machine_name = i == 0 || i == 1 || i == 2 || i == 9 || i == 10;
+        const bool trusted_machine_name = i == 0 || i == 1 || i == 2 || i == 3 || i == 4 || i == 11 || i == 12;
         if (!trusted_machine_name && !isLocalStyleDnsName(captured)) continue;
         const QString name = lanWorkstationNameFromCandidate(captured);
         if (!name.isEmpty()) return name;
@@ -1059,6 +1068,8 @@ QStringList parseLanPeerFingerprintDetails(const QString& output)
         {QStringLiteral("Workgroup"), QRegularExpression(QStringLiteral(R"(\bWorkgroup=\[([^\]]+)\])"), QRegularExpression::CaseInsensitiveOption)},
         {QStringLiteral("Workgroup"), QRegularExpression(QStringLiteral(R"(^\s*Workgroup\s*:\s*([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("NetBIOS"), QRegularExpression(QStringLiteral(R"(NetBIOS\s+Name:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption)},
+        {QStringLiteral("NetBIOS"), QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+0x00\s+UNIQUE\b.*\[Workstation Service\].*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
+        {QStringLiteral("NetBIOS"), QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+0x20\s+UNIQUE\b.*\[File/Print Server Service\].*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("NetBIOS"), QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+<20>\s+(?!(?:.*<GROUP>))(?:UNIQUE|-)\b.*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("OS"), QRegularExpression(QStringLiteral(R"(^\s*(?:Running|OS details):\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("Device"), QRegularExpression(QStringLiteral(R"(^\s*Device type:\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)}
@@ -3153,6 +3164,29 @@ done
     if (address.protocol() == QAbstractSocket::IPv4Protocol) {
         commands.push_back({QStringLiteral("/usr/sbin/arp"), {QStringLiteral("-n"), address.toString()}});
     } else if (address.protocol() == QAbstractSocket::IPv6Protocol) {
+        if (!smbutil.isEmpty()) {
+            const QString ipv6_smb_bridge_script = QStringLiteral(R"SH(
+target=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+mac=$(/usr/sbin/ndp -an 2>/dev/null |
+  awk -v target="$target" 'tolower($1) == target {print tolower($2); exit}')
+[ -n "$mac" ] || exit 0
+ipv4=$(/usr/sbin/arp -an 2>/dev/null |
+  awk -v mac="$mac" '
+    {
+      line=tolower($0)
+      if (index(line, mac) > 0) {
+        host=$0
+        sub(/^.*\(/, "", host)
+        sub(/\).*$/, "", host)
+        print host
+        exit
+      }
+    }')
+[ -n "$ipv4" ] || exit 0
+/usr/bin/smbutil status -ae "$ipv4" 2>/dev/null
+)SH");
+            commands.push_back({QStringLiteral("/bin/sh"), {QStringLiteral("-c"), ipv6_smb_bridge_script, QStringLiteral("nu-lan-ipv6-smb-bridge"), address.toString()}});
+        }
         commands.push_back({QStringLiteral("/usr/sbin/ndp"), {QStringLiteral("-n"), address.toString()}});
     }
 #elif defined(Q_OS_WIN)
@@ -3526,7 +3560,9 @@ void NuRpcService::refreshNode()
             const QPair<QString, QString> endpoint = splitPeerAddressAndPort(peer.value(QStringLiteral("addr")).toString());
             QHostAddress udp_fast_sync_address;
             QString udp_fast_sync_host_key;
-            const bool nu_fast_sync_candidate = isDefcoinCoreNuUserAgent(subver) && udp_fast_sync_address.setAddress(endpoint.first);
+            const bool fast_sync_service_candidate = peerServicesAdvertiseFastSync(peer.value(QStringLiteral("services")).toString());
+            const bool nu_fast_sync_candidate = (fast_sync_service_candidate || isDefcoinCoreNuUserAgent(subver)) &&
+                udp_fast_sync_address.setAddress(endpoint.first);
             if (nu_fast_sync_candidate) {
                 udp_fast_sync_host_key = normalizedFastSyncHost(udp_fast_sync_address);
                 udp_fast_sync_peer_hosts.insert(udp_fast_sync_host_key);
@@ -12597,8 +12633,9 @@ QString NuRpcService::formatServices(const QString& services_hex)
     if (services & (1ULL << 3)) codes << QStringLiteral("W");
     if (services & (1ULL << 6)) codes << QStringLiteral("CF");
     if (services & (1ULL << 10)) codes << QStringLiteral("NL");
+    if (services & (1ULL << 23)) codes << QStringLiteral("MLC");
     if (services & (1ULL << 24)) codes << QStringLiteral("M");
-    if (services & (1ULL << 25)) codes << QStringLiteral("MLC");
+    if (services & (1ULL << 29)) codes << QStringLiteral("FS");
     return codes.isEmpty() ? services_hex : codes.join(QLatin1Char(' '));
 }
 

@@ -30,13 +30,17 @@ of clients. It only returns the raw active-chain block requested by a Nu wallet.
 - Datagram prefix: `DFCLAN1\n`
 - Capability string: `defcoin-nu-udp-fast-sync-v1`
 - Protocol version: `1`
+- Service bit: `NODE_DEFCOIN_FASTSYNC = 1 << 29`
 
-Nu currently discovers Fast Sync candidates from connected peers whose
-User-Agent begins with `DefcoinCoreNu`. Older `DefcoinCore` peers are not marked
-Fast Sync capable. A Nu peer starts as `TBA`, becomes `Yes` after a valid UDP
-Fast Sync response, and becomes `Failed` after a session attempt times out or
-fails without usable chunks. The capability is then proven by UDP response and
-normal `submitblock` acceptance, not by the User-Agent string alone.
+Nu discovers Fast Sync candidates from connected peers that advertise
+`NODE_DEFCOIN_FASTSYNC`. During the transition to 26.6.1, Nu may also treat a
+connected peer whose User-Agent begins with `DefcoinCoreNu` as a tentative
+candidate, but this fallback is only for compatibility with earlier Nu builds.
+Older `DefcoinCore` peers are not marked Fast Sync capable. A candidate starts
+as `TBA`, becomes `Yes` after a valid UDP Fast Sync response, and becomes
+`Failed` after a session attempt times out or fails without usable chunks. The
+capability is proven by UDP response and normal `submitblock` acceptance, not by
+the service bit or User-Agent string alone.
 
 LAN discovery may learn private/local peers, but block data requests are sent to
 one selected connected Nu peer. Broadcast is not used for block data requests.
@@ -88,9 +92,10 @@ fetches the active-chain block through RPC (`getblockhash`, then
 desktop responder restricts response traffic to eligible Nu peers. The dc903
 sidecar uses the same boundary in headless form: it periodically reads
 `getpeerinfo` and only serves UDP block chunks to source IPs that are currently
-connected over normal Core TCP with a `DefcoinCoreNu` User-Agent. Loopback can
-be allowed for local administrator tests, but public requesters must first be
-normal connected Nu peers.
+connected over normal Core TCP and advertise `NODE_DEFCOIN_FASTSYNC`. During
+the 26.6.1 transition it can still accept a connected `DefcoinCoreNu`
+User-Agent as a fallback hint. Loopback can be allowed for local administrator
+tests, but public requesters must first be normal connected Nu peers.
 
 Each chunk header includes:
 
@@ -235,14 +240,16 @@ works across arbitrary public routes.
 
 The server sidecar is responder-only. It never asks legacy v1.0.0 wallets to
 use UDP, never sends UDP first, and never changes the ordinary TCP/Core service
-used by older wallets. Legacy peers are not `DefcoinCoreNu` peers, so their
-addresses are not placed in the UDP response allowlist.
+used by older wallets. Legacy peers do not advertise `NODE_DEFCOIN_FASTSYNC`,
+so their addresses are not placed in the UDP response allowlist.
 
 ## Security Rules
 
 - Never accept datagrams without the protocol prefix, version, and capability.
 - Keep datagram, header, payload, chunk-count, block-size, and request-rate caps.
-- On public sidecars, serve only currently connected `DefcoinCoreNu` TCP peers.
+- On public sidecars, serve only currently connected TCP peers advertising
+  `NODE_DEFCOIN_FASTSYNC`, with temporary `DefcoinCoreNu` User-Agent fallback
+  only during the 26.6.1 transition.
 - Reply to the datagram source address and source port; do not use UDP requests
   as a reflection mechanism to an arbitrary advertised port.
 - Restrict broadcast handling to LAN/private mode.

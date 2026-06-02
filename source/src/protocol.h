@@ -321,15 +321,18 @@ enum ServiceFlags : uint64_t {
     NODE_MWEB_LIGHT_CLIENT = (1 << 23),
     // NODE_MWEB indicates that a node can be asked for blocks and transactions including
     // MWEB data.
-    NODE_MWEB = (1 << 24)
+    NODE_MWEB = (1 << 24),
+    // NODE_DEFCOIN_FASTSYNC indicates that a Defcoin Nu node can be probed for
+    // checksum-protected UDP Fast Sync block chunks. This is a Defcoin-only
+    // service bit and must still be proven by a valid Fast Sync response before
+    // use.
+    NODE_DEFCOIN_FASTSYNC = (1 << 29)
 
-    // Bits 25-31 are reserved for temporary experiments. Just pick a bit that
-    // isn't getting used, or one not being used much, and notify the
-    // bitcoin-development mailing list. Remember that service bits are just
-    // unauthenticated advertisements, so your code must be robust against
-    // collisions and other cases where nodes may be advertising a service they
-    // do not actually support. Other service bits should be allocated via the
-    // BIP process.
+    // Bits 25-28 and 30-31 remain available only for temporary experiments.
+    // Remember that service bits are unauthenticated advertisements, so your
+    // code must be robust against collisions and nodes advertising a service
+    // they do not actually support. Other service bits should be allocated via
+    // the BIP process.
 };
 
 /**

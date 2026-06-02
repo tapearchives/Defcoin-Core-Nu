@@ -225,6 +225,7 @@ static std::string serviceFlagToStr(size_t bit)
     case NODE_NETWORK_LIMITED:   return "NETWORK_LIMITED";
     case NODE_MWEB:              return "MWEB";
     case NODE_MWEB_LIGHT_CLIENT: return "MWEB_LIGHT_CLIENT";
+    case NODE_DEFCOIN_FASTSYNC:  return "DEFCOIN_FASTSYNC";
     // Not using default, so we get warned when a case is missing
     }
 
