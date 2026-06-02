@@ -112,6 +112,7 @@ constexpr int LAN_FAST_SYNC_REQUEST_TIMEOUT_MS = 3000;
 constexpr int LAN_FAST_SYNC_MAX_RETRIES_PER_BLOCK = 3;
 constexpr int LAN_FAST_SYNC_MAX_BLOCK_BYTES = 8 * 1024 * 1024;
 constexpr int LAN_FAST_SYNC_MIN_REQUEST_INTERVAL_MS = 250;
+constexpr int LAN_FAST_SYNC_TIMER_INTERVAL_MS = 150;
 constexpr int FAST_SYNC_PROTOCOL_MAX_WINDOW = 32;
 constexpr int FAST_SYNC_PROTOCOL_PROBE_INTERVAL_MS = 30000;
 constexpr int FAST_SYNC_PROTOCOL_MIN_UDP_PROBES = 4;
@@ -1908,7 +1909,7 @@ NuRpcService::NuRpcService(QObject* parent)
     m_traffic_timer->start();
 
     m_lan_fast_sync_timer = new QTimer(this);
-    m_lan_fast_sync_timer->setInterval(1500);
+    m_lan_fast_sync_timer->setInterval(LAN_FAST_SYNC_TIMER_INTERVAL_MS);
     connect(m_lan_fast_sync_timer, &QTimer::timeout, this, &NuRpcService::lanFastSyncTick);
     m_lan_fast_sync_timer->start();
 
@@ -4412,10 +4413,6 @@ void NuRpcService::lanFastSyncTick()
 
     const int next_height = m_block_height + 1;
     if (m_lan_fast_sync_request_in_flight) {
-        if (m_lan_fast_sync_current_height <= m_block_height) {
-            resetLanFastSyncTransfer(QStringLiteral("UDP fast sync skipped block %1 because TCP/Core already received it.").arg(m_lan_fast_sync_current_height));
-            return;
-        }
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         if (m_lan_fast_sync_request_ms > 0 && now - m_lan_fast_sync_request_ms > LAN_FAST_SYNC_REQUEST_TIMEOUT_MS) {
             ++m_lan_fast_sync_retransmit_errors;
@@ -4653,7 +4650,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     const QString sender_key = normalizedFastSyncHost(sender);
     if (header.value(QStringLiteral("id")).toString() != m_lan_fast_sync_request_id) return;
     const int height = header.value(QStringLiteral("height")).toInt(-1);
-    if (height != m_lan_fast_sync_current_height || height <= m_block_height) return;
+    if (height != m_lan_fast_sync_current_height) return;
     const int seq = header.value(QStringLiteral("seq")).toInt(-1);
     const int total = header.value(QStringLiteral("total")).toInt(-1);
     const int block_size = header.value(QStringLiteral("block_size")).toInt(-1);
@@ -4719,12 +4716,19 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
             && (result.isNull() || submit_result.isEmpty()
                 || submit_result.compare(QStringLiteral("duplicate"), Qt::CaseInsensitive) == 0);
         if (accepted) {
+            const bool duplicate = submit_result.compare(QStringLiteral("duplicate"), Qt::CaseInsensitive) == 0;
             ++m_lan_fast_sync_blocks_received;
             m_lan_fast_sync_bytes_received += size;
             m_lan_fast_sync_last_progress_ms = QDateTime::currentMSecsSinceEpoch();
             recordFastSyncUdpSuccess(height, m_lan_fast_sync_request_ms > 0 ? m_lan_fast_sync_last_progress_ms - m_lan_fast_sync_request_ms : 1000);
             tuneFastSyncDatagramAfterSuccess();
-            resetLanFastSyncTransfer(QStringLiteral("UDP fast sync accepted block %1 through Core validation.").arg(height));
+            if (!duplicate && height > m_block_height) {
+                m_block_height = height;
+            }
+            resetLanFastSyncTransfer(duplicate
+                ? QStringLiteral("UDP fast sync delivered already-known block %1; transport sample counted and TCP/Core remains active.").arg(height)
+                : QStringLiteral("UDP fast sync accepted block %1 through Core validation.").arg(height));
+            QTimer::singleShot(0, this, &NuRpcService::lanFastSyncTick);
             QTimer::singleShot(0, this, &NuRpcService::refreshNode);
         } else {
             ++m_lan_fast_sync_retransmit_errors;

@@ -89,11 +89,15 @@ Each chunk header includes:
 - `block_checksum`: SHA-256 of the complete raw block bytes.
 - `chunk_checksum`: SHA-256 of that chunk payload.
 
-The receiver rejects chunks that do not match the active request, expected
-height, negotiated size caps, checksum, sequence bounds, or block-size bounds.
-After all chunks arrive, the receiver verifies the complete block checksum and
-then calls `submitblock`. Only accepted or duplicate-valid submit results count
-as UDP success.
+The receiver rejects chunks that do not match the active request, negotiated
+size caps, checksum, sequence bounds, or block-size bounds. It does not discard
+an active UDP response merely because ordinary TCP/Core sync has already
+advanced past the same height. That case is a race result, not proof that UDP
+failed. After all chunks arrive, the receiver verifies the complete block
+checksum and then calls `submitblock`. Accepted blocks and duplicate-valid
+blocks count as receiver-confirmed UDP transport samples. A duplicate-valid
+block means TCP/Core got the block into the active chain first, but UDP still
+proved that it delivered the exact valid raw block.
 
 ## Packet Size Selection
 
@@ -115,9 +119,10 @@ The mode is LAN/private when LAN discovery is enabled or when a Fast Sync target
 is a private/local address. Non-private internet peers are capped at the
 internet probe size even if they request or advertise larger datagrams.
 
-On a receiver-confirmed success, Nu steps one candidate upward. On timeout,
-checksum failure, retransmit failure, or validation failure, Nu steps one
-candidate downward. This means the displayed probe pair such as
+On a receiver-confirmed success, including duplicate-valid delivery, Nu steps
+one candidate upward. On timeout, checksum failure, retransmit failure, or
+validation failure, Nu steps one candidate downward. This means the displayed
+probe pair such as
 `1472/1024 B` is the current datagram/chunk selection, not a permanent static
 setting.
 
@@ -131,6 +136,13 @@ server-side sender throughput.
 
 The selector is a two-arm online comparison between TCP/Core sync and UDP Fast
 Sync.
+
+Nu's UDP path is intentionally a helper beside Core P2P, so TCP/Core remains
+active while UDP probes run. That makes accounting subtle: a TCP win for a
+height does not automatically mean UDP was slow; UDP may still be transferring
+the same requested block. For that reason, in-flight UDP responses are now
+allowed to finish and produce duplicate-valid transport samples instead of being
+aborted as soon as TCP advances the active height.
 
 Tracked per protocol:
 
@@ -157,6 +169,12 @@ window may grow up to the configured cap. The slower path still receives probes
 unless it is cooling down after UDP failure. Status text such as
 `UDP favored 4:1` or `TCP favored 30:2` reflects this quota window, not a
 consensus rule.
+
+The live wallet currently requests one UDP block at a time, but it immediately
+starts the next UDP probe after a receiver-confirmed success instead of waiting
+for the periodic timer. The timer is only a safety/maintenance cadence. This is
+important on LANs because a slow timer can make TCP/Core appear dominant even
+when UDP has higher raw throughput.
 
 ## Diagnostics
 
