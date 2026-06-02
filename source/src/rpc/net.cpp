@@ -1097,6 +1097,72 @@ static RPCHelpMan addpeeraddress()
     };
 }
 
+static RPCHelpMan reservefastsyncblock()
+{
+    return RPCHelpMan{"reservefastsyncblock",
+        "\nReserve or release a block in Core's normal in-flight table for Nu Fast Sync transport coordination.\n"
+        "This is used by Defcoin Core Nu so UDP and TCP are treated as transport choices for one logical peer,\n"
+        "not as independent reasons to request the same block twice. It does not change consensus rules and\n"
+        "older Defcoin Core peers continue to use normal TCP block sync.\n",
+        {
+            {"action", RPCArg::Type::STR, RPCArg::Optional::NO, "\"reserve\" or \"release\""},
+            {"nodeid", RPCArg::Type::NUM, RPCArg::Optional::NO, "Connected peer id from getpeerinfo"},
+            {"height_or_hash", RPCArg::Type::STR, RPCArg::Optional::NO, "Block height for reserve, block hash for release"},
+        },
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::BOOL, "success", "whether the action succeeded"},
+                {RPCResult::Type::STR_HEX, "hash", "reserved or released block hash, when known"},
+                {RPCResult::Type::STR, "reason", "short reason string"},
+            },
+        },
+        RPCExamples{
+            HelpExampleCli("reservefastsyncblock", "\"reserve\" 1 903169")
+    + HelpExampleCli("reservefastsyncblock", "\"release\" 1 \"0000000000000000000000000000000000000000000000000000000000000000\"")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    NodeContext& node = EnsureNodeContext(request.context);
+    if (!node.connman || !node.mempool) {
+        throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
+    }
+
+    const std::string action = ToLower(request.params[0].get_str());
+    const NodeId nodeid = (NodeId)request.params[1].get_int64();
+    const std::string height_or_hash = request.params[2].get_str();
+
+    UniValue obj(UniValue::VOBJ);
+    if (action == "reserve") {
+        int height = 0;
+        if (!ParseInt32(height_or_hash, &height)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Reserve action requires a numeric block height");
+        }
+        uint256 hash;
+        std::string reason;
+        const bool reserved = ReserveFastSyncBlockInFlight(*node.mempool, nodeid, height, hash, reason);
+        obj.pushKV("success", reserved);
+        if (!hash.IsNull()) obj.pushKV("hash", hash.ToString());
+        obj.pushKV("reason", reason);
+        return obj;
+    }
+    if (action == "release") {
+        uint256 hash;
+        if (!ParseHashStr(height_or_hash, hash)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Release action requires a 64-character block hash");
+        }
+        const bool released = ReleaseFastSyncBlockInFlight(nodeid, hash);
+        obj.pushKV("success", released);
+        obj.pushKV("hash", hash.ToString());
+        obj.pushKV("reason", released ? "released" : "not-in-flight");
+        return obj;
+    }
+
+    throw JSONRPCError(RPC_INVALID_PARAMETER, "Unknown action; expected \"reserve\" or \"release\"");
+},
+    };
+}
+
 void RegisterNetRPCCommands(CRPCTable &t)
 {
 // clang-format off
@@ -1123,6 +1189,7 @@ static const CRPCCommand commands[] =
     { "network",            "setallowlannodediscovery", &setallowlannodediscovery, {"enabled"} },
     { "network",            "setupnpportmapping",     &setupnpportmapping,     {"enabled"} },
     { "network",            "getnodeaddresses",       &getnodeaddresses,       {"count"} },
+    { "network",            "reservefastsyncblock",   &reservefastsyncblock,   {"action", "nodeid", "height_or_hash"} },
     { "hidden",             "addconnection",          &addconnection,          {"address", "connection_type"} },
     { "hidden",             "addpeeraddress",         &addpeeraddress,         {"address", "port"} },
 };

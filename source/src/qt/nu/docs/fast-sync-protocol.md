@@ -12,10 +12,12 @@ sender-reported speed. A received block is counted as successful only after the
 receiver reassembles it, verifies checksums, and submits it through the normal
 Core `submitblock` validation path.
 
-The desktop implementation lives in the Nu Qt/RPC service layer
-(`NuRpcService`). It mirrors raw active-chain blocks between eligible Nu peers
-over UDP while ordinary TCP/Core block download remains active as fallback and
-repair path.
+The desktop implementation coordinates the Nu Qt/RPC service layer
+(`NuRpcService`) with Core's normal block in-flight table. It mirrors raw
+active-chain blocks between eligible Nu peers over UDP while ordinary TCP/Core
+block download remains available as fallback and repair path. UDP and TCP are
+treated as transport choices for one logical connected peer, not as independent
+reasons to request the same block twice.
 
 The public dc903 server implementation is a responder-only sidecar
 (`defcoin-fast-syncd`) that talks to the local `defcoind` over RPC. The sidecar
@@ -36,8 +38,8 @@ Fast Sync response, and becomes `Failed` after a session attempt times out or
 fails without usable chunks. The capability is then proven by UDP response and
 normal `submitblock` acceptance, not by the User-Agent string alone.
 
-LAN discovery may also send local broadcast requests when the user enables LAN
-node discovery. Broadcast is intentionally limited to private/local networks.
+LAN discovery may learn private/local peers, but block data requests are sent to
+one selected connected Nu peer. Broadcast is not used for block data requests.
 
 ## Packet Format
 
@@ -70,6 +72,14 @@ The requester sends `type=request-block` with:
 Requests are always sent as safe small datagrams even when the requested reply
 size is larger.
 
+Before sending the request, Nu asks the backend to reserve the requested block
+height for the selected connected peer in Core's normal in-flight table. The
+backend returns the exact block hash Core expects that peer to be able to serve.
+If Core reports that the block is already present, already in flight, outside
+the peer's known header chain, or unavailable from that peer, Nu does not send
+the UDP request and leaves TCP/Core sync to continue normally. This reservation
+is a local coordination step, not a wire-protocol change.
+
 ### Response
 
 The responder verifies the request shape, rate-limits requests by source host,
@@ -89,15 +99,17 @@ Each chunk header includes:
 - `block_checksum`: SHA-256 of the complete raw block bytes.
 - `chunk_checksum`: SHA-256 of that chunk payload.
 
-The receiver rejects chunks that do not match the active request, negotiated
-size caps, checksum, sequence bounds, or block-size bounds. It does not discard
-an active UDP response merely because ordinary TCP/Core sync has already
-advanced past the same height. That case is a race result, not proof that UDP
-failed. After all chunks arrive, the receiver verifies the complete block
-checksum and then calls `submitblock`. Accepted blocks and duplicate-valid
-blocks count as receiver-confirmed UDP transport samples. A duplicate-valid
-block means TCP/Core got the block into the active chain first, but UDP still
-proved that it delivered the exact valid raw block.
+The receiver rejects chunks that do not match the active request, the backend
+reserved hash, negotiated size caps, checksum, sequence bounds, or block-size
+bounds. After all chunks arrive, the receiver verifies the complete block
+checksum and then calls `submitblock`. The reservation is released on success,
+timeout, checksum failure, validation failure, or skip.
+
+Accepted blocks count as receiver-confirmed UDP transport samples. Duplicate
+valid blocks should become uncommon because Core sees the reserved block as
+already in flight and normally avoids requesting it over TCP. If a duplicate
+still occurs due to timing, it is counted as transport evidence but treated as a
+repair/race case rather than the normal path.
 
 ## Packet Size Selection
 
@@ -137,12 +149,10 @@ server-side sender throughput.
 The selector is a two-arm online comparison between TCP/Core sync and UDP Fast
 Sync.
 
-Nu's UDP path is intentionally a helper beside Core P2P, so TCP/Core remains
-active while UDP probes run. That makes accounting subtle: a TCP win for a
-height does not automatically mean UDP was slow; UDP may still be transferring
-the same requested block. For that reason, in-flight UDP responses are now
-allowed to finish and produce duplicate-valid transport samples instead of being
-aborted as soon as TCP advances the active height.
+Nu's UDP path is coordinated with Core P2P by reserving one block in Core's
+in-flight table before a UDP request is sent. Core's normal downloader then sees
+that block as already assigned and should not also request it by TCP unless the
+reservation is released after failure or timeout.
 
 Tracked per protocol:
 
@@ -170,11 +180,11 @@ unless it is cooling down after UDP failure. Status text such as
 `UDP favored 4:1` or `TCP favored 30:2` reflects this quota window, not a
 consensus rule.
 
-The live wallet currently requests one UDP block at a time, but it immediately
-starts the next UDP probe after a receiver-confirmed success instead of waiting
-for the periodic timer. The timer is only a safety/maintenance cadence. This is
-important on LANs because a slow timer can make TCP/Core appear dominant even
-when UDP has higher raw throughput.
+The live wallet currently reserves and requests one UDP block at a time from one
+selected Nu peer. It immediately starts the next UDP probe after a
+receiver-confirmed success instead of waiting for the periodic timer. The timer
+is only a safety/maintenance cadence. This is important on LANs because a slow
+timer can make TCP/Core appear dominant even when UDP has higher raw throughput.
 
 ## Diagnostics
 

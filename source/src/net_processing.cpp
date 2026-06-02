@@ -1034,6 +1034,90 @@ bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats) {
     return true;
 }
 
+bool ReserveFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, int height, uint256& hash_out, std::string& reason)
+{
+    LOCK(cs_main);
+
+    CNodeState* state = State(nodeid);
+    if (state == nullptr) {
+        reason = "peer-not-connected";
+        return false;
+    }
+    if (height <= 0) {
+        reason = "invalid-height";
+        return false;
+    }
+    if (state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+        reason = "peer-in-flight-full";
+        return false;
+    }
+
+    ProcessBlockAvailability(nodeid);
+    if (state->pindexBestKnownBlock == nullptr) {
+        reason = "peer-best-block-unknown";
+        return false;
+    }
+    if (height > state->pindexBestKnownBlock->nHeight) {
+        reason = "peer-does-not-have-height";
+        return false;
+    }
+
+    const CBlockIndex* pindex = state->pindexBestKnownBlock->GetAncestor(height);
+    if (pindex == nullptr) {
+        reason = "height-not-in-peer-chain";
+        return false;
+    }
+    if (!PeerHasHeader(state, pindex)) {
+        reason = "peer-header-not-linked";
+        return false;
+    }
+    if (!pindex->IsValid(BLOCK_VALID_TREE)) {
+        reason = "block-header-not-valid";
+        return false;
+    }
+    if (!state->fHaveWitness && IsWitnessEnabled(pindex->pprev, Params().GetConsensus())) {
+        reason = "peer-lacks-witness";
+        return false;
+    }
+    if (!state->fHaveMWEB && IsMWEBEnabled(pindex->pprev, Params().GetConsensus())) {
+        reason = "peer-lacks-mweb";
+        return false;
+    }
+
+    const uint256 hash = pindex->GetBlockHash();
+    if ((pindex->nStatus & BLOCK_HAVE_DATA) || ::ChainActive().Contains(pindex)) {
+        hash_out = hash;
+        reason = "block-already-have-data";
+        return false;
+    }
+    if (mapBlocksInFlight.count(hash) != 0) {
+        hash_out = hash;
+        reason = "block-already-in-flight";
+        return false;
+    }
+
+    if (!MarkBlockAsInFlight(mempool, nodeid, hash, pindex)) {
+        hash_out = hash;
+        reason = "block-already-in-flight-from-peer";
+        return false;
+    }
+
+    hash_out = hash;
+    reason = "reserved";
+    LogPrint(BCLog::NET, "Fast Sync reserved block %s (%d) for UDP peer=%d\n", hash.ToString(), height, nodeid);
+    return true;
+}
+
+bool ReleaseFastSyncBlockInFlight(NodeId nodeid, const uint256& hash)
+{
+    LOCK(cs_main);
+    const bool released = MarkBlockAsReceived(hash, nodeid);
+    if (released) {
+        LogPrint(BCLog::NET, "Fast Sync released block %s from UDP peer=%d\n", hash.ToString(), nodeid);
+    }
+    return released;
+}
+
 //////////////////////////////////////////////////////////////////////////////
 //
 // mapOrphanTransactions

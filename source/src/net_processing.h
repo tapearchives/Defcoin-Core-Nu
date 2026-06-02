@@ -165,6 +165,10 @@ struct CNodeStateStats {
 /** Get statistics from node state */
 bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats);
 
+/** Reserve/release one block in Core's in-flight table for Fast Sync UDP transport coordination. */
+bool ReserveFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, int height, uint256& hash_out, std::string& reason);
+bool ReleaseFastSyncBlockInFlight(NodeId nodeid, const uint256& hash);
+
 /** Relay transaction to every node */
 void RelayTransaction(const uint256& txid, const uint256& wtxid, const CConnman& connman) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 

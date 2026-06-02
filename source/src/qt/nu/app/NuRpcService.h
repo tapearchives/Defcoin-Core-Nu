@@ -570,6 +570,9 @@ private:
     void handleLanFastSyncDatagrams();
     void lanFastSyncTick();
     void requestLanFastSyncBlock(int height);
+    QString selectUdpFastSyncTargetHost(int* node_id) const;
+    void sendLanFastSyncBlockRequest(int height, const QString& host, int node_id, const QString& expected_hash);
+    void releaseLanFastSyncReservation();
     void handleLanFastSyncRequest(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
     void handleLanFastSyncChunk(const QJsonObject& header, const QByteArray& payload, const QHostAddress& sender);
     void resetLanFastSyncTransfer(const QString& status);
@@ -843,6 +846,7 @@ private:
     QSet<QString> m_udp_fast_sync_used_peer_hosts;
     QSet<QString> m_udp_fast_sync_current_target_hosts;
     QHash<QString, qint64> m_udp_fast_sync_last_request_ms_by_host;
+    QHash<QString, int> m_udp_fast_sync_peer_node_ids_by_host;
     int m_address_book_refresh_generation = 0;
     QVariantList m_address_book;
     QVariantList m_receive_requests;
@@ -902,7 +906,10 @@ private:
     qint64 m_lan_fast_sync_started_ms = 0;
     qint64 m_lan_fast_sync_request_ms = 0;
     qint64 m_lan_fast_sync_last_progress_ms = 0;
+    int m_lan_fast_sync_reserved_node_id = -1;
+    QString m_lan_fast_sync_reserved_hash;
     bool m_lan_fast_sync_request_in_flight = false;
+    bool m_lan_fast_sync_reserve_in_flight = false;
     bool m_lan_fast_sync_submit_in_flight = false;
     int m_fast_sync_tcp_successes = 0;
     int m_fast_sync_udp_successes = 0;
