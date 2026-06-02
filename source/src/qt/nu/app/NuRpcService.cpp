@@ -1255,6 +1255,55 @@ QStringList parseLanPeerFingerprintDetails(const QString& output)
     return details;
 }
 
+QString cleanedLanWorkstationInfo(QString info)
+{
+    QStringList cleaned;
+    auto addItem = [&cleaned](QString item) {
+        item = item.trimmed();
+        if (item.isEmpty()) return;
+
+        const QString lower = item.toLower();
+        if (lower.startsWith(QStringLiteral("mac:")) ||
+            lower.contains(QRegularExpression(QStringLiteral(R"(\bmac:\s*[0-9a-f]{1,2}(?::[0-9a-f]{1,2}){5}\b)"), QRegularExpression::CaseInsensitiveOption))) {
+            return;
+        }
+
+        static const QRegularExpression source_prefix(
+            QStringLiteral(R"(^\s*(?:Name|Bonjour|NetBIOS|Server)\s*:\s*)"),
+            QRegularExpression::CaseInsensitiveOption);
+        item.remove(source_prefix);
+        item = item.trimmed();
+
+        const QString identity = lanWorkstationNameFromCandidate(item);
+        const bool identity_item = !identity.isEmpty();
+        if (identity_item) item = identity;
+
+        const QString item_key = identity_item ? lanWorkstationIdentityKey(item) : item.toLower();
+        if (item_key.isEmpty()) return;
+
+        for (int i = 0; i < cleaned.size(); ++i) {
+            const QString existing = cleaned.at(i);
+            const QString existing_key = identity_item ? lanWorkstationIdentityKey(existing) : existing.toLower();
+            if (existing_key != item_key) continue;
+            if (identity_item &&
+                lanWorkstationNameIsHumanPreferred(item) &&
+                !lanWorkstationNameIsHumanPreferred(existing)) {
+                cleaned[i] = item;
+            }
+            return;
+        }
+
+        cleaned.push_back(item);
+    };
+
+    const QStringList parts = info.split(QLatin1Char('|'), Qt::SkipEmptyParts);
+    for (const QString& part : parts) addItem(part);
+    std::stable_sort(cleaned.begin(), cleaned.end(), [](const QString& a, const QString& b) {
+        return lanWorkstationDisplayRank(a) < lanWorkstationDisplayRank(b);
+    });
+    return cleaned.join(QStringLiteral(" | "));
+}
+
 QString nmapProgramPath()
 {
     static const QStringList candidates{
@@ -1314,7 +1363,7 @@ QString peerLanWorkstationInfo(const QString& host,
                                const QSet<QString>& pending)
 {
     const QString key = normalizedPeerHost(host);
-    const QString info = lan_info_cache.value(key);
+    const QString info = cleanedLanWorkstationInfo(lan_info_cache.value(key));
     if (!info.isEmpty()) return info;
     const QString name = lan_name_cache.value(key);
     if (!name.isEmpty()) return name;

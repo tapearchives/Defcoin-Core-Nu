@@ -227,7 +227,14 @@ Rectangle {
         const type = columnType(index)
         if (type === "seedLanSource") {
             const cells = rowCells(row)
-            const isLan = cells && index > 0 && String(cells[index - 1] || "").trim() === "LAN"
+            let lanIndex = -1
+            for (let i = 0; i < columns.length; ++i) {
+                if (columnType(i) === "lan" || String(columns[i] || "").trim() === "LAN") {
+                    lanIndex = i
+                    break
+                }
+            }
+            const isLan = cells && lanIndex >= 0 && String(cells[lanIndex] || "").trim() === "LAN"
             return isLan ? Text.AlignLeft : Text.AlignRight
         }
         if (type === "knownDns") {

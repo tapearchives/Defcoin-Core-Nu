@@ -1,5 +1,14 @@
 # Defcoin Core Changelog
 
+## 26.6.1b Core Memories
+
+Defcoin Core Nu `26.6.1b` is a small diagnostics polish rebuild over
+`26.6.1a`.
+
+- Fixed conditional alignment in the detailed Peers table so LAN workstation
+  names in `Seed Source / LAN Workstation Name` align left, while non-LAN seed
+  and DNS source values remain right-aligned.
+
 ## 26.6.1a Core Memories
 
 Defcoin Core Nu `26.6.1a` is a Tahoe polish rebuild over `26.6.1`.
