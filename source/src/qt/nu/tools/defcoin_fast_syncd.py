@@ -11,6 +11,7 @@ import argparse
 import base64
 import hashlib
 import http.client
+import ipaddress
 import json
 import logging
 import os
@@ -37,6 +38,8 @@ MAX_CHUNKS_PER_BLOCK = 65536
 MAX_BLOCK_BYTES = 8 * 1024 * 1024
 MIN_REQUEST_INTERVAL_SECONDS = 0.25
 MAX_CACHE_BLOCKS = 32
+PEER_ALLOWLIST_REFRESH_SECONDS = 10
+MAX_IGNORED_LOG_INTERVAL_SECONDS = 60
 
 
 def checksum(data):
@@ -44,6 +47,11 @@ def checksum(data):
 
 
 def is_private_or_local(host):
+    try:
+        address = ipaddress.ip_address(normalize_ip(host))
+        return address.is_private or address.is_loopback or address.is_link_local
+    except ValueError:
+        pass
     try:
         packed = socket.inet_pton(socket.AF_INET, host)
         first, second = packed[0], packed[1]
@@ -65,6 +73,46 @@ def is_private_or_local(host):
         )
     except OSError:
         return False
+
+
+def normalize_ip(host):
+    if not isinstance(host, str):
+        return ""
+    value = host.strip()
+    if value.startswith("[") and "]" in value:
+        value = value[1:value.find("]")]
+    if value.startswith("::ffff:"):
+        maybe_v4 = value[7:]
+        try:
+            ipaddress.ip_address(maybe_v4)
+            return maybe_v4
+        except ValueError:
+            pass
+    return value
+
+
+def peer_host_from_addr(addr):
+    if not isinstance(addr, str) or not addr:
+        return ""
+    value = addr.strip()
+    if value.startswith("[") and "]" in value:
+        return normalize_ip(value[1:value.find("]")])
+    if value.count(":") == 1:
+        return normalize_ip(value.rsplit(":", 1)[0])
+    return normalize_ip(value)
+
+
+def is_loopback(host):
+    try:
+        return ipaddress.ip_address(normalize_ip(host)).is_loopback
+    except ValueError:
+        return False
+
+
+def is_nu_subver(subver):
+    if not isinstance(subver, str):
+        return False
+    return "DefcoinCoreNu" in subver
 
 
 def chunk_bytes_for_datagram(max_datagram):
@@ -171,19 +219,26 @@ class RpcClient:
 
 
 class FastSyncDaemon:
-    def __init__(self, rpc, bind, port):
+    def __init__(self, rpc, bind, port, require_nu_peer=True, allow_loopback=True):
         self.rpc = rpc
         self.bind = bind
         self.port = port
+        self.require_nu_peer = require_nu_peer
+        self.allow_loopback = allow_loopback
         self.selector = selectors.DefaultSelector()
         self.block_cache = OrderedDict()
         self.last_request_by_host = {}
+        self.allowed_nu_hosts = {}
+        self.allowed_nu_hosts_refreshed = 0.0
+        self.last_ignore_log_by_host = {}
         self.stats = {
             "requests": 0,
             "served_blocks": 0,
             "sent_datagrams": 0,
             "sent_bytes": 0,
             "dropped": 0,
+            "ignored_non_nu_peer": 0,
+            "peer_allowlist_refreshes": 0,
         }
 
     def open_sockets(self):
@@ -238,7 +293,7 @@ class FastSyncDaemon:
             logging.warning("request from %s failed: %s", sender[0], exc)
 
     def handle_request(self, sock, sender, header):
-        host = sender[0]
+        host = normalize_ip(sender[0])
         now = time.time()
         last = self.last_request_by_host.get(host, 0.0)
         if now - last < MIN_REQUEST_INTERVAL_SECONDS:
@@ -255,6 +310,11 @@ class FastSyncDaemon:
             return
         height = header.get("height")
         if not isinstance(height, int) or height < 0:
+            return
+
+        if not self.is_allowed_fast_sync_client(host, now):
+            self.stats["ignored_non_nu_peer"] += 1
+            self.log_ignored_client(host, now)
             return
 
         tip = int(self.rpc.call("getblockcount"))
@@ -316,6 +376,53 @@ class FastSyncDaemon:
                 height, host, total_chunks, peer_max_datagram, peer_chunk_bytes, len(raw_block)
             )
 
+    def log_ignored_client(self, host, now):
+        last = self.last_ignore_log_by_host.get(host, 0.0)
+        if now - last < MAX_IGNORED_LOG_INTERVAL_SECONDS:
+            return
+        self.last_ignore_log_by_host[host] = now
+        logging.info("ignored udp request from non-Nu/non-connected host=%s", host)
+        if len(self.last_ignore_log_by_host) > 2048:
+            self.last_ignore_log_by_host = {
+                key: value for key, value in self.last_ignore_log_by_host.items()
+                if now - value < 600
+            }
+
+    def is_allowed_fast_sync_client(self, host, now):
+        if not self.require_nu_peer:
+            return True
+        if self.allow_loopback and is_loopback(host):
+            return True
+        self.refresh_allowed_nu_hosts(now)
+        return host in self.allowed_nu_hosts
+
+    def refresh_allowed_nu_hosts(self, now):
+        if now - self.allowed_nu_hosts_refreshed < PEER_ALLOWLIST_REFRESH_SECONDS:
+            return
+        self.allowed_nu_hosts_refreshed = now
+        allowed = {}
+        try:
+            peers = self.rpc.call("getpeerinfo")
+        except Exception as exc:
+            logging.warning("could not refresh Nu peer allowlist: %s", exc)
+            self.allowed_nu_hosts = {}
+            return
+        if not isinstance(peers, list):
+            self.allowed_nu_hosts = {}
+            return
+        for peer in peers:
+            if not isinstance(peer, dict):
+                continue
+            subver = peer.get("subver") or peer.get("cleanSubVer") or ""
+            if not is_nu_subver(subver):
+                continue
+            host = peer_host_from_addr(peer.get("addr", ""))
+            if host:
+                allowed[host] = subver
+        self.allowed_nu_hosts = allowed
+        self.stats["peer_allowlist_refreshes"] += 1
+        logging.debug("Nu UDP peer allowlist hosts=%s", sorted(allowed.keys()))
+
     def raw_block(self, height):
         cached = self.block_cache.get(height)
         if cached:
@@ -337,6 +444,16 @@ def main():
     parser.add_argument("--bind", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=UDP_PORT)
     parser.add_argument("--log", default="")
+    parser.add_argument(
+        "--allow-unconnected",
+        action="store_true",
+        help="serve valid UDP requests without requiring a connected DefcoinCoreNu TCP peer; not recommended for public servers",
+    )
+    parser.add_argument(
+        "--no-loopback-test",
+        action="store_true",
+        help="also require loopback requesters to appear in the Nu TCP peer allowlist",
+    )
     args = parser.parse_args()
 
     handlers = []
@@ -350,8 +467,13 @@ def main():
         handlers=handlers,
     )
     rpc = RpcClient(args.conf)
-    logging.info("defcoin-fast-syncd starting rpc=127.0.0.1 port=%s udp=%s", rpc.port, args.port)
-    daemon = FastSyncDaemon(rpc, args.bind, args.port)
+    require_nu_peer = not args.allow_unconnected
+    allow_loopback = not args.no_loopback_test
+    logging.info(
+        "defcoin-fast-syncd starting rpc=127.0.0.1 port=%s udp=%s require_nu_peer=%s allow_loopback=%s",
+        rpc.port, args.port, require_nu_peer, allow_loopback
+    )
+    daemon = FastSyncDaemon(rpc, args.bind, args.port, require_nu_peer, allow_loopback)
     daemon.run()
 
 

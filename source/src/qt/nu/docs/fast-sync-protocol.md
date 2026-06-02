@@ -85,9 +85,12 @@ is a local coordination step, not a wire-protocol change.
 The responder verifies the request shape, rate-limits requests by source host,
 fetches the active-chain block through RPC (`getblockhash`, then
 `getblock <hash> 0`), and sends one or more `type=block-chunk` datagrams. The
-desktop responder additionally restricts response traffic to eligible Nu peers;
-the dc903 sidecar is public-facing and therefore relies on strict packet caps,
-rate limits, firewall scope, and Core's final validation on the receiving side.
+desktop responder restricts response traffic to eligible Nu peers. The dc903
+sidecar uses the same boundary in headless form: it periodically reads
+`getpeerinfo` and only serves UDP block chunks to source IPs that are currently
+connected over normal Core TCP with a `DefcoinCoreNu` User-Agent. Loopback can
+be allowed for local administrator tests, but public requesters must first be
+normal connected Nu peers.
 
 Each chunk header includes:
 
@@ -222,17 +225,26 @@ Deployment rules:
 2. Open UDP `10334` only for the Fast Sync responder.
 3. Start `defcoin-fast-syncd` after `defcoind.service`.
 4. Confirm `ss -lunp` shows UDP `10334`.
-5. Confirm a Nu wallet receives at least one validated block over UDP before
+5. Confirm `defcoin-fast-syncd` logs `require_nu_peer=True`.
+6. Confirm a Nu wallet receives at least one validated block over UDP before
    treating the server as deployed.
 
 The server can serve larger datagrams to private/local requesters, but internet
 requesters are capped to the internet probe size. This avoids assuming jumbo UDP
 works across arbitrary public routes.
 
+The server sidecar is responder-only. It never asks legacy v1.0.0 wallets to
+use UDP, never sends UDP first, and never changes the ordinary TCP/Core service
+used by older wallets. Legacy peers are not `DefcoinCoreNu` peers, so their
+addresses are not placed in the UDP response allowlist.
+
 ## Security Rules
 
 - Never accept datagrams without the protocol prefix, version, and capability.
 - Keep datagram, header, payload, chunk-count, block-size, and request-rate caps.
+- On public sidecars, serve only currently connected `DefcoinCoreNu` TCP peers.
+- Reply to the datagram source address and source port; do not use UDP requests
+  as a reflection mechanism to an arbitrary advertised port.
 - Restrict broadcast handling to LAN/private mode.
 - Never count sender-side bytes as proof of speed.
 - Never bypass `submitblock`.
