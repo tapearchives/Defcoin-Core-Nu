@@ -10,11 +10,26 @@ BUILT_APP="$1"
 DEST_PLATFORM_DIR="$2"
 RELEASE_VERSION="$3"
 DMG_SUFFIX="${4:-macOS-AppleSilicon}"
-PRODUCT_NAME="Defcoin Core Nu"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BUILT_APP_BASENAME="$(basename "$BUILT_APP")"
+if [[ "$BUILT_APP_BASENAME" == *ExpFor* || "$BUILT_APP" == *DefcoinCoreExpFor* ]]; then
+  PRODUCT_NAME="Defcoin Core ExpFor"
+  PRODUCT_SLUG="Defcoin-Core-ExpFor"
+  APP_EXECUTABLE_NAME="DefcoinCoreExpFor"
+  DEST_DMG_BACKGROUND_BASENAME="defcoin-core-expfor-dmg-background.png"
+  DMG_STAGE_TEMPLATE="/tmp/defcoin-expfor-dmg-stage.XXXXXX"
+  WORDMARK_THIRD_LINE="ExpFor"
+else
+  PRODUCT_NAME="Defcoin Core Nu"
+  PRODUCT_SLUG="Defcoin-Core-Nu"
+  APP_EXECUTABLE_NAME="DefcoinCoreNu"
+  DEST_DMG_BACKGROUND_BASENAME="defcoin-core-nu-dmg-background.png"
+  DMG_STAGE_TEMPLATE="/tmp/defcoin-nu-dmg-stage.XXXXXX"
+  WORDMARK_THIRD_LINE=""
+fi
 DEST_APP="$DEST_PLATFORM_DIR/${PRODUCT_NAME}.app"
-DEST_DMG="$DEST_PLATFORM_DIR/Defcoin-Core-Nu-v${RELEASE_VERSION}-${DMG_SUFFIX}.dmg"
-DEST_DMG_BACKGROUND="$DEST_PLATFORM_DIR/defcoin-core-nu-dmg-background.png"
+DEST_DMG="$DEST_PLATFORM_DIR/${PRODUCT_SLUG}-v${RELEASE_VERSION}-${DMG_SUFFIX}.dmg"
+DEST_DMG_BACKGROUND="$DEST_PLATFORM_DIR/${DEST_DMG_BACKGROUND_BASENAME}"
 RELEASE_DIR="$(dirname "$DEST_PLATFORM_DIR")"
 
 if [ ! -d "$BUILT_APP" ]; then
@@ -30,7 +45,7 @@ chmod -R u+w "$DEST_APP"
 rm -f "$DEST_APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
 "$(dirname "$0")/bundle_macos_backend_deps.sh" "$DEST_APP"
 
-APP_EXE="$DEST_APP/Contents/MacOS/DefcoinCoreNu"
+APP_EXE="$DEST_APP/Contents/MacOS/$APP_EXECUTABLE_NAME"
 while IFS= read -r rpath; do
   case "$rpath" in
     /opt/homebrew/lib|*"/toolchains/qt/"*|*"/Qt/"*"/macos/lib")
@@ -58,7 +73,7 @@ done
 codesign --force --sign - --timestamp=none "$DEST_APP" >/dev/null
 codesign --verify --deep --strict --verbose=4 "$DEST_APP"
 
-DMG_STAGE="$(mktemp -d /tmp/defcoin-nu-dmg-stage.XXXXXX)"
+DMG_STAGE="$(mktemp -d "$DMG_STAGE_TEMPLATE")"
 DMG_SETTINGS="$DMG_STAGE/dmgbuild-settings.py"
 cleanup() {
   rm -rf "$DMG_STAGE"
@@ -81,12 +96,12 @@ find_python_module() {
 
 PYTHON_PIL="$(find_python_module PIL || true)"
 if [ -n "$PYTHON_PIL" ]; then
-  "$PYTHON_PIL" - "$DEST_DMG_BACKGROUND" "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" <<'PY'
+  "$PYTHON_PIL" - "$DEST_DMG_BACKGROUND" "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" "$PRODUCT_NAME" "$WORDMARK_THIRD_LINE" <<'PY'
 import os
 import sys
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
-out_path, logo_path = sys.argv[1], sys.argv[2]
+out_path, logo_path, product_name, third_line = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 width, height, scale = 640, 420, 2
 rw, rh = width * scale, height * scale
 base = Image.new("RGBA", (rw, rh), (18, 7, 28, 255))
@@ -117,6 +132,16 @@ def blurred_ellipse(size, center, radius, color, blur):
     layer = layer.filter(ImageFilter.GaussianBlur(blur * scale))
     return layer.crop((pad, pad, pad + rw, pad + rh))
 
+def alpha_composite_clipped(dst, src, x, y):
+    x0 = max(0, x)
+    y0 = max(0, y)
+    x1 = min(dst.width, x + src.width)
+    y1 = min(dst.height, y + src.height)
+    if x1 <= x0 or y1 <= y0:
+        return
+    crop = src.crop((x0 - x, y0 - y, x1 - x, y1 - y))
+    dst.alpha_composite(crop, (x0, y0))
+
 purple_glow = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
 for radius, alpha in [(360, 54), (275, 62), (205, 64), (135, 54)]:
     purple_glow.alpha_composite(blurred_ellipse((rw, rh), (-74, -22), radius, (92, 41, 138, alpha), 40))
@@ -126,16 +151,16 @@ if os.path.exists(logo_path):
     logo = Image.open(logo_path).convert("RGBA")
     logo = ImageEnhance.Contrast(logo).enhance(1.05)
     logo.thumbnail((292 * scale, 292 * scale), Image.Resampling.LANCZOS)
-    glow = Image.new("RGBA", (logo.width + 144 * scale, logo.height + 144 * scale), (0, 0, 0, 0))
-    alpha = logo.getchannel("A")
-    glow_alpha = Image.new("L", glow.size, 0)
-    glow_alpha.paste(alpha.filter(ImageFilter.GaussianBlur(22 * scale)), (72 * scale, 72 * scale))
-    glow_layer = Image.new("RGBA", glow.size, (215, 196, 62, 0))
-    glow_layer.putalpha(glow_alpha.point(lambda p: int(p * 0.18)))
-    glow.alpha_composite(glow_layer, (72 * scale, 72 * scale))
-    glow.alpha_composite(logo, (72 * scale, 72 * scale))
+    coin_x = -170 * scale
+    coin_y = -122 * scale
+    coin_layer = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
+    alpha_composite_clipped(coin_layer, logo, coin_x, coin_y)
+    glow_alpha = coin_layer.getchannel("A").filter(ImageFilter.GaussianBlur(58 * scale))
+    glow_layer = Image.new("RGBA", (rw, rh), (215, 196, 62, 0))
+    glow_layer.putalpha(glow_alpha.point(lambda p: int(p * 0.14)))
+    base.alpha_composite(glow_layer)
     # Keep the coin stack clearly in the corner and away from the app icon.
-    base.alpha_composite(glow, (-170 * scale, -122 * scale))
+    alpha_composite_clipped(base, logo, coin_x, coin_y)
 
 def font(size, bold=False):
     candidates = [
@@ -183,26 +208,37 @@ def draw_logo_wordmark(draw, x, y, fill, shadow=None):
     core_width = measure_spaced("CORE NU")
     coin_width = measure_spaced("COIN")
     def_width = measure_spaced("DEF")
+    third_width = measure_spaced(third_line)
     def draw_lines(offset_x, offset_y, color):
         draw_spaced("DEF", x + offset_x, y + offset_y, color)
         draw_spaced("COIN", x + offset_x + def_width + join_gap, y + offset_y, color)
         draw_spaced("CORE NU", x + offset_x, y + line_gap + offset_y, color)
+        if third_line:
+            draw_spaced(third_line, x + offset_x, y + (line_gap * 2) + offset_y, color)
     if shadow:
         draw_lines(3 * scale, 3 * scale, shadow)
     draw_lines(0, 0, fill)
-    return max(def_width + join_gap + coin_width, core_width)
+    return max(def_width + join_gap + coin_width, core_width, third_width)
 
 word_x = 254 * scale
-word_y = 58 * scale
+word_y = (34 if third_line else 58) * scale
 draw_logo_wordmark(draw, word_x, word_y, (246, 246, 242, 255), (0, 0, 0, 110))
 
 # Finder draws icon labels in dark text. Add quiet light label fields behind
 # the text so names remain readable on the dark purple background.
 label_bg = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
 label_draw = ImageDraw.Draw(label_bg, "RGBA")
+label_font = ui_font(13)
+def finder_label_box(center_x, label):
+    label_width = draw.textlength(label, font=label_font) / scale
+    box_width = max(88, min(248, label_width + 24))
+    left = int((center_x - box_width / 2) * scale)
+    right = int((center_x + box_width / 2) * scale)
+    return (left, 333 * scale, right, 360 * scale)
+
 for box in [
-    (150 * scale, 330 * scale, 288 * scale, 358 * scale),
-    (468 * scale, 330 * scale, 558 * scale, 358 * scale),
+    finder_label_box(220, f"{product_name}.app"),
+    finder_label_box(512, "Applications"),
 ]:
     label_draw.rounded_rectangle(box, radius=8 * scale, fill=(246, 246, 242, 178))
 label_bg = label_bg.filter(ImageFilter.GaussianBlur(0.35 * scale))
@@ -219,12 +255,12 @@ arrow = [
     (286 * scale, arrow_y + 7 * scale),
 ]
 draw.polygon([(x + 3 * scale, y + 3 * scale) for x, y in arrow], fill=(0, 0, 0, 70))
-draw.polygon(arrow, fill=(92, 176, 223, 230))
+draw.polygon(arrow, fill=(93, 169, 246, 232))
 
 subtitle = "Drag to Applications"
 subtitle_box = draw.textbbox((0, 0), subtitle, font=subtitle_font)
 subtitle_width = subtitle_box[2] - subtitle_box[0]
-draw.text(((360 * scale) - (subtitle_width // 2), 214 * scale), subtitle, font=subtitle_font, fill=(220, 211, 236, 232))
+draw.text(((360 * scale) - (subtitle_width // 2), 202 * scale), subtitle, font=subtitle_font, fill=(220, 211, 236, 232))
 
 solid = Image.new("RGBA", (rw, rh), (18, 7, 28, 255))
 solid.alpha_composite(base)
@@ -235,12 +271,22 @@ base.save(out_path)
 PY
 else
   if command -v magick >/dev/null 2>&1; then
-    magick -size 640x420 gradient:'#12071c-#210d2e' \
-      "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -170-122 -composite \
-      -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+58 'DEFCOIN' \
-      -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+108 'CORE NU' \
-      -fill '#dccfee' -pointsize 15 -gravity NorthWest -annotate +302+214 'Drag to Applications' \
-      "$DEST_DMG_BACKGROUND"
+    if [ -n "$WORDMARK_THIRD_LINE" ]; then
+      magick -size 640x420 gradient:'#12071c-#210d2e' \
+        "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -170-122 -composite \
+        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+34 'DEFCOIN' \
+        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+84 'CORE NU' \
+        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+134 "$WORDMARK_THIRD_LINE" \
+        -fill '#dccfee' -pointsize 15 -gravity NorthWest -annotate +302+202 'Drag to Applications' \
+        "$DEST_DMG_BACKGROUND"
+    else
+      magick -size 640x420 gradient:'#12071c-#210d2e' \
+        "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -170-122 -composite \
+        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+58 'DEFCOIN' \
+        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+108 'CORE NU' \
+        -fill '#dccfee' -pointsize 15 -gravity NorthWest -annotate +302+202 'Drag to Applications' \
+        "$DEST_DMG_BACKGROUND"
+    fi
   else
     cp -p "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" "$DEST_DMG_BACKGROUND"
   fi
@@ -284,7 +330,7 @@ touch -ch "$RELEASE_DIR" "$DEST_PLATFORM_DIR" "$DEST_APP" "$DEST_DMG" "$DEST_DMG
 
 STAMP_FILE="$DEST_PLATFORM_DIR/BUILD_STAGED_AT.txt"
 {
-  echo "Defcoin Core Nu staged distribution"
+  echo "$PRODUCT_NAME staged distribution"
   echo "Release: $RELEASE_VERSION"
   echo "Staged at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
   echo "Built app: $BUILT_APP"

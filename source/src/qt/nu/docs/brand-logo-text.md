@@ -17,6 +17,18 @@ CORE NU
 The renderer may draw `DEF` and `COIN` as separate runs only to reproduce the
 legacy kerning join.
 
+The ExpFor app variant keeps the same first two lines and adds a third line in
+the same type family and weight:
+
+```text
+DEFCOIN
+CORE NU
+ExpFor
+```
+
+`ExpFor` is mixed case. It is a product label, not a replacement for the
+DEFCOIN / CORE NU wordmark.
+
 ## Typeface
 
 - Preferred family: `Avenir Next Condensed`.
@@ -47,6 +59,9 @@ Practical PIL reproduction:
 ## DMG Layout Notes
 
 - The wordmark should sit in clean negative space, not on top of the coin stack.
+- `stage_macos_distribution.sh` must render the third `ExpFor` line when
+  staging `DefcoinCoreExpFor.app`; the Nu installer remains the two-line
+  DEFCOIN / CORE NU lockup.
 - The corner coin stack is decorative and must not crowd the draggable app icon.
 - Finder icon labels are dark by default, so dark DMG backgrounds need a quiet
   light label field behind the app and Applications labels.

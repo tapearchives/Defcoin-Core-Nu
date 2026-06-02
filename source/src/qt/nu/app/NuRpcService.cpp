@@ -934,9 +934,29 @@ QString sanitizedLanHostName(QString value)
     return value;
 }
 
+QString sanitizedLanDisplayName(QString value)
+{
+    value = value.trimmed();
+    value.replace(QStringLiteral("\\032"), QStringLiteral(" "));
+    value.replace(QRegularExpression(QStringLiteral(R"(\s+)")), QStringLiteral(" "));
+    value.remove(QRegularExpression(QStringLiteral(R"([\x00-\x1f\x7f])")));
+    if (value.isEmpty() || isIpLiteral(value) || isLikelySyntheticReverseDnsName(value)) return QString();
+    if (!value.contains(QLatin1Char(' '))) return sanitizedLanHostName(value);
+
+    static const QRegularExpression valid(QStringLiteral(R"(^[\p{L}\p{N}][\p{L}\p{N} _.'’()-]{0,80}$)"));
+    if (!valid.match(value).hasMatch()) return QString();
+    const QString upper = value.toUpper();
+    if (upper == QLatin1String("WORKGROUP") ||
+        upper == QLatin1String("LOCAL") ||
+        upper.startsWith(QLatin1Char('_'))) {
+        return QString();
+    }
+    return value;
+}
+
 QString lanWorkstationNameFromCandidate(const QString& value)
 {
-    const QString name = sanitizedLanHostName(value);
+    const QString name = sanitizedLanDisplayName(value);
     if (name.isEmpty() || isIpLiteral(name)) return QString();
     if (isLikelySyntheticReverseDnsName(name)) return QString();
     return name;
@@ -965,6 +985,7 @@ QString lanAliasFromDnsName(const QString& value)
 QString parseLanPeerNameLookupOutput(const QString& output)
 {
     static const QVector<QRegularExpression> patterns{
+        QRegularExpression(QStringLiteral(R"(^\s*Bonjour\s+Name:\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(NetBIOS\s+Name:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption),
         QRegularExpression(QStringLiteral(R"(^\s*Server\s*:\s*([A-Za-z0-9_.-]+)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption),
         QRegularExpression(QStringLiteral(R"(NameHost\s*:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption),
@@ -983,7 +1004,7 @@ QString parseLanPeerNameLookupOutput(const QString& output)
         const QRegularExpressionMatch match = pattern.match(output);
         if (!match.hasMatch()) continue;
         const QString captured = match.captured(1);
-        const bool trusted_machine_name = i == 0 || i == 1 || i == 8 || i == 9;
+        const bool trusted_machine_name = i == 0 || i == 1 || i == 2 || i == 9 || i == 10;
         if (!trusted_machine_name && !isLocalStyleDnsName(captured)) continue;
         const QString name = lanWorkstationNameFromCandidate(captured);
         if (!name.isEmpty()) return name;
@@ -1018,6 +1039,8 @@ QStringList parseLanPeerFingerprintDetails(const QString& output)
     if (!name.isEmpty()) addDetail(QStringLiteral("Name"), name);
 
     const QVector<QPair<QString, QRegularExpression>> patterns{
+        {QStringLiteral("Name"), QRegularExpression(QStringLiteral(R"(^\s*Bonjour\s+Name:\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
+        {QStringLiteral("Bonjour"), QRegularExpression(QStringLiteral(R"(^\s*Bonjour\s+Host:\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("macOS"), QRegularExpression(QStringLiteral(R"(\bOS=\[([^\]]*(?:Mac|Darwin|Apple)[^\]]*)\])"), QRegularExpression::CaseInsensitiveOption)},
         {QStringLiteral("Windows"), QRegularExpression(QStringLiteral(R"(\bOS=\[([^\]]*Windows[^\]]*)\])"), QRegularExpression::CaseInsensitiveOption)},
         {QStringLiteral("Linux"), QRegularExpression(QStringLiteral(R"(\bOS=\[([^\]]*Linux[^\]]*)\])"), QRegularExpression::CaseInsensitiveOption)},
@@ -3077,6 +3100,35 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
 
     QVector<Command> commands;
 #if defined(Q_OS_MACOS)
+    const QString dns_sd = optionalProgramPath({QStringLiteral("/usr/bin/dns-sd")});
+    const QString dscacheutil = optionalProgramPath({QStringLiteral("/usr/bin/dscacheutil")});
+    if (!dns_sd.isEmpty() && !dscacheutil.isEmpty()) {
+        const QString bonjour_script = QStringLiteral(R"SH(
+target=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+/usr/bin/dns-sd -B _smb._tcp local 2>/dev/null |
+awk '/_smb\._tcp\./ {sub(/^.*_smb\._tcp\.[[:space:]]+/,""); print; fflush()}' |
+while IFS= read -r name; do
+  [ -n "$name" ] || continue
+  tmp=$(mktemp -t nu-bonjour.XXXXXX) || exit 0
+  (/usr/bin/dns-sd -L "$name" _smb._tcp local > "$tmp" 2>/dev/null & pid=$!; sleep 0.8; kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null)
+  host=$(awk '/ can be reached at / {sub(/^.* at /,""); sub(/:[0-9]+.*$/,""); print; exit}' "$tmp")
+  rm -f "$tmp"
+  [ -n "$host" ] || continue
+  /usr/bin/dscacheutil -q host -a name "$host" 2>/dev/null |
+  awk -v target="$target" -v name="$name" -v host="$host" '
+    /^(ipv6_address|ip_address):/ {
+      addr=tolower($2)
+      sub(/%.*/, "", addr)
+      if (addr == target) {
+        print "Bonjour Name: " name
+        print "Bonjour Host: " host
+        exit
+      }
+    }'
+done
+)SH");
+        commands.push_back({QStringLiteral("/bin/sh"), {QStringLiteral("-c"), bonjour_script, QStringLiteral("nu-lan-bonjour"), address.toString()}});
+    }
     const QString smbutil = optionalProgramPath({QStringLiteral("/usr/bin/smbutil")});
     if (!smbutil.isEmpty()) {
         commands.push_back({smbutil, {QStringLiteral("status"), QStringLiteral("-ae"), address.toString()}});
@@ -3224,7 +3276,7 @@ void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
                 [finish](QProcess::ProcessError) { finish(); });
 
         process->start(command.program, command.arguments);
-        timeout->start(2500);
+        timeout->start(command.program == QLatin1String("/bin/sh") ? 4500 : 2500);
     };
 
     (*run_next)(0);
@@ -3374,6 +3426,7 @@ void NuRpcService::refreshNode()
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
 
+#if DEFCOIN_NU_EXPFOR_APP
         if (!m_explorer_indexing && !m_explorer_index_paused_by_user && !m_explorer_auto_index_requested && m_block_height > 0) {
             const int indexed_height = explorerHighestIndexedBlock();
             if (indexed_height < m_block_height) {
@@ -3386,6 +3439,7 @@ void NuRpcService::refreshNode()
                 });
             }
         }
+#endif
     });
 
     rpcCall(QStringLiteral("getnetworkhashps"), {120, -1}, false, [this](const QJsonValue& result, const QString& error) {
@@ -8279,7 +8333,7 @@ void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins, const 
     m_explorer_analytics_refreshing = true;
     const int total_steps = (load_rich ? 1 : 0) + (load_movements ? 1 : 0);
     m_explorer_analytics_status = QStringLiteral("Explorer analytics loading: 0% complete. Starting %1%2.")
-        .arg(load_rich ? QStringLiteral("Top 100") : QString())
+        .arg(load_rich ? QStringLiteral("Holder Atlas") : QString())
         .arg(load_rich && load_movements ? QStringLiteral(" and Movements") : (load_movements ? QStringLiteral("Movements") : QString()));
     Q_EMIT explorerChanged();
 
@@ -8310,9 +8364,9 @@ void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins, const 
             }, Qt::QueuedConnection);
         };
         if (load_rich) {
-            publish_progress(completed_steps, QStringLiteral("Reading Top 100 balances from the local SQLite index."));
+            publish_progress(completed_steps, QStringLiteral("Reading largest-holder balances from the local SQLite index."));
             rich_list = guard->explorerRichListFromDb(&rich_error);
-            publish_progress(++completed_steps, QStringLiteral("Top 100 loaded; continuing analytics."));
+            publish_progress(++completed_steps, QStringLiteral("Holder Atlas loaded; continuing analytics."));
         }
         if (load_movements) {
             publish_progress(completed_steps, QStringLiteral("Reading movement rows from the local SQLite index."));
@@ -8330,14 +8384,14 @@ void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins, const 
             guard->refreshExplorerTop100TimelineStats();
             if (!rich_error.isEmpty() || !movement_error.isEmpty()) {
                 QStringList details;
-                if (!rich_error.isEmpty()) details.push_back(QStringLiteral("Top 100: %1").arg(rich_error));
+                if (!rich_error.isEmpty()) details.push_back(QStringLiteral("Holder Atlas: %1").arg(rich_error));
                 if (!movement_error.isEmpty()) details.push_back(QStringLiteral("Movements: %1").arg(movement_error));
                 guard->m_explorer_analytics_status = QStringLiteral("Explorer analytics could not fully load. %1").arg(details.join(QStringLiteral(" ")));
             } else if (load_rich && load_movements) {
-                guard->m_explorer_analytics_status = QStringLiteral("Loaded Top 100 and %1 movement rows at %2+ DFC from the local SQLite index.")
+                guard->m_explorer_analytics_status = QStringLiteral("Loaded Holder Atlas and %1 movement rows at %2+ DFC from the local SQLite index.")
                     .arg(QString::number(guard->m_explorer_movements.size()), QString::number(bounded_coins));
             } else if (load_rich) {
-                guard->m_explorer_analytics_status = QStringLiteral("Loaded Top 100 from the local SQLite index.");
+                guard->m_explorer_analytics_status = QStringLiteral("Loaded Holder Atlas from the local SQLite index.");
             } else if (load_movements) {
                 guard->m_explorer_analytics_status = QStringLiteral("Loaded %1 movement rows at %2+ DFC from the local SQLite index.")
                     .arg(QString::number(guard->m_explorer_movements.size()), QString::number(bounded_coins));
@@ -9408,7 +9462,7 @@ bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height
 {
     const int highest = explorerHighestIndexedBlock();
     if (highest < 0) {
-        if (error) *error = QStringLiteral("Build the Explorer block index before building the Top 100 timeline.");
+        if (error) *error = QStringLiteral("Build the Explorer block index before building the Holder timeline.");
         return false;
     }
     const int start = std::max(0, std::min(start_height, highest));
@@ -9532,7 +9586,7 @@ bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height
     m_explorer_top100_scan_height = start;
     m_explorer_top100_scan_end_height = end;
     m_explorer_top100_started_ms = QDateTime::currentMSecsSinceEpoch();
-    m_explorer_top100_status = QStringLiteral("Top 100 timeline checkpoints scanning blocks %1-%2 from the Explorer index. Playback anchors every ~%3 block%4%5.")
+    m_explorer_top100_status = QStringLiteral("Holder timeline checkpoints scanning blocks %1-%2 from the Explorer index. Playback anchors every ~%3 block%4%5.")
         .arg(QString::number(start),
              QString::number(end),
              QString::number(m_explorer_top100_checkpoint_interval_blocks),
@@ -9678,9 +9732,9 @@ void NuRpcService::explorerTop100Step()
         m_explorer_top100_scanning = false;
         releaseExplorerWriterLock();
         m_explorer_top100_status = finish_error.isEmpty()
-            ? QStringLiteral("Top 100 timeline complete through block %1 with %2 checkpoint rows.")
+            ? QStringLiteral("Holder timeline complete through block %1 with %2 checkpoint rows.")
                   .arg(QString::number(m_explorer_top100_scan_end_height), QString::number(m_explorer_top100_events_written))
-            : QStringLiteral("Top 100 timeline finished, but range status could not be saved: %1").arg(finish_error);
+            : QStringLiteral("Holder timeline finished, but range status could not be saved: %1").arg(finish_error);
         refreshExplorerAnalytics(5000, QStringLiteral("rich"));
         Q_EMIT explorerChanged();
         return;
@@ -9765,7 +9819,7 @@ void NuRpcService::explorerTop100Step()
         m_explorer_top100_scanning = false;
         finishExplorerTop100Scan(false, nullptr);
         releaseExplorerWriterLock();
-        m_explorer_top100_status = QStringLiteral("Top 100 timeline stopped near block %1: %2")
+        m_explorer_top100_status = QStringLiteral("Holder timeline stopped near block %1: %2")
             .arg(QString::number(chunk_start), local_error);
         Q_EMIT explorerChanged();
         return;
@@ -9777,7 +9831,7 @@ void NuRpcService::explorerTop100Step()
     const double blocks_per_second = 1000.0 * static_cast<double>(scanned_blocks) / static_cast<double>(elapsed_ms);
     const double pct = 100.0 * static_cast<double>(m_explorer_top100_scan_height - m_explorer_top100_scan_start_height)
         / static_cast<double>(std::max(1, m_explorer_top100_scan_end_height - m_explorer_top100_scan_start_height + 1));
-    m_explorer_top100_status = QStringLiteral("Top 100 timeline checkpoints indexed through block %1 of %2 (%3%). %4 checkpoint rows, %5 delta rows in last batch, %6 blocks/s.%7")
+    m_explorer_top100_status = QStringLiteral("Holder timeline checkpoints indexed through block %1 of %2 (%3%). %4 checkpoint rows, %5 delta rows in last batch, %6 blocks/s.%7")
         .arg(QString::number(chunk_end),
              QString::number(m_explorer_top100_scan_end_height),
              QString::number(std::min(100.0, pct), 'f', 2),
@@ -9798,18 +9852,18 @@ void NuRpcService::startExplorerTop100Timeline(int start_height, int end_height)
 {
     if (m_explorer_top100_scanning) return;
     if (m_explorer_indexing) {
-        Q_EMIT userMessage(QStringLiteral("Top 100 timeline not started"),
-                           QStringLiteral("Pause the main Explorer index before rebuilding the Top 100 timeline."));
+        Q_EMIT userMessage(QStringLiteral("Holder timeline not started"),
+                           QStringLiteral("Pause the main Explorer index before rebuilding the Holder timeline."));
         return;
     }
     QString error;
     if (!acquireExplorerWriterLock(&error)) {
-        Q_EMIT userMessage(QStringLiteral("Top 100 timeline blocked"), error);
+        Q_EMIT userMessage(QStringLiteral("Holder timeline blocked"), error);
         return;
     }
     if (!initializeExplorerTop100Scan(start_height, end_height, &error)) {
         releaseExplorerWriterLock();
-        Q_EMIT userMessage(QStringLiteral("Top 100 timeline not started"), error);
+        Q_EMIT userMessage(QStringLiteral("Holder timeline not started"), error);
         return;
     }
     m_explorer_top100_scanning = true;
@@ -9825,7 +9879,7 @@ void NuRpcService::stopExplorerTop100Timeline()
     m_explorer_top100_paused_by_user = true;
     finishExplorerTop100Scan(false, nullptr);
     releaseExplorerWriterLock();
-    m_explorer_top100_status = QStringLiteral("Top 100 timeline paused at block %1.")
+    m_explorer_top100_status = QStringLiteral("Holder timeline paused at block %1.")
         .arg(QString::number(m_explorer_top100_scan_height));
     Q_EMIT explorerChanged();
 }
@@ -9835,11 +9889,11 @@ void NuRpcService::resetExplorerTop100Timeline()
     stopExplorerTop100Timeline();
     QString error;
     if (!ensureExplorerDatabase(&error)) {
-        Q_EMIT userMessage(QStringLiteral("Top 100 timeline unavailable"), error);
+        Q_EMIT userMessage(QStringLiteral("Holder timeline unavailable"), error);
         return;
     }
     if (!acquireExplorerWriterLock(&error)) {
-        Q_EMIT userMessage(QStringLiteral("Top 100 reset blocked"), error);
+        Q_EMIT userMessage(QStringLiteral("Holder timeline reset blocked"), error);
         return;
     }
     const QString connection_name = QStringLiteral("nu_explorer_top100_reset_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
@@ -9861,11 +9915,11 @@ void NuRpcService::resetExplorerTop100Timeline()
     QSqlDatabase::removeDatabase(connection_name);
     releaseExplorerWriterLock();
     if (!ok) {
-        Q_EMIT userMessage(QStringLiteral("Top 100 reset failed"), local_error);
+        Q_EMIT userMessage(QStringLiteral("Holder timeline reset failed"), local_error);
         return;
     }
     refreshExplorerTop100TimelineStats();
-    m_explorer_top100_status = QStringLiteral("Top 100 timeline cleared.");
+    m_explorer_top100_status = QStringLiteral("Holder timeline cleared.");
     Q_EMIT explorerChanged();
 }
 
@@ -9873,8 +9927,8 @@ void NuRpcService::scanRemainingExplorerTop100Timeline()
 {
     const int highest = explorerHighestIndexedBlock();
     if (highest < 0) {
-        Q_EMIT userMessage(QStringLiteral("Top 100 timeline not started"),
-                           QStringLiteral("Build the Explorer block index before scanning remaining Top 100 ranges."));
+        Q_EMIT userMessage(QStringLiteral("Holder timeline not started"),
+                           QStringLiteral("Build the Explorer block index before scanning remaining Holder timeline ranges."));
         return;
     }
 
@@ -9883,7 +9937,7 @@ void NuRpcService::scanRemainingExplorerTop100Timeline()
     bool found_gap = false;
     QString error;
     if (!ensureExplorerDatabase(&error)) {
-        Q_EMIT userMessage(QStringLiteral("Top 100 timeline unavailable"), error);
+        Q_EMIT userMessage(QStringLiteral("Holder timeline unavailable"), error);
         return;
     }
     const QString connection_name = QStringLiteral("nu_explorer_top100_gap_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
@@ -9919,7 +9973,7 @@ void NuRpcService::scanRemainingExplorerTop100Timeline()
     QSqlDatabase::removeDatabase(connection_name);
 
     if (!found_gap) {
-        m_explorer_top100_status = QStringLiteral("Top 100 timeline already covers indexed blocks 0-%1.")
+        m_explorer_top100_status = QStringLiteral("Holder timeline already covers indexed blocks 0-%1.")
             .arg(QString::number(highest));
         Q_EMIT explorerChanged();
         return;
@@ -9933,7 +9987,7 @@ QVariantMap NuRpcService::explorerTop100Snapshot(int height) const
     QVariantList rows;
     out.insert(QStringLiteral("height"), height);
     out.insert(QStringLiteral("rows"), rows);
-    out.insert(QStringLiteral("status"), QStringLiteral("No Top 100 timeline rows are available yet."));
+    out.insert(QStringLiteral("status"), QStringLiteral("No Holder timeline rows are available yet."));
 
     QString error;
     if (!ensureExplorerDatabase(&error)) {
@@ -9995,8 +10049,8 @@ QVariantMap NuRpcService::explorerTop100Snapshot(int height) const
     out.insert(QStringLiteral("time"), QVariant::fromValue<qlonglong>(snapshot_time));
     out.insert(QStringLiteral("rows"), rows);
     out.insert(QStringLiteral("status"), rows.isEmpty()
-        ? QStringLiteral("No Top 100 snapshot exists at or before this block.")
-        : QStringLiteral("Snapshot reconstructed from Top 100 timeline checkpoints."));
+        ? QStringLiteral("No Holder timeline snapshot exists at or before this block.")
+        : QStringLiteral("Snapshot reconstructed from Holder timeline checkpoints."));
     return out;
 }
 

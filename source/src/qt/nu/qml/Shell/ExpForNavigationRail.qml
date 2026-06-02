@@ -10,7 +10,58 @@ Rectangle {
     id: root
     color: "#080313"
 
-    property string currentRoute: "forensics"
+    property string currentRoute: "explorer"
+    readonly property var lookupRoutes: [
+        {
+            route: "explorer",
+            label: "Explorer Search",
+            icon: "../../assets/icons/explorer.svg",
+            help: "Look up block heights, block hashes, transaction IDs, wallet addresses, and recent searches."
+        }
+    ]
+    readonly property var analysisRoutes: [
+        {
+            route: "holders",
+            label: "Holder Atlas",
+            icon: "../../assets/icons/explorer.svg",
+            help: "Study largest holder ranks, supply bands, concentration, and holder timeline checkpoints."
+        },
+        {
+            route: "movements",
+            label: "Movement Map",
+            icon: "../../assets/icons/activity.svg",
+            help: "Trace large DFC transfers, movement tables, and address-to-address flow graphs."
+        }
+    ]
+    readonly property var evidenceRoutes: [
+        {
+            route: "messages",
+            label: "Message Scan",
+            icon: "../../assets/icons/forensics.svg",
+            help: "Inspect unusual OP_RETURN text, burned outputs, and irregular accepted-chain messages."
+        },
+        {
+            route: "contacts",
+            label: "Contacts",
+            icon: "../../assets/icons/wallet.svg",
+            help: "Build local contact and address-cluster lists from wallet labels or investigation notes."
+        }
+    ]
+    readonly property var operationsRoutes: [
+        {
+            route: "indexing",
+            label: "Index Engines",
+            icon: "../../assets/icons/sync.svg",
+            help: "Monitor Explorer, Holder Atlas, movement, and forensics indexing jobs and tune long runs."
+        },
+        {
+            route: "witness",
+            label: "Witness Repair",
+            icon: "../../assets/icons/warning.svg",
+            help: "Inspect and repair missing witness data when imported block data needs maintenance."
+        }
+    ]
+
     signal routeRequested(string route)
     signal aboutRequested
 
@@ -88,6 +139,7 @@ Rectangle {
                 id: brandLockup
                 anchors.left: parent.left
                 anchors.top: parent.top
+                thirdLine: "ExpFor"
             }
 
             Rectangle {
@@ -120,28 +172,8 @@ Rectangle {
             }
         }
 
-        Repeater {
-            model: [
-                {
-                    route: "forensics",
-                    label: "Forensics",
-                    icon: "../../assets/icons/forensics.svg",
-                    help: "Irregular blockchain messages, witness inspection, and relationship/contact analysis."
-                },
-                {
-                    route: "explorer",
-                    label: "Explorer",
-                    icon: "../../assets/icons/explorer.svg",
-                    help: "Search blocks, transactions, addresses, Top 100, and movement data."
-                },
-                {
-                    route: "indexing",
-                    label: "Indexing",
-                    icon: "../../assets/icons/sync.svg",
-                    help: "Build, pause, reset, and tune the local SQLite explorer indexes."
-                }
-            ]
-
+        Component {
+            id: navButtonDelegate
             NuNavButton {
                 required property var modelData
                 Layout.fillWidth: true
@@ -152,6 +184,49 @@ Rectangle {
                 onClicked: root.routeRequested(modelData.route)
             }
         }
+
+        Label {
+            Layout.fillWidth: true
+            text: "LOOK UP"
+            color: "#dccfee"
+            font.pixelSize: NuTokens.fontTiny
+            font.weight: Font.DemiBold
+        }
+
+        Repeater { model: root.lookupRoutes; delegate: navButtonDelegate }
+
+        Label {
+            Layout.fillWidth: true
+            Layout.topMargin: NuTokens.spaceXs
+            text: "ANALYZE"
+            color: "#dccfee"
+            font.pixelSize: NuTokens.fontTiny
+            font.weight: Font.DemiBold
+        }
+
+        Repeater { model: root.analysisRoutes; delegate: navButtonDelegate }
+
+        Label {
+            Layout.fillWidth: true
+            Layout.topMargin: NuTokens.spaceXs
+            text: "EVIDENCE"
+            color: "#dccfee"
+            font.pixelSize: NuTokens.fontTiny
+            font.weight: Font.DemiBold
+        }
+
+        Repeater { model: root.evidenceRoutes; delegate: navButtonDelegate }
+
+        Label {
+            Layout.fillWidth: true
+            Layout.topMargin: NuTokens.spaceXs
+            text: "OPERATIONS"
+            color: "#dccfee"
+            font.pixelSize: NuTokens.fontTiny
+            font.weight: Font.DemiBold
+        }
+
+        Repeater { model: root.operationsRoutes; delegate: navButtonDelegate }
 
         Item { Layout.fillHeight: true }
     }

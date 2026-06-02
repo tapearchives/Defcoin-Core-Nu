@@ -15,9 +15,10 @@ Item {
     property int lineSpacing: -8
     property color textColor: NuTokens.textInverse
     property url coinSource: "../../assets/brand/defcoin-nu-coin-stack-hires.png"
+    property string thirdLine: ""
     readonly property string displayFont: Qt.platform.os === "windows" ? "Bahnschrift Condensed" : "Avenir Next Condensed"
 
-    implicitWidth: coin.width + root.gap + Math.max(defcoinLine.implicitWidth, coreText.implicitWidth)
+    implicitWidth: coin.width + root.gap + Math.max(defcoinLine.implicitWidth, coreText.implicitWidth, expforText.visible ? expforText.implicitWidth : 0)
     implicitHeight: Math.max(coin.height, wordmark.implicitHeight)
 
     Image {
@@ -67,6 +68,17 @@ Item {
         Text {
             id: coreText
             text: "CORE NU"
+            color: root.textColor
+            font.family: root.displayFont
+            font.pixelSize: root.wordmarkSize
+            font.weight: root.wordmarkWeight
+            font.letterSpacing: root.wordmarkTracking
+        }
+
+        Text {
+            id: expforText
+            visible: root.thirdLine.length > 0
+            text: root.thirdLine
             color: root.textColor
             font.family: root.displayFont
             font.pixelSize: root.wordmarkSize

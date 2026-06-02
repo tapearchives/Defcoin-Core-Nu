@@ -12,6 +12,10 @@ ColumnLayout {
     id: root
     spacing: NuTokens.spaceLg
 
+    property bool active: false
+    property int preferredTab: 0
+    property string sectionTitle: "Message Scan"
+    property string sectionDetail: "Scan accepted Defcoin blocks for unusual OP_RETURN text, burned outputs, and message patterns."
     readonly property real scanProgress: NuService.forensicsScanTip > 0
                                          ? Math.max(0, Math.min(1, NuService.forensicsScanHeight / NuService.forensicsScanTip))
                                          : 0
@@ -33,6 +37,18 @@ ColumnLayout {
     ]
     property int selectedContactIndex: -1
     property var selectedAddressBookKeys: []
+    property string pendingAddressBookWallet: ""
+    property string draggedAddressBookLabel: ""
+    property string draggedAddressBookAddress: ""
+
+    function applyPreferredTab() {
+        if (forensicsTabs)
+            forensicsTabs.currentIndex = Math.max(0, Math.min(2, root.preferredTab))
+    }
+
+    Component.onCompleted: Qt.callLater(root.applyPreferredTab)
+    onPreferredTabChanged: if (root.active) root.applyPreferredTab()
+    onActiveChanged: if (active) root.applyPreferredTab()
 
     function contactRows() {
         const rows = []
@@ -72,14 +88,155 @@ ColumnLayout {
         return out
     }
 
+    function addressBookCells(row) {
+        return row && row.cells !== undefined ? row.cells : row
+    }
+
+    function addressBookLabel(row) {
+        const cells = root.addressBookCells(row)
+        return cells && cells.length > 0 ? String(cells[0] || "").trim() : ""
+    }
+
+    function addressBookAddress(row) {
+        const cells = root.addressBookCells(row)
+        return cells && cells.length > 1 ? String(cells[1] || "").trim() : ""
+    }
+
+    function addressBookType(row) {
+        const cells = root.addressBookCells(row)
+        return cells && cells.length > 2 ? String(cells[2] || "").trim() : ""
+    }
+
+    function addressBookReceived(row) {
+        const cells = root.addressBookCells(row)
+        return cells && cells.length > 3 ? String(cells[3] || "").trim() : ""
+    }
+
+    function addAddressBookContact(label, address) {
+        const cleanAddress = String(address || "").trim()
+        if (cleanAddress.length === 0) return
+        const cleanLabel = String(label || "").trim()
+        NuService.saveExplorerContact(cleanLabel.length > 0 ? cleanLabel : cleanAddress, cleanAddress, -1)
+    }
+
+    function addAddressBookRow(row) {
+        root.addAddressBookContact(root.addressBookLabel(row), root.addressBookAddress(row))
+    }
+
     function addSelectedAddressBookContacts() {
         const rows = root.selectedAddressBookRows()
         for (let i = 0; i < rows.length; ++i) {
-            const cells = rows[i] && rows[i].cells !== undefined ? rows[i].cells : rows[i]
-            const label = cells && cells.length > 0 ? String(cells[0] || "").trim() : ""
-            const address = cells && cells.length > 1 ? String(cells[1] || "").trim() : ""
-            if (address.length > 0) NuService.saveExplorerContact(label.length > 0 ? label : address, address, -1)
+            root.addAddressBookRow(rows[i])
         }
+    }
+
+    function beginAddressBookDrag(label, address) {
+        root.draggedAddressBookLabel = String(label || "").trim()
+        root.draggedAddressBookAddress = String(address || "").trim()
+    }
+
+    function clearAddressBookDragSoon() {
+        Qt.callLater(function() {
+            root.draggedAddressBookLabel = ""
+            root.draggedAddressBookAddress = ""
+        })
+    }
+
+    function addDraggedAddressBookContact() {
+        root.addAddressBookContact(root.draggedAddressBookLabel, root.draggedAddressBookAddress)
+    }
+
+    function dropDraggedAddressIntoEditor() {
+        const address = root.draggedAddressBookAddress
+        if (address.length === 0) return
+        const label = root.draggedAddressBookLabel
+        if (contactNameField && contactNameField.text.trim().length === 0)
+            contactNameField.text = label.length > 0 ? label : address
+        if (contactAddressArea) {
+            const current = contactAddressArea.text.trim()
+            const parts = current.length > 0 ? current.split(/[\s,]+/) : []
+            if (parts.indexOf(address) < 0)
+                contactAddressArea.text = current.length > 0 ? current + "\n" + address : address
+        }
+    }
+
+    function availableWalletModel() {
+        const out = []
+        for (let i = 0; i < NuService.availableWallets.length; ++i) {
+            const name = String(NuService.availableWallets[i] || "")
+            if (out.indexOf(name) < 0) out.push(name)
+        }
+        if (NuService.walletSelected && out.indexOf(NuService.currentWalletName) < 0)
+            out.push(NuService.currentWalletName)
+        return out
+    }
+
+    function isWalletLoaded(name) {
+        const wanted = String(name || "")
+        for (let i = 0; i < NuService.loadedWallets.length; ++i) {
+            if (String(NuService.loadedWallets[i] || "") === wanted) return true
+        }
+        return false
+    }
+
+    function formatWalletMenuLabel(name) {
+        const walletName = String(name || "")
+        const tags = []
+        if (NuService.walletSelected && walletName === NuService.currentWalletName) tags.push("current")
+        else if (root.isWalletLoaded(walletName)) tags.push("loaded")
+        const display = NuService.walletDisplayName(walletName)
+        return tags.length > 0 ? display + " (" + tags.join(", ") + ")" : display
+    }
+
+    function walletAddressBookStatusText() {
+        if (!NuService.walletSelected)
+            return "No wallet selected. Choose a Nu wallet to read labels and addresses."
+        const lockText = NuService.walletEncrypted && NuService.walletLocked
+                       ? " Locked wallet; address-book reads do not unlock it."
+                       : ""
+        return NuService.walletDisplayName(NuService.currentWalletName)
+               + ": " + NuService.addressBook.length + " address-book entries visible."
+               + lockText
+    }
+
+    function selectedAddressBookWalletName() {
+        if (!addressBookWalletCombo || addressBookWalletCombo.count <= 0) return ""
+        return String(addressBookWalletCombo.currentText || "")
+    }
+
+    function syncAddressBookWalletCombo() {
+        if (!addressBookWalletCombo || addressBookWalletCombo.count <= 0) return
+        const wanted = NuService.walletSelected ? String(NuService.currentWalletName || "") : ""
+        if (wanted.length === 0) {
+            if (addressBookWalletCombo.currentIndex < 0) addressBookWalletCombo.currentIndex = 0
+            return
+        }
+        const rows = root.availableWalletModel()
+        for (let i = 0; i < rows.length; ++i) {
+            if (String(rows[i] || "") === wanted) {
+                addressBookWalletCombo.currentIndex = i
+                return
+            }
+        }
+    }
+
+    function requestAddressBookWallet(walletName) {
+        const cleanName = String(walletName || "")
+        root.pendingAddressBookWallet = cleanName
+        addressBookWalletApprovalDialog.open()
+    }
+
+    function useSelectedAddressBookWallet() {
+        if (!addressBookWalletCombo || addressBookWalletCombo.count <= 0) return
+        const walletName = root.selectedAddressBookWalletName()
+        root.requestAddressBookWallet(walletName)
+    }
+
+    function approveAddressBookWallet() {
+        const walletName = root.pendingAddressBookWallet
+        root.pendingAddressBookWallet = ""
+        if (root.isWalletLoaded(walletName)) NuService.setCurrentWallet(walletName)
+        else NuService.loadWallet(walletName)
     }
 
     function contactBalanceMap() {
@@ -202,17 +359,22 @@ ColumnLayout {
         return isNaN(parsed) || parsed < 0 ? 903168 : parsed
     }
 
+    Connections {
+        target: NuService
+        function onWalletChanged() { Qt.callLater(root.syncAddressBookWalletCombo) }
+    }
+
     NuPageHeader {
         Layout.fillWidth: true
-        title: "Forensics"
-        detail: "Blockchain oddities, hidden messages, and anomaly lists built from local block data."
+        title: root.sectionTitle
+        detail: root.sectionDetail
     }
 
     NuTabBar {
         id: forensicsTabs
         Layout.fillWidth: true
-        NuTabButton { text: "Irregular Messages" }
-        NuTabButton { text: "Fix Witness Data" }
+        NuTabButton { text: "Message Scan" }
+        NuTabButton { text: "Witness Repair" }
         NuTabButton { text: "Contacts" }
     }
 
@@ -236,7 +398,7 @@ ColumnLayout {
 
                         Label {
                             Layout.fillWidth: true
-                            text: "Irregular Messages"
+                            text: "Message Scan"
                             color: NuTokens.textPrimary
                             font.pixelSize: NuTokens.fontTitle
                             font.weight: Font.DemiBold
@@ -432,7 +594,7 @@ ColumnLayout {
 
                         Label {
                             Layout.fillWidth: true
-                            text: "Fix Witness Data"
+                            text: "Witness Repair"
                             color: NuTokens.textPrimary
                             font.pixelSize: NuTokens.fontTitle
                             font.weight: Font.DemiBold
@@ -623,20 +785,50 @@ ColumnLayout {
                         Layout.fillHeight: true
                         spacing: NuTokens.spaceXs
                         Label { text: "Addresses"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontSmall }
-                        Basic.TextArea {
-                            id: contactAddressArea
+                        Item {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            placeholderText: "One or more Defcoin addresses, separated by commas or lines"
-                            color: NuTokens.textPrimary
-                            font.pixelSize: NuTokens.fontSmall
-                            wrapMode: Text.WrapAnywhere
-                            selectByMouse: true
-                            persistentSelection: true
-                            background: Rectangle {
+
+                            Basic.TextArea {
+                                id: contactAddressArea
+                                anchors.fill: parent
+                                placeholderText: "One or more Defcoin addresses, separated by commas or lines"
+                                color: NuTokens.textPrimary
+                                font.pixelSize: NuTokens.fontSmall
+                                wrapMode: Text.WrapAnywhere
+                                selectByMouse: true
+                                persistentSelection: true
+                                background: Rectangle {
+                                    radius: NuTokens.radiusSmall
+                                    color: NuTokens.panelBase
+                                    border.color: contactAddressArea.activeFocus ? NuTokens.lineStrong : NuTokens.lineSubtle
+                                }
+                            }
+
+                            DropArea {
+                                id: contactEditorDropArea
+                                anchors.fill: parent
+                                keys: ["defcoin-address-book"]
+                                onDropped: root.dropDraggedAddressIntoEditor()
+                            }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: contactEditorDropArea.containsDrag && root.draggedAddressBookAddress.length > 0
                                 radius: NuTokens.radiusSmall
-                                color: NuTokens.panelBase
-                                border.color: contactAddressArea.activeFocus ? NuTokens.lineStrong : NuTokens.lineSubtle
+                                color: NuTokens.accentSky
+                                opacity: 0.12
+                                border.color: NuTokens.accentSky
+                                border.width: 1
+                            }
+
+                            Label {
+                                anchors.centerIn: parent
+                                visible: contactEditorDropArea.containsDrag && root.draggedAddressBookAddress.length > 0
+                                text: "Drop address here"
+                                color: NuTokens.textPrimary
+                                font.pixelSize: NuTokens.fontBody
+                                font.weight: Font.DemiBold
                             }
                         }
                     }
@@ -658,33 +850,64 @@ ColumnLayout {
                             font.pixelSize: NuTokens.fontBodyLarge
                             font.weight: Font.DemiBold
                         }
-                        NuDataTable {
+                        Item {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            tableId: "forensicsContacts"
-                            columns: ["User", "Addresses", "Count"]
-                            columnTypes: ["text", "address", "number"]
-                            columnWeights: [1.0, 3.0, 0.45]
-                            rows: root.contactRows()
-                            emptyText: "No saved Forensics Contacts yet."
-                            rowSelectionEnabled: true
-                            plainClickSelectsRows: true
-                            rowKeyMetaField: "index"
-                            onRowSelectionChanged: (keys) => {
-                                if (keys.length === 0) {
-                                    root.clearContactEditor()
-                                    return
-                                }
-                                const wanted = Number(keys[0])
-                                const rows = root.contactRows()
-                                for (let i = 0; i < rows.length; ++i) {
-                                    if (Number((rows[i].meta || {}).index) === wanted) {
-                                        root.selectContact(rows[i])
+
+                            NuDataTable {
+                                id: savedContactsTable
+                                anchors.fill: parent
+                                tableId: "forensicsContacts"
+                                columns: ["User", "Addresses", "Count"]
+                                columnTypes: ["text", "address", "number"]
+                                columnWeights: [1.0, 3.0, 0.45]
+                                rows: root.contactRows()
+                                emptyText: "No saved Forensics Contacts yet."
+                                rowSelectionEnabled: true
+                                plainClickSelectsRows: true
+                                rowKeyMetaField: "index"
+                                onRowSelectionChanged: (keys) => {
+                                    if (keys.length === 0) {
+                                        root.clearContactEditor()
                                         return
                                     }
+                                    const wanted = Number(keys[0])
+                                    const rows = root.contactRows()
+                                    for (let i = 0; i < rows.length; ++i) {
+                                        if (Number((rows[i].meta || {}).index) === wanted) {
+                                            root.selectContact(rows[i])
+                                            return
+                                        }
+                                    }
                                 }
+                                onRowActivated: (row) => root.selectContact(row)
                             }
-                            onRowActivated: (row) => root.selectContact(row)
+
+                            DropArea {
+                                id: savedContactsDropArea
+                                anchors.fill: parent
+                                keys: ["defcoin-address-book"]
+                                onDropped: root.addDraggedAddressBookContact()
+                            }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: savedContactsDropArea.containsDrag && root.draggedAddressBookAddress.length > 0
+                                radius: NuTokens.radiusMedium
+                                color: NuTokens.accentSky
+                                opacity: 0.12
+                                border.color: NuTokens.accentSky
+                                border.width: 1
+                            }
+
+                            Label {
+                                anchors.centerIn: parent
+                                visible: savedContactsDropArea.containsDrag && root.draggedAddressBookAddress.length > 0
+                                text: "Drop to save contact"
+                                color: NuTokens.textPrimary
+                                font.pixelSize: NuTokens.fontBody
+                                font.weight: Font.DemiBold
+                            }
                         }
                     }
 
@@ -696,7 +919,7 @@ ColumnLayout {
                             Layout.fillWidth: true
                             Label {
                                 Layout.fillWidth: true
-                                text: "Add from wallet address book"
+                                text: "Nu wallet address book"
                                 color: NuTokens.textPrimary
                                 font.pixelSize: NuTokens.fontBodyLarge
                                 font.weight: Font.DemiBold
@@ -709,7 +932,49 @@ ColumnLayout {
                                 onClicked: root.addSelectedAddressBookContacts()
                             }
                         }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: NuTokens.spaceSm
+
+                            NuComboBox {
+                                id: addressBookWalletCombo
+                                Layout.fillWidth: true
+                                model: root.availableWalletModel()
+                                textFormatter: root.formatWalletMenuLabel
+                                enabled: count > 0
+                                helpText: "Choose the Nu wallet whose visible address-book labels and addresses ExpFor can read for Contacts."
+                                Component.onCompleted: root.syncAddressBookWalletCombo()
+                                onModelChanged: Qt.callLater(root.syncAddressBookWalletCombo)
+                            }
+
+                            NuActionButton {
+                                Layout.preferredWidth: 112
+                                text: "Use wallet"
+                                enabled: addressBookWalletCombo.count > 0
+                                helpText: "Ask for approval before opening or selecting this Nu wallet for address-book contact import."
+                                onClicked: root.useSelectedAddressBookWallet()
+                            }
+
+                            NuActionButton {
+                                Layout.preferredWidth: 92
+                                text: "Refresh"
+                                enabled: NuService.rpcConnected
+                                helpText: "Refresh the active wallet address book from the local Defcoin backend."
+                                onClicked: NuService.refresh()
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.walletAddressBookStatusText()
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WordWrap
+                        }
+
                         NuDataTable {
+                            id: addressBookTable
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             tableId: "forensicsContactsAddressBook"
@@ -717,11 +982,134 @@ ColumnLayout {
                             columnTypes: ["text", "address", "text", "amount"]
                             columnWeights: [1.2, 3.0, 0.8, 1.1]
                             rows: NuService.addressBook
-                            emptyText: "Open a wallet with address-book entries to seed Forensics Contacts."
+                            emptyText: ""
                             rowSelectionEnabled: true
                             plainClickSelectsRows: true
                             rowKeyMetaField: "address"
                             onRowSelectionChanged: (keys) => root.selectedAddressBookKeys = keys
+                            onRowActivated: (row) => root.addAddressBookRow(row)
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 156
+                            radius: NuTokens.radiusMedium
+                            color: NuTokens.backgroundBase
+                            border.color: NuTokens.lineSubtle
+                            border.width: 1
+
+                            ListView {
+                                id: addressBookDragList
+                                anchors.fill: parent
+                                anchors.margins: NuTokens.spaceXs
+                                clip: true
+                                spacing: NuTokens.spaceXs
+                                model: NuService.addressBook
+                                boundsBehavior: Flickable.StopAtBounds
+                                Basic.ScrollBar.vertical: Basic.ScrollBar { policy: Basic.ScrollBar.AsNeeded }
+
+                                delegate: Item {
+                                    id: addressBookDragItem
+                                    required property var modelData
+                                    width: addressBookDragList.width
+                                    height: 44
+                                    property string labelText: root.addressBookLabel(modelData)
+                                    property string addressText: root.addressBookAddress(modelData)
+                                    property string typeText: root.addressBookType(modelData)
+                                    property string receivedText: root.addressBookReceived(modelData)
+                                    property bool selected: root.selectedAddressBookKeys.indexOf(addressText) >= 0
+
+                                    Rectangle {
+                                        id: addressBookDragCard
+                                        anchors.fill: parent
+                                        anchors.margins: 1
+                                        radius: NuTokens.radiusSmall
+                                        color: addressBookDragItem.selected ? "#eef7ff" : NuTokens.panelBase
+                                        border.color: addressBookDragMouse.drag.active ? NuTokens.accentSky
+                                                                                      : (addressBookDragItem.selected ? NuTokens.lineStrong : NuTokens.lineSubtle)
+                                        border.width: addressBookDragMouse.drag.active || addressBookDragItem.selected ? 2 : 1
+                                        z: addressBookDragMouse.drag.active ? 20 : 0
+                                        Drag.active: addressBookDragMouse.drag.active
+                                        Drag.keys: ["defcoin-address-book"]
+                                        Drag.mimeData: { "text/plain": addressBookDragItem.addressText }
+                                        Drag.supportedActions: Qt.CopyAction
+                                        Drag.hotSpot.x: width / 2
+                                        Drag.hotSpot.y: height / 2
+
+                                        MouseArea {
+                                            id: addressBookDragMouse
+                                            anchors.fill: parent
+                                            anchors.rightMargin: 66
+                                            hoverEnabled: true
+                                            cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                            drag.target: addressBookDragCard
+                                            onPressed: root.beginAddressBookDrag(addressBookDragItem.labelText, addressBookDragItem.addressText)
+                                            onClicked: {
+                                                root.selectedAddressBookKeys = [addressBookDragItem.addressText]
+                                                addressBookTable.setSelectedKeys(root.selectedAddressBookKeys)
+                                            }
+                                            onDoubleClicked: root.addAddressBookRow(addressBookDragItem.modelData)
+                                            onReleased: {
+                                                addressBookDragCard.x = 0
+                                                addressBookDragCard.y = 0
+                                                root.clearAddressBookDragSoon()
+                                            }
+                                        }
+
+                                        Label {
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: NuTokens.spaceSm
+                                            anchors.right: addDragContactButton.left
+                                            anchors.rightMargin: NuTokens.spaceSm
+                                            anchors.top: parent.top
+                                            anchors.topMargin: 5
+                                            text: addressBookDragItem.labelText.length > 0 ? addressBookDragItem.labelText : "(no label)"
+                                            color: NuTokens.textPrimary
+                                            font.pixelSize: NuTokens.fontSmall
+                                            font.weight: Font.DemiBold
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Label {
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: NuTokens.spaceSm
+                                            anchors.right: addDragContactButton.left
+                                            anchors.rightMargin: NuTokens.spaceSm
+                                            anchors.bottom: parent.bottom
+                                            anchors.bottomMargin: 5
+                                            text: addressBookDragItem.addressText
+                                                  + (addressBookDragItem.typeText.length > 0 ? " | " + addressBookDragItem.typeText : "")
+                                                  + (addressBookDragItem.receivedText.length > 0 ? " | " + addressBookDragItem.receivedText : "")
+                                            color: NuTokens.textSecondary
+                                            font.pixelSize: 12
+                                            font.family: NuTokens.monoFont
+                                            elide: Text.ElideMiddle
+                                        }
+
+                                        NuActionButton {
+                                            id: addDragContactButton
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: NuTokens.spaceSm
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 54
+                                            height: 28
+                                            text: "Add"
+                                            helpText: "Copy this wallet address-book entry into Forensics Contacts."
+                                            onClicked: root.addAddressBookRow(addressBookDragItem.modelData)
+                                        }
+                                    }
+                                }
+
+                                Label {
+                                    anchors.centerIn: parent
+                                    visible: NuService.addressBook.length === 0
+                                    text: "No address-book entries visible.\nOpen a wallet with labels to seed Contacts."
+                                    color: NuTokens.textMuted
+                                    font.pixelSize: NuTokens.fontSmall
+                                    horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
                         }
                     }
                 }
@@ -742,9 +1130,43 @@ ColumnLayout {
         }
     }
 
+    NuDialog {
+        id: addressBookWalletApprovalDialog
+        title: "Use wallet address book?"
+        acceptText: "Use wallet"
+        cancelText: "Cancel"
+        showCancel: true
+        onAccepted: root.approveAddressBookWallet()
+        onRejected: root.pendingAddressBookWallet = ""
+
+        Label {
+            Layout.fillWidth: true
+            text: "ExpFor will ask the local Defcoin backend to open or select this Nu wallet and read visible address-book labels and addresses for the Forensics Contacts list."
+            color: NuTokens.textPrimary
+            font.pixelSize: NuTokens.fontBody
+            wrapMode: Text.WordWrap
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: "Wallet: " + NuService.walletDisplayName(root.pendingAddressBookWallet)
+            color: NuTokens.textSecondary
+            font.pixelSize: NuTokens.fontSmall
+            wrapMode: Text.WordWrap
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: "This does not unlock the wallet, request a passphrase, sign transactions, spend funds, or read private keys."
+            color: NuTokens.textSecondary
+            font.pixelSize: NuTokens.fontSmall
+            wrapMode: Text.WordWrap
+        }
+    }
+
     Window {
         id: forensicsTableWindow
-        title: "Irregular Messages"
+        title: "Message Scan"
         width: 1280
         height: 760
         minimumWidth: 860
@@ -763,7 +1185,7 @@ ColumnLayout {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Irregular Messages"
+                    text: "Message Scan"
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontTitle
                     font.weight: Font.DemiBold
@@ -888,7 +1310,7 @@ ColumnLayout {
 
             Label {
                 Layout.fillWidth: true
-                text: "Node size is based on saved addresses that also appear in the current Top 100. Each node shows rounded DFC. Line thickness is based on indexed direct spend flow between saved contact groups."
+                text: "Node size is based on saved addresses that also appear in the current largest-holder table. Each node shows rounded DFC. Line thickness is based on indexed direct spend flow between saved contact groups."
                 color: NuTokens.textSecondary
                 font.pixelSize: NuTokens.fontSmall
                 wrapMode: Text.WordWrap

@@ -962,7 +962,7 @@ private:
     bool m_explorer_top100_scanning = false;
     bool m_explorer_top100_paused_by_user = false;
     bool m_explorer_top100_focused_indexing = false;
-    QString m_explorer_top100_status = QStringLiteral("Top 100 timeline not built yet.");
+    QString m_explorer_top100_status = QStringLiteral("Holder timeline not built yet.");
     int m_explorer_top100_scan_start_height = 0;
     int m_explorer_top100_scan_height = 0;
     int m_explorer_top100_scan_end_height = 0;

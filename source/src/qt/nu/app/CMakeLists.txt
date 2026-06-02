@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(DefcoinCoreNuQml VERSION 26.6.0 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.6e" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.6f" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -274,6 +274,65 @@ else()
         COMMENT "Omitting optional Defcoin Core Nu help resources"
     )
 endif()
+
+if(APPLE)
+    set(DEFCOIN_NU_EXPFOR_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Resources/nu")
+    set(DEFCOIN_NU_EXPFOR_HELP_DIR "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Resources/DefcoinCoreNu.help")
+else()
+    set(DEFCOIN_NU_EXPFOR_RESOURCE_DIR "$<TARGET_FILE_DIR:DefcoinCoreExpFor>/nu")
+    set(DEFCOIN_NU_EXPFOR_HELP_DIR "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}/help/DefcoinCoreNu.help")
+endif()
+
+set(DEFCOIN_NU_EXPFOR_ASSET_COPY_COMMANDS)
+foreach(nu_asset IN LISTS DEFCOIN_NU_RUNTIME_ASSET_FILES)
+    file(RELATIVE_PATH nu_asset_rel "${CMAKE_CURRENT_LIST_DIR}/../assets" "${nu_asset}")
+    get_filename_component(nu_asset_rel_dir "${nu_asset_rel}" DIRECTORY)
+    list(APPEND DEFCOIN_NU_EXPFOR_ASSET_COPY_COMMANDS
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}/assets/${nu_asset_rel_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${nu_asset}" "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}/assets/${nu_asset_rel}"
+    )
+endforeach()
+
+add_custom_target(DefcoinCoreExpForResources ALL
+    DEPENDS ${DEFCOIN_NU_QML_FILES} ${DEFCOIN_NU_RUNTIME_ASSET_FILES}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_LIST_DIR}/../qml" "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}/qml"
+    ${DEFCOIN_NU_EXPFOR_ASSET_COPY_COMMANDS}
+)
+
+add_dependencies(DefcoinCoreExpForResources DefcoinCoreExpFor)
+
+if(APPLE)
+    add_custom_command(TARGET DefcoinCoreExpForResources POST_BUILD
+        COMMAND /bin/chmod u+w "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Info.plist"
+        COMMAND ${CMAKE_COMMAND}
+            "-DDEFCOIN_NU_RESOURCE_DIR=${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}"
+            "-DDEFCOIN_NU_RELEASE_NAME=${DEFCOIN_NU_RELEASE_NAME}"
+            "-DDEFCOIN_NU_SOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}"
+            "-DDEFCOIN_NU_PLIST_PATH=$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Info.plist"
+            -P "${CMAKE_CURRENT_LIST_DIR}/write_nu_build_metadata.cmake"
+        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/set_macos_launch_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Info.plist"
+        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/remove_macos_help_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Info.plist"
+        COMMAND /usr/bin/touch -ch "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>"
+        COMMENT "Writing Defcoin Core ExpFor resources and build metadata"
+    )
+else()
+    add_custom_command(TARGET DefcoinCoreExpForResources POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            "-DDEFCOIN_NU_RESOURCE_DIR=${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}"
+            "-DDEFCOIN_NU_RELEASE_NAME=${DEFCOIN_NU_RELEASE_NAME}"
+            "-DDEFCOIN_NU_SOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/write_nu_build_metadata.cmake"
+        COMMENT "Writing Defcoin Core ExpFor build metadata"
+    )
+endif()
+
+add_custom_command(TARGET DefcoinCoreExpForResources POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPFOR_HELP_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}/help"
+    COMMENT "Omitting optional Defcoin Core ExpFor help resources"
+)
 
 if(APPLE)
     add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
@@ -603,6 +662,52 @@ if(DEFCOIN_NU_BACKEND_BINARY)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_WALLET_BINARY}" "${DEFCOIN_NU_WALLET_OUTPUT}"
             COMMAND /bin/chmod 755 "${DEFCOIN_NU_WALLET_OUTPUT}"
             COMMENT "Bundling Defcoin wallet utility for Nu"
+        )
+    endif()
+    if(APPLE)
+        set(DEFCOIN_NU_EXPFOR_BACKEND_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Resources/nu/bin/defcoind")
+        set(DEFCOIN_NU_EXPFOR_CLI_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Resources/nu/bin/defcoin-cli")
+        set(DEFCOIN_NU_EXPFOR_TX_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Resources/nu/bin/defcoin-tx")
+        set(DEFCOIN_NU_EXPFOR_WALLET_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreExpFor>/Contents/Resources/nu/bin/defcoin-wallet")
+    elseif(WIN32)
+        set(DEFCOIN_NU_EXPFOR_BACKEND_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExpFor>/nu/bin/defcoind.exe")
+        set(DEFCOIN_NU_EXPFOR_CLI_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExpFor>/nu/bin/defcoin-cli.exe")
+        set(DEFCOIN_NU_EXPFOR_TX_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExpFor>/nu/bin/defcoin-tx.exe")
+        set(DEFCOIN_NU_EXPFOR_WALLET_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExpFor>/nu/bin/defcoin-wallet.exe")
+    else()
+        set(DEFCOIN_NU_EXPFOR_BACKEND_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExpFor>/nu/bin/defcoind")
+        set(DEFCOIN_NU_EXPFOR_CLI_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExpFor>/nu/bin/defcoin-cli")
+        set(DEFCOIN_NU_EXPFOR_TX_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExpFor>/nu/bin/defcoin-tx")
+        set(DEFCOIN_NU_EXPFOR_WALLET_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExpFor>/nu/bin/defcoin-wallet")
+    endif()
+    add_custom_command(TARGET DefcoinCoreExpForResources POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}/bin"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_BACKEND_BINARY}" "${DEFCOIN_NU_EXPFOR_BACKEND_OUTPUT}"
+        COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPFOR_BACKEND_OUTPUT}"
+        COMMENT "Bundling Defcoin backend for ExpFor"
+    )
+    if(DEFCOIN_NU_CLI_BINARY)
+        add_custom_command(TARGET DefcoinCoreExpForResources POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}/bin"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_CLI_BINARY}" "${DEFCOIN_NU_EXPFOR_CLI_OUTPUT}"
+            COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPFOR_CLI_OUTPUT}"
+            COMMENT "Bundling Defcoin CLI for ExpFor"
+        )
+    endif()
+    if(DEFCOIN_NU_TX_BINARY)
+        add_custom_command(TARGET DefcoinCoreExpForResources POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}/bin"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_TX_BINARY}" "${DEFCOIN_NU_EXPFOR_TX_OUTPUT}"
+            COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPFOR_TX_OUTPUT}"
+            COMMENT "Bundling Defcoin transaction utility for ExpFor"
+        )
+    endif()
+    if(DEFCOIN_NU_WALLET_BINARY)
+        add_custom_command(TARGET DefcoinCoreExpForResources POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPFOR_RESOURCE_DIR}/bin"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_WALLET_BINARY}" "${DEFCOIN_NU_EXPFOR_WALLET_OUTPUT}"
+            COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPFOR_WALLET_OUTPUT}"
+            COMMENT "Bundling Defcoin wallet utility for ExpFor"
         )
     endif()
     if(WIN32)

@@ -2,9 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import QtQuick.Controls.Basic 2.15 as Basic
 import QtQuick.Layouts 1.15
-import QtQuick.Window 2.15
 import Defcoin.Nu 1.0
 
 import "Shell"
@@ -94,73 +92,7 @@ ApplicationWindow {
             messageDialog.open()
         }
         function onExplorerWindowRequested(title, html) {
-            const explorerWindow = explorerWindowComponent.createObject(root, {
-                "title": title,
-                "explorerHtml": html
-            })
-            if (explorerWindow) explorerWindow.show()
-        }
-    }
-
-    Component {
-        id: explorerWindowComponent
-
-        Window {
-            id: explorerWindow
-            width: 920
-            height: 700
-            minimumWidth: 720
-            minimumHeight: 520
-            color: NuTokens.backgroundBase
-            property string explorerHtml: ""
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: NuTokens.spaceLg
-                spacing: NuTokens.spaceMd
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label {
-                        Layout.fillWidth: true
-                        text: explorerWindow.title
-                        color: NuTokens.textPrimary
-                        font.pixelSize: NuTokens.fontTitle
-                        font.weight: Font.DemiBold
-                        wrapMode: Text.WrapAnywhere
-                        maximumLineCount: 2
-                    }
-                    NuActionButton {
-                        text: qsTr("Close")
-                        Layout.preferredWidth: 112
-                        onClicked: explorerWindow.close()
-                    }
-                }
-
-                Basic.ScrollView {
-                    id: explorerScroll
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    contentWidth: availableWidth
-                    Basic.ScrollBar.horizontal.policy: Basic.ScrollBar.AlwaysOff
-                    clip: true
-
-                    TextEdit {
-                        width: Math.max(1, explorerScroll.availableWidth)
-                        readOnly: true
-                        selectByMouse: true
-                        persistentSelection: true
-                        textFormat: TextEdit.RichText
-                        wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
-                        text: explorerWindow.explorerHtml
-                        color: NuTokens.textPrimary
-                        selectedTextColor: NuTokens.textInverse
-                        selectionColor: NuTokens.lineStrong
-                        font.pixelSize: NuTokens.fontBody
-                        onLinkActivated: NuService.openExplorerLink(link)
-                    }
-                }
-            }
+            frame.showExplorerResult(title, html)
         }
     }
 

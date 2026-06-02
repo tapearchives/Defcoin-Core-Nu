@@ -19,9 +19,16 @@ ColumnLayout {
     property string selectedWhaleGroup: ""
     property bool active: false
     property int preferredTab: 0
+    property string sectionTitle: "Explorer"
+    property string sectionDetail: "Local block, transaction, address, Holder Atlas, and movement lookups backed by a SQLite WAL cache."
+    property string mastSearchText: ""
+    property int mastSearchNonce: 0
+    property string explorerResultTitle: ""
+    property string explorerResultHtml: ""
+    property int explorerResultNonce: 0
     property bool analyticsRequested: false
     property bool summaryRequested: false
-    property var timelineSnapshot: ({ rows: [], height: -1, status: "No Top 100 timeline snapshot loaded." })
+    property var timelineSnapshot: ({ rows: [], height: -1, status: "No holder timeline snapshot loaded." })
     property bool timelinePlaying: false
     property bool top100EndInitialized: false
     property bool top100EndEdited: false
@@ -48,12 +55,34 @@ ColumnLayout {
             explorerTabs.currentIndex = Math.max(0, Math.min(3, root.preferredTab))
     }
 
+    function applyMastSearchText() {
+        if (!searchField || root.mastSearchText.length === 0) return
+        explorerTabs.currentIndex = 0
+        searchField.text = root.mastSearchText
+    }
+
+    function applyExplorerResult() {
+        if (!explorerTabs || root.explorerResultHtml.length === 0) return
+        explorerTabs.currentIndex = 0
+    }
+
+    function contentIndexForTab(tabIndex) {
+        if (tabIndex === 1) return 2
+        if (tabIndex === 2) return 3
+        if (tabIndex === 3) return 1
+        return 0
+    }
+
     Component.onCompleted: Qt.callLater(function() {
         root.applyPreferredTab()
+        root.applyMastSearchText()
+        root.applyExplorerResult()
         root.maybeRefreshAnalyticsForTab()
     })
 
     onPreferredTabChanged: if (root.active) root.applyPreferredTab()
+    onMastSearchNonceChanged: Qt.callLater(root.applyMastSearchText)
+    onExplorerResultNonceChanged: Qt.callLater(root.applyExplorerResult)
 
     function indexPercentText() {
         if (NuService.explorerIndexTip <= 0) return "0.00%"
@@ -129,9 +158,9 @@ ColumnLayout {
 
     function maybeRefreshAnalyticsForTab() {
         if (!root.active || root.analyticsRequested || !explorerTabs) return
-        if (explorerTabs.currentIndex === 2)
+        if (explorerTabs.currentIndex === 1)
             root.refreshAnalytics("rich")
-        else if (explorerTabs.currentIndex === 3)
+        else if (explorerTabs.currentIndex === 2)
             root.refreshAnalytics("movements")
     }
 
@@ -249,12 +278,12 @@ ColumnLayout {
         const top100 = top1_25 + top26_50 + top51_75 + top76_100
         const rest = Math.max(0, total - top100)
         return [
-            root.distributionRow("#db38b8", "Top 1-25", top1_25, total, true),
-            root.distributionRow("#48bd91", "Top 26-50", top26_50, total, true),
-            root.distributionRow("#3d9ddd", "Top 51-75", top51_75, total, true),
-            root.distributionRow("#ead934", "Top 76-100", top76_100, total, true),
+            root.distributionRow("#db38b8", "Ranks 1-25", top1_25, total, true),
+            root.distributionRow("#48bd91", "Ranks 26-50", top26_50, total, true),
+            root.distributionRow("#3d9ddd", "Ranks 51-75", top51_75, total, true),
+            root.distributionRow("#ead934", "Ranks 76-100", top76_100, total, true),
             root.distributionRow("#8b95a1", "101+", rest, total, true),
-            root.distributionRow("", "Top 1-100 Total", top100, total, false),
+            root.distributionRow("", "Ranks 1-100 Total", top100, total, false),
             root.distributionRow("", "Total", total, total, false),
             { cells: ["", "Total Wallet Addresses", root.explorerAddressCountText(), ""],
               meta: { includeInPie: false, label: "Total Wallet Addresses" } }
@@ -729,8 +758,8 @@ ColumnLayout {
 
     NuPageHeader {
         Layout.fillWidth: true
-        title: "Explorer"
-        detail: "Local block, transaction, address, Top 100, and movement lookups backed by a SQLite WAL cache."
+        title: root.sectionTitle
+        detail: root.sectionDetail
     }
 
     NuPanel {
@@ -819,7 +848,7 @@ ColumnLayout {
                     Layout.preferredWidth: 148
                     Layout.alignment: Qt.AlignTop
                     text: "Refresh stats"
-                    helpText: "Reload Top 100 and movement summaries from the local SQLite explorer index."
+                    helpText: "Reload holder atlas and movement summaries from the local SQLite explorer index."
                     onClicked: root.refreshAnalytics()
                 }
             }
@@ -842,8 +871,8 @@ ColumnLayout {
                 NuMetricRow { label: "Tip"; value: String(NuService.explorerIndexTip) }
                 NuMetricRow { label: "Blocks"; value: String(NuService.explorerIndexedBlockCount) }
                 NuMetricRow { label: "Outputs"; value: String(NuService.explorerIndexedOutputCount) }
-                NuMetricRow { label: "Top 100"; value: String(NuService.explorerRichList.length) }
-                NuMetricRow { label: "Top 100 checkpoints"; value: String(NuService.explorerTop100TimelineEventCount) }
+                NuMetricRow { label: "Largest holders"; value: String(NuService.explorerRichList.length) }
+                NuMetricRow { label: "Holder checkpoints"; value: String(NuService.explorerTop100TimelineEventCount) }
                 NuMetricRow { label: "Movements"; value: String(NuService.explorerMovements.length) }
             }
         }
@@ -854,16 +883,16 @@ ColumnLayout {
         Layout.fillWidth: true
         onCurrentIndexChanged: root.maybeRefreshAnalyticsForTab()
         NuTabButton { text: "Search" }
-        NuTabButton { text: "Index" }
-        NuTabButton { text: "Top 100" }
-        NuTabButton { text: "Movements" }
+        NuTabButton { text: "Holder Atlas" }
+        NuTabButton { text: "Movement Map" }
+        NuTabButton { text: "Index Engines" }
     }
 
     StackLayout {
         Layout.fillWidth: true
         Layout.fillHeight: true
         clip: true
-        currentIndex: explorerTabs.currentIndex
+        currentIndex: root.contentIndexForTab(explorerTabs.currentIndex)
 
         NuPanel {
             ColumnLayout {
@@ -912,8 +941,53 @@ ColumnLayout {
                         Layout.preferredWidth: 150
                         Layout.preferredHeight: 56
                         primary: true
-                        helpText: "Open the matching item in an independent internal explorer window."
+                        helpText: "Show the matching item in the Explorer results panel."
                         onClicked: NuService.searchExplorer(searchField.text)
+                    }
+                }
+
+                NuPanel {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.max(220, Math.min(340, root.height * 0.3))
+                    visible: root.explorerResultHtml.length > 0
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: NuTokens.spaceSm
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Lookup result"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontBodyLarge
+                            font.weight: Font.DemiBold
+                            wrapMode: Text.WrapAnywhere
+                            maximumLineCount: 2
+                        }
+
+                        Basic.ScrollView {
+                            id: explorerResultScroll
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            contentWidth: availableWidth
+                            Basic.ScrollBar.horizontal.policy: Basic.ScrollBar.AlwaysOff
+                            clip: true
+
+                            TextEdit {
+                                width: Math.max(1, explorerResultScroll.availableWidth)
+                                readOnly: true
+                                selectByMouse: true
+                                persistentSelection: true
+                                textFormat: TextEdit.RichText
+                                wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                                text: root.explorerResultHtml
+                                color: NuTokens.textPrimary
+                                selectedTextColor: NuTokens.textInverse
+                                selectionColor: NuTokens.lineStrong
+                                font.pixelSize: NuTokens.fontBody
+                                onLinkActivated: NuService.openExplorerLink(link)
+                            }
+                        }
                     }
                 }
 
@@ -980,7 +1054,7 @@ ColumnLayout {
                         width: 130
                         enabled: !NuService.explorerIndexing
                         danger: true
-                        helpText: "Clear only the block, transaction, Top 100, and movement index. Recent manual lookups are kept."
+                        helpText: "Clear only the block, transaction, Holder Atlas, and movement index. Recent manual lookups are kept."
                         onClicked: NuService.resetExplorerIndex()
                     }
 
@@ -1003,7 +1077,7 @@ ColumnLayout {
                     spacing: NuTokens.spaceSm
                     Label {
                         Layout.fillWidth: true
-                        text: "Top 100 timeline index"
+                        text: "Holder timeline index"
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontBodyLarge
                         font.weight: Font.DemiBold
@@ -1011,7 +1085,7 @@ ColumnLayout {
                     NuActionButton {
                         width: 74
                         text: "Copy"
-                        helpText: "Copy the Top 100 timeline status or error text."
+                        helpText: "Copy the holder timeline status or error text."
                         onClicked: {
                             NuService.copyText(NuService.explorerTop100Status)
                         }
@@ -1042,7 +1116,7 @@ ColumnLayout {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Top 100 timeline can scan through block " + NuService.explorerIndexTip + ", the Explorer indexed height."
+                    text: "Holder timeline can scan through block " + NuService.explorerIndexTip + ", the Explorer indexed height."
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap
@@ -1062,7 +1136,7 @@ ColumnLayout {
                         width: 110
                         text: "0"
                         validator: IntValidator { bottom: 0; top: 99999999 }
-                        helpText: "First block height to include when rebuilding the sparse Top 100 over-time index."
+                        helpText: "First block height to include when rebuilding the sparse holder over-time index."
                     }
                     Label {
                         text: "Stop"
@@ -1087,7 +1161,7 @@ ColumnLayout {
                         text: NuService.explorerTop100Scanning ? "Scanning" : "Start scan"
                         enabled: !NuService.explorerTop100Scanning && !NuService.explorerIndexing
                         primary: enabled
-                        helpText: "Build the exact sparse Top 100 timeline from local balance deltas."
+                        helpText: "Build the exact sparse holder timeline from local balance deltas."
                         onClicked: NuService.startExplorerTop100Timeline(parseInt(top100StartField.text) || 0,
                                                                           top100EndField.text.length > 0 ? parseInt(top100EndField.text) : NuService.explorerIndexTip)
                     }
@@ -1095,14 +1169,14 @@ ColumnLayout {
                         width: 112
                         text: "Pause scan"
                         enabled: NuService.explorerTop100Scanning
-                        helpText: "Pause the Top 100 timeline scan after the current chunk."
+                        helpText: "Pause the holder timeline scan after the current chunk."
                         onClicked: NuService.stopExplorerTop100Timeline()
                     }
                     NuActionButton {
                         width: 152
                         text: "Scan remaining"
                         enabled: !NuService.explorerTop100Scanning && !NuService.explorerIndexing
-                        helpText: "Scan the next missing Top 100 timeline range between block 0 and the indexed tip."
+                        helpText: "Scan the next missing holder timeline range between block 0 and the indexed tip."
                         onClicked: NuService.scanRemainingExplorerTop100Timeline()
                     }
                     NuActionButton {
@@ -1110,7 +1184,7 @@ ColumnLayout {
                         text: "Clear timeline"
                         enabled: !NuService.explorerTop100Scanning && !NuService.explorerIndexing
                         danger: true
-                        helpText: "Delete only the Top 100 over-time checkpoint rows and ranges."
+                        helpText: "Delete only the holder over-time checkpoint rows and ranges."
                         onClicked: NuService.resetExplorerTop100Timeline()
                     }
                 }
@@ -1123,7 +1197,7 @@ ColumnLayout {
                     NuCheckBox {
                         text: "High intensity (uses more resources)"
                         checked: NuService.explorerTop100FocusedIndexing
-                        helpText: "When enabled, Nu uses larger Explorer and Top 100 batches, larger SQLite cache settings, fewer UI refreshes, and tries to raise indexing priority. Use this for a dedicated indexing run on a mostly idle machine."
+                        helpText: "When enabled, Nu uses larger Explorer and Holder Atlas batches, larger SQLite cache settings, fewer UI refreshes, and tries to raise indexing priority. Use this for a dedicated indexing run on a mostly idle machine."
                         onToggled: NuService.explorerTop100FocusedIndexing = checked
                     }
 
@@ -1234,10 +1308,10 @@ ColumnLayout {
                             ctx.textAlign = "center"
                             ctx.textBaseline = "middle"
                             ctx.font = "700 14px " + NuTokens.bodyFont
-                            ctx.fillText("Top 100", cx, cy - 8)
+                            ctx.fillText("Largest", cx, cy - 8)
                             ctx.font = "11px " + NuTokens.bodyFont
                             ctx.fillStyle = NuTokens.textSecondary
-                            ctx.fillText("indexed balances", cx, cy + 10)
+                            ctx.fillText("holders", cx, cy + 10)
                         }
 
                         MouseArea {
@@ -1264,14 +1338,14 @@ ColumnLayout {
                         spacing: NuTokens.spaceSm
                         Label {
                             Layout.fillWidth: true
-                            text: "Top 100 Address Balance Holders"
+                            text: "Largest Holders"
                             color: NuTokens.textPrimary
                             font.pixelSize: NuTokens.fontBodyLarge
                             font.weight: Font.DemiBold
                         }
                         Label {
                             Layout.fillWidth: true
-                            text: "Ranked by unspent balance in the local explorer index. This view is complete only through the indexed block height shown above."
+                            text: "The richest indexed addresses ranked by current unspent balance. This is the direct holder leaderboard and is complete only through the indexed block height shown above."
                             color: NuTokens.textSecondary
                             font.pixelSize: NuTokens.fontSmall
                             wrapMode: Text.WordWrap
@@ -1281,19 +1355,19 @@ ColumnLayout {
                             spacing: NuTokens.spaceMd
                             NuActionButton {
                                 width: 150
-                                text: "Refresh Top 100"
+                                text: "Refresh holders"
                                 enabled: NuService.explorerIndexedBlockCount > 0
                                          && NuService.explorerIndexTip > 0
                                          && NuService.explorerIndexHeight > NuService.explorerIndexTip
                                          && !NuService.explorerIndexing
-                                helpText: "Reload the Top 100 table after the local Explorer index is complete, usually after new blocks arrive."
+                                helpText: "Reload the largest-holder table after the local Explorer index is complete, usually after new blocks arrive."
                                 onClicked: root.refreshAnalytics("rich")
                             }
                             NuActionButton {
                                 width: 118
                                 text: "Timeline"
                                 enabled: NuService.explorerTop100TimelineEventCount > 0
-                                helpText: "Open the sparse Top 100 over-time animation window."
+                                helpText: "Open the sparse largest-holder over-time animation window."
                                 onClicked: {
                                     root.loadTimelineSnapshotAtPosition(1)
                                     top100TimelineWindow.showFullScreen()
@@ -1308,7 +1382,7 @@ ColumnLayout {
                         Label {
                             Layout.fillWidth: true
                             visible: NuService.explorerIndexing || NuService.explorerIndexHeight <= NuService.explorerIndexTip
-                            text: "Refresh Top 100 enables after the Explorer index reaches the current chain tip; until then this pane shows the latest cached partial result."
+                            text: "Refresh holders enables after the Explorer index reaches the current chain tip; until then this pane shows the latest cached partial result."
                             color: NuTokens.textMuted
                             font.pixelSize: NuTokens.fontTiny
                             wrapMode: Text.WordWrap
@@ -1352,7 +1426,7 @@ ColumnLayout {
                     columnTypes: ["swatch", "number", "address", "amount", "number", "amount", "number", "number"]
                     columnWeights: [0.25, 0.45, 3.1, 1.1, 0.75, 1.1, 0.55, 0.55]
                     rows: NuService.explorerRichList
-                    emptyText: "Top 100 appears after the Explorer index contains spendable outputs."
+                    emptyText: "Largest holders appear after the Explorer index contains spendable outputs."
                     defaultSortColumn: 1
                     rowSelectionEnabled: true
                     plainClickSelectsRows: true
@@ -1372,7 +1446,7 @@ ColumnLayout {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Wealth Distribution"
+                    text: "Supply Bands"
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontBodyLarge
                     font.weight: Font.DemiBold
@@ -1380,7 +1454,7 @@ ColumnLayout {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Grouped like the eIquidus rich-list view: four Top 100 bands plus every indexed address outside the Top 100."
+                    text: "A banded view of how indexed supply is split across the first 25, next 25, third 25, fourth 25, and all other addresses."
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap
@@ -1393,7 +1467,7 @@ ColumnLayout {
                         id: wealthDistributionPie
                         Layout.preferredWidth: 260
                         Layout.preferredHeight: 260
-                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.wealthDistributionRows(), "Wealth", "distribution", root.selectedWealthGroup)
+                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.wealthDistributionRows(), "Supply", "bands", root.selectedWealthGroup)
                         MouseArea {
                             anchors.fill: parent
                             hoverEnabled: true
@@ -1412,7 +1486,7 @@ ColumnLayout {
                         columnTypes: ["swatch", "text", "amount", "number"]
                         columnWeights: [0.25, 1.4, 1.2, 0.55]
                         rows: root.wealthDistributionRows()
-                        emptyText: "Build the Explorer index and refresh Top 100 to calculate wealth distribution."
+                        emptyText: "Build the Explorer index and refresh holders to calculate supply bands."
                         defaultSortColumn: -1
                         rowSelectionEnabled: true
                         plainClickSelectsRows: true
@@ -1426,7 +1500,7 @@ ColumnLayout {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Whale Concentration"
+                    text: "Whale Lens"
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontBodyLarge
                     font.weight: Font.DemiBold
@@ -1434,7 +1508,7 @@ ColumnLayout {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "A Pareto-style concentration view separates the largest address, the next nine addresses, the rest of the Top 25, the rest of the Top 100, and everyone else."
+                    text: "A concentration view that isolates the largest address, ranks 2-10, ranks 11-25, ranks 26-100, and everyone else."
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap
@@ -1447,7 +1521,7 @@ ColumnLayout {
                         id: whaleConcentrationPie
                         Layout.preferredWidth: 260
                         Layout.preferredHeight: 260
-                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.whaleConcentrationRows(), "Whale", "concentration", root.selectedWhaleGroup)
+                        onPaint: root.drawDistributionPie(getContext("2d"), width, height, root.whaleConcentrationRows(), "Whale", "lens", root.selectedWhaleGroup)
                         MouseArea {
                             anchors.fill: parent
                             hoverEnabled: true
@@ -1466,7 +1540,7 @@ ColumnLayout {
                         columnTypes: ["swatch", "text", "amount", "number"]
                         columnWeights: [0.25, 1.4, 1.2, 0.55]
                         rows: root.whaleConcentrationRows()
-                        emptyText: "Build the Explorer index and refresh Top 100 to calculate concentration."
+                        emptyText: "Build the Explorer index and refresh holders to calculate concentration."
                         defaultSortColumn: -1
                         rowSelectionEnabled: true
                         plainClickSelectsRows: true
@@ -1902,7 +1976,7 @@ ColumnLayout {
             minimumWidth: 760
             minimumHeight: 560
             visible: false
-            title: "Top 100 Timeline"
+            title: "Holder Timeline"
             color: NuTokens.backgroundBase
 
             ColumnLayout {
@@ -1915,7 +1989,7 @@ ColumnLayout {
                 spacing: NuTokens.spaceSm
                 Label {
                     Layout.fillWidth: true
-                    text: "Top 100 Timeline"
+                    text: "Holder Timeline"
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontTitle
                     font.weight: Font.DemiBold
@@ -1930,7 +2004,7 @@ ColumnLayout {
                 NuActionButton {
                     Layout.preferredWidth: 94
                     text: root.timelinePlaying ? "Pause" : "Play"
-                    helpText: "Animate the pie chart forward through stored Top 100 timeline checkpoints."
+                    helpText: "Animate the pie chart forward through stored largest-holder timeline checkpoints."
                     onClicked: root.timelinePlaying = !root.timelinePlaying
                 }
             }
@@ -1960,7 +2034,7 @@ ColumnLayout {
                         ctx.textAlign = "center"
                         ctx.textBaseline = "middle"
                         ctx.font = "13px " + NuTokens.bodyFont
-                        ctx.fillText("Build Top 100 timeline", cx, cy)
+                        ctx.fillText("Build holder timeline", cx, cy)
                         return
                     }
                     let start = -Math.PI / 2
@@ -1998,7 +2072,7 @@ ColumnLayout {
                     ctx.textAlign = "center"
                     ctx.textBaseline = "middle"
                     ctx.font = "700 15px " + NuTokens.bodyFont
-                    ctx.fillText("Top 100", cx, cy - 8)
+                    ctx.fillText("Holders", cx, cy - 8)
                     ctx.font = "12px " + NuTokens.bodyFont
                     ctx.fillStyle = NuTokens.textSecondary
                     ctx.fillText("timeline shares", cx, cy + 12)
@@ -2040,7 +2114,7 @@ ColumnLayout {
                 columnTypes: ["swatch", "number", "address", "number"]
                 columnWeights: [0.25, 0.4, 3.2, 0.65]
                 rows: root.timelineSnapshot.rows || []
-                emptyText: "No Top 100 timeline snapshot loaded."
+                emptyText: "No holder timeline snapshot loaded."
                 defaultSortColumn: 1
                 rowSelectionEnabled: true
                 plainClickSelectsRows: true
@@ -2189,7 +2263,7 @@ ColumnLayout {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "Node size is based on saved addresses that also appear in the current Top 100. Line thickness is based on indexed direct spend flow between saved contact groups."
+                    text: "Node size is based on saved addresses that also appear in the current largest-holder table. Line thickness is based on indexed direct spend flow between saved contact groups."
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap

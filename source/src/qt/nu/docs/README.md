@@ -39,6 +39,9 @@ resources/nu.qrc          Qt resource manifest for the Nu app
 See `functionality-map.md` for the current Litecoin/Defcoin wallet function
 coverage map.
 
+See `defcoin-core-nu-goals.md` for the Defcoin Core Nu and ExpFor product,
+community, explorer, and forensics goals.
+
 See `backend-frontend-boundary.md` for the service-boundary rules that keep
 wallet keys, signing, validation, and networking out of QML.
 
@@ -46,7 +49,7 @@ See `build-and-installer-runbook.md` for the current local build, staging,
 installer, cleanup, and verification procedure.
 
 See `brand-logo-text.md` for the canonical Defcoin Core Nu wordmark font,
-kerning, and DMG layout rules.
+kerning, ExpFor third-line variant, and DMG layout rules.
 
 See `bitcoin-core-qml-comparison.md` for the architecture comparison with
 Bitcoin Core QML.

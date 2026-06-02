@@ -13,6 +13,42 @@ Rectangle {
     border.color: NuTokens.lineSubtle
     implicitHeight: contentColumn.implicitHeight + NuTokens.spaceSm * 2
 
+    property bool showExplorerIndexTools: false
+
+    signal explorerSearchRequested(string query)
+
+    function runExplorerSearch() {
+        const clean = String(mastSearchField.text || "").trim()
+        if (clean.length === 0) return
+        root.explorerSearchRequested(clean)
+    }
+
+    function explorerIndexPercentText() {
+        if (NuService.explorerIndexTip <= 0) return "0.00%"
+        const progress = Math.max(0, Math.min(1, NuService.explorerIndexHeight / NuService.explorerIndexTip))
+        return (progress * 100).toFixed(2) + "%"
+    }
+
+    function holderTimelineValue() {
+        if (NuService.explorerTop100Scanning)
+            return NuService.explorerTop100ScanHeight + " / " + NuService.explorerTop100ScanEndHeight
+        return NuService.explorerTop100TimelineEventCount + " checkpoints"
+    }
+
+    function holderTimelineLabel() {
+        if (NuService.explorerTop100Scanning) return "Holder timeline indexing"
+        if (NuService.explorerTop100TimelineEventCount > 0) return "Holder timeline ready"
+        return "Holder timeline idle"
+    }
+
+    function forensicsProgressValue() {
+        if (NuService.forensicsScanning && NuService.forensicsScanTip > 0) {
+            const progress = Math.max(0, Math.min(1, NuService.forensicsScanHeight / NuService.forensicsScanTip))
+            return (progress * 100).toFixed(2) + "%"
+        }
+        return NuService.forensicsIrregularMessageCount + " rows"
+    }
+
     function networkStatusLabel() {
         if (!NuService.rpcConnected)
             return NuService.connectionStatus === "Starting backend" ? "Starting backend..." : "Connecting to backend..."
@@ -61,6 +97,89 @@ Rectangle {
         anchors.topMargin: NuTokens.spaceSm
         anchors.bottomMargin: NuTokens.spaceSm
         spacing: NuTokens.spaceSm
+
+        RowLayout {
+            id: searchRow
+            visible: root.showExplorerIndexTools
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? implicitHeight : 0
+            spacing: NuTokens.spaceMd
+
+            Item { Layout.fillWidth: true }
+
+            NuTextField {
+                id: mastSearchField
+                Layout.preferredWidth: Math.min(640, Math.max(420, root.width * 0.52))
+                Layout.maximumWidth: 720
+                Layout.preferredHeight: 42
+                placeholderText: "Search wallet address, txid, block hash, or height..."
+                helpText: "Search the local Defcoin explorer for a wallet address, transaction ID, block hash, or block height."
+                Keys.onPressed: (event) => {
+                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        root.runExplorerSearch()
+                        event.accepted = true
+                    }
+                }
+            }
+
+            NuActionButton {
+                Layout.preferredWidth: 96
+                Layout.preferredHeight: 42
+                text: "Search"
+                primary: true
+                helpText: "Switch to Explorer and open the matching local lookup result."
+                onClicked: root.runExplorerSearch()
+            }
+
+            Item { Layout.fillWidth: true }
+        }
+
+        Flow {
+            id: indexFlow
+            visible: root.showExplorerIndexTools
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? indexFlow.implicitHeight : 0
+            spacing: NuTokens.spaceLg
+
+            NuStatusDot {
+                label: NuService.explorerIndexing ? "Explorer indexing" : "Explorer index idle"
+                stateColor: NuService.explorerIndexing ? NuTokens.stateWarning : NuTokens.stateInactive
+                helpText: NuService.explorerIndexStatus
+                labelMaximumWidth: root.width < 900 ? 190 : 230
+            }
+
+            NuMetricRow {
+                label: "Explorer"
+                value: root.explorerIndexPercentText()
+                helpText: "Progress of the local block, transaction, address, and output cache."
+            }
+
+            NuStatusDot {
+                label: root.holderTimelineLabel()
+                stateColor: NuService.explorerTop100Scanning ? NuTokens.stateWarning : (NuService.explorerTop100TimelineEventCount > 0 ? NuTokens.stateConnected : NuTokens.stateInactive)
+                helpText: NuService.explorerTop100Status
+                labelMaximumWidth: root.width < 900 ? 200 : 260
+            }
+
+            NuMetricRow {
+                label: "Holder Atlas"
+                value: root.holderTimelineValue()
+                valueMaximumWidth: root.width < 900 ? 120 : 180
+                helpText: "Sparse over-time checkpoints for largest-holder analysis."
+            }
+
+            NuMetricRow {
+                label: "Movements"
+                value: NuService.explorerMovements.length + " rows"
+                helpText: "Loaded large-movement rows from the local Explorer index."
+            }
+
+            NuMetricRow {
+                label: "Forensics"
+                value: root.forensicsProgressValue()
+                helpText: NuService.forensicsScanStatus
+            }
+        }
 
         Flow {
             id: statusFlow

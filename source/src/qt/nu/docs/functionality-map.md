@@ -16,8 +16,8 @@ review history, manage wallets, inspect the node, and configure the app.
 | Activity | Transaction history, date/type/search filters, CSV export | History is a retrieval task, not part of payment composition. |
 | Wallet | Wallet files, backup, BIP39 recovery, compatibility encoding tools, passphrase protection, message signing, and address book | Key and wallet maintenance are now first-class wallet tasks instead of being buried under Settings. |
 | Mining | External miner executable setup, pool presets, CPU thread/nice settings, and miner output | Mining helpers stay separate from wallet spending and node diagnostics. |
-| Explorer | Local block, transaction, address, rich-list, and movement lookups | Chain-wide public data stays separate from wallet-owned funds and keys. |
-| Forensics | Irregular OP_RETURN message discovery | Blockchain oddities are readable without exposing raw RPC or requiring manual block scans. |
+| Explorer | Explorer Search, Holder Atlas, Movement Map, and Index Engines | Chain-wide public data stays separate from wallet-owned funds and keys; ExpFor groups lookup, analysis, and indexing by user task. |
+| Forensics | Message Scan, Witness Repair, and Contacts | Blockchain oddities, maintenance checks, and local address clusters are readable without exposing raw RPC or requiring manual block scans. |
 | Diagnostics | Status, peers, traffic, debug log, local RPC console | Node transparency is preserved while keeping it out of the main wallet path. |
 | Settings | Network controls, display behavior, update checks, and background-close behavior | App preferences stay together; wallet operations live in Wallet. Node diagnostics stay in Diagnostics. |
 
@@ -67,7 +67,7 @@ review history, manage wallets, inspect the node, and configure the app.
 | Debug log tail | Diagnostics > Log | `debug.log` tail | Direct UI | Read-only, scoped diagnostics. |
 | Open full debug log | Diagnostics > Log | system open `debug.log` | Direct UI | Maintenance action stays with diagnostic log context. |
 | RPC console | Diagnostics > Console | local JSON-RPC | Direct UI for advanced users | Preserves full Litecoin/Defcoin command surface while keeping ordinary users on safer flows. |
-| Irregular OP_RETURN messages | Forensics > Irregular Messages | `scanirregularmessages` | Direct UI | Flags accepted-chain message outputs that bypass standard relay expectations or burn DFC. |
+| Irregular OP_RETURN messages | Forensics > Message Scan | `scanirregularmessages` | Direct UI | Flags accepted-chain message outputs that bypass standard relay expectations or burn DFC. |
 | Witness block storage repair | Forensics > Witness Repair | `repairwitnessblockdata` | Direct UI | Inspects and optionally rewinds/redownloads post-activation blocks whose local stored bodies are missing witness data, without loading the irregular-message table. |
 | About | About menu, Settings > About | local text/assets | Direct UI | Standard desktop behavior retained. |
 | Options/preferences | Settings | QML settings + RPC | Direct UI | Duplicate controls removed; Defcoin user-agent filter appears in Network only. |

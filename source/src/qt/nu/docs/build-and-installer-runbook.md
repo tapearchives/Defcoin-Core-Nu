@@ -1,6 +1,6 @@
 # Defcoin Core Nu Build And Installer Runbook
 
-Last updated: 2026-05-29
+Last updated: 2026-06-01
 
 This runbook is public-safe. It intentionally avoids local workstation paths,
 mounted volume names, user names, and machine-specific details.
@@ -68,6 +68,18 @@ src/qt/nu/app/stage_macos_distribution.sh \
   "$SRC/build/nu-qml-arm64/DefcoinCoreNu.app" \
   "$OUT/Nu-26.5.5w/apple-silicon" \
   "26.5.5w" \
+  "macOS-AppleSilicon"
+```
+
+The same staging helper detects ExpFor bundles and switches the product name,
+DMG filename, executable name, background filename, and three-line ExpFor
+wordmark automatically:
+
+```sh
+src/qt/nu/app/stage_macos_distribution.sh \
+  "$SRC/build/nu-qml-arm64/DefcoinCoreExpFor.app" \
+  "$OUT/ExpFor-26.6e-20260601/apple-silicon" \
+  "26.6e" \
   "macOS-AppleSilicon"
 ```
 
