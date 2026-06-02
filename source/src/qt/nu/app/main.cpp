@@ -379,7 +379,7 @@ int main(int argc, char* argv[])
         displaySplash.fill(QColor("#05080a"));
         drawNuBrandSplash(displaySplash, resourceRoot);
         const QString splashText = QStringLiteral(
-            "%1 v%2 • Core Memories • Backend: Litecoin Core v0.21.5.5 + Defcoin parameters\n"
+            "%1 v%2 • Core Memories • Backend originated from Litecoin Core v0.21.5.5 + Defcoin parameters\n"
             "© 2014-2026 Defcoin Core developers • © 2011-2026 Litecoin Core developers • © 2009-2026 Bitcoin Core developers")
             .arg(productName(), QStringLiteral(DEFCOIN_NU_VERSION));
         QPainter painter(&displaySplash);

@@ -48,6 +48,9 @@ wallet keys, signing, validation, and networking out of QML.
 See `build-and-installer-runbook.md` for the current local build, staging,
 installer, cleanup, and verification procedure.
 
+See `initial-launch-crash-prevention.md` for the confirmed recent launch-crash
+causes, smoke gates, and triage order for new app bundles.
+
 See `brand-logo-text.md` for the canonical Defcoin Core Nu wordmark font,
 kerning, ExpFor third-line variant, and DMG layout rules.
 

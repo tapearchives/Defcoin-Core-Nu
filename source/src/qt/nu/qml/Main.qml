@@ -176,7 +176,7 @@ ApplicationWindow {
     }
 
     function basicAboutText() {
-        return "Defcoin Core Nu v" + root.buildVersion + " - " + root.releaseCodeName + ". New Qt Quick interface build. Backend derived from Litecoin Core v0.21.5.5 with Defcoin consensus and network parameters. Verify recipients, amounts, and backups carefully before use. © 2014-2026 The Defcoin Core developers. © 2011-2026 The Litecoin Core developers. © 2009-2021 The Bitcoin Core developers."
+        return "Defcoin Core Nu v" + root.buildVersion + " - " + root.releaseCodeName + ". New Qt Quick interface build. Backend originated from Litecoin Core v0.21.5.5 with Defcoin consensus and network parameters. Verify recipients, amounts, and backups carefully before use. © 2014-2026 The Defcoin Core developers. © 2011-2026 The Litecoin Core developers. © 2009-2021 The Bitcoin Core developers."
     }
 
     function showHelpPage(windowTitle, page) {
@@ -196,7 +196,7 @@ ApplicationWindow {
     function nuBuildDetailsHtml() {
         return "<h1>Defcoin Core Nu v" + root.buildVersion + "</h1>"
              + "<p><b>Codename:</b> Core Memories</p>"
-             + "<p><b>Status:</b> Nu is a new Qt Quick interface for Defcoin Core. It keeps the Litecoin Core v0.21.5.5-derived backend, Defcoin consensus parameters, and the existing Defcoin data directory, while introducing a desktop shell inspired by Nothing Company product design and the Bitcoin Design Community.</p>"
+             + "<p><b>Status:</b> Nu is a new Qt Quick interface for Defcoin Core. Its backend originated from Litecoin Core v0.21.5.5 and keeps Defcoin consensus parameters and the existing Defcoin data directory, while introducing a desktop shell inspired by Nothing Company product design and the Bitcoin Design Community.</p>"
              + "<h2>Build metadata</h2>"
              + "<ul>"
              + "<li><b>Release:</b> " + root.buildVersion + "</li>"
