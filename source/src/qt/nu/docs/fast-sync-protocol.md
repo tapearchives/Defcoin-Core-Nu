@@ -162,6 +162,12 @@ Tracked per protocol:
 - UDP checksum/retransmit/error counts.
 - UDP cooldown after failures.
 
+The TCP and UDP selector counters are maintained through one shared
+transport-scoring path. The transport label decides which counters are updated;
+the scoring, reliability, and quota logic is otherwise protocol-agnostic. This
+keeps UDP from developing a separate hidden trust or scheduling model while
+leaving TCP/Core behavior intact.
+
 Warmup requires four UDP samples when UDP is possible. TCP-only peer traffic is
 not allowed to swamp the comparison: TCP success samples are capped relative to
 the number of UDP samples when calculating the selector score.
@@ -254,6 +260,10 @@ Reusable TCP/Core protections to keep applying to UDP:
   UDP request.
 - Request block data only from connected peers whose headers indicate they
   should have that block.
+- Enable UDP probing only when there is an actual connected Nu peer; LAN
+  discovery alone is not enough to start block-data requests.
+- Use large UDP datagrams only for actual private/local Fast Sync peers, not
+  merely because LAN discovery is enabled.
 - Keep one clear active owner for a requested block; release it on timeout,
   checksum failure, validation failure, or completion.
 - Feed completed blocks through normal Core validation instead of trusting the

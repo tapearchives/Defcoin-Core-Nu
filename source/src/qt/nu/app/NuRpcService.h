@@ -590,6 +590,12 @@ private:
     QString syncTransportDecisionSummary() const;
     QString syncTransportProbeSummary() const;
     void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes);
+    enum class FastSyncTransport {
+        TcpCore,
+        UdpFastSync
+    };
+    void recordFastSyncTransportSuccess(FastSyncTransport transport, int blocks, int height, double seconds);
+    void recordFastSyncTransportFailure(FastSyncTransport transport);
     void recordFastSyncUdpSuccess(int height, qint64 latency_ms);
     void recordFastSyncUdpFailure();
     void recordFastSyncTcpProgress(int blocks, double seconds);
@@ -891,6 +897,7 @@ private:
     QString m_lan_fast_sync_block_hash;
     QString m_lan_fast_sync_block_checksum;
     QHash<int, QByteArray> m_lan_fast_sync_chunks;
+    int m_lan_fast_sync_assembled_bytes = 0;
     int m_lan_fast_sync_current_height = -1;
     int m_lan_fast_sync_expected_chunks = 0;
     int m_lan_fast_sync_expected_size = 0;

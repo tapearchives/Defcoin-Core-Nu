@@ -4027,13 +4027,16 @@ void NuRpcService::ensureLanFastSyncSocket()
 
 void NuRpcService::stopLanFastSyncSocket()
 {
+    releaseLanFastSyncReservation();
     if (m_lan_fast_sync_socket) {
         m_lan_fast_sync_socket->close();
         m_lan_fast_sync_socket->deleteLater();
         m_lan_fast_sync_socket = nullptr;
     }
     m_lan_fast_sync_chunks.clear();
+    m_lan_fast_sync_assembled_bytes = 0;
     m_lan_fast_sync_request_in_flight = false;
+    m_lan_fast_sync_reserve_in_flight = false;
     m_lan_fast_sync_submit_in_flight = false;
 }
 
@@ -4194,51 +4197,68 @@ void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 receive
     }
 }
 
+void NuRpcService::recordFastSyncTransportSuccess(FastSyncTransport transport, int blocks, int height, double seconds)
+{
+    if (blocks <= 0 || seconds <= 0.0) return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const double sample = static_cast<double>(blocks) / seconds;
+    double& ewma = transport == FastSyncTransport::UdpFastSync
+        ? m_fast_sync_udp_ewma_blocks_per_second
+        : m_fast_sync_tcp_ewma_blocks_per_second;
+    ewma = ewma <= 0.0
+        ? sample
+        : (FAST_SYNC_PROTOCOL_EWMA_ALPHA * sample) + ((1.0 - FAST_SYNC_PROTOCOL_EWMA_ALPHA) * ewma);
+
+    if (transport == FastSyncTransport::UdpFastSync) {
+        if (m_lan_fast_sync_udp_first_activity_ms <= 0) {
+            m_lan_fast_sync_udp_first_activity_ms = now;
+        }
+        m_lan_fast_sync_udp_last_activity_ms = qMax(m_lan_fast_sync_udp_last_activity_ms, now);
+        m_fast_sync_udp_successes += blocks;
+        m_fast_sync_last_udp_accepted_height = std::max(m_fast_sync_last_udp_accepted_height, height);
+    } else {
+        m_fast_sync_tcp_successes += blocks;
+    }
+    resetFastSyncProtocolWindow();
+}
+
+void NuRpcService::recordFastSyncTransportFailure(FastSyncTransport transport)
+{
+    if (transport == FastSyncTransport::UdpFastSync) {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (m_lan_fast_sync_udp_first_activity_ms <= 0) {
+            m_lan_fast_sync_udp_first_activity_ms = now;
+        }
+        m_lan_fast_sync_udp_last_activity_ms = qMax(m_lan_fast_sync_udp_last_activity_ms, now);
+        ++m_fast_sync_udp_failures;
+        const int consecutive_penalty = std::min(8, std::max(1, m_fast_sync_udp_failures - m_fast_sync_udp_successes + 1));
+        m_fast_sync_udp_cooldown_until_ms = now + (1000LL << consecutive_penalty);
+        m_fast_sync_udp_ewma_blocks_per_second *= 0.5;
+    } else {
+        ++m_fast_sync_tcp_failures;
+        m_fast_sync_tcp_ewma_blocks_per_second *= 0.5;
+    }
+    resetFastSyncProtocolWindow();
+}
+
 void NuRpcService::recordFastSyncUdpSuccess(int height, qint64 latency_ms)
 {
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (m_lan_fast_sync_udp_first_activity_ms <= 0) {
-        m_lan_fast_sync_udp_first_activity_ms = now;
-    }
-    m_lan_fast_sync_udp_last_activity_ms = qMax(m_lan_fast_sync_udp_last_activity_ms, now);
-    const double seconds = qMax(0.001, double(latency_ms) / 1000.0);
-    const double sample = 1.0 / seconds;
-    m_fast_sync_udp_ewma_blocks_per_second = m_fast_sync_udp_ewma_blocks_per_second <= 0.0
-        ? sample
-        : (FAST_SYNC_PROTOCOL_EWMA_ALPHA * sample) + ((1.0 - FAST_SYNC_PROTOCOL_EWMA_ALPHA) * m_fast_sync_udp_ewma_blocks_per_second);
-    ++m_fast_sync_udp_successes;
-    m_fast_sync_last_udp_accepted_height = std::max(m_fast_sync_last_udp_accepted_height, height);
-    resetFastSyncProtocolWindow();
+    recordFastSyncTransportSuccess(FastSyncTransport::UdpFastSync, 1, height, qMax(0.001, double(latency_ms) / 1000.0));
 }
 
 void NuRpcService::recordFastSyncUdpFailure()
 {
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (m_lan_fast_sync_udp_first_activity_ms <= 0) {
-        m_lan_fast_sync_udp_first_activity_ms = now;
-    }
-    m_lan_fast_sync_udp_last_activity_ms = qMax(m_lan_fast_sync_udp_last_activity_ms, now);
-    ++m_fast_sync_udp_failures;
-    const int consecutive_penalty = std::min(8, std::max(1, m_fast_sync_udp_failures - m_fast_sync_udp_successes + 1));
-    m_fast_sync_udp_cooldown_until_ms = now + (1000LL << consecutive_penalty);
-    m_fast_sync_udp_ewma_blocks_per_second *= 0.5;
-    resetFastSyncProtocolWindow();
+    recordFastSyncTransportFailure(FastSyncTransport::UdpFastSync);
 }
 
 void NuRpcService::recordFastSyncTcpProgress(int blocks, double seconds)
 {
-    if (blocks <= 0 || seconds <= 0.0) return;
-    const double sample = static_cast<double>(blocks) / seconds;
-    m_fast_sync_tcp_ewma_blocks_per_second = m_fast_sync_tcp_ewma_blocks_per_second <= 0.0
-        ? sample
-        : (FAST_SYNC_PROTOCOL_EWMA_ALPHA * sample) + ((1.0 - FAST_SYNC_PROTOCOL_EWMA_ALPHA) * m_fast_sync_tcp_ewma_blocks_per_second);
-    m_fast_sync_tcp_successes += blocks;
-    resetFastSyncProtocolWindow();
+    recordFastSyncTransportSuccess(FastSyncTransport::TcpCore, blocks, -1, seconds);
 }
 
 void NuRpcService::resetFastSyncProtocolWindow()
 {
-    const bool udp_possible = m_lan_fast_sync_enabled && (!m_udp_fast_sync_peer_hosts.isEmpty() || m_lan_node_discovery_enabled);
+    const bool udp_possible = m_lan_fast_sync_enabled && !m_udp_fast_sync_peer_hosts.isEmpty();
     if (!udp_possible) {
         m_fast_sync_tcp_quota_remaining = 1;
         m_fast_sync_udp_quota_remaining = 0;
@@ -4334,6 +4354,7 @@ void NuRpcService::resetLanFastSyncTransfer(const QString& status)
 {
     releaseLanFastSyncReservation();
     m_lan_fast_sync_chunks.clear();
+    m_lan_fast_sync_assembled_bytes = 0;
     m_lan_fast_sync_request_id.clear();
     m_lan_fast_sync_block_hash.clear();
     m_lan_fast_sync_block_checksum.clear();
@@ -4359,7 +4380,6 @@ bool NuRpcService::isUdpFastSyncAllowedPeer(const QHostAddress& address) const
 
 bool NuRpcService::hasPrivateUdpFastSyncTarget() const
 {
-    if (m_lan_node_discovery_enabled) return true;
     for (const QString& host : m_udp_fast_sync_peer_hosts) {
         QHostAddress address;
         if (address.setAddress(host) && isPrivateOrLocalFastSyncAddress(address)) return true;
@@ -4506,6 +4526,7 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
         m_lan_fast_sync_started_ms = QDateTime::currentMSecsSinceEpoch();
     }
     m_lan_fast_sync_chunks.clear();
+    m_lan_fast_sync_assembled_bytes = 0;
     m_lan_fast_sync_request_id = QUuid::createUuid().toString(QUuid::Id128);
     m_lan_fast_sync_current_height = height;
     m_lan_fast_sync_expected_chunks = 0;
@@ -4753,7 +4774,15 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     m_lan_fast_sync_block_checksum = header.value(QStringLiteral("block_checksum")).toString();
     if (m_lan_fast_sync_block_hash.size() != 64 || m_lan_fast_sync_block_checksum.size() != 64) return;
     if (m_lan_fast_sync_chunks.contains(seq)) return;
+    if (m_lan_fast_sync_assembled_bytes + payload.size() > qMin(block_size, LAN_FAST_SYNC_MAX_BLOCK_BYTES)) {
+        ++m_lan_fast_sync_retransmit_errors;
+        recordFastSyncUdpFailure();
+        tuneFastSyncDatagramAfterFailure();
+        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync exceeded the reserved block buffer at block %1; TCP/Core fallback remains active.").arg(height));
+        return;
+    }
     m_lan_fast_sync_chunks.insert(seq, payload);
+    m_lan_fast_sync_assembled_bytes += payload.size();
     if (!sender_key.isEmpty()) {
         m_udp_fast_sync_available_peer_hosts.insert(sender_key);
         m_udp_fast_sync_failed_peer_hosts.remove(sender_key);
