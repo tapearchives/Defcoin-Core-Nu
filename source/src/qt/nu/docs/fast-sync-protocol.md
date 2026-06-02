@@ -232,3 +232,31 @@ works across arbitrary public routes.
 - Never bypass `submitblock`.
 - Treat TCP/Core as the repair path.
 - Keep the UDP helper disableable from Settings.
+
+## Future Security Roadmap
+
+Fast Sync currently prioritizes safe transport coordination, bounded packet
+handling, receiver-confirmed checksums, and normal Core block validation. The
+next hardening layer should evaluate authenticated encryption for UDP after the
+basic transport proves stable.
+
+Candidate approaches:
+
+- BIP324-style session keys: negotiate or derive keys through the existing
+  connected TCP peer relationship, then authenticate/encrypt UDP block chunks
+  with an AEAD construction. This aligns conceptually with Bitcoin Core's v2
+  encrypted transport while keeping UDP as an auxiliary block-body path.
+- Noise Protocol / libsodium secretbox style packets: use a small, explicit
+  handshake and per-peer symmetric keys for authenticated UDP payloads. This is
+  simpler to reason about than ad hoc encryption but adds a dependency and
+  key-rotation design work.
+- QUIC as a later benchmark option: QUIC already runs over UDP and provides
+  encryption, congestion control, streams, and loss handling, but it is a much
+  larger protocol and dependency than the current helper. Treat it as a separate
+  benchmark/research item, not an immediate replacement.
+
+Do not add encryption as a substitute for validation. Even encrypted UDP block
+data must still pass the same reservation, checksum, size-cap, timeout, and
+`submitblock` validation path. The first goal remains preventing spoofing,
+amplification, memory pressure, duplicate requests, and unsafe packet handling;
+secrecy is a useful later improvement, not the primary safety boundary.
