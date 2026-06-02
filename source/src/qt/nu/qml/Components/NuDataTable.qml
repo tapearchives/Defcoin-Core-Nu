@@ -217,7 +217,7 @@ Rectangle {
 
     function headerHorizontalAlignment(index) {
         const type = columnType(index)
-        if (type === "knownDns") return Text.AlignHCenter
+        if (type === "knownDns" || type === "seedLanSource") return Text.AlignHCenter
         if (centerAlignColumn(index)) return Text.AlignHCenter
         if (rightAlignColumn(index)) return Text.AlignRight
         return Text.AlignLeft
@@ -225,6 +225,11 @@ Rectangle {
 
     function cellHorizontalAlignment(row, index) {
         const type = columnType(index)
+        if (type === "seedLanSource") {
+            const cells = rowCells(row)
+            const isLan = cells && index > 0 && String(cells[index - 1] || "").trim() === "LAN"
+            return isLan ? Text.AlignLeft : Text.AlignRight
+        }
         if (type === "knownDns") {
             return Text.AlignRight
         }

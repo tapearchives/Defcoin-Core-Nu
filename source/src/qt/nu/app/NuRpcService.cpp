@@ -980,7 +980,7 @@ QString lanAliasFromDnsName(const QString& value)
     if (!isLocalStyleDnsName(value)) return QString();
     const QString name = lanWorkstationNameFromCandidate(value);
     if (name.isEmpty()) return QString();
-    return QStringLiteral("LAN:%1").arg(name);
+    return name;
 }
 
 QString parseLanPeerNameLookupOutput(const QString& output)
@@ -1017,7 +1017,7 @@ QString parseLanPeerNameLookupOutput(const QString& output)
 QStringList parseLanPeerFingerprintDetails(const QString& output)
 {
     QStringList details;
-    auto addDetail = [&details](const QString& label, QString value) {
+    auto addDetail = [&details](QString label, QString value) {
         value = value.trimmed();
         value.replace(QRegularExpression(QStringLiteral(R"(\s+)")), QStringLiteral(" "));
         if (value.isEmpty()) return;
@@ -1032,7 +1032,15 @@ QStringList parseLanPeerFingerprintDetails(const QString& output)
             label == QLatin1String("NetBIOS")) {
             value = lanWorkstationNameFromCandidate(value);
         }
-        const QString item = QStringLiteral("%1: %2").arg(label, value);
+        if (label == QLatin1String("Bonjour")) {
+            value = lanWorkstationNameFromCandidate(value);
+            if (value.isEmpty()) return;
+            label = QStringLiteral("Name");
+        }
+        if (label == QLatin1String("MAC")) return;
+        const QString item = label == QLatin1String("Name")
+            ? value
+            : QStringLiteral("%1: %2").arg(label, value);
         if (!details.contains(item, Qt::CaseInsensitive)) details.push_back(item);
     };
 
@@ -1053,10 +1061,7 @@ QStringList parseLanPeerFingerprintDetails(const QString& output)
         {QStringLiteral("NetBIOS"), QRegularExpression(QStringLiteral(R"(NetBIOS\s+Name:\s*([A-Za-z0-9_.-]+))"), QRegularExpression::CaseInsensitiveOption)},
         {QStringLiteral("NetBIOS"), QRegularExpression(QStringLiteral(R"(^\s*([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\s+<20>\s+(?!(?:.*<GROUP>))(?:UNIQUE|-)\b.*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
         {QStringLiteral("OS"), QRegularExpression(QStringLiteral(R"(^\s*(?:Running|OS details):\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
-        {QStringLiteral("Device"), QRegularExpression(QStringLiteral(R"(^\s*Device type:\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
-        {QStringLiteral("MAC"), QRegularExpression(QStringLiteral(R"(^\s*MAC Address:\s*([0-9A-F:]{17}(?:\s+\([^)]+\))?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)},
-        {QStringLiteral("MAC"), QRegularExpression(QStringLiteral(R"(\bat\s+([0-9A-F]{1,2}(?::[0-9A-F]{1,2}){5})\s+on\b)"), QRegularExpression::CaseInsensitiveOption)},
-        {QStringLiteral("MAC"), QRegularExpression(QStringLiteral(R"(^\s*(?:[0-9A-F:.%]+)\s+([0-9A-F]{1,2}(?::[0-9A-F]{1,2}){5})\s+\w+)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)}
+        {QStringLiteral("Device"), QRegularExpression(QStringLiteral(R"(^\s*Device type:\s*(.+?)\s*$)"), QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption)}
     };
 
     for (const auto& item : patterns) {
@@ -1143,10 +1148,10 @@ QString peerLanWorkstationInfo(const QString& host,
     const QString info = lan_info_cache.value(key);
     if (!info.isEmpty()) return info;
     const QString name = lan_name_cache.value(key);
-    if (!name.isEmpty()) return QStringLiteral("Name: %1").arg(name);
+    if (!name.isEmpty()) return name;
     Q_UNUSED(reverse_dns);
     const QString alias = lanAliasFromDnsName(dns_cache.value(key));
-    if (!alias.isEmpty()) return QStringLiteral("Name: %1").arg(alias.mid(4));
+    if (!alias.isEmpty()) return alias;
     if (pending.contains(key)) return QStringLiteral("Scanning...");
     return QStringLiteral("-");
 }
@@ -1215,7 +1220,7 @@ QString peerDomainAlias(const QJsonObject& peer,
                         const QHash<QString, QString>& lan_cache)
 {
     const QString lan_name = lan_cache.value(normalizedPeerHost(endpoint.first));
-    if (!lan_name.isEmpty()) return QStringLiteral("LAN:%1").arg(lan_name);
+    if (!lan_name.isEmpty()) return lan_name;
 
     const QString explicit_dns = peer.value(QStringLiteral("dns_name")).toString(
         peer.value(QStringLiteral("fqdn")).toString(peer.value(QStringLiteral("addr_name")).toString()));
@@ -1231,7 +1236,7 @@ QString peerDomainAlias(const QJsonObject& peer,
     if (isLikelyLanAddress(endpoint.first)) {
         const QString fallback_lan_name = sanitizedLanHostName(endpoint.first);
         if (!fallback_lan_name.isEmpty() && !isIpLiteral(fallback_lan_name)) {
-            return QStringLiteral("LAN:%1").arg(fallback_lan_name);
+            return fallback_lan_name;
         }
     }
 
@@ -3194,7 +3199,7 @@ done
             m_peer_lan_name_by_host.insert(key, name);
             changed = true;
         }
-        const QString detail = QStringLiteral("Name: %1").arg(name);
+        const QString detail = name;
         if (m_peer_lan_info_by_host.value(key).isEmpty()) {
             m_peer_lan_info_by_host.insert(key, detail);
             changed = true;
@@ -3567,7 +3572,10 @@ void NuRpcService::refreshNode()
             const QString lan_marker = lan_peer ? QStringLiteral("LAN") : QString();
             const QString workstation_info = lan_peer
                 ? peerLanWorkstationInfo(endpoint.first, reverse_dns, m_peer_lan_info_by_host, m_peer_lan_name_by_host, m_peer_dns_name_by_host, m_peer_lan_lookup_pending)
-                : QStringLiteral("-");
+                : QString();
+            const QString source_or_lan_name = lan_peer && workstation_info != QLatin1String("-")
+                ? workstation_info
+                : known_dns;
             const QJsonObject sent_per_msg = peer.value(QStringLiteral("bytessent_per_msg")).toObject();
             for (auto it = sent_per_msg.constBegin(); it != sent_per_msg.constEnd(); ++it) {
                 sent_message_bytes[it.key()] += it.value().toVariant().toLongLong();
@@ -3594,9 +3602,8 @@ void NuRpcService::refreshNode()
                 peerIpDisplay(endpoint),
                 fallbackDash(endpoint.second),
                 lan_marker,
-                workstation_info,
                 reverse_dns,
-                known_dns,
+                source_or_lan_name,
                 protocol_version,
                 magic,
                 services,
@@ -3623,8 +3630,7 @@ void NuRpcService::refreshNode()
                     : QStringLiteral("-")
             }, {
                 {QStringLiteral("reverseDnsSort"), reverseDomainSortNotation(reverse_dns)},
-                {QStringLiteral("knownDnsSort"), reverseDomainSortNotation(known_dns.startsWith(QStringLiteral("LAN:")) ? known_dns.mid(4) : known_dns)},
-                {QStringLiteral("workstationInfoSort"), workstation_info}
+                {QStringLiteral("knownDnsSort"), lan_peer ? source_or_lan_name.toLower() : reverseDomainSortNotation(source_or_lan_name)}
             }));
         }
         m_peer_rows_simple = simple_rows;

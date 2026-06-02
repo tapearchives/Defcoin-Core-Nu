@@ -44,24 +44,23 @@ ColumnLayout {
         "Software name and version reported by the peer."
     ]
     readonly property int detailedLanColumnStart: 4
-    readonly property int detailedLanColumnCount: 2
+    readonly property int detailedLanColumnCount: 1
     property bool showLanPeerColumns: NuService.lanNodeDiscoveryEnabled
-    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "LAN", "Workstation\nInfo", "Reverse\nDNS Name", "Seed/LAN\nSource", "Protocol\nVersion", "Magic", "Svcs", "Fast\nSync\nAvail", "Methods", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
-    property var detailedPeerTypes: ["number", "text", "ipport", "number", "lan", "text", "reverseDns", "knownDns", "number", "text", "text", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
-    property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "lan", "workstationInfo", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "transportMethods", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
-    property var detailedPeerSortMetaFields: ["", "", "", "", "", "workstationInfoSort", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
-    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 0.2, 1.15, 1.05, 1.05, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
-    property var detailedPeerMinimums: [44, 34, 128, 46, 34, 116, 90, 96, 62, 74, 54, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
-    property var detailedPeerMaximums: [62, 42, 330, 70, 40, 360, 240, 220, 82, 92, 80, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
+    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "LAN", "Reverse\nDNS Name", "Seed Source /\nLAN Workstation Name", "Protocol\nVersion", "Magic", "Svcs", "Fast\nSync\nAvail", "Methods", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
+    property var detailedPeerTypes: ["number", "text", "ipport", "number", "lan", "reverseDns", "seedLanSource", "number", "text", "text", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
+    property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "lan", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "transportMethods", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
+    property var detailedPeerSortMetaFields: ["", "", "", "", "", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
+    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 0.2, 1.05, 1.3, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
+    property var detailedPeerMinimums: [44, 34, 128, 46, 34, 90, 150, 62, 74, 54, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
+    property var detailedPeerMaximums: [62, 42, 330, 70, 40, 240, 320, 82, 92, 80, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
     property var detailedPeerTooltips: [
         "Backend peer connection ID for this session.",
         "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
         "Peer IP address without the port. IPv4 values use fixed-width octet spacing so dots align.",
         "Peer TCP port.",
         "LAN peer marker. This narrow column appears only when LAN communication/discovery is enabled and the peer address looks local.",
-        "Best-effort LAN workstation fingerprint for local peers, using explicit local host names from SMB/NetBIOS, mDNS/local DNS, ping host-name resolution, and optional nmap output when available. Provider reverse-DNS names are not treated as workstation names.",
         "Best-effort reverse DNS name for the peer IP address. Blank means no reverse DNS name has resolved yet.",
-        "Configured seed/source domain or confirmed LAN workstation identity associated with this peer address. LAN identities appear as LAN:<machine name> only when a local naming probe finds a real workstation name.",
+        "Configured seed/source domain or confirmed LAN workstation name associated with this peer address. LAN names come from local naming probes such as Bonjour, SMB/NetBIOS, host-name resolution, and optional nmap output.",
         "P2P protocol version reported by the peer.",
         "Actual network message-start bytes selected for this peer, such as defc014e or fbc0b6db.",
         "Compact service flags advertised by the peer, such as N for NODE_NETWORK or W for witness support.",
@@ -110,17 +109,16 @@ ColumnLayout {
             return text === "Yes" || text === "No" || text === "Off" || text === "TBA" || text === "Failed" || text === "-"
         }
 
+        const oldExtraWorkstationCell = cells.length === root.detailedPeerColumns.length + 1
+                                        && looksLikeLanMarker(cells[root.detailedLanColumnStart])
+        if (oldExtraWorkstationCell) cells.splice(root.detailedLanColumnStart + 1, 1)
+
         const hasLanCells = cells.length >= root.detailedLanColumnStart + root.detailedLanColumnCount
                             && looksLikeLanMarker(cells[root.detailedLanColumnStart])
-                            && (String(cells[root.detailedLanColumnStart + 1]).indexOf("Name:") === 0
-                                || String(cells[root.detailedLanColumnStart + 1]).indexOf("OS:") === 0
-                                || String(cells[root.detailedLanColumnStart + 1]).indexOf("Scanning") === 0
-                                || String(cells[root.detailedLanColumnStart + 1]).trim() === "-"
-                                || String(cells[root.detailedLanColumnStart + 1]).trim().length === 0)
         if (!hasLanCells && cells.length <= root.detailedPeerColumns.length - root.detailedLanColumnCount) {
-            cells.splice(root.detailedLanColumnStart, 0, "", "-")
+            cells.splice(root.detailedLanColumnStart, 0, "")
         }
-        const fastSyncIndex = 11
+        const fastSyncIndex = 10
         if (cells.length > fastSyncIndex && !looksLikeFastSyncValue(cells[fastSyncIndex])) {
             cells.splice(fastSyncIndex, 0, "TBA", "-")
         }
