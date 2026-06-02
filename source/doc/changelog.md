@@ -1,5 +1,15 @@
 # Defcoin Core Changelog
 
+## 26.6.1d Core Memories
+
+Defcoin Core Nu `26.6.1d` is a packaging correction over `26.6.1c`.
+
+- Fixed Apple Silicon distribution staging so the final `.app` includes the Qt
+  platform plugin and focused runtime plugin set, preventing launch crashes
+  caused by a missing `libqcocoa.dylib`.
+- Keeps the bundled Qt framework install-name repair and detailed Peers table
+  fixes from the prior `26.6.1` letter builds.
+
 ## 26.6.1c Core Memories
 
 Defcoin Core Nu `26.6.1c` is a packaging correction over `26.6.1b`.

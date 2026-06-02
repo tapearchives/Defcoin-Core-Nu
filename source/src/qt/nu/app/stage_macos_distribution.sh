@@ -12,13 +12,13 @@ RELEASE_VERSION="$3"
 DMG_SUFFIX="${4:-macOS-AppleSilicon}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILT_APP_BASENAME="$(basename "$BUILT_APP")"
-if [[ "$BUILT_APP_BASENAME" == *ExpFor* || "$BUILT_APP" == *DefcoinCoreExpFor* ]]; then
-  PRODUCT_NAME="Defcoin Core ExpFor"
-  PRODUCT_SLUG="Defcoin-Core-ExpFor"
-  APP_EXECUTABLE_NAME="DefcoinCoreExpFor"
-  DEST_DMG_BACKGROUND_BASENAME="defcoin-core-expfor-dmg-background.png"
-  DMG_STAGE_TEMPLATE="/tmp/defcoin-expfor-dmg-stage.XXXXXX"
-  WORDMARK_THIRD_LINE="ExpFor"
+if [[ "$BUILT_APP_BASENAME" == *Explore* || "$BUILT_APP" == *DefcoinCoreExplore* ]]; then
+  PRODUCT_NAME="Defcoin Core Explore"
+  PRODUCT_SLUG="Defcoin-Core-Explore"
+  APP_EXECUTABLE_NAME="DefcoinCoreExplore"
+  DEST_DMG_BACKGROUND_BASENAME="defcoin-core-explore-dmg-background.png"
+  DMG_STAGE_TEMPLATE="/tmp/defcoin-explore-dmg-stage.XXXXXX"
+  WORDMARK_THIRD_LINE="Explore"
 else
   PRODUCT_NAME="Defcoin Core Nu"
   PRODUCT_SLUG="Defcoin-Core-Nu"
@@ -44,6 +44,41 @@ ditto "$BUILT_APP" "$DEST_APP"
 chmod -R u+w "$DEST_APP"
 rm -f "$DEST_APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
 "$(dirname "$0")/bundle_macos_backend_deps.sh" "$DEST_APP"
+
+find_existing_dir() {
+  for candidate in "$@"; do
+    [ -n "$candidate" ] || continue
+    if [ -d "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+QT_ROOT="${DEFCOIN_NU_QT_ROOT:-/opt/homebrew}"
+QT_PLUGIN_ROOT="$(find_existing_dir \
+  "$QT_ROOT/plugins" \
+  "$QT_ROOT/share/qt/plugins" \
+  "$QT_ROOT/opt/qt/plugins" \
+  "$QT_ROOT/opt/qt/share/qt/plugins" \
+  "$QT_ROOT/opt/qtbase/share/qt/plugins" \
+  "/opt/homebrew/share/qt/plugins" \
+  "/opt/homebrew/opt/qtbase/share/qt/plugins" \
+  "/opt/homebrew/opt/qt/share/qt/plugins" \
+  "/usr/local/share/qt/plugins")"
+QT_QML_ROOT="$(find_existing_dir \
+  "$QT_ROOT/qml" \
+  "$QT_ROOT/share/qt/qml" \
+  "$QT_ROOT/opt/qt/qml" \
+  "$QT_ROOT/opt/qt/share/qt/qml" \
+  "$QT_ROOT/opt/qtdeclarative/share/qt/qml" \
+  "/opt/homebrew/share/qt/qml" \
+  "/opt/homebrew/opt/qtdeclarative/share/qt/qml" \
+  "/opt/homebrew/opt/qt/share/qt/qml" \
+  "/usr/local/share/qt/qml")"
+"/bin/sh" "$(dirname "$0")/deploy_macos_qt_runtime.sh" "$QT_ROOT" "$QT_PLUGIN_ROOT" "$QT_QML_ROOT" "$DEST_APP"
+
 PYTHON_FOR_QT_REPAIR="${DEFCOIN_NU_PACKAGING_PYTHON:-$(command -v python3)}"
 "$PYTHON_FOR_QT_REPAIR" "$(dirname "$0")/repair_macos_qt_bundle.py" /opt/homebrew "$DEST_APP"
 
