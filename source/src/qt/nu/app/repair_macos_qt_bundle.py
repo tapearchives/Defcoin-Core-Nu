@@ -10,6 +10,7 @@ staging.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -17,7 +18,6 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
-
 
 QT_FRAMEWORK_RE = re.compile(r"(Qt[^/\s]+\.framework)/Versions/([^/\s]+)/([^/\s]+)$")
 MACHO_MAGICS = {
@@ -354,10 +354,8 @@ def prune_non_runtime_framework_files(app_bundle: Path) -> None:
             pass
 
     for prl_file in frameworks_dir.glob("Qt*.framework/Versions/*/Resources/*.prl"):
-        try:
+        with contextlib.suppress(OSError):
             prl_file.unlink()
-        except OSError:
-            pass
 
 
 def validate_bundle(app_bundle: Path) -> None:

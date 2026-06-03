@@ -9,6 +9,7 @@ received block through Core before accepting it.
 
 import argparse
 import base64
+import contextlib
 import hashlib
 import http.client
 import ipaddress
@@ -21,7 +22,6 @@ import socket
 import sys
 import time
 from collections import OrderedDict
-
 
 PREFIX = b"DFCLAN1\n"
 CAPABILITY = "defcoin-nu-udp-fast-sync-v1"
@@ -109,10 +109,7 @@ def is_loopback(host):
 def peer_advertises_fast_sync_service(peer):
     services = peer.get("services")
     try:
-        if isinstance(services, str):
-            services_value = int(services.strip() or "0", 16)
-        else:
-            services_value = int(services or 0)
+        services_value = int(services.strip() or "0", 16) if isinstance(services, str) else int(services or 0)
     except (TypeError, ValueError):
         return False
     return bool(services_value & FAST_SYNC_SERVICE_BIT)
@@ -173,14 +170,14 @@ class RpcClient:
         self.port = int(settings.get("rpcport", "1335"))
         user = settings.get("rpcuser", "")
         password = settings.get("rpcpassword", "")
-        token = base64.b64encode(("%s:%s" % (user, password)).encode("utf-8")).decode("ascii")
+        token = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
         self.auth_header = "Basic " + token
         self.request_id = 0
 
     @staticmethod
     def _read_conf(path):
         settings = {}
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             for raw in handle:
                 line = raw.strip()
                 if not line or line.startswith("#") or "=" not in line:
@@ -216,10 +213,10 @@ class RpcClient:
         finally:
             conn.close()
         if response.status != 200:
-            raise RuntimeError("RPC HTTP %s: %r" % (response.status, payload[:120]))
+            raise RuntimeError(f"RPC HTTP {response.status}: {payload[:120]!r}")
         decoded = json.loads(payload.decode("utf-8"))
         if decoded.get("error"):
-            raise RuntimeError("RPC %s error: %s" % (method, decoded["error"]))
+            raise RuntimeError(f"RPC {method} error: {decoded['error']}")
         return decoded.get("result")
 
 
@@ -255,10 +252,8 @@ class FastSyncDaemon:
             sock = socket.socket(family, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             if family == socket.AF_INET6:
-                try:
+                with contextlib.suppress(OSError):
                     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-                except OSError:
-                    pass
                 sock.bind(("::", self.port))
             else:
                 sock.bind((self.bind if self.bind else "0.0.0.0", self.port))

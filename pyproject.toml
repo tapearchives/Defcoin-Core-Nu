@@ -4,13 +4,20 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = [
+    "B",
     "E",
     "F",
+    "I",
+    "SIM",
+    "UP",
     "W",
 ]
 ignore = [
     "E501",
 ]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
 
 [tool.ruff.format]
 quote-style = "double"
