@@ -292,8 +292,9 @@ exploration_bonus = c * sqrt(log(total_samples + 1) / (samples + 1))
 If one protocol wins by at least 25 percent and there are no fresh failures, the
 window may grow up to the configured cap. The slower path still receives probes
 unless it is cooling down after UDP failure. Status text such as
-`UDP favored 4:1` or `TCP favored 30:2` reflects this quota window, not a
-consensus rule.
+`UDP favored 4:1` or `Core path favored 30:2` reflects this quota window, not a
+consensus rule. The Core path can include validation of already-local block
+data; it should not be read as proof that TCP downloaded every advanced block.
 
 The live wallet currently reserves and requests one UDP block at a time from one
 selected Nu peer. It immediately starts the next UDP probe after a
@@ -306,8 +307,10 @@ timer can make normal TCP sync appear dominant even when UDP has higher raw thro
 Diagnostics exposes:
 
 - Combined syncing average.
-- Fast Sync TCP totals, recent rate, sample counts, and backend-managed packet
-  note.
+- Core sync path totals, recent active-chain advance rate, sample counts, and
+  backend-managed packet note. These chain advances are not proof that TCP
+  downloaded those blocks; they can include validation of locally available
+  block data.
 - Fast Sync UDP totals, packet counts, accepted blocks, recent rate, samples,
   and retransmit/checksum count.
 - Current TCP/UDP decision summary.

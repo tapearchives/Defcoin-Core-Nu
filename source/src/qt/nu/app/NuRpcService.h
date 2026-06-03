@@ -677,7 +677,7 @@ private:
     QString lanFastSyncMethodSummary() const;
     QString lanFastSyncRateSummary() const;
     QString syncTransportSpeedSummary() const;
-    QString fastSyncTcpSummary() const;
+    QString coreSyncPathSummary() const;
     QString fastSyncUdpSummary() const;
     QString syncTransportDecisionSummary() const;
     QString syncTransportProbeSummary() const;
@@ -692,7 +692,7 @@ private:
     void recordFastSyncTransportFailure(FastSyncTransport transport);
     void recordFastSyncUdpSuccess(int height, qint64 latency_ms);
     void recordFastSyncUdpFailure();
-    void recordFastSyncTcpProgress(int blocks, double seconds);
+    void recordCoreSyncPathProgress(int blocks, double seconds);
     bool shouldAttemptUdpFastSync();
     void resetFastSyncProtocolWindow();
     void probeBackendCapabilities();

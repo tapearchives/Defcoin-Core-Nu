@@ -3840,7 +3840,7 @@ void NuRpcService::refreshNode()
                 && m_lan_fast_sync_last_progress_ms > 0
                 && now_ms - m_lan_fast_sync_last_progress_ms < 10000;
             if (!recent_udp_accept) {
-                recordFastSyncTcpProgress(block_delta, seconds);
+                recordCoreSyncPathProgress(block_delta, seconds);
             }
         }
         m_syncing = syncing;
@@ -4783,13 +4783,13 @@ QString NuRpcService::syncTransportSpeedSummary() const
 
     QStringList parts;
     parts.push_back(QStringLiteral("combined %1").arg(volume_rate(combined_total, combined_seconds)));
-    parts.push_back(QStringLiteral("TCP blocks %1").arg(m_fast_sync_tcp_successes));
+    parts.push_back(QStringLiteral("Core advances %1").arg(m_fast_sync_tcp_successes));
     parts.push_back(QStringLiteral("UDP blocks %1").arg(m_lan_fast_sync_blocks_received));
     parts.push_back(QStringLiteral("UDP failures %1").arg(m_fast_sync_udp_failures));
     return parts.join(QStringLiteral(" | "));
 }
 
-QString NuRpcService::fastSyncTcpSummary() const
+QString NuRpcService::coreSyncPathSummary() const
 {
     const qint64 total = m_sync_tcp_bytes_received + m_sync_tcp_bytes_sent;
     const double seconds = total > 0 ? qMax(1.0, m_sync_tcp_active_seconds) : 0.0;
@@ -4799,9 +4799,9 @@ QString NuRpcService::fastSyncTcpSummary() const
                    QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1))
         : QStringLiteral("-");
     const QString ewma = m_fast_sync_tcp_ewma_blocks_per_second > 0.0
-        ? QStringLiteral("%1 blk/s recent").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
-        : QStringLiteral("recent waiting for accepted TCP blocks");
-    return QStringLiteral("%1 | total %2 (in %3, out %4) | blocks %5 | %6 | samples %7 ok/%8 fail | packets handled by normal sync")
+        ? QStringLiteral("%1 chain advances/s recent").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
+        : QStringLiteral("recent waiting for Core chain advances");
+    return QStringLiteral("%1 | Core network total %2 (in %3, out %4) | chain advances %5 | %6 | samples %7 ok/%8 fail | block data handled by Core")
         .arg(avg,
              formatBytes(total),
              formatBytes(m_sync_tcp_bytes_received),
@@ -4853,9 +4853,9 @@ QString NuRpcService::syncTransportDecisionSummary() const
     const int udp_warmup_percent = FAST_SYNC_PROTOCOL_MIN_UDP_PROBES > 0
         ? std::clamp((udp_samples * 100) / FAST_SYNC_PROTOCOL_MIN_UDP_PROBES, 0, 100)
         : 100;
-    const QString tcp_rate = m_fast_sync_tcp_ewma_blocks_per_second > 0.0
-        ? QStringLiteral("TCP %1 blk/s").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
-        : QStringLiteral("TCP waiting");
+    const QString core_rate = m_fast_sync_tcp_ewma_blocks_per_second > 0.0
+        ? QStringLiteral("Core %1 adv/s").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
+        : QStringLiteral("Core waiting");
     const QString udp_rate = m_fast_sync_udp_ewma_blocks_per_second > 0.0
         ? QStringLiteral("UDP %1 blk/s").arg(QString::number(m_fast_sync_udp_ewma_blocks_per_second, 'f', m_fast_sync_udp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
         : QStringLiteral("UDP warming %1/%2 (%3%)")
@@ -4870,7 +4870,7 @@ QString NuRpcService::syncTransportDecisionSummary() const
         : m_fast_sync_decision_summary;
     return QStringLiteral("%1 | %2 | %3")
         .arg(favor,
-             tcp_rate,
+             core_rate,
              udp_rate);
 }
 
@@ -5012,7 +5012,7 @@ void NuRpcService::recordFastSyncUdpFailure()
     recordFastSyncTransportFailure(FastSyncTransport::UdpFastSync);
 }
 
-void NuRpcService::recordFastSyncTcpProgress(int blocks, double seconds)
+void NuRpcService::recordCoreSyncPathProgress(int blocks, double seconds)
 {
     recordFastSyncTransportSuccess(FastSyncTransport::TcpCore, blocks, -1, seconds);
 }
@@ -5024,7 +5024,7 @@ void NuRpcService::resetFastSyncProtocolWindow()
         m_fast_sync_tcp_quota_remaining = 1;
         m_fast_sync_udp_quota_remaining = 0;
         m_fast_sync_window_size = 2;
-        m_fast_sync_decision_summary = QStringLiteral("TCP sync only");
+        m_fast_sync_decision_summary = QStringLiteral("Core sync only");
         return;
     }
 
@@ -5088,10 +5088,10 @@ void NuRpcService::resetFastSyncProtocolWindow()
     const QString favored = udp_quota > tcp_quota
         ? QStringLiteral("UDP favored %1:%2").arg(udp_quota).arg(tcp_quota)
         : (tcp_quota > udp_quota
-               ? QStringLiteral("TCP favored %1:%2").arg(tcp_quota).arg(udp_quota)
-               : QStringLiteral("TCP/UDP balanced 1:1"));
+               ? QStringLiteral("Core path favored %1:%2").arg(tcp_quota).arg(udp_quota)
+               : QStringLiteral("Core/UDP balanced 1:1"));
     m_fast_sync_decision_summary = udp_in_cooldown && !force_probe
-        ? QStringLiteral("TCP favored; UDP cooling")
+        ? QStringLiteral("Core path favored; UDP cooling")
         : favored;
 }
 
@@ -5108,7 +5108,7 @@ bool NuRpcService::shouldAttemptUdpFastSync()
     if (m_fast_sync_tcp_quota_remaining > 0) {
         --m_fast_sync_tcp_quota_remaining;
     }
-    m_lan_fast_sync_status = QStringLiteral("%1. Letting normal TCP sync fetch the next block before another UDP probe.")
+    m_lan_fast_sync_status = QStringLiteral("%1. Letting Core's normal sync path continue before another UDP probe.")
         .arg(m_fast_sync_decision_summary);
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
@@ -6960,8 +6960,8 @@ void NuRpcService::rebuildNodeMetrics()
                   QStringLiteral("Blockchain sync progress, current sync state, and only the transport methods that have actually carried sync traffic during this Nu session.")),
         metricRow(QStringLiteral("Syncing avg speeds"), syncTransportSpeedSummary(),
                   QStringLiteral("Combined session-average sync throughput. UDP timing includes failed attempts and cooldown/retry time so failed probes reduce the average instead of being ignored.")),
-        metricRow(QStringLiteral("Fast Sync TCP"), fastSyncTcpSummary(),
-                  QStringLiteral("Normal TCP sync totals for this Nu session. Packet counts are handled by the backend and not exposed here; block counts are inferred from active-chain height increases not attributed to UDP.")),
+        metricRow(QStringLiteral("Core sync path"), coreSyncPathSummary(),
+                  QStringLiteral("Core-managed sync and validation observed while Nu is syncing. Chain advances here are active-chain height increases not attributed to UDP fast sync; they can include validation of locally available block data and are not proof that TCP downloaded those blocks.")),
         metricRow(QStringLiteral("Fast Sync UDP"), fastSyncUdpSummary(),
                   QStringLiteral("UDP fast-sync totals for this Nu session. Average speed includes elapsed time from failed UDP attempts, checksum failures, timeouts, and retries so the protocol comparison is not inflated by ignoring failures.")),
         metricRow(QStringLiteral("Fast-sync favor"), syncTransportDecisionSummary(),
