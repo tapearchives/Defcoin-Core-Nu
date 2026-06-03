@@ -481,6 +481,7 @@ void SetupServerArgs(NodeContext& node)
     argsman.AddArg("-onlydefcoinua", strprintf("Only accept peers whose advertised user agent starts with /Defcoin (default: %u)", DEFAULT_DEFCOIN_USER_AGENT_FILTER), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-acceptlegacymagic", strprintf("Temporarily accept legacy Litecoin-compatible Defcoin P2P message-start bytes during the Defcoin magic migration (default: %u)", DEFAULT_ACCEPT_LEGACY_MAGIC), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
     argsman.AddArg("-allowlannodediscovery", strprintf("Allow learning local/private LAN peer addresses from peer address relay (default: %u). Manually configured and inbound LAN peers are not blocked by this setting.", DEFAULT_ALLOW_LAN_NODE_DISCOVERY), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
+    argsman.AddArg("-defcoinfastsync", "Advertise Defcoin Nu UDP Fast Sync service capability. This should only be enabled by a frontend or service that is actually listening on the Fast Sync UDP port.", ArgsManager::ALLOW_BOOL | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-timeout=<n>", strprintf("Specify connection timeout in milliseconds (minimum: 1, default: %d)", DEFAULT_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify p2p connection timeout in seconds. This option determines the amount of time a peer may be inactive before the connection to it is dropped. (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -1892,10 +1893,12 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
         }
     }
 
-    // Advertise Defcoin Nu's optional UDP Fast Sync capability as an
-    // unauthenticated hint. Clients still require a valid UDP response and
-    // normal Core block validation before treating the peer as usable.
-    nLocalServices = ServiceFlags(nLocalServices | NODE_DEFCOIN_FASTSYNC);
+    // Advertise Defcoin Nu's optional UDP Fast Sync capability only when an
+    // actual UDP transport owner enabled it. The Qt frontend currently owns
+    // that socket; bare defcoind must not claim this service by default.
+    if (args.GetBoolArg("-defcoinfastsync", false)) {
+        nLocalServices = ServiceFlags(nLocalServices | NODE_DEFCOIN_FASTSYNC);
+    }
 
     // ********************************************************* Step 11: import blocks
 

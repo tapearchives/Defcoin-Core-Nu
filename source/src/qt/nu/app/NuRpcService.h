@@ -72,6 +72,7 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QVariantList peers READ peers NOTIFY peersChanged)
     Q_PROPERTY(QVariantList peerRowsSimple READ peerRowsSimple NOTIFY peersChanged)
     Q_PROPERTY(QVariantList peerRowsDetailed READ peerRowsDetailed NOTIFY peersChanged)
+    Q_PROPERTY(QVariantList bannedPeerRows READ bannedPeerRows NOTIFY peersChanged)
     Q_PROPERTY(QVariantList nodeMetrics READ nodeMetrics NOTIFY stateChanged)
     Q_PROPERTY(QVariantList trafficSamples READ trafficSamples NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficReceivedTotal READ trafficReceivedTotal NOTIFY trafficChanged)
@@ -91,6 +92,7 @@ class NuRpcService final : public QObject
     Q_PROPERTY(bool lanNodeDiscoveryEnabled READ lanNodeDiscoveryEnabled WRITE setLanNodeDiscoveryEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool lanFastSyncEnabled READ lanFastSyncEnabled WRITE setLanFastSyncEnabled NOTIFY settingsChanged)
     Q_PROPERTY(QString lanFastSyncStatus READ lanFastSyncStatus NOTIFY stateChanged)
+    Q_PROPERTY(bool advancedToolsVisible READ advancedToolsVisible WRITE setAdvancedToolsVisible NOTIFY settingsChanged)
     Q_PROPERTY(bool upnpConnectionsEnabled READ upnpConnectionsEnabled WRITE setUpnpConnectionsEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool showLanNodeDiscoveryNotice READ showLanNodeDiscoveryNotice NOTIFY settingsChanged)
     Q_PROPERTY(bool automaticUpdateChecksEnabled READ automaticUpdateChecksEnabled WRITE setAutomaticUpdateChecksEnabled NOTIFY settingsChanged)
@@ -145,6 +147,22 @@ class NuRpcService final : public QObject
     Q_PROPERTY(int explorerIndexedOutputCount READ explorerIndexedOutputCount NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerRichList READ explorerRichList NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerMovements READ explorerMovements NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantMap coindroidsSummary READ coindroidsSummary NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsWindowRows READ coindroidsWindowRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsEndpointRows READ coindroidsEndpointRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsWinnerRows READ coindroidsWinnerRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsPhaseRows READ coindroidsPhaseRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsPublishedRows READ coindroidsPublishedRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsVanityRows READ coindroidsVanityRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsOpReturnRows READ coindroidsOpReturnRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsBotRows READ coindroidsBotRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsEvidenceRows READ coindroidsEvidenceRows NOTIFY explorerChanged)
+    Q_PROPERTY(QString coindroidsStatus READ coindroidsStatus NOTIFY explorerChanged)
+    Q_PROPERTY(bool coindroidsScanning READ coindroidsScanning NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantMap defcoinTimelineSummary READ defcoinTimelineSummary NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList defcoinTimelineRows READ defcoinTimelineRows NOTIFY explorerChanged)
+    Q_PROPERTY(QString defcoinTimelineCriteria READ defcoinTimelineCriteria NOTIFY explorerChanged)
+    Q_PROPERTY(QString defcoinTimelineStatus READ defcoinTimelineStatus NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerContacts READ explorerContacts NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerContactRelationships READ explorerContactRelationships NOTIFY explorerChanged)
     Q_PROPERTY(QString explorerAnalyticsStatus READ explorerAnalyticsStatus NOTIFY explorerChanged)
@@ -215,6 +233,7 @@ public:
     QVariantList peers() const { return m_peers; }
     QVariantList peerRowsSimple() const { return m_peer_rows_simple; }
     QVariantList peerRowsDetailed() const { return m_peer_rows_detailed; }
+    QVariantList bannedPeerRows() const { return m_banned_peer_rows; }
     QVariantList nodeMetrics() const { return m_node_metrics; }
     QVariantList trafficSamples() const { return m_traffic_samples; }
     QString trafficReceivedTotal() const { return m_traffic_received_total; }
@@ -234,6 +253,7 @@ public:
     bool lanNodeDiscoveryEnabled() const { return m_lan_node_discovery_enabled; }
     bool lanFastSyncEnabled() const { return m_lan_fast_sync_enabled; }
     QString lanFastSyncStatus() const { return m_lan_fast_sync_status; }
+    bool advancedToolsVisible() const { return m_advanced_tools_visible; }
     bool upnpConnectionsEnabled() const { return m_upnp_connections_enabled; }
     bool showLanNodeDiscoveryNotice() const { return !m_lan_node_discovery_notice_acknowledged && !m_lan_node_discovery_enabled; }
     bool automaticUpdateChecksEnabled() const { return m_automatic_update_checks_enabled; }
@@ -289,6 +309,22 @@ public:
     int explorerIndexedOutputCount() const { return m_explorer_indexed_output_count; }
     QVariantList explorerRichList() const { return m_explorer_rich_list; }
     QVariantList explorerMovements() const { return m_explorer_movements; }
+    QVariantMap coindroidsSummary() const { return m_coindroids_summary; }
+    QVariantList coindroidsWindowRows() const { return m_coindroids_window_rows; }
+    QVariantList coindroidsEndpointRows() const { return m_coindroids_endpoint_rows; }
+    QVariantList coindroidsWinnerRows() const { return m_coindroids_winner_rows; }
+    QVariantList coindroidsPhaseRows() const { return m_coindroids_phase_rows; }
+    QVariantList coindroidsPublishedRows() const { return m_coindroids_published_rows; }
+    QVariantList coindroidsVanityRows() const { return m_coindroids_vanity_rows; }
+    QVariantList coindroidsOpReturnRows() const { return m_coindroids_op_return_rows; }
+    QVariantList coindroidsBotRows() const { return m_coindroids_bot_rows; }
+    QVariantList coindroidsEvidenceRows() const { return m_coindroids_evidence_rows; }
+    QString coindroidsStatus() const { return m_coindroids_status; }
+    bool coindroidsScanning() const { return m_coindroids_scanning; }
+    QVariantMap defcoinTimelineSummary() const { return m_defcoin_timeline_summary; }
+    QVariantList defcoinTimelineRows() const { return m_defcoin_timeline_rows; }
+    QString defcoinTimelineCriteria() const { return m_defcoin_timeline_criteria; }
+    QString defcoinTimelineStatus() const { return m_defcoin_timeline_status; }
     QVariantList explorerContacts() const { return m_explorer_contacts; }
     QVariantList explorerContactRelationships() const { return m_explorer_contact_relationships; }
     QString explorerAnalyticsStatus() const { return m_explorer_analytics_status; }
@@ -344,9 +380,15 @@ public:
     Q_INVOKABLE void scheduleWitnessBlockRepair(int start_height);
     Q_INVOKABLE void repairWitnessBlockDataNow(int start_height, bool fix_missing_witness = true);
     Q_INVOKABLE void pingPeers();
+    Q_INVOKABLE void refreshPeer(const QString& node_id);
+    Q_INVOKABLE void banPeer(const QString& node_id);
+    Q_INVOKABLE void unbanPeer(const QString& address);
+    Q_INVOKABLE void refreshBannedPeers();
     Q_INVOKABLE void runRpcCommand(const QString& method, const QString& params_json, bool wallet_scoped);
     Q_INVOKABLE QString walletDisplayName(const QString& name) const;
     Q_INVOKABLE void copyText(const QString& text);
+    Q_INVOKABLE void copySensitiveTextAfterWarning(const QString& text);
+    Q_INVOKABLE void openExternalUrl(const QString& url);
     Q_INVOKABLE void backupWallet();
     Q_INVOKABLE void refreshWalletStats();
     Q_INVOKABLE void createWallet(const QString& name,
@@ -405,6 +447,8 @@ public:
     Q_INVOKABLE void openExplorerLink(const QString& link);
     Q_INVOKABLE void refreshExplorerRecentLookups();
     Q_INVOKABLE void refreshExplorerAnalytics(int movement_threshold_coins = 5000, const QString& scope = QStringLiteral("all"));
+    Q_INVOKABLE void refreshCoindroidsAnalytics();
+    Q_INVOKABLE void refreshDefcoinTimeline();
     Q_INVOKABLE void startExplorerIndexing();
     Q_INVOKABLE void stopExplorerIndexing();
     Q_INVOKABLE void resetExplorerIndex();
@@ -463,6 +507,7 @@ public Q_SLOTS:
     void setDisallowLanNodeDiscovery(bool enabled);
     void setLanNodeDiscoveryEnabled(bool enabled);
     void setLanFastSyncEnabled(bool enabled);
+    void setAdvancedToolsVisible(bool enabled);
     void setUpnpConnectionsEnabled(bool enabled);
     void setAutomaticUpdateChecksEnabled(bool enabled);
     void setTableCopyDelimiterStyle(const QString& style);
@@ -556,6 +601,7 @@ private:
     bool ensureCurrentWalletSelected(const QString& title);
 
     void refreshNode();
+    void refreshBannedPeerRows();
     void refreshWallet();
     void refreshAddressBook();
     void refreshWalletList();
@@ -568,11 +614,23 @@ private:
     void ensureLanFastSyncSocket();
     void stopLanFastSyncSocket();
     void handleLanFastSyncDatagrams();
+    void sendLanDiscoveryAnnouncement();
+    void handleLanDiscoveryAnnouncement(const QJsonObject& message, const QHostAddress& sender, quint16 sender_port);
+    void queueLanDiscoveryAddNode(const QString& host, quint16 p2p_port);
+    void processQueuedLanDiscoveryAddNodes();
+    bool isLocalInterfaceAddress(const QHostAddress& address) const;
     void lanFastSyncTick();
     void requestLanFastSyncBlock(int height);
     QString selectUdpFastSyncTargetHost(int* node_id) const;
+    bool isUdpFastSyncProbeAllowed(const QString& host, qint64 now) const;
+    bool isUdpFastSyncHostVerified(const QString& host) const;
+    void recordUdpFastSyncPeerReply(const QString& host);
+    void recordUdpFastSyncPeerMiss(const QString& host, const QString& reason = QString());
+    bool sendUdpFastSyncProbe(const QString& host, int node_id);
     void sendLanFastSyncBlockRequest(int height, const QString& host, int node_id, const QString& expected_hash);
     void releaseLanFastSyncReservation();
+    void handleLanFastSyncProbe(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
+    void handleLanFastSyncProbeAck(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
     void handleLanFastSyncRequest(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
     void handleLanFastSyncChunk(const QJsonObject& header, const QByteArray& payload, const QHostAddress& sender);
     void resetLanFastSyncTransfer(const QString& status);
@@ -590,6 +648,8 @@ private:
     QString syncTransportDecisionSummary() const;
     QString syncTransportProbeSummary() const;
     void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes);
+    QString udpFastSyncEndpointText(const QHostAddress& address, quint16 port = 0) const;
+    void recordFastSyncUdpDiagnostic(const QString& reason, const QString& detail = QString());
     enum class FastSyncTransport {
         TcpCore,
         UdpFastSync
@@ -631,10 +691,17 @@ private:
                              const QJsonValue& raw_json);
     void loadExplorerRecentLookups();
     int explorerHighestIndexedBlock() const;
+    qint64 explorerMetaInteger(const QString& key, qint64 fallback = -1) const;
     int explorerIndexedBlockCountFromDb() const;
     int explorerIndexedOutputCountFromDb() const;
     QVariantList explorerRichListFromDb(QString* error = nullptr) const;
     QVariantList explorerMovementsFromDb(qint64 threshold_sats, QString* error = nullptr) const;
+    QString droidTrailsDatabasePath() const;
+    bool ensureDroidTrailsDatabase(QString* error = nullptr) const;
+    QVariantMap coindroidsAnalyticsFromCache(QString* error = nullptr) const;
+    void saveCoindroidsAnalyticsCache(const QVariantMap& analysis, QString* error = nullptr) const;
+    QVariantMap coindroidsAnalyticsFromDb(QString* error = nullptr) const;
+    void loadDefcoinTimeline();
     void loadExplorerContacts();
     void persistExplorerContacts();
     void refreshExplorerTop100TimelineStats();
@@ -652,6 +719,24 @@ private:
     void scheduleExplorerTop100Step(int delay_ms = 0);
     void explorerTop100Step();
     bool initializeExplorerTop100Scan(int start_height, int end_height, QString* error = nullptr);
+    struct ExplorerTop100EventRow {
+        int rank = 0;
+        QString address;
+        int percent = 0;
+        int color_index = 0;
+    };
+    struct ExplorerTop100EventWrite {
+        int height = 0;
+        qint64 time = 0;
+        bool is_anchor = false;
+        QVector<ExplorerTop100EventRow> rows;
+    };
+    bool prepareExplorerTop100EventWrite(int height,
+                                         qint64 block_time,
+                                         bool force_anchor,
+                                         ExplorerTop100EventWrite* event,
+                                         QString* error = nullptr);
+    bool writeExplorerTop100EventBatch(const QVector<ExplorerTop100EventWrite>& events, QString* error = nullptr);
     bool writeExplorerTop100Events(int height, qint64 block_time, bool force_anchor, QString* error = nullptr);
     bool finishExplorerTop100Scan(bool completed, QString* error = nullptr);
     void scheduleForensicsScanStep(int delay_ms = 0);
@@ -692,6 +777,7 @@ private:
     QString nuResourceRoot() const;
     QStringList loadBip39Words() const;
     bool validateMnemonic(const QString& phrase, QString* normalized = nullptr, QString* error = nullptr) const;
+    bool looksLikeRecoveryPhraseText(const QString& text) const;
     bool requireLocalRecoveryRpc(const QString& operation);
     bool mnemonicMaterial(const QString& phrase, const QString& wif_mode, QString* wif, QString* xprv, QString* error) const;
     QString descriptorForRecoveryPath(const QString& xprv, const QString& derivation_path, QString* error) const;
@@ -846,6 +932,12 @@ private:
     QSet<QString> m_peer_lan_lookup_pending;
     QSet<QString> m_peer_lan_lookup_attempted;
     QHash<QString, qint64> m_peer_lan_lookup_last_attempt_ms;
+    QString m_lan_discovery_node_id;
+    qint64 m_lan_discovery_last_announce_ms = 0;
+    qint64 m_lan_discovery_last_addnode_attempt_ms = 0;
+    QSet<QString> m_lan_discovery_added_endpoints;
+    QSet<QString> m_lan_discovery_addnode_pending;
+    QSet<QString> m_lan_discovery_addnode_inflight;
     QSet<QString> m_udp_fast_sync_peer_hosts;
     QSet<QString> m_udp_fast_sync_attempted_peer_hosts;
     QSet<QString> m_udp_fast_sync_available_peer_hosts;
@@ -853,7 +945,14 @@ private:
     QSet<QString> m_udp_fast_sync_used_peer_hosts;
     QSet<QString> m_udp_fast_sync_current_target_hosts;
     QHash<QString, qint64> m_udp_fast_sync_last_request_ms_by_host;
+    QHash<QString, qint64> m_udp_fast_sync_last_probe_ms_by_host;
+    QHash<QString, QString> m_udp_fast_sync_probe_ids_by_host;
+    QHash<QString, int> m_udp_fast_sync_probe_failures_by_host;
+    QHash<QString, int> m_udp_fast_sync_failure_reason_counts;
+    QHash<QString, qint64> m_udp_fast_sync_last_diagnostic_ms_by_reason;
+    QHash<QString, int> m_udp_fast_sync_suppressed_diagnostic_count_by_reason;
     QHash<QString, int> m_udp_fast_sync_peer_node_ids_by_host;
+    QHash<QString, int> m_udp_fast_sync_peer_inflight_counts_by_host;
     int m_address_book_refresh_generation = 0;
     QVariantList m_address_book;
     QVariantList m_receive_requests;
@@ -861,6 +960,10 @@ private:
     QVariantList m_peers;
     QVariantList m_peer_rows_simple;
     QVariantList m_peer_rows_detailed;
+    QVariantList m_banned_peer_rows;
+    QHash<int, QString> m_peer_host_by_node_id;
+    QHash<int, QString> m_peer_addr_by_node_id;
+    QHash<int, bool> m_peer_inbound_by_node_id;
     QVariantList m_node_metrics;
     QVariantList m_traffic_samples;
     qint64 m_last_traffic_ms = 0;
@@ -890,6 +993,7 @@ private:
     QString m_current_psbt_summary = QStringLiteral("No PSBT loaded.");
     QString m_current_psbt_final_hex;
     bool m_only_defcoin_user_agents = true;
+    bool m_advanced_tools_visible = false;
     bool m_lan_fast_sync_enabled = true;
     QUdpSocket* m_lan_fast_sync_socket = nullptr;
     QTimer* m_lan_fast_sync_timer = nullptr;
@@ -914,6 +1018,7 @@ private:
     qint64 m_lan_fast_sync_started_ms = 0;
     qint64 m_lan_fast_sync_request_ms = 0;
     qint64 m_lan_fast_sync_last_progress_ms = 0;
+    QString m_lan_fast_sync_last_failure_detail;
     int m_lan_fast_sync_reserved_node_id = -1;
     QString m_lan_fast_sync_reserved_hash;
     bool m_lan_fast_sync_request_in_flight = false;
@@ -930,7 +1035,7 @@ private:
     int m_fast_sync_window_size = 2;
     qint64 m_fast_sync_udp_cooldown_until_ms = 0;
     qint64 m_fast_sync_last_probe_ms = 0;
-    QString m_fast_sync_decision_summary = QStringLiteral("Fast sync selector warming up; TCP/Core and UDP will be sampled when available.");
+    QString m_fast_sync_decision_summary = QStringLiteral("Fast sync selector waiting for peer samples; normal TCP sync and UDP will be sampled when available.");
     int m_fast_sync_last_udp_accepted_height = -1;
     int m_fast_sync_udp_datagram_index = 0;
     int m_fast_sync_current_datagram_bytes = 1232;
@@ -942,6 +1047,25 @@ private:
     QVariantList m_explorer_recent_lookups;
     QVariantList m_explorer_rich_list;
     QVariantList m_explorer_movements;
+    QVariantMap m_coindroids_summary;
+    QVariantList m_coindroids_window_rows;
+    QVariantList m_coindroids_endpoint_rows;
+    QVariantList m_coindroids_winner_rows;
+    QVariantList m_coindroids_phase_rows;
+    QVariantList m_coindroids_published_rows;
+    QVariantList m_coindroids_vanity_rows;
+    QVariantList m_coindroids_op_return_rows;
+    QVariantList m_coindroids_bot_rows;
+    QVariantList m_coindroids_evidence_rows;
+    QString m_coindroids_status = QStringLiteral("Coindroids analysis not loaded yet.");
+    int m_coindroids_generation = 0;
+    bool m_coindroids_scanning = false;
+    qint64 m_coindroids_last_refresh_ms = 0;
+    QVariantMap m_defcoin_timeline_summary;
+    QVariantList m_defcoin_timeline_rows;
+    QString m_defcoin_timeline_criteria = QStringLiteral("Timeline not loaded yet.");
+    QString m_defcoin_timeline_status = QStringLiteral("/r/Defcoin timeline not loaded yet.");
+    bool m_defcoin_timeline_loaded = false;
     QVariantList m_explorer_contacts;
     QVariantList m_explorer_contact_relationships;
     QString m_explorer_analytics_status = QStringLiteral("Explorer analytics not loaded yet.");

@@ -1,8 +1,25 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(DefcoinCoreNuQml VERSION 26.6.1 LANGUAGES CXX)
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(DEFCOIN_NU_DEFAULT_MACOS_DEPLOYMENT_TARGET "10.15")
+    execute_process(
+        COMMAND sw_vers -productVersion
+        OUTPUT_VARIABLE DEFCOIN_NU_HOST_MACOS_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(DEFCOIN_NU_HOST_MACOS_VERSION MATCHES "^([0-9]+)\\.([0-9]+)")
+        set(DEFCOIN_NU_DEFAULT_MACOS_DEPLOYMENT_TARGET "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
+    endif()
+    if(DEFCOIN_NU_DEFAULT_MACOS_DEPLOYMENT_TARGET VERSION_LESS "10.15")
+        set(DEFCOIN_NU_DEFAULT_MACOS_DEPLOYMENT_TARGET "10.15")
+    endif()
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "${DEFCOIN_NU_DEFAULT_MACOS_DEPLOYMENT_TARGET}" CACHE STRING "Minimum macOS version for Defcoin Core Nu bundles" FORCE)
+endif()
 
-set(DEFCOIN_NU_RELEASE_NAME "26.6.1f" CACHE STRING "Visible Defcoin Core Nu release label")
+project(DefcoinCoreNuQml VERSION 26.6.3 LANGUAGES CXX)
+
+set(DEFCOIN_NU_RELEASE_NAME "26.6.3c" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -16,9 +33,37 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network OpenGL Qml QmlMeta QmlModels QmlWorkerScript Quick QuickControls2 QuickLayouts QuickTemplates2 Sql Svg Widgets)
+set(DEFCOIN_NU_QT_COMPONENTS
+    Core
+    Gui
+    Network
+    OpenGL
+    Qml
+    QmlModels
+    QmlWorkerScript
+    Quick
+    QuickControls2
+    QuickLayouts
+    QuickTemplates2
+    Sql
+    Svg
+    Widgets
+)
+
+find_package(Qt6 REQUIRED COMPONENTS ${DEFCOIN_NU_QT_COMPONENTS})
+find_package(Qt6 QUIET COMPONENTS QmlMeta)
+
+set(DEFCOIN_NU_QT_LIBRARIES)
+foreach(defcoin_nu_qt_component IN LISTS DEFCOIN_NU_QT_COMPONENTS)
+    list(APPEND DEFCOIN_NU_QT_LIBRARIES Qt6::${defcoin_nu_qt_component})
+endforeach()
+if(TARGET Qt6::QmlMeta)
+    list(APPEND DEFCOIN_NU_QT_LIBRARIES Qt6::QmlMeta)
+endif()
 find_library(QRENCODE_LIBRARY qrencode REQUIRED)
 find_path(QRENCODE_INCLUDE_DIR qrencode.h REQUIRED)
+get_filename_component(QRENCODE_LIBRARY_DIR "${QRENCODE_LIBRARY}" DIRECTORY)
+file(GLOB QRENCODE_RUNTIME_LIBRARIES CONFIGURE_DEPENDS "${QRENCODE_LIBRARY_DIR}/libqrencode*.dylib")
 
 qt_add_executable(DefcoinCoreNu
     MACOSX_BUNDLE
@@ -53,21 +98,7 @@ endif()
 
 target_link_libraries(DefcoinCoreNu
     PRIVATE
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Network
-        Qt6::OpenGL
-        Qt6::Qml
-        Qt6::QmlMeta
-        Qt6::QmlModels
-        Qt6::QmlWorkerScript
-        Qt6::Quick
-        Qt6::QuickControls2
-        Qt6::QuickLayouts
-        Qt6::QuickTemplates2
-        Qt6::Sql
-        Qt6::Svg
-        Qt6::Widgets
+        ${DEFCOIN_NU_QT_LIBRARIES}
         ${QRENCODE_LIBRARY}
 )
 
@@ -124,30 +155,16 @@ endif()
 
 target_link_libraries(DefcoinCoreExplore
     PRIVATE
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Network
-        Qt6::OpenGL
-        Qt6::Qml
-        Qt6::QmlMeta
-        Qt6::QmlModels
-        Qt6::QmlWorkerScript
-        Qt6::Quick
-        Qt6::QuickControls2
-        Qt6::QuickLayouts
-        Qt6::QuickTemplates2
-        Qt6::Sql
-        Qt6::Svg
-        Qt6::Widgets
+        ${DEFCOIN_NU_QT_LIBRARIES}
         ${QRENCODE_LIBRARY}
 )
 
 target_include_directories(DefcoinCoreExplore PRIVATE ${QRENCODE_INCLUDE_DIR})
 
 set_target_properties(DefcoinCoreExplore PROPERTIES
-    MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinCoreExplore
-    MACOSX_BUNDLE_BUNDLE_NAME "Defcoin Core Explore"
-    MACOSX_BUNDLE_DISPLAY_NAME "Defcoin Core Explore"
+    MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinCoreNuExplore
+    MACOSX_BUNDLE_BUNDLE_NAME "Defcoin Core Nu Explore"
+    MACOSX_BUNDLE_DISPLAY_NAME "Defcoin Core Nu Explore"
     MACOSX_BUNDLE_ICON_FILE "DefcoinCoreNuNuIcon"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${DEFCOIN_NU_RELEASE_NAME}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${DEFCOIN_NU_RELEASE_NAME}"
@@ -170,6 +187,7 @@ set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/bip39/english.txt"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-coin-stack-hires.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-icon-1024.png"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/data/defcoin_reddit_timeline.json"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/activity.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/copy.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/external-link.svg"
@@ -207,6 +225,18 @@ set(DEFCOIN_NU_BACKEND_BINARY "" CACHE FILEPATH "Optional defcoind binary to bun
 set(DEFCOIN_NU_CLI_BINARY "" CACHE FILEPATH "Optional defcoin-cli binary to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_TX_BINARY "" CACHE FILEPATH "Optional defcoin-tx binary to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_WALLET_BINARY "" CACHE FILEPATH "Optional defcoin-wallet binary to bundle with Defcoin Core Nu")
+
+if(NOT DEFCOIN_NU_BACKEND_BINARY)
+    if(WIN32)
+        set(DEFCOIN_NU_BACKEND_AUTO_CANDIDATE "${CMAKE_CURRENT_LIST_DIR}/../../../defcoind.exe")
+    else()
+        set(DEFCOIN_NU_BACKEND_AUTO_CANDIDATE "${CMAKE_CURRENT_LIST_DIR}/../../../defcoind")
+    endif()
+    if(EXISTS "${DEFCOIN_NU_BACKEND_AUTO_CANDIDATE}")
+        set(DEFCOIN_NU_BACKEND_BINARY "${DEFCOIN_NU_BACKEND_AUTO_CANDIDATE}" CACHE FILEPATH "Optional defcoind binary to bundle with Defcoin Core Nu" FORCE)
+        message(STATUS "Auto-detected Defcoin backend for Nu bundle: ${DEFCOIN_NU_BACKEND_BINARY}")
+    endif()
+endif()
 
 if(APPLE)
     set(DEFCOIN_NU_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/nu")
@@ -315,7 +345,7 @@ if(APPLE)
         COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/set_macos_launch_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
         COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/remove_macos_help_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
         COMMAND /usr/bin/touch -ch "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
-        COMMENT "Writing Defcoin Core Explore resources and build metadata"
+        COMMENT "Writing Defcoin Core Nu Explore resources and build metadata"
     )
 else()
     add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
@@ -324,14 +354,14 @@ else()
             "-DDEFCOIN_NU_RELEASE_NAME=${DEFCOIN_NU_RELEASE_NAME}"
             "-DDEFCOIN_NU_SOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}"
             -P "${CMAKE_CURRENT_LIST_DIR}/write_nu_build_metadata.cmake"
-        COMMENT "Writing Defcoin Core Explore build metadata"
+        COMMENT "Writing Defcoin Core Nu Explore build metadata"
     )
 endif()
 
 add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPLORE_HELP_DIR}"
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/help"
-    COMMENT "Omitting optional Defcoin Core Explore help resources"
+    COMMENT "Omitting optional Defcoin Core Nu Explore help resources"
 )
 
 if(APPLE)
@@ -403,10 +433,40 @@ if(APPLE)
                 COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
                 COMMENT "Deploying focused Qt frameworks, plugins, and QML imports"
             )
+            add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Frameworks"
+                COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/PlugIns"
+                COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/qml"
+                COMMAND "${DEFCOIN_NU_MACDEPLOYQT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
+                    -no-plugins
+                    "-libpath=${DEFCOIN_NU_QT_ROOT}/lib"
+                    -always-overwrite
+                    -appstore-compliant
+                    ${DEFCOIN_NU_MACDEPLOYQT_CODESIGN_FLAGS}
+                COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/deploy_macos_qt_runtime.sh" "${DEFCOIN_NU_QT_ROOT}" "${DEFCOIN_NU_QT_PLUGIN_ROOT}" "${DEFCOIN_NU_QT_QML_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
+                COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/fix_macos_qt_rpath.sh" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/MacOS/DefcoinCoreExplore"
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/repair_macos_qt_bundle.py" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
+                COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
+                COMMENT "Deploying focused Qt frameworks, plugins, and QML imports for Explore"
+            )
         else()
             message(WARNING "macdeployqt not found at ${DEFCOIN_NU_MACDEPLOYQT}; macOS app bundle will not be self-contained")
         endif()
     endif()
+
+    foreach(qrencode_runtime_library IN LISTS QRENCODE_RUNTIME_LIBRARIES)
+        get_filename_component(qrencode_runtime_name "${qrencode_runtime_library}" NAME)
+        add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Frameworks"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${qrencode_runtime_library}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Frameworks/${qrencode_runtime_name}"
+            COMMENT "Bundling qrencode runtime for Defcoin Core Nu"
+        )
+        add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Frameworks"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${qrencode_runtime_library}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Frameworks/${qrencode_runtime_name}"
+            COMMENT "Bundling qrencode runtime for Defcoin Core Nu Explore"
+        )
+    endforeach()
 
     if(DEFCOIN_NU_ENABLE_HELP)
         add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
@@ -710,6 +770,16 @@ if(DEFCOIN_NU_BACKEND_BINARY)
             COMMENT "Bundling Defcoin wallet utility for Explore"
         )
     endif()
+    if(APPLE)
+        add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+            COMMAND /bin/bash "${CMAKE_CURRENT_LIST_DIR}/bundle_macos_backend_deps.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>"
+            COMMENT "Bundling Defcoin backend runtime dependencies for Nu"
+        )
+        add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
+            COMMAND /bin/bash "${CMAKE_CURRENT_LIST_DIR}/bundle_macos_backend_deps.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
+            COMMENT "Bundling Defcoin backend runtime dependencies for Explore"
+        )
+    endif()
     if(WIN32)
         file(GLOB DEFCOIN_NU_BACKEND_RUNTIME_DLLS CONFIGURE_DEPENDS
             "${DEFCOIN_NU_BACKEND_INPUT_DIR}/*.dll"
@@ -755,4 +825,26 @@ if(DEFCOIN_NU_BACKEND_BINARY)
             endif()
         endif()
     endif()
+endif()
+
+if(APPLE)
+    if(DEFCOIN_NU_ENABLE_HELP)
+        set(DEFCOIN_NU_FINAL_HELP_PLIST_SCRIPT "set_macos_help_plist.sh")
+    else()
+        set(DEFCOIN_NU_FINAL_HELP_PLIST_SCRIPT "remove_macos_help_plist.sh")
+    endif()
+    add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+        COMMAND /bin/chmod u+w "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Info.plist"
+        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/set_macos_launch_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Info.plist"
+        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/${DEFCOIN_NU_FINAL_HELP_PLIST_SCRIPT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Info.plist"
+        COMMAND /bin/bash "${CMAKE_CURRENT_LIST_DIR}/sign_macos_bundle.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>"
+        COMMENT "Ad-hoc signing Defcoin Core Nu app bundle"
+    )
+    add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
+        COMMAND /bin/chmod u+w "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
+        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/set_macos_launch_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
+        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/remove_macos_help_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
+        COMMAND /bin/bash "${CMAKE_CURRENT_LIST_DIR}/sign_macos_bundle.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
+        COMMENT "Ad-hoc signing Defcoin Core Nu Explore app bundle"
+    )
 endif()

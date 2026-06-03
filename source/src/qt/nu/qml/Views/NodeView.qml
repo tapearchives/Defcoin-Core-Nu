@@ -26,6 +26,8 @@ ColumnLayout {
     property bool peerSimpleSortAscending: true
     property string peerDetailedSortKey: ""
     property bool peerDetailedSortAscending: true
+    property var selectedPeerNodeIds: []
+    property var selectedBannedPeerKeys: []
     readonly property int trafficMaxChartSeconds: 7 * 24 * 60 * 60
     property var simplePeerColumns: ["Node", "Dir", "IP Address: Port", "Methods", "Ping", "Sent", "Rec'd", "User Agent"]
     property var simplePeerTypes: ["number", "text", "ipport", "center", "duration", "bytes", "bytes", "text"]
@@ -43,29 +45,27 @@ ColumnLayout {
         "Total bytes received from this peer since the connection opened.",
         "Software name and version reported by the peer."
     ]
-    readonly property int detailedLanColumnStart: 4
-    readonly property int detailedLanColumnCount: 1
-    property bool showLanPeerColumns: NuService.lanNodeDiscoveryEnabled
-    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "LAN", "Reverse\nDNS Name", "Seed Source /\nLAN Workstation Name", "Protocol\nVersion", "Magic", "Services", "Fast\nSync\nAvail", "Methods", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
-    property var detailedPeerTypes: ["number", "text", "ipport", "number", "lan", "reverseDns", "seedLanSource", "number", "text", "center", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
-    property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "lan", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "transportMethods", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
-    property var detailedPeerSortMetaFields: ["", "", "", "", "", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
-    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 0.2, 1.05, 1.3, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
-    property var detailedPeerMinimums: [44, 34, 128, 46, 34, 90, 150, 62, 74, 54, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
-    property var detailedPeerMaximums: [62, 42, 330, 70, 40, 240, 320, 82, 92, 80, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
+    readonly property int legacyDetailedLanColumnStart: 4
+    readonly property int detailedFastSyncColumnIndex: 9
+    property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "Reverse\nDNS Name", "Seed Source /\nLAN Workstation Name", "Protocol\nVersion", "Magic", "Services", "Fast\nSync\nAvail", "Methods", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
+    property var detailedPeerTypes: ["number", "text", "ipport", "number", "reverseDns", "seedLanSource", "number", "text", "center", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
+    property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "transportMethods", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
+    property var detailedPeerSortMetaFields: ["", "", "", "", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
+    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 1.05, 1.35, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
+    property var detailedPeerMinimums: [44, 34, 128, 46, 90, 164, 62, 74, 54, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
+    property var detailedPeerMaximums: [62, 42, 330, 70, 240, 340, 82, 92, 80, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
     property var detailedPeerTooltips: [
         "Backend peer connection ID for this session.",
         "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
         "Peer IP address without the port. IPv4 values use fixed-width octet spacing so dots align.",
         "Peer TCP port.",
-        "LAN peer marker. This narrow column appears only when LAN communication/discovery is enabled and the peer address looks local.",
         "Best-effort reverse DNS name for the peer IP address. Blank means no reverse DNS name has resolved yet.",
-        "Configured seed/source domain or confirmed LAN workstation name associated with this peer address. LAN names come from local naming probes such as Bonjour, SMB/NetBIOS, host-name resolution, and optional nmap output.",
+        "Configured seed/source domain or confirmed LAN workstation name associated with this peer address. LAN rows show a small local-network icon before the name; hover the cell for the discovery source such as Bonjour, SMB/NetBIOS, host-name resolution, or optional nmap output.",
         "P2P protocol version reported by the peer.",
         "Actual network message-start bytes selected for this peer, such as defc014e or fbc0b6db.",
         "Compact service flags advertised by the peer. Hover an entry for the full service-bit names and meanings.",
-        "UDP fast-sync capability state. Peers must advertise NODE_DEFCOIN_FASTSYNC, bit 29, before Nu counts them as UDP fast-sync candidates. TBA means the service bit is present but this session has not yet received a valid UDP response.",
-        "Transport methods that have successfully exchanged data with this peer during this Nu session: TCP means Core P2P bytes; UDP means fast-sync block data; TCP+UDP means both.",
+        "UDP fast-sync capability state. Advertised means bit 29 is present but no UDP probe has succeeded yet. Probe sent means Nu has sent a UDP negotiation probe. No reply means the probe timed out or failed. Yes means a valid UDP Fast Sync response was received.",
+        "Transport methods that have successfully exchanged data with this peer during this Nu session: TCP means normal peer sync bytes; UDP means fast-sync block data; TCP+UDP means both.",
         "Current round-trip latency reported by the backend.",
         "Best observed ping for this connection.",
         "Total bytes sent to this peer since the connection opened.",
@@ -85,15 +85,6 @@ ColumnLayout {
         "Minimum transaction relay fee rate this peer has announced with its feefilter policy, displayed as DFC per kilobyte."
     ]
 
-    function filterLanPeerColumns(values) {
-        if (root.showLanPeerColumns) return values
-        let out = []
-        for (let i = 0; i < values.length; ++i) {
-            if (i < root.detailedLanColumnStart || i >= root.detailedLanColumnStart + root.detailedLanColumnCount) out.push(values[i])
-        }
-        return out
-    }
-
     function normalizeDetailedPeerCells(row) {
         let cells = []
         if (row && row.cells !== undefined) cells = row.cells.slice()
@@ -106,23 +97,20 @@ ColumnLayout {
 
         function looksLikeFastSyncValue(value) {
             const text = String(value === undefined || value === null ? "" : value).trim()
-            return text === "Yes" || text === "No" || text === "Off" || text === "TBA" || text === "Failed" || text === "-"
+            return text === "Yes" || text === "No" || text === "Off" || text === "Advertised" || text === "Probe sent"
+                    || text === "No reply" || text === "Checking" || text === "TBA" || text === "Failed" || text === "-"
         }
 
-        const oldExtraWorkstationCell = cells.length === root.detailedPeerColumns.length + 1
-                                        && looksLikeLanMarker(cells[root.detailedLanColumnStart])
-        if (oldExtraWorkstationCell) cells.splice(root.detailedLanColumnStart + 1, 1)
-
-        const hasLanCells = cells.length >= root.detailedLanColumnStart + root.detailedLanColumnCount
-                            && looksLikeLanMarker(cells[root.detailedLanColumnStart])
-        if (!hasLanCells && cells.length <= root.detailedPeerColumns.length - root.detailedLanColumnCount) {
-            cells.splice(root.detailedLanColumnStart, 0, "")
+        if (cells.length === root.detailedPeerColumns.length + 1
+                && looksLikeLanMarker(cells[root.legacyDetailedLanColumnStart])) {
+            cells.splice(root.legacyDetailedLanColumnStart, 1)
         }
-        const fastSyncIndex = 10
-        if (cells.length > fastSyncIndex && !looksLikeFastSyncValue(cells[fastSyncIndex])) {
-            cells.splice(fastSyncIndex, 0, "TBA", "-")
+        if (cells.length > root.detailedFastSyncColumnIndex
+                && !looksLikeFastSyncValue(cells[root.detailedFastSyncColumnIndex])) {
+            cells.splice(root.detailedFastSyncColumnIndex, 0, "Checking", "-")
         }
         while (cells.length < root.detailedPeerColumns.length) cells.push("")
+        if (cells.length > root.detailedPeerColumns.length) cells = cells.slice(0, root.detailedPeerColumns.length)
         return cells
     }
 
@@ -131,26 +119,23 @@ ColumnLayout {
         let rows = []
         for (let r = 0; r < source.length; ++r) {
             const row = source[r]
+            const rawCells = row && row.cells !== undefined ? row.cells : row
+            const legacyLanRow = rawCells
+                                  && rawCells.length === root.detailedPeerColumns.length + 1
+                                  && String(rawCells[root.legacyDetailedLanColumnStart] || "").trim() === "LAN"
             const cells = normalizeDetailedPeerCells(row)
-            const meta = row && row.meta !== undefined ? row.meta : ({})
-            if (root.showLanPeerColumns) {
-                rows.push({ "cells": cells, "meta": meta })
-                continue
+            let meta = ({})
+            if (row && row.meta !== undefined) {
+                for (let key in row.meta) meta[key] = row.meta[key]
             }
-            let filtered = []
-            for (let i = 0; i < cells.length; ++i) {
-                if (i < root.detailedLanColumnStart || i >= root.detailedLanColumnStart + root.detailedLanColumnCount) filtered.push(cells[i])
+            if (legacyLanRow && meta.isLanPeer === undefined) meta.isLanPeer = true
+            if (meta.cellTooltips !== undefined && meta.cellTooltips !== null
+                    && meta.cellTooltips.length === root.detailedPeerColumns.length + 1) {
+                let tips = meta.cellTooltips.slice()
+                tips.splice(root.legacyDetailedLanColumnStart, 1)
+                meta.cellTooltips = tips
             }
-            let filteredMeta = ({})
-            for (let key in meta) filteredMeta[key] = meta[key]
-            if (meta.cellTooltips !== undefined && meta.cellTooltips !== null) {
-                let filteredTips = []
-                for (let i = 0; i < meta.cellTooltips.length; ++i) {
-                    if (i < root.detailedLanColumnStart || i >= root.detailedLanColumnStart + root.detailedLanColumnCount) filteredTips.push(meta.cellTooltips[i])
-                }
-                filteredMeta.cellTooltips = filteredTips
-            }
-            rows.push({ "cells": filtered, "meta": filteredMeta })
+            rows.push({ "cells": cells, "meta": meta })
         }
         return rows
     }
@@ -479,6 +464,21 @@ ColumnLayout {
                     elide: Text.ElideRight
                 }
 
+                NuActionButton {
+                    text: "Retest FastSync"
+                    Layout.preferredWidth: 136
+                    enabled: root.selectedPeerNodeIds.length === 1
+                    helpText: "Clear this peer's cached UDP Fast Sync state, reconnect, and test Fast Sync negotiation again."
+                    onClicked: NuService.refreshPeer(root.selectedPeerNodeIds[0])
+                }
+
+                NuActionButton {
+                    text: "Ban peer"
+                    Layout.preferredWidth: 104
+                    enabled: root.selectedPeerNodeIds.length === 1
+                    helpText: "Add the selected peer address to Core's ban list and disconnect it."
+                    onClicked: NuService.banPeer(root.selectedPeerNodeIds[0])
+                }
             }
 
             NuDataTable {
@@ -487,19 +487,24 @@ ColumnLayout {
                 Layout.fillHeight: true
                 compact: true
                 fontPixelSize: NuTokens.fontTiny
+                rowSelectionEnabled: true
+                plainClickSelectsRows: true
+                rowKeyMetaField: "nodeId"
+                selectedRowKeys: root.selectedPeerNodeIds
                 alwaysShowHorizontalScrollBar: peerViewToggle.currentIndex === 1
                 tableId: peerViewToggle.currentIndex === 0 ? "nodePeersSimple" : "nodePeersDetailed"
                 restoreSavedColumnWidths: false
-                columns: peerViewToggle.currentIndex === 0 ? root.simplePeerColumns : root.filterLanPeerColumns(root.detailedPeerColumns)
-                columnTooltips: peerViewToggle.currentIndex === 0 ? root.simplePeerTooltips : root.filterLanPeerColumns(root.detailedPeerTooltips)
-                columnTypes: peerViewToggle.currentIndex === 0 ? root.simplePeerTypes : root.filterLanPeerColumns(root.detailedPeerTypes)
-                sortColumnKeys: peerViewToggle.currentIndex === 0 ? root.simplePeerSortKeys : root.filterLanPeerColumns(root.detailedPeerSortKeys)
-                columnSortMetaFields: peerViewToggle.currentIndex === 0 ? [] : root.filterLanPeerColumns(root.detailedPeerSortMetaFields)
-                columnWeights: peerViewToggle.currentIndex === 0 ? root.simplePeerWeights : root.filterLanPeerColumns(root.detailedPeerWeights)
-                columnMinimums: peerViewToggle.currentIndex === 0 ? root.simplePeerMinimums : root.filterLanPeerColumns(root.detailedPeerMinimums)
-                columnMaximums: peerViewToggle.currentIndex === 0 ? root.simplePeerMaximums : root.filterLanPeerColumns(root.detailedPeerMaximums)
+                columns: peerViewToggle.currentIndex === 0 ? root.simplePeerColumns : root.detailedPeerColumns
+                columnTooltips: peerViewToggle.currentIndex === 0 ? root.simplePeerTooltips : root.detailedPeerTooltips
+                columnTypes: peerViewToggle.currentIndex === 0 ? root.simplePeerTypes : root.detailedPeerTypes
+                sortColumnKeys: peerViewToggle.currentIndex === 0 ? root.simplePeerSortKeys : root.detailedPeerSortKeys
+                columnSortMetaFields: peerViewToggle.currentIndex === 0 ? [] : root.detailedPeerSortMetaFields
+                columnWeights: peerViewToggle.currentIndex === 0 ? root.simplePeerWeights : root.detailedPeerWeights
+                columnMinimums: peerViewToggle.currentIndex === 0 ? root.simplePeerMinimums : root.detailedPeerMinimums
+                columnMaximums: peerViewToggle.currentIndex === 0 ? root.simplePeerMaximums : root.detailedPeerMaximums
                 rows: peerViewToggle.currentIndex === 0 ? NuService.peerRowsSimple : root.displayedDetailedPeerRows()
                 emptyText: "Peers hydrate here after the tab renders."
+                onRowSelectionChanged: (keys) => root.selectedPeerNodeIds = keys
                 onSortChanged: (column, ascending, key) => {
                     root.peerSortKey = key
                     root.peerSortAscending = ascending
@@ -533,6 +538,48 @@ ColumnLayout {
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                 }
+
+                NuActionButton {
+                    text: "Unban selected"
+                    Layout.preferredWidth: 132
+                    enabled: root.selectedBannedPeerKeys.length > 0
+                    helpText: "Remove selected addresses from Core's ban list."
+                    onClicked: {
+                        for (let i = 0; i < root.selectedBannedPeerKeys.length; ++i) {
+                            NuService.unbanPeer(root.selectedBannedPeerKeys[i])
+                        }
+                        root.selectedBannedPeerKeys = []
+                    }
+                }
+
+                NuActionButton {
+                    text: "Refresh bans"
+                    Layout.preferredWidth: 120
+                    helpText: "Reload Core's current banned peer list."
+                    onClicked: NuService.refreshBannedPeers()
+                }
+            }
+
+            NuDataTable {
+                id: bannedPeersTable
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(156, Math.max(78, 34 + NuService.bannedPeerRows.length * 24))
+                compact: true
+                fontPixelSize: NuTokens.fontTiny
+                rowSelectionEnabled: true
+                plainClickSelectsRows: true
+                rowKeyMetaField: "address"
+                selectedRowKeys: root.selectedBannedPeerKeys
+                columns: ["Banned Address", "Reason", "Created", "Expires"]
+                columnTypes: ["ipport", "text", "date", "date"]
+                sortColumnKeys: ["address", "reason", "created", "expires"]
+                columnWeights: [1.25, 0.8, 1.0, 1.0]
+                columnMinimums: [160, 90, 150, 150]
+                columnMaximums: [420, 220, 210, 210]
+                restoreSavedColumnWidths: false
+                rows: NuService.bannedPeerRows
+                emptyText: "No banned peers."
+                onRowSelectionChanged: (keys) => root.selectedBannedPeerKeys = keys
             }
         }
 
@@ -937,12 +984,16 @@ ColumnLayout {
     Window {
         id: logPopoutWindow
         title: "Defcoin Core Nu - Log since launch"
-        width: 1180
-        height: 720
+        property int initialWidth: 1180
+        property int initialHeight: 720
         minimumWidth: 760
         minimumHeight: 420
         visible: false
         color: NuTokens.backgroundBase
+        Component.onCompleted: {
+            width = initialWidth
+            height = initialHeight
+        }
 
         ColumnLayout {
             anchors.fill: parent

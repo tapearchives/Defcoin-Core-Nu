@@ -77,8 +77,8 @@
 #include <windows.h>
 #endif
 
-#ifndef DEFCOIN_NU_EXPFOR_APP
-#define DEFCOIN_NU_EXPFOR_APP 0
+#ifndef DEFCOIN_NU_EXPLORE_APP
+#define DEFCOIN_NU_EXPLORE_APP 0
 #endif
 
 #if !defined(Q_OS_WIN)
@@ -105,7 +105,10 @@ constexpr int EXPLORER_TOP100_FOCUSED_CHUNK_BLOCKS = 25000;
 constexpr int EXPLORER_TOP100_MAX_ANCHOR_BLOCKS = 10000;
 constexpr int EXPLORER_TOP100_MIN_PLAYBACK_CHECKPOINTS = 250;
 constexpr int EXPLORER_TOP100_LARGE_PLAYBACK_CHECKPOINTS = 500;
+constexpr int EXPLORER_TOP100_EVENT_WRITE_BATCH_ROWS = 5000;
 constexpr qint64 EXPLORER_TOP100_UI_REFRESH_MS = 5000;
+constexpr int DROIDTRAILS_CACHE_SCHEMA_VERSION = 3;
+constexpr int DEFCOIN_REDDIT_TIMELINE_SCHEMA_VERSION = 1;
 constexpr quint16 LAN_FAST_SYNC_PORT = 10334;
 constexpr int LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES = 1232;
 constexpr int LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES = 1472;
@@ -118,6 +121,15 @@ constexpr int LAN_FAST_SYNC_MAX_DATAGRAMS_PER_READ = 96;
 constexpr int LAN_FAST_SYNC_REQUEST_TIMEOUT_MS = 3000;
 constexpr int LAN_FAST_SYNC_MAX_RETRIES_PER_BLOCK = 3;
 constexpr int LAN_FAST_SYNC_MAX_BLOCK_BYTES = 8 * 1024 * 1024;
+constexpr int LAN_FAST_SYNC_PROBE_TIMEOUT_MS = 2500;
+constexpr int LAN_FAST_SYNC_PUBLIC_PROBE_MIN_INTERVAL_MS = 30000;
+constexpr int LAN_FAST_SYNC_PUBLIC_PROBE_COOLDOWN_MS = 180000;
+constexpr int LAN_FAST_SYNC_PUBLIC_PROBE_FAILURES_BEFORE_COOLDOWN = 2;
+constexpr int LAN_FAST_SYNC_DIAGNOSTIC_LOG_THROTTLE_MS = 30000;
+constexpr int LAN_DISCOVERY_ANNOUNCE_INTERVAL_MS = 10000;
+constexpr int LAN_DISCOVERY_ANNOUNCE_MAX_BYTES = 1536;
+constexpr quint16 DEFCOIN_DEFAULT_P2P_PORT = 1337;
+constexpr int SENSITIVE_CLIPBOARD_MAX_CHARS = 4096;
 constexpr int LAN_FAST_SYNC_MIN_REQUEST_INTERVAL_MS = 250;
 constexpr int LAN_FAST_SYNC_TIMER_INTERVAL_MS = 150;
 constexpr int FAST_SYNC_PROTOCOL_MAX_WINDOW = 32;
@@ -158,6 +170,13 @@ bool peerServicesAdvertiseFastSync(const QString& services_hex)
     return ok && (services & (1ULL << 29));
 }
 
+bool isLowerRiskHexText(const QString& value, int max_chars)
+{
+    if (value.isEmpty() || value.size() > max_chars || value.size() % 2 != 0) return false;
+    static const QRegularExpression hex_re(QStringLiteral(R"(^[0-9A-Fa-f]+$)"));
+    return hex_re.match(value).hasMatch();
+}
+
 QVector<int> lanFastSyncDatagramCandidates(bool lan_mode)
 {
     return lan_mode
@@ -176,9 +195,9 @@ QString explorerTop100Color(int rank)
     return EXPLORER_TOP100_COLORS.at((rank - 1) % EXPLORER_TOP100_COLORS.size());
 }
 
-bool launchExpForLookup(const QString& option, const QString& value)
+bool launchExploreLookup(const QString& option, const QString& value)
 {
-#if DEFCOIN_NU_EXPFOR_APP
+#if DEFCOIN_NU_EXPLORE_APP
     Q_UNUSED(option);
     Q_UNUSED(value);
     return false;
@@ -188,16 +207,22 @@ bool launchExpForLookup(const QString& option, const QString& value)
 #if defined(Q_OS_MACOS)
     QStringList open_args;
     open_args << QStringLiteral("-b")
-              << QStringLiteral("org.defcoincore.DefcoinCoreExpFor")
+              << QStringLiteral("org.defcoincore.DefcoinCoreNuExplore")
+              << QStringLiteral("--args")
+              << lookup_args;
+    if (QProcess::startDetached(QStringLiteral("/usr/bin/open"), open_args)) return true;
+    open_args.clear();
+    open_args << QStringLiteral("-b")
+              << QStringLiteral("org.defcoincore.DefcoinCoreExplore")
               << QStringLiteral("--args")
               << lookup_args;
     if (QProcess::startDetached(QStringLiteral("/usr/bin/open"), open_args)) return true;
 #endif
     const QDir app_dir(QCoreApplication::applicationDirPath());
 #if defined(Q_OS_WIN)
-    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExpFor.exe"));
+    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExplore.exe"));
 #else
-    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExpFor"));
+    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExplore"));
 #endif
     const QFileInfo candidate_info(candidate);
     if (candidate_info.exists() && candidate_info.isExecutable())
@@ -211,12 +236,32 @@ QString normalizedFastSyncHost(const QHostAddress& address)
     bool ipv4_ok = false;
     const quint32 ipv4 = address.toIPv4Address(&ipv4_ok);
     if (ipv4_ok) return QHostAddress(ipv4).toString().toLower();
-    return address.toString().toLower();
+    QString host = address.toString().toLower();
+    const int scope = host.indexOf(QLatin1Char('%'));
+    if (scope >= 0) host.truncate(scope);
+    return host;
+}
+
+bool isInvalidLanDiscoveryAddress(const QHostAddress& address)
+{
+    if (address.isNull() || address.isLoopback()) return true;
+    if (address.protocol() == QAbstractSocket::IPv4Protocol) {
+        const quint32 ip = address.toIPv4Address();
+        const quint8 a = static_cast<quint8>((ip >> 24) & 0xff);
+        const quint8 d = static_cast<quint8>(ip & 0xff);
+        return ip == 0xffffffffu || a == 0 || a >= 224 || d == 0 || d == 255;
+    }
+    if (address.protocol() == QAbstractSocket::IPv6Protocol) {
+        const Q_IPV6ADDR bytes = address.toIPv6Address();
+        return bytes[0] == 0xff;
+    }
+    return true;
 }
 
 bool isPrivateOrLocalFastSyncAddress(const QHostAddress& address)
 {
     if (address.isNull()) return false;
+    if (isInvalidLanDiscoveryAddress(address)) return false;
     if (address.isLoopback()) return true;
     if (address.protocol() == QAbstractSocket::IPv4Protocol) {
         const quint32 ip = address.toIPv4Address();
@@ -617,6 +662,23 @@ QString explorerAmountText(qint64 sats, bool with_unit = true)
     return with_unit ? text + QStringLiteral(" DFC") : text;
 }
 
+QString roundedExplorerAmountText(qint64 sats, int decimals = 2)
+{
+    const double coins = static_cast<double>(sats) / 100000000.0;
+    return QString::number(coins, 'f', std::max(0, decimals)) + QStringLiteral(" DFC");
+}
+
+QString explorerDateRangeText(qint64 start_time, qint64 end_time)
+{
+    if (start_time <= 0 || end_time <= 0) return QStringLiteral("date unavailable");
+    const QTimeZone utc = QTimeZone::utc();
+    const QDate start_date = QDateTime::fromSecsSinceEpoch(start_time, utc).date();
+    const QDate end_date = QDateTime::fromSecsSinceEpoch(end_time, utc).date();
+    if (start_date == end_date) return start_date.toString(QStringLiteral("yyyy-MM-dd"));
+    return start_date.toString(QStringLiteral("yyyy-MM-dd")) + QStringLiteral(" - ") +
+           end_date.toString(QStringLiteral("yyyy-MM-dd"));
+}
+
 QStringList explorerOutputAddresses(const QJsonObject& script)
 {
     QStringList out;
@@ -628,6 +690,57 @@ QStringList explorerOutputAddresses(const QJsonObject& script)
     const QString address = script.value(QStringLiteral("address")).toString().trimmed();
     if (!address.isEmpty() && !out.contains(address)) out.push_back(address);
     return out;
+}
+
+QByteArray explorerOpReturnPayloadBytes(const QString& script_hex)
+{
+    const QByteArray script_bytes = QByteArray::fromHex(script_hex.trimmed().toLatin1());
+    if (script_bytes.isEmpty() || static_cast<unsigned char>(script_bytes.at(0)) != 0x6a) return {};
+
+    QByteArray payload;
+    int pos = 1;
+    while (pos < script_bytes.size()) {
+        const unsigned char opcode = static_cast<unsigned char>(script_bytes.at(pos++));
+        quint32 length = 0;
+        if (opcode <= 75) {
+            length = opcode;
+        } else if (opcode == 0x4c && pos < script_bytes.size()) {
+            length = static_cast<unsigned char>(script_bytes.at(pos++));
+        } else if (opcode == 0x4d && pos + 1 < script_bytes.size()) {
+            length = static_cast<unsigned char>(script_bytes.at(pos)) |
+                     (static_cast<unsigned char>(script_bytes.at(pos + 1)) << 8);
+            pos += 2;
+        } else if (opcode == 0x4e && pos + 3 < script_bytes.size()) {
+            length = static_cast<unsigned char>(script_bytes.at(pos)) |
+                     (static_cast<unsigned char>(script_bytes.at(pos + 1)) << 8) |
+                     (static_cast<unsigned char>(script_bytes.at(pos + 2)) << 16) |
+                     (static_cast<unsigned char>(script_bytes.at(pos + 3)) << 24);
+            pos += 4;
+        } else {
+            continue;
+        }
+        if (length == 0) continue;
+        if (pos + static_cast<int>(length) > script_bytes.size()) break;
+        payload.append(script_bytes.mid(pos, static_cast<int>(length)));
+        pos += static_cast<int>(length);
+    }
+    return payload;
+}
+
+QString explorerPrintablePayloadText(const QByteArray& payload)
+{
+    if (payload.isEmpty()) return QStringLiteral("");
+    int printable = 0;
+    for (char byte : payload) {
+        const unsigned char value = static_cast<unsigned char>(byte);
+        if (value == 9 || value == 10 || value == 13 || (value >= 32 && value <= 126)) ++printable;
+    }
+    const int minimum_printable = std::max(1, static_cast<int>(payload.size()) * 3 / 4);
+    if (printable < minimum_printable) return QStringLiteral("");
+    QString text = QString::fromUtf8(payload).trimmed();
+    text.replace(QRegularExpression(QStringLiteral("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]")), QStringLiteral(" "));
+    text = text.simplified();
+    return text.size() > 512 ? text.left(512) : text;
 }
 
 bool isLikelyBase58AddressText(const QString& value);
@@ -901,6 +1014,8 @@ QString normalizedPeerHost(QString host)
     if (host.startsWith(QLatin1Char('[')) && host.endsWith(QLatin1Char(']'))) {
         host = host.mid(1, host.size() - 2);
     }
+    const int scope = host.indexOf(QLatin1Char('%'));
+    if (scope >= 0) host.truncate(scope);
     QHostAddress address;
     if (address.setAddress(host)) return address.toString().toLower();
     return host.toLower();
@@ -981,7 +1096,7 @@ QString reverseDnsNameForAddress(const QHostAddress& address)
 bool isLikelyLanAddress(const QString& host)
 {
     QHostAddress address;
-    if (!address.setAddress(host.trimmed()) || address.isLoopback()) return false;
+    if (!address.setAddress(host.trimmed()) || isInvalidLanDiscoveryAddress(address)) return false;
 
     if (address.protocol() == QAbstractSocket::IPv4Protocol) {
         const quint32 value = address.toIPv4Address();
@@ -1048,6 +1163,9 @@ QString sanitizedLanHostName(QString value)
     const QString upper = value.toUpper();
     if (upper == QLatin1String("WORKGROUP") ||
         upper == QLatin1String("LOCAL") ||
+        upper == QLatin1String("LOCALHOST") ||
+        upper == QLatin1String("BROADCAST") ||
+        upper == QLatin1String("BROADCASTHOST") ||
         upper.startsWith(QLatin1Char('_'))) {
         return QString();
     }
@@ -1069,6 +1187,9 @@ QString sanitizedLanDisplayName(QString value)
     const QString upper = value.toUpper();
     if (upper == QLatin1String("WORKGROUP") ||
         upper == QLatin1String("LOCAL") ||
+        upper == QLatin1String("LOCALHOST") ||
+        upper == QLatin1String("BROADCAST") ||
+        upper == QLatin1String("BROADCASTHOST") ||
         upper.startsWith(QLatin1Char('_'))) {
         return QString();
     }
@@ -1363,15 +1484,59 @@ QString peerLanWorkstationInfo(const QString& host,
                                const QSet<QString>& pending)
 {
     const QString key = normalizedPeerHost(host);
-    const QString info = cleanedLanWorkstationInfo(lan_info_cache.value(key));
-    if (!info.isEmpty()) return info;
     const QString name = lan_name_cache.value(key);
     if (!name.isEmpty()) return name;
+    const QString info = cleanedLanWorkstationInfo(lan_info_cache.value(key));
+    if (!info.isEmpty()) return info;
     Q_UNUSED(reverse_dns);
     const QString alias = lanAliasFromDnsName(dns_cache.value(key));
     if (!alias.isEmpty()) return alias;
     if (pending.contains(key)) return QStringLiteral("Scanning...");
     return QStringLiteral("-");
+}
+
+QString peerLanWorkstationSourceTooltip(const QString& host,
+                                        const QString& display_name,
+                                        const QString& reverse_dns,
+                                        const QHash<QString, QString>& lan_info_cache,
+                                        const QHash<QString, QString>& lan_name_cache,
+                                        const QHash<QString, QString>& dns_cache,
+                                        const QSet<QString>& pending)
+{
+    const QString key = normalizedPeerHost(host);
+    QStringList sources;
+    const QString raw_info = lan_info_cache.value(key);
+    if (raw_info.contains(QStringLiteral("Nu LAN beacon"), Qt::CaseInsensitive)) sources.push_back(QStringLiteral("Nu LAN beacon"));
+    if (raw_info.contains(QStringLiteral("Bonjour"), Qt::CaseInsensitive)) sources.push_back(QStringLiteral("Bonjour/mDNS"));
+    if (raw_info.contains(QStringLiteral("NetBIOS"), Qt::CaseInsensitive) ||
+        raw_info.contains(QStringLiteral("Workstation Service"), Qt::CaseInsensitive) ||
+        raw_info.contains(QStringLiteral("File/Print Server Service"), Qt::CaseInsensitive)) {
+        sources.push_back(QStringLiteral("SMB/NetBIOS"));
+    }
+    if (raw_info.contains(QStringLiteral("nmap"), Qt::CaseInsensitive) ||
+        raw_info.contains(QStringLiteral("OS="), Qt::CaseInsensitive) ||
+        raw_info.contains(QStringLiteral("Device type:"), Qt::CaseInsensitive)) {
+        sources.push_back(QStringLiteral("nmap fingerprint"));
+    }
+    if (lan_name_cache.contains(key)) sources.push_back(QStringLiteral("host-name probe"));
+    if (!lanAliasFromDnsName(dns_cache.value(key)).isEmpty() ||
+        !lanAliasFromDnsName(reverse_dns).isEmpty()) {
+        sources.push_back(QStringLiteral("local DNS/reverse DNS"));
+    }
+    if (isLikelyLanAddress(host) || isOnLocalInterfaceSubnet(host)) {
+        sources.push_back(QStringLiteral("local/private address match"));
+    }
+    if (pending.contains(key)) sources.push_back(QStringLiteral("scan pending"));
+    sources.removeDuplicates();
+
+    const QString name = display_name.trimmed().isEmpty() || display_name == QLatin1String("-")
+        ? QStringLiteral("detected LAN peer")
+        : display_name.trimmed();
+    return QStringLiteral("LAN: %1%2")
+        .arg(name,
+             sources.isEmpty()
+                ? QString()
+                : QStringLiteral("\nDiscovery source: %1").arg(sources.join(QStringLiteral(", "))));
 }
 
 QStringList configuredSeedDomains()
@@ -1629,7 +1794,7 @@ bool parseDebugLogTimestamp(const QString& line, QDateTime& utc, QString& messag
     const QRegularExpressionMatch match = re.match(line);
     if (!match.hasMatch()) return false;
     utc = QDateTime::fromString(match.captured(1), QStringLiteral("yyyy-MM-dd'T'HH:mm:ss"));
-    utc.setTimeZone(QTimeZone::UTC);
+    utc.setTimeZone(QTimeZone(QByteArrayLiteral("UTC")));
     message = match.captured(2);
     return utc.isValid();
 }
@@ -2172,6 +2337,7 @@ void NuRpcService::loadLocalSettings()
     }
     m_lan_node_discovery_enabled = nu_settings.value(QStringLiteral("LanNodeDiscoveryEnabled"), false).toBool();
     m_lan_fast_sync_enabled = nu_settings.value(QStringLiteral("LanFastSyncEnabled"), true).toBool();
+    m_advanced_tools_visible = nu_settings.value(QStringLiteral("AdvancedToolsVisible"), false).toBool();
     m_explorer_top100_focused_indexing = nu_settings.value(QStringLiteral("ExplorerTop100FocusedIndexing"), false).toBool();
     m_upnp_connections_enabled = nu_settings.value(QStringLiteral("UpnpConnectionsEnabled"), false).toBool();
     m_lan_node_discovery_notice_acknowledged = nu_settings.value(QStringLiteral("LanNodeDiscoveryNoticeAcknowledged"), false).toBool();
@@ -2211,6 +2377,10 @@ void NuRpcService::loadLocalSettings()
         m_third_party_tx_urls_enabled = true;
         if (m_explorer_mode == QLatin1String("dc903")) m_third_party_tx_url = explorerPresetUrl(1);
         if (m_explorer_mode == QLatin1String("legacy")) m_third_party_tx_url = explorerPresetUrl(2);
+        if (m_explorer_mode == QLatin1String("custom") && m_third_party_tx_url.isEmpty()) {
+            m_explorer_mode = QStringLiteral("internal");
+            m_third_party_tx_urls_enabled = false;
+        }
     }
     loadExplorerRecentLookups();
     loadExplorerContacts();
@@ -2483,9 +2653,15 @@ bool NuRpcService::ensureBackendStarted()
             : QStringLiteral("Defcoin backend -version preflight: %1").arg(output.section(QLatin1Char('\n'), 0, 0)));
     }
 
+    const bool fast_sync_needs_lan_peer_reachability = m_lan_fast_sync_enabled;
+    const bool effective_lan_node_discovery_enabled = m_lan_node_discovery_enabled || fast_sync_needs_lan_peer_reachability;
+    if (fast_sync_needs_lan_peer_reachability && !m_lan_node_discovery_enabled) {
+        appendLaunchDiagnostic(QStringLiteral("UDP fast sync is enabled, so backend launch enables LAN discovery/listening for peer negotiation."));
+    }
+
     const bool listen_for_peers =
 #if defined(Q_OS_MACOS)
-        m_lan_node_discovery_enabled || m_upnp_connections_enabled;
+        effective_lan_node_discovery_enabled || m_upnp_connections_enabled;
 #else
         true;
 #endif
@@ -2504,7 +2680,8 @@ bool NuRpcService::ensureBackendStarted()
          << QStringLiteral("-listen=%1").arg(listen_for_peers ? 1 : 0)
          << QStringLiteral("-networkactive=1")
          << QStringLiteral("-acceptlegacymagic=%1").arg(m_only_defcoin_magic_bytes ? 0 : 1)
-         << QStringLiteral("-allowlannodediscovery=%1").arg(m_lan_node_discovery_enabled ? 1 : 0)
+         << QStringLiteral("-allowlannodediscovery=%1").arg(effective_lan_node_discovery_enabled ? 1 : 0)
+         << QStringLiteral("-defcoinfastsync=%1").arg(m_lan_fast_sync_enabled ? 1 : 0)
          << QStringLiteral("-upnp=%1").arg(m_upnp_connections_enabled ? 1 : 0)
          << QStringLiteral("-rpcport=%1").arg(m_rpc_port)
          << QStringLiteral("-rpcbind=127.0.0.1")
@@ -2541,9 +2718,11 @@ bool NuRpcService::ensureBackendStarted()
         }
     }
 
-    if (!m_lan_node_discovery_enabled) {
+    if (!effective_lan_node_discovery_enabled) {
         args << QStringLiteral("-discover=0");
         appendLaunchDiagnostic(QStringLiteral("LAN node discovery is disabled; backend launch skips local interface peer discovery before networking starts."));
+    } else {
+        args << QStringLiteral("-discover=1");
     }
     if (!listen_for_peers) {
         appendLaunchDiagnostic(QStringLiteral("Inbound peer listening is disabled on macOS until LAN node discovery or UPnP is enabled, avoiding the Local Network permission prompt on first launch."));
@@ -3301,7 +3480,7 @@ void NuRpcService::schedulePeerNameLookups(const QString& host)
 
 void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
 {
-    if (!m_lan_node_discovery_enabled) return;
+    if (!m_lan_node_discovery_enabled && !m_lan_fast_sync_enabled) return;
     const QString key = normalizedPeerHost(host);
     const bool has_local_dns_hint = !lanAliasFromDnsName(m_peer_dns_name_by_host.value(key)).isEmpty();
     const bool on_local_subnet = isOnLocalInterfaceSubnet(host);
@@ -3677,7 +3856,7 @@ void NuRpcService::refreshNode()
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
 
-#if DEFCOIN_NU_EXPFOR_APP
+#if DEFCOIN_NU_EXPLORE_APP
         if (!m_explorer_indexing && !m_explorer_index_paused_by_user && !m_explorer_auto_index_requested && m_block_height > 0) {
             const int indexed_height = explorerHighestIndexedBlock();
             if (indexed_height < m_block_height) {
@@ -3763,12 +3942,23 @@ void NuRpcService::refreshNode()
         QHash<QString, qint64> received_message_bytes;
         QSet<QString> udp_fast_sync_peer_hosts;
         QHash<QString, int> udp_fast_sync_peer_node_ids_by_host;
+        QHash<QString, int> udp_fast_sync_peer_inflight_counts_by_host;
+        QHash<int, QString> peer_host_by_node_id;
+        QHash<int, QString> peer_addr_by_node_id;
+        QHash<int, bool> peer_inbound_by_node_id;
         for (const QJsonValue& peer_value : result.toArray()) {
             const QJsonObject peer = peer_value.toObject();
             const QString subver = trimUserAgent(peer.value(QStringLiteral("subver")).toString());
             if (m_only_defcoin_user_agents && !isDefcoinUserAgent(subver)) continue;
             const QString raw_addr = peer.value(QStringLiteral("addr")).toString();
             const QPair<QString, QString> endpoint = splitPeerAddressAndPort(peer.value(QStringLiteral("addr")).toString());
+            const int node_id_int = peer.value(QStringLiteral("id")).toInt(-1);
+            const int inflight_count = peer.value(QStringLiteral("inflight")).toArray().size();
+            if (node_id_int >= 0) {
+                peer_host_by_node_id.insert(node_id_int, endpoint.first);
+                peer_addr_by_node_id.insert(node_id_int, raw_addr);
+                peer_inbound_by_node_id.insert(node_id_int, peer.value(QStringLiteral("inbound")).toBool());
+            }
             QHostAddress udp_fast_sync_address;
             QString udp_fast_sync_host_key;
             const bool fast_sync_service_candidate = peerServicesAdvertiseFastSync(peer.value(QStringLiteral("services")).toString());
@@ -3777,7 +3967,8 @@ void NuRpcService::refreshNode()
             if (nu_fast_sync_candidate) {
                 udp_fast_sync_host_key = normalizedFastSyncHost(udp_fast_sync_address);
                 udp_fast_sync_peer_hosts.insert(udp_fast_sync_host_key);
-                udp_fast_sync_peer_node_ids_by_host.insert(udp_fast_sync_host_key, peer.value(QStringLiteral("id")).toInt(-1));
+                udp_fast_sync_peer_node_ids_by_host.insert(udp_fast_sync_host_key, node_id_int);
+                udp_fast_sync_peer_inflight_counts_by_host.insert(udp_fast_sync_host_key, inflight_count);
             }
             QString fast_sync_available = QStringLiteral("No");
             if (!m_lan_fast_sync_enabled) {
@@ -3789,14 +3980,17 @@ void NuRpcService::refreshNode()
                     fast_sync_available = QStringLiteral("Yes");
                 } else if (!udp_fast_sync_host_key.isEmpty() &&
                            m_udp_fast_sync_failed_peer_hosts.contains(udp_fast_sync_host_key)) {
-                    fast_sync_available = QStringLiteral("Failed");
+                    fast_sync_available = QStringLiteral("No reply");
+                } else if (!udp_fast_sync_host_key.isEmpty() &&
+                           m_udp_fast_sync_probe_ids_by_host.contains(udp_fast_sync_host_key)) {
+                    fast_sync_available = QStringLiteral("Probe sent");
                 } else {
-                    fast_sync_available = QStringLiteral("TBA");
+                    fast_sync_available = QStringLiteral("Advertised");
                 }
             }
             schedulePeerNameLookups(endpoint.first);
             scheduleLanPeerNameLookups(endpoint.first);
-            const QString node_id = QString::number(peer.value(QStringLiteral("id")).toInt());
+            const QString node_id = QString::number(node_id_int);
             const QString direction = peer.value(QStringLiteral("inbound")).toBool() ? QStringLiteral("In") : QStringLiteral("Out");
             const QString ping = formatPing(peer.value(QStringLiteral("pingtime")));
             const QString min_ping = formatPing(peer.value(QStringLiteral("minping")));
@@ -3818,13 +4012,15 @@ void NuRpcService::refreshNode()
             const QString reverse_dns = peerDnsName(peer, endpoint, m_peer_dns_name_by_host);
             const QString known_dns = peerDomainAlias(peer, endpoint, reverse_dns, m_peer_dns_name_by_host, m_peer_domain_alias_by_host, m_peer_lan_name_by_host);
             const bool lan_peer = m_lan_node_discovery_enabled && isVisibleLanPeer(endpoint.first, reverse_dns, known_dns, m_peer_lan_name_by_host, m_peer_lan_info_by_host);
-            const QString lan_marker = lan_peer ? QStringLiteral("LAN") : QString();
             const QString workstation_info = lan_peer
                 ? peerLanWorkstationInfo(endpoint.first, reverse_dns, m_peer_lan_info_by_host, m_peer_lan_name_by_host, m_peer_dns_name_by_host, m_peer_lan_lookup_pending)
                 : QString();
             const QString source_or_lan_name = lan_peer && workstation_info != QLatin1String("-")
                 ? workstation_info
                 : known_dns;
+            const QString lan_tooltip = lan_peer
+                ? peerLanWorkstationSourceTooltip(endpoint.first, source_or_lan_name, reverse_dns, m_peer_lan_info_by_host, m_peer_lan_name_by_host, m_peer_dns_name_by_host, m_peer_lan_lookup_pending)
+                : QString();
             const QJsonObject sent_per_msg = peer.value(QStringLiteral("bytessent_per_msg")).toObject();
             for (auto it = sent_per_msg.constBegin(); it != sent_per_msg.constEnd(); ++it) {
                 sent_message_bytes[it.key()] += it.value().toVariant().toLongLong();
@@ -3834,7 +4030,14 @@ void NuRpcService::refreshNode()
                 received_message_bytes[it.key()] += it.value().toVariant().toLongLong();
             }
 
-            simple_rows.push_back(row({
+            const QVariantMap peer_meta{
+                {QStringLiteral("nodeId"), node_id},
+                {QStringLiteral("peerHost"), endpoint.first},
+                {QStringLiteral("peerAddress"), raw_addr},
+                {QStringLiteral("peerInbound"), peer.value(QStringLiteral("inbound")).toBool()}
+            };
+
+            simple_rows.push_back(tableRow({
                 node_id,
                 direction,
                 peerAddressPortDisplay(raw_addr, endpoint),
@@ -3843,18 +4046,18 @@ void NuRpcService::refreshNode()
                 sent,
                 received,
                 subver
-            }));
+            }, peer_meta));
 
             QVariantList cell_tooltips;
-            for (int i = 0; i < 29; ++i) cell_tooltips << QString();
-            cell_tooltips[9] = service_details;
+            for (int i = 0; i < 28; ++i) cell_tooltips << QString();
+            if (!lan_tooltip.isEmpty()) cell_tooltips[5] = lan_tooltip;
+            cell_tooltips[8] = service_details;
 
             detailed_rows.push_back(tableRow({
                 node_id,
                 direction,
                 peerIpDisplay(endpoint),
                 fallbackDash(endpoint.second),
-                lan_marker,
                 reverse_dns,
                 source_or_lan_name,
                 protocol_version,
@@ -3882,8 +4085,13 @@ void NuRpcService::refreshNode()
                     ? formatAmount(peer.value(QStringLiteral("minfeefilter"))) + QStringLiteral(" DFC/kB")
                     : QStringLiteral("-")
             }, {
+                {QStringLiteral("nodeId"), node_id},
+                {QStringLiteral("peerHost"), endpoint.first},
+                {QStringLiteral("peerAddress"), raw_addr},
+                {QStringLiteral("peerInbound"), peer.value(QStringLiteral("inbound")).toBool()},
                 {QStringLiteral("reverseDnsSort"), reverseDomainSortNotation(reverse_dns)},
                 {QStringLiteral("knownDnsSort"), lan_peer ? source_or_lan_name.toLower() : reverseDomainSortNotation(source_or_lan_name)},
+                {QStringLiteral("isLanPeer"), lan_peer},
                 {QStringLiteral("cellTooltips"), cell_tooltips}
             }));
         }
@@ -3893,6 +4101,10 @@ void NuRpcService::refreshNode()
         m_peer_count = detailed_rows.size();
         m_udp_fast_sync_peer_hosts = udp_fast_sync_peer_hosts;
         m_udp_fast_sync_peer_node_ids_by_host = udp_fast_sync_peer_node_ids_by_host;
+        m_udp_fast_sync_peer_inflight_counts_by_host = udp_fast_sync_peer_inflight_counts_by_host;
+        m_peer_host_by_node_id = peer_host_by_node_id;
+        m_peer_addr_by_node_id = peer_addr_by_node_id;
+        m_peer_inbound_by_node_id = peer_inbound_by_node_id;
         resetFastSyncProtocolWindow();
         m_metric_peer_messages_sent = orderedMessageTypeStats(sent_message_bytes);
         m_metric_peer_messages_received = orderedMessageTypeStats(received_message_bytes);
@@ -3900,6 +4112,7 @@ void NuRpcService::refreshNode()
         Q_EMIT peersChanged();
         Q_EMIT stateChanged();
     });
+    refreshBannedPeerRows();
 }
 
 void NuRpcService::refreshWallet()
@@ -4285,6 +4498,193 @@ void NuRpcService::ensureLanFastSyncSocket()
     Q_EMIT stateChanged();
 }
 
+bool NuRpcService::isLocalInterfaceAddress(const QHostAddress& address) const
+{
+    if (address.isNull()) return false;
+    const QString normalized = normalizedFastSyncHost(address);
+    for (const QNetworkInterface& iface : QNetworkInterface::allInterfaces()) {
+        const QNetworkInterface::InterfaceFlags flags = iface.flags();
+        if (!(flags & QNetworkInterface::IsUp)) continue;
+        for (const QNetworkAddressEntry& entry : iface.addressEntries()) {
+            const QHostAddress local = entry.ip();
+            if (local.isNull()) continue;
+            if (normalizedFastSyncHost(local) == normalized) return true;
+        }
+    }
+    return false;
+}
+
+void NuRpcService::sendLanDiscoveryAnnouncement()
+{
+    if (!m_lan_fast_sync_socket || !m_lan_fast_sync_enabled) return;
+    const bool lan_announce_enabled = m_lan_node_discovery_enabled || m_lan_fast_sync_enabled;
+    if (!lan_announce_enabled) return;
+
+    QSettings settings;
+    if (m_lan_discovery_node_id.isEmpty()) {
+        m_lan_discovery_node_id = settings.value(QStringLiteral("LanDiscoveryNodeId")).toString();
+        if (m_lan_discovery_node_id.isEmpty()) {
+            m_lan_discovery_node_id = QUuid::createUuid().toString(QUuid::Id128);
+            settings.setValue(QStringLiteral("LanDiscoveryNodeId"), m_lan_discovery_node_id);
+        }
+    }
+
+    const QString host_name = lanWorkstationNameFromCandidate(QHostInfo::localHostName());
+    const QString workstation_name = host_name.isEmpty()
+        ? lanWorkstationNameFromCandidate(QSysInfo::machineHostName())
+        : host_name;
+    if (workstation_name.isEmpty()) return;
+
+    QJsonObject message;
+    message.insert(QStringLiteral("type"), QStringLiteral("defcoin-nu-lan-announce"));
+    message.insert(QStringLiteral("version"), 1);
+    message.insert(QStringLiteral("product"), QStringLiteral("Defcoin Core Nu"));
+    message.insert(QStringLiteral("build"), QStringLiteral(DEFCOIN_NU_VERSION));
+    message.insert(QStringLiteral("node_id"), m_lan_discovery_node_id);
+    message.insert(QStringLiteral("platform"), QSysInfo::prettyProductName());
+    message.insert(QStringLiteral("arch"), QSysInfo::currentCpuArchitecture());
+    message.insert(QStringLiteral("lan_discovery_protocol"), QStringLiteral("defcoin-nu-lan-announce-v1"));
+    message.insert(QStringLiteral("p2p_port"), int(DEFCOIN_DEFAULT_P2P_PORT));
+    message.insert(QStringLiteral("fastsync_port"), int(LAN_FAST_SYNC_PORT));
+    message.insert(QStringLiteral("host"), workstation_name);
+    message.insert(QStringLiteral("workstation_name"), workstation_name);
+
+    const QByteArray payload = QJsonDocument(message).toJson(QJsonDocument::Compact);
+    if (payload.isEmpty() || payload.size() > LAN_DISCOVERY_ANNOUNCE_MAX_BYTES) return;
+
+    QSet<QString> targets;
+    auto addTarget = [&targets](const QHostAddress& address) {
+        if (address.isNull()) return;
+        targets.insert(address.toString());
+    };
+    addTarget(QHostAddress::Broadcast);
+
+    for (const QNetworkInterface& iface : QNetworkInterface::allInterfaces()) {
+        const QNetworkInterface::InterfaceFlags flags = iface.flags();
+        if (!(flags & QNetworkInterface::IsUp) ||
+            !(flags & QNetworkInterface::CanBroadcast) ||
+            (flags & QNetworkInterface::IsLoopBack)) {
+            continue;
+        }
+        for (const QNetworkAddressEntry& entry : iface.addressEntries()) {
+            const QHostAddress local = entry.ip();
+            if (local.protocol() != QAbstractSocket::IPv4Protocol || isInvalidLanDiscoveryAddress(local)) continue;
+            QHostAddress broadcast = entry.broadcast();
+            if (broadcast.isNull()) {
+                const int prefix = entry.prefixLength();
+                if (prefix <= 0 || prefix >= 32) continue;
+                const quint32 mask = prefix == 0 ? 0 : (0xffffffffu << (32 - prefix));
+                broadcast = QHostAddress((local.toIPv4Address() & mask) | ~mask);
+            }
+            if (!broadcast.isNull() && !isLocalInterfaceAddress(broadcast)) addTarget(broadcast);
+        }
+    }
+
+    for (const QString& target_text : std::as_const(targets)) {
+        QHostAddress target(target_text);
+        if (target.isNull()) continue;
+        m_lan_fast_sync_socket->writeDatagram(payload, target, LAN_FAST_SYNC_PORT);
+    }
+}
+
+void NuRpcService::queueLanDiscoveryAddNode(const QString& host, quint16 p2p_port)
+{
+    QHostAddress address;
+    if (!address.setAddress(host.trimmed()) || isInvalidLanDiscoveryAddress(address) || isLocalInterfaceAddress(address)) return;
+    if (!isPrivateOrLocalFastSyncAddress(address) && !isOnLocalInterfaceSubnet(address.toString())) return;
+
+    const QString normalized = normalizedFastSyncHost(address);
+    const QString endpoint = address.protocol() == QAbstractSocket::IPv6Protocol
+        ? QStringLiteral("[%1]:%2").arg(normalized, QString::number(p2p_port))
+        : QStringLiteral("%1:%2").arg(normalized, QString::number(p2p_port));
+    const QString endpoint_key = endpoint.toLower();
+    if (m_lan_discovery_added_endpoints.contains(endpoint_key) ||
+        m_lan_discovery_addnode_pending.contains(endpoint_key) ||
+        m_lan_discovery_addnode_inflight.contains(endpoint_key)) {
+        return;
+    }
+
+    m_lan_discovery_addnode_pending.insert(endpoint_key);
+    processQueuedLanDiscoveryAddNodes();
+}
+
+void NuRpcService::processQueuedLanDiscoveryAddNodes()
+{
+    if (!m_rpc_connected || m_lan_discovery_addnode_pending.isEmpty()) return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_lan_discovery_last_addnode_attempt_ms > 0 &&
+        now - m_lan_discovery_last_addnode_attempt_ms < 5000) {
+        return;
+    }
+    m_lan_discovery_last_addnode_attempt_ms = now;
+    const QList<QString> pending = m_lan_discovery_addnode_pending.values();
+    for (const QString& endpoint_key : pending) {
+        if (m_lan_discovery_added_endpoints.contains(endpoint_key) ||
+            m_lan_discovery_addnode_inflight.contains(endpoint_key)) {
+            m_lan_discovery_addnode_pending.remove(endpoint_key);
+            continue;
+        }
+        m_lan_discovery_addnode_pending.remove(endpoint_key);
+        m_lan_discovery_addnode_inflight.insert(endpoint_key);
+        rpcCall(QStringLiteral("addnode"), {endpoint_key, QStringLiteral("add")}, false, [this, endpoint_key](const QJsonValue&, const QString& error) {
+            m_lan_discovery_addnode_inflight.remove(endpoint_key);
+            if (error.isEmpty() || error.contains(QStringLiteral("already"), Qt::CaseInsensitive)) {
+                m_lan_discovery_added_endpoints.insert(endpoint_key);
+                refreshNode();
+            } else if (error.contains(QStringLiteral("warmup"), Qt::CaseInsensitive) ||
+                       error.contains(QStringLiteral("loading block index"), Qt::CaseInsensitive) ||
+                       error.contains(QStringLiteral("rewinding"), Qt::CaseInsensitive) ||
+                       error.contains(QStringLiteral("verifying"), Qt::CaseInsensitive)) {
+                m_lan_discovery_addnode_pending.insert(endpoint_key);
+            } else {
+                recordFastSyncUdpDiagnostic(QStringLiteral("LAN discovery addnode failed"), error.left(240));
+            }
+        });
+    }
+}
+
+void NuRpcService::handleLanDiscoveryAnnouncement(const QJsonObject& message, const QHostAddress& sender, quint16)
+{
+    if (message.value(QStringLiteral("type")).toString() != QLatin1String("defcoin-nu-lan-announce")) return;
+    if (message.value(QStringLiteral("version")).toInt(0) != 1) return;
+    if (message.value(QStringLiteral("product")).toString() != QLatin1String("Defcoin Core Nu")) return;
+    if (isInvalidLanDiscoveryAddress(sender) || isLocalInterfaceAddress(sender)) return;
+    if (!isPrivateOrLocalFastSyncAddress(sender) && !isOnLocalInterfaceSubnet(sender.toString())) return;
+
+    const QString sender_key = normalizedFastSyncHost(sender);
+    if (sender_key.isEmpty()) return;
+    if (!m_lan_discovery_node_id.isEmpty() &&
+        message.value(QStringLiteral("node_id")).toString() == m_lan_discovery_node_id) {
+        return;
+    }
+
+    const QString announced_name = lanWorkstationNameFromCandidate(
+        message.value(QStringLiteral("workstation_name")).toString(
+            message.value(QStringLiteral("host")).toString()));
+    const quint16 p2p_port = quint16(qBound(1, message.value(QStringLiteral("p2p_port")).toInt(DEFCOIN_DEFAULT_P2P_PORT), 65535));
+
+    bool changed = false;
+    if (!announced_name.isEmpty()) {
+        if (m_peer_lan_name_by_host.value(sender_key) != announced_name) {
+            m_peer_lan_name_by_host.insert(sender_key, announced_name);
+            changed = true;
+        }
+        const QString info = QStringLiteral("Nu LAN beacon | %1").arg(announced_name);
+        if (m_peer_lan_info_by_host.value(sender_key) != info) {
+            m_peer_lan_info_by_host.insert(sender_key, info);
+            changed = true;
+        }
+        m_peer_lan_lookup_pending.remove(sender_key);
+    } else {
+        // Bad or ambiguous announced names are display-only failures. Keep the
+        // endpoint usable for normal P2P/Fast Sync and let the older probes try.
+        scheduleLanPeerNameLookups(sender.toString());
+    }
+
+    queueLanDiscoveryAddNode(sender.toString(), p2p_port);
+    if (changed) refreshNode();
+}
+
 void NuRpcService::stopLanFastSyncSocket()
 {
     releaseLanFastSyncReservation();
@@ -4316,7 +4716,7 @@ QString NuRpcService::lanFastSyncMethodSummary() const
 {
     QStringList methods;
     if (m_sync_tcp_bytes_received > 0 || m_sync_tcp_bytes_sent > 0) {
-        methods.push_back(QStringLiteral("TCP/Core"));
+        methods.push_back(QStringLiteral("TCP sync"));
     }
     if (m_lan_fast_sync_udp_bytes_received > 0 || m_lan_fast_sync_udp_bytes_sent > 0) {
         methods.push_back(QStringLiteral("UDP fast sync: %1 block%2 accepted, %3 retransmit error%4 (OK)")
@@ -4367,8 +4767,8 @@ QString NuRpcService::fastSyncTcpSummary() const
         : QStringLiteral("-");
     const QString ewma = m_fast_sync_tcp_ewma_blocks_per_second > 0.0
         ? QStringLiteral("%1 blk/s recent").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
-        : QStringLiteral("recent warming");
-    return QStringLiteral("%1 | total %2 (in %3, out %4) | blocks %5 | %6 | samples %7 ok/%8 fail | packets Core-managed")
+        : QStringLiteral("recent waiting for accepted TCP blocks");
+    return QStringLiteral("%1 | total %2 (in %3, out %4) | blocks %5 | %6 | samples %7 ok/%8 fail | packets handled by normal sync")
         .arg(avg,
              formatBytes(total),
              formatBytes(m_sync_tcp_bytes_received),
@@ -4381,6 +4781,10 @@ QString NuRpcService::fastSyncTcpSummary() const
 
 QString NuRpcService::fastSyncUdpSummary() const
 {
+    const int udp_samples = m_fast_sync_udp_successes + m_fast_sync_udp_failures;
+    const int udp_warmup_percent = FAST_SYNC_PROTOCOL_MIN_UDP_PROBES > 0
+        ? std::clamp((udp_samples * 100) / FAST_SYNC_PROTOCOL_MIN_UDP_PROBES, 0, 100)
+        : 100;
     const qint64 total = m_lan_fast_sync_udp_bytes_received + m_lan_fast_sync_udp_bytes_sent;
     const double seconds = (m_lan_fast_sync_udp_first_activity_ms > 0 && m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms)
         ? qMax(1.0, double(m_lan_fast_sync_udp_last_activity_ms - m_lan_fast_sync_udp_first_activity_ms) / 1000.0)
@@ -4392,7 +4796,10 @@ QString NuRpcService::fastSyncUdpSummary() const
         : QStringLiteral("-");
     const QString ewma = m_fast_sync_udp_ewma_blocks_per_second > 0.0
         ? QStringLiteral("%1 blk/s recent").arg(QString::number(m_fast_sync_udp_ewma_blocks_per_second, 'f', m_fast_sync_udp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
-        : QStringLiteral("recent warming");
+        : QStringLiteral("recent warming %1/%2 (%3%)")
+              .arg(QString::number(udp_samples),
+                   QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES),
+                   QString::number(udp_warmup_percent));
     return QStringLiteral("%1 | total %2 (in %3, out %4) | packets %5 in/%6 out | blocks %7 | %8 | samples %9 ok/%10 fail | retransmit/checksum %11")
         .arg(avg,
              formatBytes(total),
@@ -4409,15 +4816,23 @@ QString NuRpcService::fastSyncUdpSummary() const
 
 QString NuRpcService::syncTransportDecisionSummary() const
 {
+    const int udp_samples = m_fast_sync_udp_successes + m_fast_sync_udp_failures;
+    const int udp_warmup_percent = FAST_SYNC_PROTOCOL_MIN_UDP_PROBES > 0
+        ? std::clamp((udp_samples * 100) / FAST_SYNC_PROTOCOL_MIN_UDP_PROBES, 0, 100)
+        : 100;
     const QString tcp_rate = m_fast_sync_tcp_ewma_blocks_per_second > 0.0
         ? QStringLiteral("TCP %1 blk/s").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
-        : QStringLiteral("TCP warming");
+        : QStringLiteral("TCP waiting");
     const QString udp_rate = m_fast_sync_udp_ewma_blocks_per_second > 0.0
         ? QStringLiteral("UDP %1 blk/s").arg(QString::number(m_fast_sync_udp_ewma_blocks_per_second, 'f', m_fast_sync_udp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
-        : QStringLiteral("UDP warming");
+        : QStringLiteral("UDP warming %1/%2 (%3%)")
+              .arg(QString::number(udp_samples),
+                   QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES),
+                   QString::number(udp_warmup_percent));
     const QString favor = m_fast_sync_decision_summary.startsWith(QStringLiteral("UDP warmup"))
-        ? QStringLiteral("TCP/UDP probing %1:%2")
-              .arg(QString::number(std::max(0, m_fast_sync_tcp_quota_remaining)),
+        ? QStringLiteral("%1 | probing %2:%3")
+              .arg(m_fast_sync_decision_summary,
+                   QString::number(std::max(0, m_fast_sync_tcp_quota_remaining)),
                    QString::number(std::max(0, m_fast_sync_udp_quota_remaining)))
         : m_fast_sync_decision_summary;
     return QStringLiteral("%1 | %2 | %3")
@@ -4429,11 +4844,22 @@ QString NuRpcService::syncTransportDecisionSummary() const
 QString NuRpcService::syncTransportProbeSummary() const
 {
     const int udp_samples = m_fast_sync_udp_successes + m_fast_sync_udp_failures;
+    const int udp_warmup_percent = FAST_SYNC_PROTOCOL_MIN_UDP_PROBES > 0
+        ? std::clamp((udp_samples * 100) / FAST_SYNC_PROTOCOL_MIN_UDP_PROBES, 0, 100)
+        : 100;
     const QString warmup = udp_samples < FAST_SYNC_PROTOCOL_MIN_UDP_PROBES
-        ? QStringLiteral("UDP samples %1/%2").arg(QString::number(udp_samples), QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES))
+        ? QStringLiteral("UDP samples %1/%2 (%3%)")
+              .arg(QString::number(udp_samples),
+                   QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES),
+                   QString::number(udp_warmup_percent))
         : QStringLiteral("UDP samples %1").arg(QString::number(udp_samples));
-    return QStringLiteral("%1 | probe %2/%3 B | retransmit/errors %4")
+    QSet<QString> verified_hosts = m_udp_fast_sync_available_peer_hosts;
+    verified_hosts.unite(m_udp_fast_sync_used_peer_hosts);
+    const int verified_peers = verified_hosts.size();
+    return QStringLiteral("%1 | peers %2 candidates/%3 verified | datagram %4/%5 B | retransmit/errors %6")
         .arg(warmup,
+             QString::number(m_udp_fast_sync_peer_hosts.size()),
+             QString::number(verified_peers),
              QString::number(currentFastSyncDatagramSize()),
              QString::number(currentFastSyncChunkSize()),
              QString::number(m_lan_fast_sync_retransmit_errors));
@@ -4455,6 +4881,48 @@ void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 receive
         m_lan_fast_sync_udp_bytes_received += received_bytes;
         ++m_lan_fast_sync_udp_packets_received;
     }
+}
+
+QString NuRpcService::udpFastSyncEndpointText(const QHostAddress& address, quint16 port) const
+{
+    QString host = normalizedFastSyncHost(address);
+    if (host.isEmpty()) host = address.toString();
+    if (host.isEmpty()) host = QStringLiteral("unknown");
+    if (port == 0) return host;
+    return host.contains(QLatin1Char(':'))
+        ? QStringLiteral("[%1]:%2").arg(host).arg(port)
+        : QStringLiteral("%1:%2").arg(host).arg(port);
+}
+
+void NuRpcService::recordFastSyncUdpDiagnostic(const QString& reason, const QString& detail)
+{
+    const QString key = reason.trimmed().isEmpty() ? QStringLiteral("unspecified UDP Fast Sync issue") : reason.trimmed();
+    m_udp_fast_sync_failure_reason_counts.insert(key, m_udp_fast_sync_failure_reason_counts.value(key, 0) + 1);
+    if (!detail.trimmed().isEmpty()) {
+        m_lan_fast_sync_last_failure_detail = detail.trimmed();
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 last = m_udp_fast_sync_last_diagnostic_ms_by_reason.value(key, 0);
+    if (last > 0 && now - last < LAN_FAST_SYNC_DIAGNOSTIC_LOG_THROTTLE_MS) {
+        m_udp_fast_sync_suppressed_diagnostic_count_by_reason.insert(
+            key,
+            m_udp_fast_sync_suppressed_diagnostic_count_by_reason.value(key, 0) + 1);
+        return;
+    }
+
+    m_udp_fast_sync_last_diagnostic_ms_by_reason.insert(key, now);
+    const int suppressed = m_udp_fast_sync_suppressed_diagnostic_count_by_reason.take(key);
+    const QString line = QStringLiteral("udp fast sync diagnostic: %1%2%3")
+        .arg(key,
+             detail.trimmed().isEmpty() ? QString() : QStringLiteral(" - %1").arg(detail.trimmed()),
+             suppressed > 0 ? QStringLiteral(" (suppressed %1 repeats)").arg(suppressed) : QString());
+    const int debug_line = appendDebugLogLineFromNu(line);
+    appendLogLine(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t ")) + line, debug_line);
+    trimLogLines();
+    rebuildNodeMetrics();
+    Q_EMIT logChanged();
+    Q_EMIT stateChanged();
 }
 
 void NuRpcService::recordFastSyncTransportSuccess(FastSyncTransport transport, int blocks, int height, double seconds)
@@ -4523,7 +4991,7 @@ void NuRpcService::resetFastSyncProtocolWindow()
         m_fast_sync_tcp_quota_remaining = 1;
         m_fast_sync_udp_quota_remaining = 0;
         m_fast_sync_window_size = 2;
-        m_fast_sync_decision_summary = QStringLiteral("TCP/Core only");
+        m_fast_sync_decision_summary = QStringLiteral("TCP sync only");
         return;
     }
 
@@ -4537,9 +5005,13 @@ void NuRpcService::resetFastSyncProtocolWindow()
         m_fast_sync_udp_quota_remaining = 3;
         m_fast_sync_tcp_quota_remaining = 1;
         m_fast_sync_last_probe_ms = now;
-        m_fast_sync_decision_summary = QStringLiteral("UDP warmup %1/%2")
+        const int udp_warmup_percent = FAST_SYNC_PROTOCOL_MIN_UDP_PROBES > 0
+            ? std::clamp((udp_samples * 100) / FAST_SYNC_PROTOCOL_MIN_UDP_PROBES, 0, 100)
+            : 100;
+        m_fast_sync_decision_summary = QStringLiteral("UDP warmup %1/%2 (%3%)")
             .arg(QString::number(udp_samples),
-                 QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES));
+                 QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES),
+                 QString::number(udp_warmup_percent));
         return;
     }
 
@@ -4603,7 +5075,7 @@ bool NuRpcService::shouldAttemptUdpFastSync()
     if (m_fast_sync_tcp_quota_remaining > 0) {
         --m_fast_sync_tcp_quota_remaining;
     }
-    m_lan_fast_sync_status = QStringLiteral("%1. Letting TCP/Core fetch the next block before another UDP probe.")
+    m_lan_fast_sync_status = QStringLiteral("%1. Letting normal TCP sync fetch the next block before another UDP probe.")
         .arg(m_fast_sync_decision_summary);
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
@@ -4634,8 +5106,7 @@ void NuRpcService::resetLanFastSyncTransfer(const QString& status)
 bool NuRpcService::isUdpFastSyncAllowedPeer(const QHostAddress& address) const
 {
     if (address.isNull()) return false;
-    if (m_udp_fast_sync_peer_hosts.contains(normalizedFastSyncHost(address))) return true;
-    return m_lan_node_discovery_enabled && isPrivateOrLocalFastSyncAddress(address);
+    return m_udp_fast_sync_peer_hosts.contains(normalizedFastSyncHost(address));
 }
 
 bool NuRpcService::hasPrivateUdpFastSyncTarget() const
@@ -4662,6 +5133,9 @@ int NuRpcService::currentFastSyncChunkSize() const
 void NuRpcService::tuneFastSyncDatagramAfterSuccess()
 {
     const QVector<int> candidates = lanFastSyncDatagramCandidates(hasPrivateUdpFastSyncTarget());
+    if (m_fast_sync_udp_successes < 4 || m_fast_sync_udp_successes % 4 != 0) {
+        return;
+    }
     if (m_fast_sync_udp_datagram_index < candidates.size() - 1) {
         ++m_fast_sync_udp_datagram_index;
     }
@@ -4669,26 +5143,33 @@ void NuRpcService::tuneFastSyncDatagramAfterSuccess()
 
 void NuRpcService::tuneFastSyncDatagramAfterFailure()
 {
-    if (m_fast_sync_udp_datagram_index > 0) {
-        --m_fast_sync_udp_datagram_index;
-    }
+    m_fast_sync_udp_datagram_index = 0;
 }
 
 void NuRpcService::lanFastSyncTick()
 {
     if (!m_lan_fast_sync_enabled) {
         if (m_lan_fast_sync_socket) stopLanFastSyncSocket();
-        m_lan_fast_sync_status = QStringLiteral("UDP fast sync off; TCP/Core sync remains active.");
+        m_lan_fast_sync_status = QStringLiteral("UDP fast sync off; normal TCP sync remains active.");
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
         return;
     }
 
     ensureLanFastSyncSocket();
+    if (m_lan_fast_sync_socket) {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (m_lan_discovery_last_announce_ms <= 0 ||
+            now - m_lan_discovery_last_announce_ms >= LAN_DISCOVERY_ANNOUNCE_INTERVAL_MS) {
+            m_lan_discovery_last_announce_ms = now;
+            sendLanDiscoveryAnnouncement();
+        }
+    }
     if (!m_lan_fast_sync_socket || !m_rpc_connected) return;
+    processQueuedLanDiscoveryAddNodes();
     if (!m_syncing || m_header_height <= 0 || m_block_height >= m_header_height) {
         if (!m_lan_fast_sync_request_in_flight && !m_lan_fast_sync_submit_in_flight && !m_lan_fast_sync_reserve_in_flight) {
-            m_lan_fast_sync_status = QStringLiteral("UDP fast sync idle; TCP/Core is up to date.");
+            m_lan_fast_sync_status = QStringLiteral("UDP fast sync idle; normal TCP sync is up to date.");
             rebuildNodeMetrics();
             Q_EMIT stateChanged();
         }
@@ -4710,7 +5191,7 @@ void NuRpcService::lanFastSyncTick()
                         m_udp_fast_sync_failed_peer_hosts.insert(host);
                     }
                 }
-                resetLanFastSyncTransfer(QStringLiteral("UDP fast sync fell back to TCP/Core at block %1 after missing chunks.").arg(m_lan_fast_sync_current_height));
+                resetLanFastSyncTransfer(QStringLiteral("UDP fast sync fell back to normal TCP sync at block %1 after missing chunks.").arg(m_lan_fast_sync_current_height));
                 return;
             }
             const int retry_height = m_lan_fast_sync_current_height;
@@ -4724,21 +5205,127 @@ void NuRpcService::lanFastSyncTick()
     requestLanFastSyncBlock(next_height);
 }
 
+bool NuRpcService::isUdpFastSyncHostVerified(const QString& host) const
+{
+    return !host.isEmpty()
+        && (m_udp_fast_sync_available_peer_hosts.contains(host) || m_udp_fast_sync_used_peer_hosts.contains(host));
+}
+
+bool NuRpcService::isUdpFastSyncProbeAllowed(const QString& host, qint64 now) const
+{
+    if (host.isEmpty()) return false;
+    if (isUdpFastSyncHostVerified(host)) return true;
+    const qint64 pending_ms = m_udp_fast_sync_last_probe_ms_by_host.value(host, 0);
+    if (m_udp_fast_sync_probe_ids_by_host.contains(host) &&
+        pending_ms > 0 &&
+        now - pending_ms < LAN_FAST_SYNC_PROBE_TIMEOUT_MS) {
+        return false;
+    }
+    QHostAddress address;
+    if (!address.setAddress(host)) return false;
+    const bool local_target = isPrivateOrLocalFastSyncAddress(address);
+    const qint64 min_interval = local_target
+        ? qint64(5000)
+        : (m_udp_fast_sync_probe_failures_by_host.value(host, 0) >= LAN_FAST_SYNC_PUBLIC_PROBE_FAILURES_BEFORE_COOLDOWN
+               ? qint64(LAN_FAST_SYNC_PUBLIC_PROBE_COOLDOWN_MS)
+               : qint64(LAN_FAST_SYNC_PUBLIC_PROBE_MIN_INTERVAL_MS));
+    return pending_ms <= 0 || now - pending_ms >= min_interval;
+}
+
+void NuRpcService::recordUdpFastSyncPeerReply(const QString& host)
+{
+    if (host.isEmpty()) return;
+    m_udp_fast_sync_available_peer_hosts.insert(host);
+    m_udp_fast_sync_failed_peer_hosts.remove(host);
+    m_udp_fast_sync_probe_failures_by_host.remove(host);
+    m_udp_fast_sync_probe_ids_by_host.remove(host);
+    m_lan_fast_sync_last_failure_detail.clear();
+}
+
+void NuRpcService::recordUdpFastSyncPeerMiss(const QString& host, const QString& reason)
+{
+    if (host.isEmpty()) return;
+    if (!isUdpFastSyncHostVerified(host)) {
+        m_udp_fast_sync_failed_peer_hosts.insert(host);
+    }
+    m_udp_fast_sync_probe_ids_by_host.remove(host);
+    m_udp_fast_sync_probe_failures_by_host.insert(host, m_udp_fast_sync_probe_failures_by_host.value(host, 0) + 1);
+    m_udp_fast_sync_last_probe_ms_by_host.insert(host, QDateTime::currentMSecsSinceEpoch());
+    if (!reason.isEmpty()) {
+        m_lan_fast_sync_last_failure_detail = QStringLiteral("%1 for %2").arg(reason, host);
+        recordFastSyncUdpDiagnostic(reason, host);
+    }
+}
+
+bool NuRpcService::sendUdpFastSyncProbe(const QString& host, int node_id)
+{
+    if (!m_lan_fast_sync_socket || host.isEmpty() || node_id < 0) return false;
+    QHostAddress peer_address;
+    if (!peer_address.setAddress(host)) {
+        recordUdpFastSyncPeerMiss(host, QStringLiteral("invalid UDP probe target address"));
+        return false;
+    }
+
+    const QString probe_id = QUuid::createUuid().toString(QUuid::Id128);
+    const int max_datagram = isPrivateOrLocalFastSyncAddress(peer_address)
+        ? qMin(currentFastSyncDatagramSize(), LAN_FAST_SYNC_MAX_DATAGRAM_BYTES)
+        : LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES;
+    QJsonObject header;
+    header.insert(QStringLiteral("type"), QStringLiteral("probe"));
+    header.insert(QStringLiteral("version"), 1);
+    header.insert(QStringLiteral("capability"), QString::fromLatin1(UDP_FAST_SYNC_CAPABILITY));
+    header.insert(QStringLiteral("id"), probe_id);
+    header.insert(QStringLiteral("port"), int(LAN_FAST_SYNC_PORT));
+    header.insert(QStringLiteral("tip"), m_block_height);
+    header.insert(QStringLiteral("node_id"), node_id);
+    header.insert(QStringLiteral("max_datagram"), max_datagram);
+    header.insert(QStringLiteral("chunk_bytes"), lanFastSyncChunkBytesForDatagram(max_datagram));
+    header.insert(QStringLiteral("probe_mode"), isPrivateOrLocalFastSyncAddress(peer_address) ? QStringLiteral("lan") : QStringLiteral("public-safe"));
+
+    const QByteArray datagram = lanFastSyncDatagram(header, QByteArray(), LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES);
+    if (datagram.isEmpty()) {
+        recordUdpFastSyncPeerMiss(host, QStringLiteral("could not build UDP probe datagram"));
+        return false;
+    }
+    const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, peer_address, LAN_FAST_SYNC_PORT);
+    if (written <= 0) {
+        recordUdpFastSyncPeerMiss(host, QStringLiteral("UDP probe send failed"));
+        recordFastSyncUdpFailure();
+        return false;
+    }
+
+    m_udp_fast_sync_probe_ids_by_host.insert(host, probe_id);
+    m_udp_fast_sync_last_probe_ms_by_host.insert(host, QDateTime::currentMSecsSinceEpoch());
+    m_udp_fast_sync_attempted_peer_hosts.insert(host);
+    recordLanFastSyncUdpTraffic(written, 0);
+    recordFastSyncUdpDiagnostic(QStringLiteral("sent UDP Fast Sync probe"),
+        QStringLiteral("peer %1 host %2 id %3").arg(node_id).arg(host, probe_id.left(8)));
+    m_lan_fast_sync_status = QStringLiteral("UDP fast sync probing peer %1 on %2 before block requests.")
+        .arg(node_id)
+        .arg(host);
+    rebuildNodeMetrics();
+    Q_EMIT stateChanged();
+    return true;
+}
+
 QString NuRpcService::selectUdpFastSyncTargetHost(int* node_id) const
 {
     if (node_id) *node_id = -1;
     QString best_host;
     int best_score = -1;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
     for (const QString& host : std::as_const(m_udp_fast_sync_peer_hosts)) {
         const int peer_node_id = m_udp_fast_sync_peer_node_ids_by_host.value(host, -1);
         if (peer_node_id < 0) continue;
         if (m_udp_fast_sync_failed_peer_hosts.contains(host) &&
             !m_udp_fast_sync_available_peer_hosts.contains(host) &&
-            !m_udp_fast_sync_used_peer_hosts.contains(host)) {
+            !m_udp_fast_sync_used_peer_hosts.contains(host) &&
+            !isUdpFastSyncProbeAllowed(host, now)) {
             continue;
         }
         QHostAddress address;
         if (!address.setAddress(host)) continue;
+        if (!isUdpFastSyncHostVerified(host) && !isUdpFastSyncProbeAllowed(host, now)) continue;
         if (m_fast_sync_current_datagram_bytes > LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES &&
             !isPrivateOrLocalFastSyncAddress(address)) {
             continue;
@@ -4747,6 +5334,15 @@ QString NuRpcService::selectUdpFastSyncTargetHost(int* node_id) const
         if (m_udp_fast_sync_used_peer_hosts.contains(host)) score += 100;
         if (m_udp_fast_sync_available_peer_hosts.contains(host)) score += 50;
         if (isPrivateOrLocalFastSyncAddress(address)) score += 25;
+        score -= qMin(48, m_udp_fast_sync_peer_inflight_counts_by_host.value(host, 0) * 3);
+        // The desktop helper currently owns one UDP socket. Prefer IPv4 until
+        // a peer has proven UDP reachability so an unwriteable IPv6 target does
+        // not starve otherwise usable IPv4 fast-sync peers.
+        if (address.protocol() == QAbstractSocket::IPv4Protocol) score += 10;
+        if (!isUdpFastSyncHostVerified(host)) {
+            score -= isPrivateOrLocalFastSyncAddress(address) ? 20 : 45;
+            score -= qMin(40, m_udp_fast_sync_probe_failures_by_host.value(host, 0) * 20);
+        }
         if (score > best_score || (score == best_score && (best_host.isEmpty() || host < best_host))) {
             best_score = score;
             best_host = host;
@@ -4773,13 +5369,13 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
 {
     if (!m_lan_fast_sync_socket || height <= 0 || host.isEmpty() || node_id < 0 || expected_hash.size() != 64) {
         releaseLanFastSyncReservation();
-        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync could not start a reserved block request; TCP/Core fallback remains active."));
+        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync could not start a reserved block request; normal TCP fallback remains active."));
         return;
     }
     QHostAddress peer_address;
     if (!peer_address.setAddress(host)) {
         releaseLanFastSyncReservation();
-        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync target address was invalid; TCP/Core fallback remains active."));
+        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync target address was invalid; normal TCP fallback remains active."));
         return;
     }
     if (m_lan_fast_sync_started_ms <= 0) {
@@ -4812,13 +5408,24 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
     header.insert(QStringLiteral("datagram_mode"), hasPrivateUdpFastSyncTarget() ? QStringLiteral("lan-probe") : QStringLiteral("safe-probe"));
     const QByteArray datagram = lanFastSyncDatagram(header, QByteArray(), LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES);
     if (datagram.isEmpty()) {
-        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync could not build a safe request packet; TCP/Core fallback remains active."));
+        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync could not build a safe request packet; normal TCP fallback remains active."));
         return;
     }
     const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, peer_address, LAN_FAST_SYNC_PORT);
     if (written <= 0) {
+        const QString key = normalizedFastSyncHost(peer_address);
+        if (!key.isEmpty() &&
+            !m_udp_fast_sync_available_peer_hosts.contains(key) &&
+            !m_udp_fast_sync_used_peer_hosts.contains(key)) {
+            m_udp_fast_sync_failed_peer_hosts.insert(key);
+        }
+        ++m_lan_fast_sync_retransmit_errors;
+        recordFastSyncUdpFailure();
+        tuneFastSyncDatagramAfterFailure();
         releaseLanFastSyncReservation();
-        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync could not reach eligible peers; TCP/Core fallback remains active."));
+        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync could not send to peer %1 (%2); normal TCP fallback remains active.")
+            .arg(node_id)
+            .arg(m_lan_fast_sync_socket ? m_lan_fast_sync_socket->errorString() : QStringLiteral("socket unavailable")));
         return;
     }
     recordLanFastSyncUdpTraffic(written, 0);
@@ -4836,8 +5443,20 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
 void NuRpcService::requestLanFastSyncBlock(int height)
 {
     if (!m_lan_fast_sync_socket || height <= 0 || m_lan_fast_sync_reserve_in_flight) return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QStringList expired_probe_hosts;
+    for (auto it = m_udp_fast_sync_probe_ids_by_host.constBegin(); it != m_udp_fast_sync_probe_ids_by_host.constEnd(); ++it) {
+        const QString host = it.key();
+        const qint64 sent_ms = m_udp_fast_sync_last_probe_ms_by_host.value(host, 0);
+        if (sent_ms > 0 && now - sent_ms > LAN_FAST_SYNC_PROBE_TIMEOUT_MS) {
+            expired_probe_hosts.push_back(host);
+        }
+    }
+    for (const QString& host : expired_probe_hosts) {
+        recordUdpFastSyncPeerMiss(host, QStringLiteral("UDP probe timed out"));
+    }
     if (m_udp_fast_sync_peer_hosts.isEmpty()) {
-        m_lan_fast_sync_status = QStringLiteral("UDP fast sync waiting for connected Nu peers; TCP/Core fallback remains active.");
+        m_lan_fast_sync_status = QStringLiteral("UDP fast sync waiting for connected Nu peers; normal TCP fallback remains active.");
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
         return;
@@ -4846,9 +5465,17 @@ void NuRpcService::requestLanFastSyncBlock(int height)
     int node_id = -1;
     const QString host = selectUdpFastSyncTargetHost(&node_id);
     if (host.isEmpty() || node_id < 0) {
-        m_lan_fast_sync_status = QStringLiteral("UDP fast sync has no eligible Nu peer for the next block; TCP/Core fallback remains active.");
+        m_lan_fast_sync_status = QStringLiteral("UDP fast sync has no eligible Nu peer for the next block; normal TCP fallback remains active.");
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
+        return;
+    }
+    if (!isUdpFastSyncHostVerified(host)) {
+        if (!sendUdpFastSyncProbe(host, node_id)) {
+            m_lan_fast_sync_status = QStringLiteral("UDP fast sync could not probe peer %1; normal TCP fallback remains active.").arg(node_id);
+            rebuildNodeMetrics();
+            Q_EMIT stateChanged();
+        }
         return;
     }
     m_lan_fast_sync_reserve_in_flight = true;
@@ -4865,7 +5492,9 @@ void NuRpcService::requestLanFastSyncBlock(int height)
         const QString reason = error.isEmpty() ? obj.value(QStringLiteral("reason")).toString(QStringLiteral("unknown")) : error;
         const QString hash = obj.value(QStringLiteral("hash")).toString();
         if (!success || hash.size() != 64) {
-            m_lan_fast_sync_status = QStringLiteral("UDP fast sync did not reserve block %1 (%2); TCP/Core fallback remains active.")
+            recordFastSyncUdpDiagnostic(QStringLiteral("Core reservation rejected"),
+                QStringLiteral("block %1 peer %2: %3").arg(height).arg(node_id).arg(reason));
+            m_lan_fast_sync_status = QStringLiteral("UDP fast sync did not reserve block %1 (%2); normal TCP fallback remains active.")
                 .arg(height)
                 .arg(reason);
             rebuildNodeMetrics();
@@ -4894,21 +5523,56 @@ void NuRpcService::handleLanFastSyncDatagrams()
     while (m_lan_fast_sync_socket->hasPendingDatagrams() && processed < LAN_FAST_SYNC_MAX_DATAGRAMS_PER_READ) {
         ++processed;
         const QNetworkDatagram datagram = m_lan_fast_sync_socket->receiveDatagram();
+        if (!datagram.isValid()) continue;
         const int datagram_size = datagram.data().size();
+        if (datagram_size <= 0) continue;
         if (datagram_size > LAN_FAST_SYNC_MAX_DATAGRAM_BYTES) continue;
         const QHostAddress sender = datagram.senderAddress();
-        if (!isUdpFastSyncAllowedPeer(sender)) continue;
+        if (sender.isNull()) continue;
+        const QByteArray data = datagram.data();
+        if (data.startsWith('{')) {
+            QJsonParseError parse_error;
+            const QJsonDocument doc = QJsonDocument::fromJson(data, &parse_error);
+            if (parse_error.error == QJsonParseError::NoError && doc.isObject()) {
+                handleLanDiscoveryAnnouncement(doc.object(), sender, datagram.senderPort());
+            }
+            continue;
+        }
+        if (!isUdpFastSyncAllowedPeer(sender)) {
+            recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync datagram from non-peer"),
+                udpFastSyncEndpointText(sender, datagram.senderPort()));
+            continue;
+        }
         QJsonObject header;
         QByteArray payload;
-        if (!parseLanFastSyncDatagram(datagram.data(), &header, &payload)) continue;
-        if (header.value(QStringLiteral("version")).toInt(0) != 1) continue;
-        if (header.value(QStringLiteral("capability")).toString() != QLatin1String(UDP_FAST_SYNC_CAPABILITY)) continue;
+        if (!parseLanFastSyncDatagram(data, &header, &payload)) {
+            recordFastSyncUdpDiagnostic(QStringLiteral("dropped malformed UDP Fast Sync datagram"),
+                QStringLiteral("%1; bytes=%2").arg(udpFastSyncEndpointText(sender, datagram.senderPort())).arg(datagram_size));
+            continue;
+        }
+        if (header.value(QStringLiteral("version")).toInt(0) != 1) {
+            recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync datagram with unsupported version"),
+                udpFastSyncEndpointText(sender, datagram.senderPort()));
+            continue;
+        }
+        if (header.value(QStringLiteral("capability")).toString() != QLatin1String(UDP_FAST_SYNC_CAPABILITY)) {
+            recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync datagram with unsupported capability"),
+                udpFastSyncEndpointText(sender, datagram.senderPort()));
+            continue;
+        }
         recordLanFastSyncUdpTraffic(0, datagram_size);
         const QString type = header.value(QStringLiteral("type")).toString();
-        if (type == QLatin1String("request-block")) {
+        if (type == QLatin1String("probe")) {
+            handleLanFastSyncProbe(header, sender, datagram.senderPort());
+        } else if (type == QLatin1String("probe-ack")) {
+            handleLanFastSyncProbeAck(header, sender, datagram.senderPort());
+        } else if (type == QLatin1String("request-block")) {
             handleLanFastSyncRequest(header, sender, datagram.senderPort());
         } else if (type == QLatin1String("block-chunk")) {
             handleLanFastSyncChunk(header, payload, sender);
+        } else {
+            recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync datagram with unknown type"),
+                QStringLiteral("%1; type=%2").arg(udpFastSyncEndpointText(sender, datagram.senderPort()), type.left(80)));
         }
     }
     if (m_lan_fast_sync_socket && m_lan_fast_sync_socket->hasPendingDatagrams()) {
@@ -4916,14 +5580,98 @@ void NuRpcService::handleLanFastSyncDatagrams()
     }
 }
 
+void NuRpcService::handleLanFastSyncProbe(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port)
+{
+    if (!m_rpc_connected || !m_lan_fast_sync_enabled) return;
+    if (!isUdpFastSyncAllowedPeer(sender)) {
+        recordFastSyncUdpDiagnostic(QStringLiteral("ignored UDP probe from non-peer"), udpFastSyncEndpointText(sender, sender_port));
+        return;
+    }
+    const QString request_id = header.value(QStringLiteral("id")).toString();
+    static const QRegularExpression request_id_re(QStringLiteral(R"(^[0-9a-f]{32}$)"), QRegularExpression::CaseInsensitiveOption);
+    if (!request_id_re.match(request_id).hasMatch()) {
+        recordFastSyncUdpDiagnostic(QStringLiteral("ignored UDP probe with invalid transaction id"),
+            QStringLiteral("%1; id-len=%2").arg(udpFastSyncEndpointText(sender, sender_port)).arg(request_id.size()));
+        return;
+    }
+    const int advertised_reply_port = header.value(QStringLiteral("port")).toInt(sender_port);
+    const quint16 reply_port = sender_port > 0 ? sender_port : quint16(advertised_reply_port);
+    if (reply_port == 0) {
+        recordFastSyncUdpDiagnostic(QStringLiteral("ignored UDP probe with no reply port"), udpFastSyncEndpointText(sender, sender_port));
+        return;
+    }
+
+    const int sender_datagram_cap = isPrivateOrLocalFastSyncAddress(sender)
+        ? LAN_FAST_SYNC_MAX_DATAGRAM_BYTES
+        : LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES;
+    const int peer_max_datagram = qBound(576, header.value(QStringLiteral("max_datagram")).toInt(LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES), sender_datagram_cap);
+    const int requested_chunk_bytes = header.value(QStringLiteral("chunk_bytes")).toInt(lanFastSyncChunkBytesForDatagram(peer_max_datagram));
+    const int peer_chunk_bytes = qBound(LAN_FAST_SYNC_MIN_CHUNK_BYTES,
+                                        qMin(requested_chunk_bytes, lanFastSyncChunkBytesForDatagram(peer_max_datagram)),
+                                        LAN_FAST_SYNC_MAX_CHUNK_BYTES);
+    QJsonObject ack;
+    ack.insert(QStringLiteral("type"), QStringLiteral("probe-ack"));
+    ack.insert(QStringLiteral("version"), 1);
+    ack.insert(QStringLiteral("capability"), QString::fromLatin1(UDP_FAST_SYNC_CAPABILITY));
+    ack.insert(QStringLiteral("id"), request_id);
+    ack.insert(QStringLiteral("port"), int(LAN_FAST_SYNC_PORT));
+    ack.insert(QStringLiteral("tip"), m_block_height);
+    ack.insert(QStringLiteral("max_datagram"), peer_max_datagram);
+    ack.insert(QStringLiteral("chunk_bytes"), peer_chunk_bytes);
+    ack.insert(QStringLiteral("observed_sender_port"), int(sender_port));
+    const QByteArray datagram = lanFastSyncDatagram(ack, QByteArray(), LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES);
+    if (datagram.isEmpty()) {
+        recordFastSyncUdpDiagnostic(QStringLiteral("could not build UDP probe acknowledgement"), udpFastSyncEndpointText(sender, reply_port));
+        return;
+    }
+    const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, sender, reply_port);
+    if (written <= 0) {
+        recordFastSyncUdpDiagnostic(QStringLiteral("UDP probe acknowledgement send failed"),
+            QStringLiteral("%1; %2").arg(udpFastSyncEndpointText(sender, reply_port), m_lan_fast_sync_socket->errorString()));
+        return;
+    }
+    recordLanFastSyncUdpTraffic(written, 0);
+    recordFastSyncUdpDiagnostic(QStringLiteral("sent UDP Fast Sync probe acknowledgement"),
+        QStringLiteral("%1 id %2").arg(udpFastSyncEndpointText(sender, reply_port), request_id.left(8)));
+    recordUdpFastSyncPeerReply(normalizedFastSyncHost(sender));
+}
+
+void NuRpcService::handleLanFastSyncProbeAck(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port)
+{
+    if (!m_lan_fast_sync_enabled) return;
+    const QString sender_key = normalizedFastSyncHost(sender);
+    if (sender_key.isEmpty()) return;
+    const QString request_id = header.value(QStringLiteral("id")).toString();
+    if (m_udp_fast_sync_probe_ids_by_host.value(sender_key) != request_id) {
+        recordFastSyncUdpDiagnostic(QStringLiteral("ignored UDP probe acknowledgement with mismatched transaction id"),
+            QStringLiteral("%1; expected=%2 got=%3")
+                .arg(udpFastSyncEndpointText(sender, sender_port),
+                     m_udp_fast_sync_probe_ids_by_host.value(sender_key).left(8),
+                     request_id.left(8)));
+        return;
+    }
+    recordUdpFastSyncPeerReply(sender_key);
+    const int peer_max_datagram = header.value(QStringLiteral("max_datagram")).toInt(LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES);
+    if (peer_max_datagram >= LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES &&
+        peer_max_datagram < currentFastSyncDatagramSize()) {
+        tuneFastSyncDatagramAfterFailure();
+    }
+    m_lan_fast_sync_status = QStringLiteral("UDP fast sync verified peer %1; block requests may use UDP without another probe.")
+        .arg(sender_key);
+    rebuildNodeMetrics();
+    Q_EMIT stateChanged();
+    QTimer::singleShot(0, this, &NuRpcService::lanFastSyncTick);
+}
+
 void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port)
 {
     if (!m_rpc_connected || !m_lan_fast_sync_enabled) return;
     if (!isUdpFastSyncAllowedPeer(sender)) return;
     const QString request_id = header.value(QStringLiteral("id")).toString();
-    if (request_id.size() != 32) return;
+    static const QRegularExpression request_id_re(QStringLiteral(R"(^[0-9a-f]{32}$)"), QRegularExpression::CaseInsensitiveOption);
+    if (!request_id_re.match(request_id).hasMatch()) return;
     const int height = header.value(QStringLiteral("height")).toInt(-1);
-    if (request_id.isEmpty() || height < 0 || height > m_block_height) return;
+    if (request_id.isEmpty() || height <= 0 || height > m_block_height) return;
     const QString sender_key = normalizedFastSyncHost(sender);
     if (!sender_key.isEmpty()) {
         m_udp_fast_sync_available_peer_hosts.insert(sender_key);
@@ -4941,6 +5689,7 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
     }
     const int advertised_reply_port = header.value(QStringLiteral("port")).toInt(sender_port);
     const quint16 reply_port = sender_port > 0 ? sender_port : quint16(advertised_reply_port);
+    if (reply_port == 0) return;
     const int sender_datagram_cap = isPrivateOrLocalFastSyncAddress(sender)
         ? LAN_FAST_SYNC_MAX_DATAGRAM_BYTES
         : LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES;
@@ -4952,10 +5701,12 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
     rpcCall(QStringLiteral("getblockhash"), {height}, false, [this, request_id, height, sender, reply_port, peer_max_datagram, peer_chunk_bytes](const QJsonValue& hash_result, const QString& hash_error) {
         if (!hash_error.isEmpty() || !m_lan_fast_sync_socket) return;
         const QString hash = hash_result.toString();
-        if (hash.isEmpty()) return;
+        if (!isHex256(hash)) return;
         rpcCall(QStringLiteral("getblock"), {hash, 0}, false, [this, request_id, height, sender, reply_port, hash, peer_max_datagram, peer_chunk_bytes](const QJsonValue& block_result, const QString& block_error) {
             if (!block_error.isEmpty() || !m_lan_fast_sync_socket) return;
-            const QByteArray raw = QByteArray::fromHex(block_result.toString().toLatin1());
+            const QString raw_hex = block_result.toString();
+            if (!isLowerRiskHexText(raw_hex, LAN_FAST_SYNC_MAX_BLOCK_BYTES * 2)) return;
+            const QByteArray raw = QByteArray::fromHex(raw_hex.toLatin1());
             if (raw.isEmpty() || raw.size() > LAN_FAST_SYNC_MAX_BLOCK_BYTES) return;
             const int total_chunks = (raw.size() + peer_chunk_bytes - 1) / peer_chunk_bytes;
             if (total_chunks <= 0 || total_chunks > LAN_FAST_SYNC_MAX_CHUNKS_PER_BLOCK) return;
@@ -5012,13 +5763,17 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     const int block_size = header.value(QStringLiteral("block_size")).toInt(-1);
     const int chunk_bytes = header.value(QStringLiteral("chunk_bytes")).toInt(m_fast_sync_current_chunk_bytes);
     const int max_datagram = header.value(QStringLiteral("max_datagram")).toInt(m_fast_sync_current_datagram_bytes);
-    if (qBound(576, max_datagram, LAN_FAST_SYNC_MAX_DATAGRAM_BYTES) > m_fast_sync_current_datagram_bytes) return;
-    if (payload.isEmpty() || payload.size() > qMin(m_fast_sync_current_chunk_bytes, qBound(LAN_FAST_SYNC_MIN_CHUNK_BYTES, chunk_bytes, LAN_FAST_SYNC_MAX_CHUNK_BYTES))) return;
+    const int negotiated_max_datagram = qBound(576, max_datagram, LAN_FAST_SYNC_MAX_DATAGRAM_BYTES);
+    if (negotiated_max_datagram < LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES) return;
+    const int negotiated_chunk_cap = qBound(LAN_FAST_SYNC_MIN_CHUNK_BYTES,
+                                           qMin(chunk_bytes, lanFastSyncChunkBytesForDatagram(negotiated_max_datagram)),
+                                           LAN_FAST_SYNC_MAX_CHUNK_BYTES);
+    if (payload.isEmpty() || payload.size() > negotiated_chunk_cap) return;
     if (seq < 0 || total <= 0 || total > LAN_FAST_SYNC_MAX_CHUNKS_PER_BLOCK || block_size <= 0 || block_size > LAN_FAST_SYNC_MAX_BLOCK_BYTES) return;
     if (seq >= total) return;
-    if (block_size > total * m_fast_sync_current_chunk_bytes) return;
+    if (block_size > total * negotiated_chunk_cap) return;
     const QString chunk_checksum = header.value(QStringLiteral("chunk_checksum")).toString();
-    if (chunk_checksum.size() != 64) return;
+    if (!isHex256(chunk_checksum)) return;
     if (lanFastSyncChecksum(payload) != chunk_checksum) {
         ++m_lan_fast_sync_retransmit_errors;
         recordFastSyncUdpFailure();
@@ -5027,18 +5782,19 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
         return;
     }
     const QString block_hash = header.value(QStringLiteral("hash")).toString();
+    if (!isHex256(block_hash)) return;
     if (!m_lan_fast_sync_reserved_hash.isEmpty() && block_hash != m_lan_fast_sync_reserved_hash) return;
     m_lan_fast_sync_expected_chunks = total;
     m_lan_fast_sync_expected_size = block_size;
     m_lan_fast_sync_block_hash = block_hash;
     m_lan_fast_sync_block_checksum = header.value(QStringLiteral("block_checksum")).toString();
-    if (m_lan_fast_sync_block_hash.size() != 64 || m_lan_fast_sync_block_checksum.size() != 64) return;
+    if (!isHex256(m_lan_fast_sync_block_hash) || !isHex256(m_lan_fast_sync_block_checksum)) return;
     if (m_lan_fast_sync_chunks.contains(seq)) return;
     if (m_lan_fast_sync_assembled_bytes + payload.size() > qMin(block_size, LAN_FAST_SYNC_MAX_BLOCK_BYTES)) {
         ++m_lan_fast_sync_retransmit_errors;
         recordFastSyncUdpFailure();
         tuneFastSyncDatagramAfterFailure();
-        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync exceeded the reserved block buffer at block %1; TCP/Core fallback remains active.").arg(height));
+        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync exceeded the reserved block buffer at block %1; normal TCP fallback remains active.").arg(height));
         return;
     }
     m_lan_fast_sync_chunks.insert(seq, payload);
@@ -5067,7 +5823,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
         ++m_lan_fast_sync_retransmit_errors;
         recordFastSyncUdpFailure();
         tuneFastSyncDatagramAfterFailure();
-        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync checksum mismatch at block %1; TCP/Core fallback remains active.").arg(height));
+        resetLanFastSyncTransfer(QStringLiteral("UDP fast sync checksum mismatch at block %1; normal TCP fallback remains active.").arg(height));
         return;
     }
 
@@ -5092,7 +5848,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
                 m_block_height = height;
             }
             resetLanFastSyncTransfer(duplicate
-                ? QStringLiteral("UDP fast sync delivered already-known block %1; transport sample counted and TCP/Core remains active.").arg(height)
+                ? QStringLiteral("UDP fast sync delivered already-known block %1; transport sample counted and normal TCP sync remains active.").arg(height)
                 : QStringLiteral("UDP fast sync accepted block %1 through Core validation.").arg(height));
             QTimer::singleShot(0, this, &NuRpcService::lanFastSyncTick);
             QTimer::singleShot(0, this, &NuRpcService::refreshNode);
@@ -5100,7 +5856,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
             ++m_lan_fast_sync_retransmit_errors;
             recordFastSyncUdpFailure();
             tuneFastSyncDatagramAfterFailure();
-            resetLanFastSyncTransfer(QStringLiteral("UDP fast sync block %1 was not accepted (%2); TCP/Core fallback remains active.")
+            resetLanFastSyncTransfer(QStringLiteral("UDP fast sync block %1 was not accepted (%2); normal TCP fallback remains active.")
                 .arg(height)
                 .arg(error.isEmpty() ? result.toString(QStringLiteral("unknown result")) : error));
         }
@@ -5920,6 +6676,149 @@ void NuRpcService::pingPeers()
     });
 }
 
+void NuRpcService::refreshPeer(const QString& node_id)
+{
+    bool ok = false;
+    const int id = node_id.trimmed().toInt(&ok);
+    if (!ok || id < 0) {
+        Q_EMIT userMessage(QStringLiteral("Refresh peer failed"), QStringLiteral("Select one peer row first."));
+        return;
+    }
+    const QString host = m_peer_host_by_node_id.value(id).trimmed();
+    if (host.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Refresh peer failed"), QStringLiteral("Nu does not have a current endpoint for that peer."));
+        return;
+    }
+
+    QHostAddress address;
+    if (address.setAddress(host)) {
+        const QString host_key = normalizedFastSyncHost(address);
+        m_udp_fast_sync_available_peer_hosts.remove(host_key);
+        m_udp_fast_sync_attempted_peer_hosts.remove(host_key);
+        m_udp_fast_sync_failed_peer_hosts.remove(host_key);
+        m_udp_fast_sync_used_peer_hosts.remove(host_key);
+        m_udp_fast_sync_current_target_hosts.remove(host_key);
+        m_udp_fast_sync_last_request_ms_by_host.remove(host_key);
+        m_udp_fast_sync_last_probe_ms_by_host.remove(host_key);
+        m_udp_fast_sync_probe_ids_by_host.remove(host_key);
+        m_udp_fast_sync_probe_failures_by_host.remove(host_key);
+        m_udp_fast_sync_peer_node_ids_by_host.remove(host_key);
+        m_udp_fast_sync_peer_inflight_counts_by_host.remove(host_key);
+    }
+
+    QJsonArray disconnect_params;
+    disconnect_params.push_back(QString());
+    disconnect_params.push_back(id);
+    rpcCall(QStringLiteral("disconnectnode"), disconnect_params, false, [this, id, host](const QJsonValue&, const QString& error) {
+        if (!error.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Refresh peer failed"), error);
+            return;
+        }
+
+        QString target = m_peer_addr_by_node_id.value(id).trimmed();
+        if (m_peer_inbound_by_node_id.value(id, false) || target.isEmpty()) {
+            QHostAddress address;
+            target = address.setAddress(host) && address.protocol() == QAbstractSocket::IPv6Protocol
+                ? QStringLiteral("[%1]:%2").arg(host).arg(DEFCOIN_DEFAULT_P2P_PORT)
+                : QStringLiteral("%1:%2").arg(host).arg(DEFCOIN_DEFAULT_P2P_PORT);
+        }
+
+        rpcCall(QStringLiteral("addnode"), {target, QStringLiteral("onetry")}, false, [this, target](const QJsonValue&, const QString& add_error) {
+            if (!add_error.isEmpty()) {
+                Q_EMIT userMessage(QStringLiteral("Peer disconnected"),
+                                   QStringLiteral("Nu cleared cached Fast Sync state and disconnected the peer. Reconnect attempt to %1 failed: %2")
+                                       .arg(target, add_error));
+            } else {
+                Q_EMIT userMessage(QStringLiteral("Peer refresh started"),
+                                   QStringLiteral("Nu cleared cached Fast Sync state and asked Core to reconnect to %1.").arg(target));
+            }
+            refreshNode();
+        });
+    });
+}
+
+void NuRpcService::banPeer(const QString& node_id)
+{
+    bool ok = false;
+    const int id = node_id.trimmed().toInt(&ok);
+    if (!ok || id < 0) {
+        Q_EMIT userMessage(QStringLiteral("Ban peer failed"), QStringLiteral("Select one peer row first."));
+        return;
+    }
+    const QString host = m_peer_host_by_node_id.value(id).trimmed();
+    if (host.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Ban peer failed"), QStringLiteral("Nu does not have a current endpoint for that peer."));
+        return;
+    }
+
+    rpcCall(QStringLiteral("setban"), {host, QStringLiteral("add")}, false, [this, id, host](const QJsonValue&, const QString& error) {
+        if (!error.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Ban peer failed"), error);
+            return;
+        }
+        QJsonArray disconnect_params;
+        disconnect_params.push_back(QString());
+        disconnect_params.push_back(id);
+        rpcCall(QStringLiteral("disconnectnode"), disconnect_params, false, [this, host](const QJsonValue&, const QString&) {
+            Q_EMIT userMessage(QStringLiteral("Peer banned"), QStringLiteral("%1 was added to Core's ban list.").arg(host));
+            refreshBannedPeerRows();
+            refreshNode();
+        });
+    });
+}
+
+void NuRpcService::unbanPeer(const QString& address)
+{
+    const QString clean = address.trimmed();
+    if (clean.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Unban failed"), QStringLiteral("Select a banned peer row first."));
+        return;
+    }
+    rpcCall(QStringLiteral("setban"), {clean, QStringLiteral("remove")}, false, [this, clean](const QJsonValue&, const QString& error) {
+        if (!error.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Unban failed"), error);
+            return;
+        }
+        Q_EMIT userMessage(QStringLiteral("Peer unbanned"), QStringLiteral("%1 was removed from Core's ban list.").arg(clean));
+        refreshBannedPeerRows();
+        refreshNode();
+    });
+}
+
+void NuRpcService::refreshBannedPeers()
+{
+    refreshBannedPeerRows();
+}
+
+void NuRpcService::refreshBannedPeerRows()
+{
+    rpcCall(QStringLiteral("listbanned"), {}, false, [this](const QJsonValue& result, const QString& error) {
+        if (!error.isEmpty()) return;
+        QVariantList rows;
+        for (const QJsonValue& value : result.toArray()) {
+            const QJsonObject ban = value.toObject();
+            const QString address = ban.value(QStringLiteral("address")).toString();
+            const qint64 created = ban.value(QStringLiteral("ban_created")).toVariant().toLongLong();
+            const qint64 until = ban.value(QStringLiteral("banned_until")).toVariant().toLongLong();
+            const QString reason = ban.value(QStringLiteral("ban_reason")).toString(QStringLiteral("-"));
+            const auto time_text = [](qint64 seconds) {
+                if (seconds <= 0) return QStringLiteral("-");
+                return QDateTime::fromSecsSinceEpoch(seconds).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"));
+            };
+            rows.push_back(tableRow({
+                address,
+                reason.isEmpty() ? QStringLiteral("-") : reason,
+                time_text(created),
+                time_text(until)
+            }, {
+                {QStringLiteral("address"), address}
+            }));
+        }
+        m_banned_peer_rows = rows;
+        Q_EMIT peersChanged();
+    });
+}
+
 void NuRpcService::runRpcCommand(const QString& method, const QString& params_json, bool wallet_scoped)
 {
     QString clean_method = method.trimmed();
@@ -6029,13 +6928,13 @@ void NuRpcService::rebuildNodeMetrics()
         metricRow(QStringLiteral("Syncing avg speeds"), syncTransportSpeedSummary(),
                   QStringLiteral("Combined session-average sync throughput. UDP timing includes failed attempts and cooldown/retry time so failed probes reduce the average instead of being ignored.")),
         metricRow(QStringLiteral("Fast Sync TCP"), fastSyncTcpSummary(),
-                  QStringLiteral("TCP/Core sync totals for this Nu session. Packet counts are Core-managed and not exposed here; block counts are inferred from active-chain height increases not attributed to UDP.")),
+                  QStringLiteral("Normal TCP sync totals for this Nu session. Packet counts are handled by the backend and not exposed here; block counts are inferred from active-chain height increases not attributed to UDP.")),
         metricRow(QStringLiteral("Fast Sync UDP"), fastSyncUdpSummary(),
                   QStringLiteral("UDP fast-sync totals for this Nu session. Average speed includes elapsed time from failed UDP attempts, checksum failures, timeouts, and retries so the protocol comparison is not inflated by ignoring failures.")),
         metricRow(QStringLiteral("Fast-sync favor"), syncTransportDecisionSummary(),
                   QStringLiteral("Adaptive TCP/UDP block-transfer preference. Nu uses recent accepted-block timing, reliability, and occasional probes so a slower protocol can recover if conditions change.")),
         metricRow(QStringLiteral("Fast-sync probe"), syncTransportProbeSummary(),
-                  QStringLiteral("Current UDP probe size and UDP sample count. UDP only leaves warmup after Nu receives accepted block samples from fast-sync peers.")),
+                  QStringLiteral("Fast Sync service-bit candidates, UDP-verified peers, and current datagram/chunk target. Nu probes a peer once per verification window, then reuses verified UDP peers without probing every block.")),
         metricRow(QStringLiteral("Network active"), m_metric_network_active,
                   QStringLiteral("Whether the backend currently allows peer network activity.")),
         metricRow(QStringLiteral("Connections"), QStringLiteral("Total: %1 | In: %2 | Out: %3")
@@ -6162,13 +7061,22 @@ void NuRpcService::setLanFastSyncEnabled(bool enabled)
     settings.setValue(QStringLiteral("LanFastSyncEnabled"), enabled);
     if (!enabled) {
         stopLanFastSyncSocket();
-        m_lan_fast_sync_status = QStringLiteral("UDP fast sync off; TCP/Core sync remains active.");
+        m_lan_fast_sync_status = QStringLiteral("UDP fast sync off; normal TCP sync remains active.");
     } else {
         ensureLanFastSyncSocket();
     }
     rebuildNodeMetrics();
     Q_EMIT settingsChanged();
     Q_EMIT stateChanged();
+}
+
+void NuRpcService::setAdvancedToolsVisible(bool enabled)
+{
+    if (m_advanced_tools_visible == enabled) return;
+    m_advanced_tools_visible = enabled;
+    QSettings settings;
+    settings.setValue(QStringLiteral("AdvancedToolsVisible"), enabled);
+    Q_EMIT settingsChanged();
 }
 
 void NuRpcService::setExplorerTop100FocusedIndexing(bool enabled)
@@ -6314,6 +7222,89 @@ QString NuRpcService::nuResourceRoot() const
 #endif
 }
 
+void NuRpcService::loadDefcoinTimeline()
+{
+    if (m_defcoin_timeline_loaded) return;
+
+    m_defcoin_timeline_rows.clear();
+    m_defcoin_timeline_summary.clear();
+    m_defcoin_timeline_criteria = QStringLiteral("Timeline not loaded yet.");
+    m_defcoin_timeline_status = QStringLiteral("Loading /r/Defcoin timeline.");
+
+    const QString relative_path = QStringLiteral("assets/data/defcoin_reddit_timeline.json");
+    QStringList candidates;
+    candidates << QDir(nuResourceRoot()).filePath(relative_path)
+               << QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("nu/%1").arg(relative_path))
+               << QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../Resources/nu/%1").arg(relative_path))
+               << QStringLiteral(":/nu/assets/data/defcoin_reddit_timeline.json");
+
+    QFile file;
+    QString opened_path;
+    for (const QString& candidate : candidates) {
+        file.setFileName(candidate);
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            opened_path = candidate;
+            break;
+        }
+    }
+    if (!file.isOpen()) {
+        m_defcoin_timeline_status = QStringLiteral("Could not load bundled /r/Defcoin timeline data.");
+        m_defcoin_timeline_loaded = true;
+        return;
+    }
+
+    QJsonParseError parse_error;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parse_error);
+    if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
+        m_defcoin_timeline_status = QStringLiteral("/r/Defcoin timeline JSON parse error: %1").arg(parse_error.errorString());
+        m_defcoin_timeline_loaded = true;
+        return;
+    }
+
+    const QJsonObject object = doc.object();
+    const int schema_version = object.value(QStringLiteral("schemaVersion")).toInt();
+    if (schema_version != DEFCOIN_REDDIT_TIMELINE_SCHEMA_VERSION) {
+        m_defcoin_timeline_status = QStringLiteral("/r/Defcoin timeline schema %1 is not supported by this build.")
+            .arg(schema_version);
+        m_defcoin_timeline_loaded = true;
+        return;
+    }
+
+    const QJsonObject summary_object = object.value(QStringLiteral("summary")).toObject();
+    m_defcoin_timeline_summary = summary_object.toVariantMap();
+    m_defcoin_timeline_summary.insert(QStringLiteral("dataPath"), opened_path);
+    const QJsonArray rows = object.value(QStringLiteral("rows")).toArray();
+    for (const QJsonValue& value : rows) {
+        if (value.isObject()) m_defcoin_timeline_rows.push_back(value.toObject().toVariantMap());
+    }
+
+    QString criteria = summary_object.value(QStringLiteral("criteriaText")).toString();
+    if (criteria.isEmpty()) {
+        const QJsonObject criteria_object = object.value(QStringLiteral("criteria")).toObject();
+        QStringList parts;
+        for (const QJsonValue& value : criteria_object.value(QStringLiteral("included")).toArray())
+            parts.push_back(value.toString());
+        for (const QJsonValue& value : criteria_object.value(QStringLiteral("removed")).toArray())
+            parts.push_back(value.toString());
+        criteria = parts.join(QStringLiteral(" "));
+    }
+    m_defcoin_timeline_criteria = criteria.isEmpty()
+        ? QStringLiteral("Timeline criteria are bundled with the generated data file.")
+        : criteria;
+    m_defcoin_timeline_status = QStringLiteral("Loaded /r/Defcoin timeline: %1 included events, %2 subreddit rows, %3 DEF CON anchors, %4 removed as noise or duplicates.")
+        .arg(QString::number(m_defcoin_timeline_rows.size()),
+             QString::number(m_defcoin_timeline_summary.value(QStringLiteral("includedSubredditRows")).toInt()),
+             QString::number(m_defcoin_timeline_summary.value(QStringLiteral("includedHistoryRows")).toInt()),
+             QString::number(m_defcoin_timeline_summary.value(QStringLiteral("removedRows")).toInt()));
+    m_defcoin_timeline_loaded = true;
+}
+
+void NuRpcService::refreshDefcoinTimeline()
+{
+    loadDefcoinTimeline();
+    Q_EMIT explorerChanged();
+}
+
 QStringList NuRpcService::loadBip39Words() const
 {
     if (!m_bip39_words.isEmpty()) return m_bip39_words;
@@ -6404,6 +7395,23 @@ QVariantMap NuRpcService::validateRecoveryPhrase(const QString& phrase) const
     result.insert(QStringLiteral("normalized"), normalized);
     result.insert(QStringLiteral("message"), valid ? QStringLiteral("Recovery phrase checksum is valid.") : error);
     return result;
+}
+
+bool NuRpcService::looksLikeRecoveryPhraseText(const QString& text) const
+{
+    const QString cleaned = text.toLower().simplified();
+    const QStringList parts = cleaned.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (!isValidBip39WordCount(parts.size())) return false;
+
+    const QStringList words = loadBip39Words();
+    if (words.size() != 2048) return false;
+
+    int bip39_words = 0;
+    for (const QString& word : parts) {
+        if (m_bip39_word_index.contains(word)) ++bip39_words;
+    }
+
+    return bip39_words >= parts.size() - 1;
 }
 
 QString NuRpcService::generateRecoveryPhrase()
@@ -7850,7 +8858,7 @@ void NuRpcService::setThirdPartyTxUrl(const QString& url)
     const QString normalized = normalizedExplorerUrl(url);
     if (!url.trimmed().isEmpty() && normalized.isEmpty()) {
         Q_EMIT userMessage(QStringLiteral("Explorer URL not saved"),
-                           QStringLiteral("Explorer URL must be a valid http:// or https:// URL without embedded credentials."));
+                           QStringLiteral("Explorer URL must be a valid http:// or https:// template with one %s placeholder and no embedded credentials."));
         return;
     }
     if (m_third_party_tx_url == normalized) return;
@@ -7865,6 +8873,11 @@ void NuRpcService::setExplorerMode(const QString& mode)
 {
     QString clean = mode.trimmed().toLower();
     if (!QStringList{QStringLiteral("internal"), QStringLiteral("dc903"), QStringLiteral("legacy"), QStringLiteral("custom")}.contains(clean)) {
+        clean = QStringLiteral("internal");
+    }
+    if (clean == QLatin1String("custom") && normalizedExplorerUrl(m_third_party_tx_url).isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Explorer URL required"),
+                           QStringLiteral("Enter a valid http:// or https:// explorer URL template with one %s placeholder before switching to Custom."));
         clean = QStringLiteral("internal");
     }
     if (m_explorer_mode == clean) return;
@@ -7892,6 +8905,7 @@ QString NuRpcService::normalizedExplorerUrl(const QString& url) const
 {
     QString clean = singleLineLimited(url, 1024);
     if (clean.isEmpty()) return QString();
+    if (clean.count(QStringLiteral("%s")) != 1) return QString();
     if (!clean.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive) &&
         !clean.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
         clean.prepend(QStringLiteral("https://"));
@@ -7921,6 +8935,76 @@ QString NuRpcService::explorerDatabasePath() const
 {
     const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
     return data_dir.filePath(QStringLiteral("nu-explorer/explorer.sqlite"));
+}
+
+QString NuRpcService::droidTrailsDatabasePath() const
+{
+    const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
+    return data_dir.filePath(QStringLiteral("nu-explorer/droidtails.sqlite"));
+}
+
+bool NuRpcService::ensureDroidTrailsDatabase(QString* error) const
+{
+    const QFileInfo db_info(droidTrailsDatabasePath());
+    if (!QDir().mkpath(db_info.absolutePath())) {
+        if (error) *error = QStringLiteral("Could not create Droid Trails cache directory:\n%1").arg(db_info.absolutePath());
+        return false;
+    }
+
+    const QString connection_name = QStringLiteral("nu_droidtails_init_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(db_info.absoluteFilePath());
+        ok = db.open();
+        if (!ok) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery query(db);
+            query.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+            query.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+            ok = query.exec(QStringLiteral(
+                "CREATE TABLE IF NOT EXISTS droidtails_meta ("
+                "key TEXT PRIMARY KEY,"
+                "value TEXT NOT NULL)"));
+            if (!ok) local_error = query.lastError().text();
+            if (ok) {
+                ok = query.exec(QStringLiteral(
+                    "CREATE TABLE IF NOT EXISTS droidtails_cache ("
+                    "cache_key TEXT PRIMARY KEY,"
+                    "schema_version INTEGER NOT NULL,"
+                    "source_height INTEGER NOT NULL,"
+                    "source_outputs INTEGER NOT NULL,"
+                    "payload_json TEXT NOT NULL,"
+                    "cached_at INTEGER NOT NULL)"));
+                if (!ok) local_error = query.lastError().text();
+            }
+            QString saved_version;
+            if (ok) {
+                QSqlQuery version_query(db);
+                if (version_query.exec(QStringLiteral("SELECT value FROM droidtails_meta WHERE key='schema_version'")) && version_query.next())
+                    saved_version = version_query.value(0).toString();
+                if (saved_version != QString::number(DROIDTRAILS_CACHE_SCHEMA_VERSION)) {
+                    if (!query.exec(QStringLiteral("DELETE FROM droidtails_cache"))) {
+                        ok = false;
+                        local_error = query.lastError().text();
+                    }
+                }
+            }
+            if (ok) {
+                QSqlQuery upsert(db);
+                upsert.prepare(QStringLiteral("INSERT OR REPLACE INTO droidtails_meta(key,value) VALUES('schema_version',?)"));
+                upsert.addBindValue(QString::number(DROIDTRAILS_CACHE_SCHEMA_VERSION));
+                ok = upsert.exec();
+                if (!ok) local_error = upsert.lastError().text();
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok && error) *error = QStringLiteral("SQLite Droid Trails cache unavailable: %1").arg(local_error);
+    return ok;
 }
 
 bool NuRpcService::ensureExplorerDatabase(QString* error) const
@@ -7984,6 +9068,7 @@ bool NuRpcService::ensureExplorerDatabase(QString* error) const
                 if (!ok) local_error = query.lastError().text();
             }
             if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_block_transactions_txid ON explorer_block_transactions(txid)"));
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_block_transactions_txid_block ON explorer_block_transactions(txid, block_height, tx_index)"));
             if (ok) {
                 ok = query.exec(QStringLiteral(
                     "CREATE TABLE IF NOT EXISTS explorer_tx_outputs ("
@@ -8002,7 +9087,25 @@ bool NuRpcService::ensureExplorerDatabase(QString* error) const
             }
             if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_address ON explorer_tx_outputs(address, block_height DESC)"));
             if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_block ON explorer_tx_outputs(block_height)"));
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_block_txid ON explorer_tx_outputs(block_height, txid)"));
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_block_value_address ON explorer_tx_outputs(block_height, value_sats, address)"));
             if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_spent_by ON explorer_tx_outputs(spent_by_txid)"));
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_tx_outputs_unspent_address_value ON explorer_tx_outputs(address, value_sats) WHERE spent_by_txid IS NULL"));
+            if (ok) {
+                ok = query.exec(QStringLiteral(
+                    "CREATE TABLE IF NOT EXISTS explorer_op_returns ("
+                    "txid TEXT NOT NULL,"
+                    "vout INTEGER NOT NULL,"
+                    "block_height INTEGER NOT NULL,"
+                    "value_sats INTEGER NOT NULL,"
+                    "script_hex TEXT NOT NULL,"
+                    "payload_hex TEXT NOT NULL,"
+                    "payload_text TEXT NOT NULL,"
+                    "PRIMARY KEY(txid, vout))"));
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_op_returns_block ON explorer_op_returns(block_height)"));
+            if (ok) query.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS explorer_op_returns_payload ON explorer_op_returns(payload_hex)"));
             if (ok) {
                 ok = query.exec(QStringLiteral(
                     "CREATE TABLE IF NOT EXISTS explorer_balance_deltas ("
@@ -8104,9 +9207,17 @@ bool NuRpcService::ensureExplorerBalanceDeltas(QString* error)
                 rebuild = meta.value(0).toInt() < highest;
             }
             QSqlQuery count_query(db);
-            if (count_query.exec(QStringLiteral("SELECT COUNT(*) FROM explorer_tx_outputs")) && count_query.next()) {
-                rebuild = rebuild && count_query.value(0).toLongLong() > 0;
+            count_query.prepare(QStringLiteral("SELECT value FROM explorer_meta WHERE key = 'indexed_output_count'"));
+            qint64 indexed_output_count = -1;
+            if (count_query.exec() && count_query.next()) {
+                indexed_output_count = count_query.value(0).toLongLong();
             }
+            if (indexed_output_count < 0 &&
+                count_query.exec(QStringLiteral("SELECT COUNT(*) FROM explorer_tx_outputs")) &&
+                count_query.next()) {
+                indexed_output_count = count_query.value(0).toLongLong();
+            }
+            rebuild = rebuild && indexed_output_count > 0;
 
             ok = true;
             if (rebuild) {
@@ -8274,8 +9385,33 @@ int NuRpcService::explorerHighestIndexedBlock() const
     return highest;
 }
 
+qint64 NuRpcService::explorerMetaInteger(const QString& key, qint64 fallback) const
+{
+    if (key.isEmpty()) return fallback;
+    QString error;
+    if (!ensureExplorerDatabase(&error)) return fallback;
+    qint64 value = fallback;
+    const QString connection_name = QStringLiteral("nu_explorer_meta_int_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral("SELECT value FROM explorer_meta WHERE key = ?"));
+            query.addBindValue(key);
+            if (query.exec() && query.next()) value = query.value(0).toLongLong();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    return value;
+}
+
 int NuRpcService::explorerIndexedBlockCountFromDb() const
 {
+    const qint64 cached = explorerMetaInteger(QStringLiteral("indexed_block_count"), -1);
+    if (cached >= 0) return static_cast<int>(std::min<qint64>(cached, std::numeric_limits<int>::max()));
+
     QString error;
     if (!ensureExplorerDatabase(&error)) return 0;
     int count = 0;
@@ -8297,6 +9433,9 @@ int NuRpcService::explorerIndexedBlockCountFromDb() const
 
 int NuRpcService::explorerIndexedOutputCountFromDb() const
 {
+    const qint64 cached = explorerMetaInteger(QStringLiteral("indexed_output_count"), -1);
+    if (cached >= 0) return static_cast<int>(std::min<qint64>(cached, std::numeric_limits<int>::max()));
+
     QString error;
     if (!ensureExplorerDatabase(&error)) return 0;
     int count = 0;
@@ -8426,66 +9565,101 @@ QVariantList NuRpcService::explorerMovementsFromDb(qint64 threshold_sats, QStrin
         } else {
             QSqlQuery query(db);
             query.prepare(QStringLiteral(
-                "SELECT o.txid, o.block_height, b.time, COALESCE(SUM(o.value_sats), 0) AS amount_sats, "
-                "COUNT(*) AS output_count, COUNT(DISTINCT o.address) AS address_count, "
-                "(SELECT GROUP_CONCAT(source_address, '|') FROM ("
-                "  SELECT spent.address AS source_address "
-                "  FROM explorer_tx_outputs spent "
-                "  WHERE spent.spent_by_txid = o.txid AND spent.address != '' "
-                "  GROUP BY spent.address ORDER BY MAX(spent.value_sats) DESC LIMIT 12"
-                ")) AS source_addresses, "
-                "(SELECT GROUP_CONCAT(target_address, '|') FROM ("
-                "  SELECT target.address AS target_address "
-                "  FROM explorer_tx_outputs target "
-                "  WHERE target.txid = o.txid AND target.address != '' "
-                "  GROUP BY target.address ORDER BY MAX(target.value_sats) DESC LIMIT 12"
-                ")) AS target_addresses "
-                "FROM explorer_tx_outputs o "
+                "SELECT o.txid, o.vout, o.block_height, b.time, o.value_sats, o.address "
+                "FROM explorer_tx_outputs o INDEXED BY explorer_tx_outputs_block_value_address "
                 "JOIN explorer_blocks b ON b.height = o.block_height "
                 "JOIN explorer_block_transactions t ON t.txid = o.txid AND t.block_height = o.block_height "
-                "WHERE t.tx_index > 0 "
-                "GROUP BY o.txid, o.block_height, b.time "
-                "HAVING amount_sats >= ? "
-                "ORDER BY b.time DESC, o.block_height DESC, amount_sats DESC "
+                "WHERE t.tx_index > 0 AND o.value_sats >= ? AND o.address != '' "
+                "ORDER BY o.block_height DESC "
                 "LIMIT 5000"));
             query.addBindValue(QVariant::fromValue<qlonglong>(bounded_threshold));
             if (!query.exec()) {
                 local_error = query.lastError().text();
             } else {
+                QVector<QPair<qint64, int>> largest_candidates;
+                QVector<int> newest_candidates;
+                constexpr int graph_endpoint_cushion = 56;
                 while (query.next()) {
                     const QString txid = query.value(0).toString();
-                    const int height = query.value(1).toInt();
-                    const qint64 time = query.value(2).toLongLong();
-                    const qint64 amount_sats = query.value(3).toLongLong();
-                    const int output_count = query.value(4).toInt();
-                    const int address_count = query.value(5).toInt();
-                    QVariantList source_addresses;
-                    for (const QString& address : query.value(6).toString().split(QLatin1Char('|'), Qt::SkipEmptyParts)) {
-                        source_addresses.push_back(address);
-                    }
+                    const int vout = query.value(1).toInt();
+                    const int height = query.value(2).toInt();
+                    const qint64 time = query.value(3).toLongLong();
+                    const qint64 amount_sats = query.value(4).toLongLong();
+                    const QString target_address = query.value(5).toString();
                     QVariantList target_addresses;
-                    for (const QString& address : query.value(7).toString().split(QLatin1Char('|'), Qt::SkipEmptyParts)) {
-                        target_addresses.push_back(address);
-                    }
+                    if (!target_address.isEmpty())
+                        target_addresses.push_back(target_address);
                     const QString timestamp = QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"));
+                    const int row_index = rows.size();
                     rows.push_back(QVariantMap{
                         {QStringLiteral("cells"), QVariantList{
                             txid,
-                            explorerAmountText(amount_sats),
-                            timestamp,
-                            height,
-                            output_count,
-                            address_count}},
-                        {QStringLiteral("meta"), QVariantMap{
-                            {QStringLiteral("type"), QStringLiteral("transaction")},
-                            {QStringLiteral("id"), txid},
-                            {QStringLiteral("txid"), txid},
-                            {QStringLiteral("height"), height},
-                            {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
-                            {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(amount_sats)},
-                            {QStringLiteral("sourceAddresses"), source_addresses},
+	                            explorerAmountText(amount_sats),
+	                            timestamp,
+	                            height,
+	                            1,
+	                            1}},
+	                        {QStringLiteral("meta"), QVariantMap{
+	                            {QStringLiteral("type"), QStringLiteral("transaction")},
+	                            {QStringLiteral("id"), txid},
+	                            {QStringLiteral("txid"), txid},
+	                            {QStringLiteral("vout"), vout},
+	                            {QStringLiteral("height"), height},
+	                            {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
+	                            {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(amount_sats)},
+                            {QStringLiteral("sourceAddresses"), QVariantList{}},
                             {QStringLiteral("targetAddresses"), target_addresses}}}
                     });
+                    if (newest_candidates.size() < graph_endpoint_cushion) newest_candidates.push_back(row_index);
+                    largest_candidates.push_back(qMakePair(amount_sats, row_index));
+                }
+                query.finish();
+
+                std::sort(largest_candidates.begin(), largest_candidates.end(), [](const QPair<qint64, int>& a, const QPair<qint64, int>& b) {
+                    if (a.first != b.first) return a.first > b.first;
+                    return a.second < b.second;
+                });
+                QVector<int> endpoint_rows;
+                auto add_endpoint_row = [&endpoint_rows](int row_index) {
+                    if (row_index < 0 || endpoint_rows.contains(row_index)) return;
+                    endpoint_rows.push_back(row_index);
+                };
+                for (int i = 0; i < newest_candidates.size(); ++i)
+                    add_endpoint_row(newest_candidates.at(i));
+                const int largest_endpoint_count = std::min(graph_endpoint_cushion, static_cast<int>(largest_candidates.size()));
+                for (int i = 0; i < largest_endpoint_count; ++i)
+                    add_endpoint_row(largest_candidates.at(i).second);
+
+                QSqlQuery source_query(db);
+                const bool source_ok = source_query.prepare(QStringLiteral(
+                    "SELECT address FROM explorer_tx_outputs "
+                    "WHERE spent_by_txid = ? AND address != '' "
+                    "GROUP BY address ORDER BY MAX(value_sats) DESC LIMIT 12"));
+                if (!source_ok) {
+                    local_error = source_query.lastError().text();
+                } else {
+                    for (int endpoint_index = 0; endpoint_index < endpoint_rows.size(); ++endpoint_index) {
+                        const int row_index = endpoint_rows.at(endpoint_index);
+                        if (row_index < 0 || row_index >= rows.size()) continue;
+                        QVariantMap row = rows.at(row_index).toMap();
+                        QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
+                        const QString txid = meta.value(QStringLiteral("txid")).toString();
+                        if (txid.isEmpty()) continue;
+
+                        QVariantList source_addresses;
+                        source_query.bindValue(0, txid);
+                        if (!source_query.exec()) {
+                            local_error = source_query.lastError().text();
+                            break;
+                        }
+                        while (source_query.next())
+                            source_addresses.push_back(source_query.value(0).toString());
+                        source_query.finish();
+
+                        meta.insert(QStringLiteral("sourceAddresses"), source_addresses);
+                        row.insert(QStringLiteral("meta"), meta);
+                        rows[row_index] = row;
+                    }
                 }
             }
         }
@@ -8494,6 +9668,781 @@ QVariantList NuRpcService::explorerMovementsFromDb(qint64 threshold_sats, QStrin
     QSqlDatabase::removeDatabase(connection_name);
     if (!local_error.isEmpty() && error) *error = local_error;
     return rows;
+}
+
+QVariantMap NuRpcService::coindroidsAnalyticsFromCache(QString* error) const
+{
+    QVariantMap result;
+    QString db_error;
+    if (!ensureDroidTrailsDatabase(&db_error)) {
+        if (error) *error = db_error;
+        return result;
+    }
+
+    const int source_height = explorerHighestIndexedBlock();
+    const int source_outputs = explorerIndexedOutputCountFromDb();
+    const QString connection_name = QStringLiteral("nu_droidtails_read_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    QString local_error;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(droidTrailsDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral(
+                "SELECT schema_version,source_height,source_outputs,payload_json "
+                "FROM droidtails_cache WHERE cache_key='coindroids-analytics'"));
+            if (!query.exec()) {
+                local_error = query.lastError().text();
+            } else if (query.next()) {
+                const int schema_version = query.value(0).toInt();
+                const int cached_height = query.value(1).toInt();
+                const int cached_outputs = query.value(2).toInt();
+                const QString payload = query.value(3).toString();
+                if (schema_version == DROIDTRAILS_CACHE_SCHEMA_VERSION) {
+                    QJsonParseError parse_error;
+                    const QJsonDocument doc = QJsonDocument::fromJson(payload.toUtf8(), &parse_error);
+                    if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
+                        local_error = QStringLiteral("Droid Trails cache JSON parse error: %1").arg(parse_error.errorString());
+                    } else {
+                        result = doc.object().toVariantMap();
+                        QVariantMap summary = result.value(QStringLiteral("summary")).toMap();
+                        summary.insert(QStringLiteral("droidTrailsCacheStatus"), QStringLiteral("hit"));
+                        summary.insert(QStringLiteral("droidTrailsCacheVersion"), DROIDTRAILS_CACHE_SCHEMA_VERSION);
+                        summary.insert(QStringLiteral("droidTrailsCachePath"), droidTrailsDatabasePath());
+                        summary.insert(QStringLiteral("droidTrailsSourceHeight"), cached_height);
+                        summary.insert(QStringLiteral("droidTrailsSourceOutputs"), cached_outputs);
+                        summary.insert(QStringLiteral("droidTrailsCurrentSourceHeight"), source_height);
+                        summary.insert(QStringLiteral("droidTrailsCurrentSourceOutputs"), source_outputs);
+                        result.insert(QStringLiteral("summary"), summary);
+                    }
+                }
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!result.isEmpty()) return result;
+    if (!local_error.isEmpty() && error) *error = local_error;
+    return {};
+}
+
+void NuRpcService::saveCoindroidsAnalyticsCache(const QVariantMap& analysis, QString* error) const
+{
+    if (analysis.isEmpty()) return;
+    QString db_error;
+    if (!ensureDroidTrailsDatabase(&db_error)) {
+        if (error) *error = db_error;
+        return;
+    }
+
+    const int source_height = explorerHighestIndexedBlock();
+    const int source_outputs = explorerIndexedOutputCountFromDb();
+    const QJsonDocument doc(QJsonObject::fromVariantMap(analysis));
+    const QString connection_name = QStringLiteral("nu_droidtails_write_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    QString local_error;
+    bool ok = false;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(droidTrailsDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral(
+                "INSERT OR REPLACE INTO droidtails_cache("
+                "cache_key,schema_version,source_height,source_outputs,payload_json,cached_at"
+                ") VALUES('coindroids-analytics',?,?,?,?,?)"));
+            query.addBindValue(DROIDTRAILS_CACHE_SCHEMA_VERSION);
+            query.addBindValue(source_height);
+            query.addBindValue(source_outputs);
+            query.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+            query.addBindValue(QDateTime::currentSecsSinceEpoch());
+            ok = query.exec();
+            if (!ok) local_error = query.lastError().text();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok && error) *error = QStringLiteral("Could not save Droid Trails cache: %1").arg(local_error);
+}
+
+QVariantMap NuRpcService::coindroidsAnalyticsFromDb(QString* error) const
+{
+    QVariantMap result;
+    QVariantMap summary;
+    QVariantList window_rows;
+    QVariantList endpoint_rows;
+    QVariantList winner_rows;
+    QVariantList phase_rows;
+    QVariantList published_rows;
+    QVariantList vanity_rows;
+    QVariantList op_return_rows;
+    QVariantList bot_rows;
+    QVariantList evidence_rows;
+    QString db_error;
+    if (!ensureExplorerDatabase(&db_error)) {
+        if (error) *error = db_error;
+        return result;
+    }
+    const QVariantMap cached = coindroidsAnalyticsFromCache();
+    if (!cached.isEmpty()) return cached;
+
+    auto row_for = [](const QVariantList& cells, const QVariantMap& meta = QVariantMap()) {
+        QVariantMap row;
+        row.insert(QStringLiteral("cells"), cells);
+        row.insert(QStringLiteral("meta"), meta);
+        return row;
+    };
+
+    phase_rows.push_back(row_for(QVariantList{
+        QStringLiteral("2014 on-chain response era"),
+        QStringLiteral("2014-08-12"),
+        QStringLiteral("DEF CON 22 launch"),
+        QStringLiteral("0.01 DFC registration returns and cosmetic battle-response outputs encoded visible game stats."),
+        QStringLiteral("High: vanity response detector")
+    }, QVariantMap{
+        {QStringLiteral("phase"), QStringLiteral("2014-response")},
+        {QStringLiteral("date"), QStringLiteral("2014-08-12")},
+        {QStringLiteral("sourceUrl"), QStringLiteral("https://blog.coindroids.com/introducing-coindroids-2014/")}}));
+    phase_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Dust to OP_RETURN / mempool shift"),
+        QStringLiteral("2017-07-25"),
+        QStringLiteral("Mempool endpoint and later metadata model"),
+        QStringLiteral("Early blocks need exact fractional output analysis; later blocks must preserve OP_RETURN payloads because semantic action data can move out of the DFC amount."),
+        QStringLiteral("Pivot: amount first, payload later")
+    }, QVariantMap{
+        {QStringLiteral("phase"), QStringLiteral("2017-mempool")},
+        {QStringLiteral("date"), QStringLiteral("2017-07-25")},
+        {QStringLiteral("sourceUrl"), QStringLiteral("https://blog.coindroids.com/defcoin-mempool-support-added/")}}));
+    phase_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Purse renamed to Bounty"),
+        QStringLiteral("2017-08-11"),
+        QStringLiteral("Terminology / API transition"),
+        QStringLiteral("Published status showed backend, API, frontend, documentation, and guides moving at different speeds through the 2017-10-01 update."),
+        QStringLiteral("Normalize terms, preserve raw labels")
+    }, QVariantMap{
+        {QStringLiteral("phase"), QStringLiteral("2017-bounty")},
+        {QStringLiteral("date"), QStringLiteral("2017-08-11")},
+        {QStringLiteral("sourceUrl"), QStringLiteral("https://blog.coindroids.com/upcoming-change-purse-to-bounty/")}}));
+    phase_rows.push_back(row_for(QVariantList{
+        QStringLiteral("docker-droid automation era"),
+        QStringLiteral("2019-08-18"),
+        QStringLiteral("DEF CON 27 recap"),
+        QStringLiteral("Coindroids documented docker-droid, a bootstrapped Defcoin client with bot tooling, making automation an explicit part of the culture."),
+        QStringLiteral("Bot/reload candidates are neutral labels")
+    }, QVariantMap{
+        {QStringLiteral("phase"), QStringLiteral("2019-automation")},
+        {QStringLiteral("date"), QStringLiteral("2019-08-18")},
+        {QStringLiteral("sourceUrl"), QStringLiteral("https://blog.coindroids.com/coindroids-defcon-27/")}}));
+
+    published_rows.push_back(row_for(QVariantList{
+        QStringLiteral("DEF CON 25 network share"),
+        QStringLiteral("2017-08-08 recap"),
+        QStringLiteral("71%"),
+        QStringLiteral("Published share of all Defcoin network transactions during DEF CON 25.")
+    }));
+    published_rows.push_back(row_for(QVariantList{
+        QStringLiteral("DEF CON 25 attacks"),
+        QStringLiteral("2017-08-08 recap"),
+        QStringLiteral("3,233 attacks / 126.664 DFC"),
+        QStringLiteral("Published action count and attack volume for the Defcoin realm.")
+    }));
+    published_rows.push_back(row_for(QVariantList{
+        QStringLiteral("DEF CON 25 item purchases"),
+        QStringLiteral("2017-08-08 recap"),
+        QStringLiteral("521 purchases / 0.803 DFC"),
+        QStringLiteral("High count, low total value; health packs dominated purchase volume.")
+    }));
+    published_rows.push_back(row_for(QVariantList{
+        QStringLiteral("DEF CON 25 payouts"),
+        QStringLiteral("2017-08-08 recap"),
+        QStringLiteral("227.046 DFC"),
+        QStringLiteral("Published total paid back out to players, including pre-existing bounty/purse value.")
+    }));
+    published_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Published largest payout winner"),
+        QStringLiteral("DEF CON 25"),
+        QStringLiteral("ModemBot1138 - 100.0605 DFC"),
+        QStringLiteral("Operator-published recap value; separate from the local launch-swarm recipient table.")
+    }));
+    published_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Top Droid prize winner"),
+        QStringLiteral("DEF CON 25"),
+        QStringLiteral("Bob"),
+        QStringLiteral("Won by largest final purse/bounty at the cutoff, not by largest total payout.")
+    }));
+    published_rows.push_back(row_for(QVariantList{
+        QStringLiteral("DEF CON 27 network share"),
+        QStringLiteral("2019-08-18 recap"),
+        QStringLiteral("74%"),
+        QStringLiteral("Published share of the Defcoin network in the docker-droid automation era.")
+    }));
+    published_rows.push_back(row_for(QVariantList{
+        QStringLiteral("DEF CON 27 winner"),
+        QStringLiteral("2019-08-18 recap"),
+        QStringLiteral("Ballhair"),
+        QStringLiteral("Published event winner; DETH-MASHENE was an honorable mention and bot-code catalyst.")
+    }));
+
+    auto classify_endpoint = [](qint64 value_sats, int outputs) {
+        if (value_sats == 1000000) {
+            return outputs >= 50
+                ? QStringLiteral("0.01 DFC action hub")
+                : QStringLiteral("0.01 DFC action candidate");
+        }
+        if (value_sats == 13370000) return QStringLiteral("0.1337 DFC payout/spillage recipient");
+        if (value_sats == 100000000) return QStringLiteral("1.00 DFC battle/purse endpoint");
+        if (value_sats == 23000000 || value_sats == 46000000) return QStringLiteral("repeated item/action amount");
+        return QStringLiteral("action-range endpoint");
+    };
+
+    const QString windows_cte = QString::fromLatin1(R"SQL(
+WITH windows(label,short_label,start_h,end_h,sort_order) AS (
+  VALUES
+    ('DEF CON 22 launch [Rio Hotel & Casino]','DC22',109943,111441,1),
+    ('DEF CON 23 [Paris Hotel and Bally''s Hotel]','DC23',299028,301643,2),
+    ('DEF CON 24 [Paris Hotel and Bally''s Hotel]','DC24',538696,541310,3),
+    ('DEF CON 25 return [Caesars Palace]','DC25',736611,739117,4),
+    ('DEF CON 26 return [Caesars Palace]','DC26',901949,904119,5),
+    ('DEF CON 27 return [Paris, Ballys, Flamingo & Planet Hollywood hotels]','DC27',1115166,1117682,6),
+    ('DEF CON 28 Safe Mode [Virtual Event]','DC28',1281336,1282012,7)
+)
+)SQL");
+
+    QString local_error;
+    qint64 total_action_outputs = 0;
+    qint64 total_action_txs = 0;
+    qint64 total_action_addresses = 0;
+    qint64 total_action_sats = 0;
+    qint64 launch_001_outputs = 0;
+    qint64 launch_1337_outputs = 0;
+    qint64 launch_1337_sats = 0;
+    qint64 launch_1337_recipients = 0;
+    QString largest_winner_address;
+    qint64 largest_winner_sats = 0;
+    int largest_winner_ties = 0;
+    QString strongest_window_label;
+    qint64 strongest_window_sats = 0;
+    qint64 strongest_window_outputs = 0;
+
+    const QString connection_name = QStringLiteral("nu_coindroids_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery pragma(db);
+            pragma.exec(QStringLiteral("PRAGMA query_only=ON"));
+            pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+
+            QSqlQuery window_query(db);
+            if (!window_query.exec(windows_cte + QString::fromLatin1(R"SQL(
+, rows AS (
+  SELECT w.label,w.short_label,w.start_h,w.end_h,w.sort_order,o.txid,o.address,o.value_sats
+  FROM windows w
+  JOIN explorer_tx_outputs o ON o.block_height BETWEEN w.start_h AND w.end_h AND o.address != ''
+), action_range AS (
+  SELECT label,short_label,sort_order,start_h,end_h,COUNT(*) outputs,COUNT(DISTINCT txid) txs,
+         COUNT(DISTINCT address) addresses,COALESCE(SUM(value_sats),0) sats
+  FROM rows
+  WHERE value_sats BETWEEN 100000 AND 314159265
+  GROUP BY label,short_label,sort_order,start_h,end_h
+), exact001 AS (
+  SELECT label,COUNT(*) outputs,COUNT(DISTINCT address) addresses
+  FROM rows WHERE value_sats=1000000 GROUP BY label
+), exact1337 AS (
+  SELECT label,COUNT(*) outputs,COUNT(DISTINCT address) addresses,COALESCE(SUM(value_sats),0) sats
+  FROM rows WHERE value_sats=13370000 GROUP BY label
+)
+SELECT w.label,w.short_label,w.start_h,w.end_h,COALESCE(sb.time,0),COALESCE(eb.time,0),
+       COALESCE(a.outputs,0),COALESCE(a.txs,0),COALESCE(a.addresses,0),COALESCE(a.sats,0),
+       COALESCE(e.outputs,0),COALESCE(e.addresses,0),
+       COALESCE(s.outputs,0),COALESCE(s.addresses,0),COALESCE(s.sats,0)
+FROM windows w
+LEFT JOIN action_range a ON a.label=w.label
+LEFT JOIN exact001 e ON e.label=w.label
+LEFT JOIN exact1337 s ON s.label=w.label
+LEFT JOIN explorer_blocks sb ON sb.height=w.start_h
+LEFT JOIN explorer_blocks eb ON eb.height=w.end_h
+ORDER BY w.sort_order
+)SQL"))) {
+                local_error = window_query.lastError().text();
+            } else {
+                while (window_query.next()) {
+                    const QString label = window_query.value(0).toString();
+                    const QString short_label = window_query.value(1).toString();
+                    const int start_height = window_query.value(2).toInt();
+                    const int end_height = window_query.value(3).toInt();
+                    const qint64 start_time = window_query.value(4).toLongLong();
+                    const qint64 end_time = window_query.value(5).toLongLong();
+                    const qint64 action_outputs = window_query.value(6).toLongLong();
+                    const qint64 action_txs = window_query.value(7).toLongLong();
+                    const qint64 action_addresses = window_query.value(8).toLongLong();
+                    const qint64 action_sats = window_query.value(9).toLongLong();
+                    const qint64 exact001_outputs = window_query.value(10).toLongLong();
+                    const qint64 exact001_addresses = window_query.value(11).toLongLong();
+                    const qint64 exact1337_outputs = window_query.value(12).toLongLong();
+                    const qint64 exact1337_addresses = window_query.value(13).toLongLong();
+                    const qint64 exact1337_sats = window_query.value(14).toLongLong();
+                    const QString date_range = explorerDateRangeText(start_time, end_time);
+                    total_action_outputs += action_outputs;
+                    total_action_txs += action_txs;
+                    total_action_addresses += action_addresses;
+                    total_action_sats += action_sats;
+                    if (short_label == QLatin1String("DC22")) {
+                        launch_001_outputs = exact001_outputs;
+                        launch_1337_outputs = exact1337_outputs;
+                        launch_1337_sats = exact1337_sats;
+                        launch_1337_recipients = exact1337_addresses;
+                    }
+                    if (action_sats > strongest_window_sats) {
+                        strongest_window_sats = action_sats;
+                        strongest_window_outputs = action_outputs;
+                        strongest_window_label = label;
+                    }
+                    const QString signal = exact1337_outputs > 0
+                        ? QStringLiteral("strong payout swarm")
+                        : (exact001_outputs >= 40 ? QStringLiteral("0.01 action cluster") : QStringLiteral("background candidates"));
+                    window_rows.push_back(row_for(QVariantList{
+                        label,
+                        QStringLiteral("%1-%2").arg(QString::number(start_height), QString::number(end_height)),
+                        date_range,
+                        QVariant::fromValue<qlonglong>(action_outputs),
+                        QVariant::fromValue<qlonglong>(action_txs),
+                        QVariant::fromValue<qlonglong>(action_addresses),
+                        roundedExplorerAmountText(action_sats),
+                        QVariant::fromValue<qlonglong>(exact001_outputs),
+                        QVariant::fromValue<qlonglong>(exact1337_outputs),
+                        signal
+                    }, QVariantMap{
+                        {QStringLiteral("label"), label},
+                        {QStringLiteral("shortLabel"), short_label},
+                        {QStringLiteral("startHeight"), start_height},
+                        {QStringLiteral("endHeight"), end_height},
+                        {QStringLiteral("startTime"), QVariant::fromValue<qlonglong>(start_time)},
+                        {QStringLiteral("endTime"), QVariant::fromValue<qlonglong>(end_time)},
+                        {QStringLiteral("dateRange"), date_range},
+                        {QStringLiteral("actionOutputs"), QVariant::fromValue<qlonglong>(action_outputs)},
+                        {QStringLiteral("actionTransactions"), QVariant::fromValue<qlonglong>(action_txs)},
+                        {QStringLiteral("actionAddresses"), QVariant::fromValue<qlonglong>(action_addresses)},
+                        {QStringLiteral("actionSats"), QVariant::fromValue<qlonglong>(action_sats)},
+                        {QStringLiteral("exact001Outputs"), QVariant::fromValue<qlonglong>(exact001_outputs)},
+                        {QStringLiteral("exact001Addresses"), QVariant::fromValue<qlonglong>(exact001_addresses)},
+                        {QStringLiteral("exact1337Outputs"), QVariant::fromValue<qlonglong>(exact1337_outputs)},
+                        {QStringLiteral("exact1337Addresses"), QVariant::fromValue<qlonglong>(exact1337_addresses)},
+                        {QStringLiteral("exact1337Sats"), QVariant::fromValue<qlonglong>(exact1337_sats)}}));
+                }
+            }
+
+            if (local_error.isEmpty()) {
+                QSqlQuery endpoint_query(db);
+                if (!endpoint_query.exec(windows_cte + QString::fromLatin1(R"SQL(
+, endpoint_hits AS (
+  SELECT w.label,w.sort_order,o.address,o.value_sats,COUNT(*) outputs,COUNT(DISTINCT o.txid) txs,
+         MIN(o.block_height) first_h,MAX(o.block_height) last_h,COALESCE(SUM(o.value_sats),0) sats
+  FROM windows w
+  JOIN explorer_tx_outputs o ON o.block_height BETWEEN w.start_h AND w.end_h AND o.address != ''
+  WHERE o.value_sats BETWEEN 100000 AND 314159265
+  GROUP BY w.label,w.sort_order,o.address,o.value_sats
+)
+SELECT label,address,value_sats,outputs,txs,sats,first_h,last_h
+FROM endpoint_hits
+WHERE outputs >= 25 OR (sort_order=1 AND value_sats IN (1000000,13370000,23000000,46000000,100000000) AND outputs >= 5)
+ORDER BY sort_order,outputs DESC,sats DESC,address ASC
+LIMIT 200
+)SQL"))) {
+                    local_error = endpoint_query.lastError().text();
+                } else {
+                    while (endpoint_query.next()) {
+                        const QString label = endpoint_query.value(0).toString();
+                        const QString address = endpoint_query.value(1).toString();
+                        const qint64 value_sats = endpoint_query.value(2).toLongLong();
+                        const int outputs = endpoint_query.value(3).toInt();
+                        const int txs = endpoint_query.value(4).toInt();
+                        const qint64 sats = endpoint_query.value(5).toLongLong();
+                        const int first_height = endpoint_query.value(6).toInt();
+                        const int last_height = endpoint_query.value(7).toInt();
+                        const QString kind = classify_endpoint(value_sats, outputs);
+                        endpoint_rows.push_back(row_for(QVariantList{
+                            kind,
+                            label,
+                            address,
+                            roundedExplorerAmountText(value_sats),
+                            outputs,
+                            txs,
+                            roundedExplorerAmountText(sats),
+                            QStringLiteral("%1-%2").arg(QString::number(first_height), QString::number(last_height))
+                        }, QVariantMap{
+                            {QStringLiteral("type"), QStringLiteral("address")},
+                            {QStringLiteral("id"), address},
+                            {QStringLiteral("kind"), kind},
+                            {QStringLiteral("label"), label},
+                            {QStringLiteral("address"), address},
+                            {QStringLiteral("valueSats"), QVariant::fromValue<qlonglong>(value_sats)},
+                            {QStringLiteral("outputs"), outputs},
+                            {QStringLiteral("transactions"), txs},
+                            {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)},
+                            {QStringLiteral("firstHeight"), first_height},
+                            {QStringLiteral("lastHeight"), last_height}}));
+                        if ((outputs >= 100 || txs >= 50) && bot_rows.size() < 100) {
+                            bot_rows.push_back(row_for(QVariantList{
+                                QStringLiteral("Repeated endpoint / cadence candidate"),
+                                address,
+                                label,
+                                roundedExplorerAmountText(value_sats),
+                                outputs,
+                                txs,
+                                roundedExplorerAmountText(sats),
+                                QStringLiteral("Same address and amount repeated across %1 blocks; could be attack target, item endpoint, or scripted play.")
+                                    .arg(QString::number(std::max(1, last_height - first_height + 1)))
+                            }, QVariantMap{
+                                {QStringLiteral("type"), QStringLiteral("address")},
+                                {QStringLiteral("id"), address},
+                                {QStringLiteral("address"), address},
+                                {QStringLiteral("label"), label},
+                                {QStringLiteral("signal"), QStringLiteral("repeated-endpoint")},
+                                {QStringLiteral("valueSats"), QVariant::fromValue<qlonglong>(value_sats)},
+                                {QStringLiteral("outputs"), outputs},
+                                {QStringLiteral("transactions"), txs},
+                                {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)},
+                                {QStringLiteral("firstHeight"), first_height},
+                                {QStringLiteral("lastHeight"), last_height}}));
+                        }
+                    }
+                }
+            }
+
+            if (local_error.isEmpty()) {
+                QSqlQuery vanity_query(db);
+                if (!vanity_query.exec(QString::fromLatin1(R"SQL(
+WITH vanity(address,role,sort_order) AS (
+  VALUES
+    ('DAtkLvJg7ZoECzqhnv6yRLETsH3PTfoW1E','Atk level',1),
+    ('DAtkHPuBm9TmAK3HGmz3LJaSgCSzjcemKY','Atk HP',2),
+    ('DDfndLvCygu9jyv9eKF1tUQcAok5uMwoC2','Def level',3),
+    ('DDfndHPWv9k3m2btAat9GQa74VUeQfaRui','Def HP',4),
+    ('DAMAGEYxp2xwJkginsmiRvhQ8Jesu6dpKU','Damage',5),
+    ('DCDAMGTzeNNLD8Gn5q9Ghdc3F1uyp21d8Z','Counter',6)
+), hits AS (
+  SELECT o.txid,o.block_height,b.time,v.role,v.sort_order,o.value_sats,o.value_text
+  FROM explorer_tx_outputs o
+  JOIN vanity v ON v.address=o.address
+  LEFT JOIN explorer_blocks b ON b.height=o.block_height
+)
+SELECT txid,block_height,COALESCE(time,0),COUNT(DISTINCT role) roles,
+       COUNT(*) outputs,COALESCE(SUM(value_sats),0) stat_sats,
+       GROUP_CONCAT(role || '=' || value_sats, ' | ') decoded
+FROM hits
+GROUP BY txid,block_height,time
+HAVING COUNT(DISTINCT role) >= 3
+ORDER BY block_height ASC, roles DESC, outputs DESC
+LIMIT 100
+)SQL"))) {
+                    local_error = vanity_query.lastError().text();
+                } else {
+                    while (vanity_query.next()) {
+                        const QString txid = vanity_query.value(0).toString();
+                        const int height = vanity_query.value(1).toInt();
+                        const qint64 time = vanity_query.value(2).toLongLong();
+                        const int roles = vanity_query.value(3).toInt();
+                        const int outputs = vanity_query.value(4).toInt();
+                        const qint64 stat_sats = vanity_query.value(5).toLongLong();
+                        const QString decoded = vanity_query.value(6).toString();
+                        const QString timestamp = time > 0
+                            ? QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
+                            : QStringLiteral("date unavailable");
+                        vanity_rows.push_back(row_for(QVariantList{
+                            txid,
+                            height,
+                            timestamp,
+                            roles,
+                            outputs,
+                            decoded,
+                            roundedExplorerAmountText(stat_sats)
+                        }, QVariantMap{
+                            {QStringLiteral("type"), QStringLiteral("transaction")},
+                            {QStringLiteral("id"), txid},
+                            {QStringLiteral("txid"), txid},
+                            {QStringLiteral("height"), height},
+                            {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
+                            {QStringLiteral("roles"), roles},
+                            {QStringLiteral("outputs"), outputs},
+                            {QStringLiteral("statSats"), QVariant::fromValue<qlonglong>(stat_sats)},
+                            {QStringLiteral("decoded"), decoded}}));
+                    }
+                }
+            }
+
+            if (local_error.isEmpty()) {
+                QSqlQuery fanout_query(db);
+                if (!fanout_query.exec(windows_cte + QString::fromLatin1(R"SQL(
+, fanout_hits AS (
+  SELECT w.label,o.txid,o.block_height,COALESCE(b.time,0) time,o.value_sats,
+       COUNT(*) outputs,COUNT(DISTINCT o.address) addresses,COALESCE(SUM(o.value_sats),0) sats
+  FROM windows w
+  JOIN explorer_tx_outputs o ON o.block_height BETWEEN w.start_h AND w.end_h
+  LEFT JOIN explorer_blocks b ON b.height=o.block_height
+  WHERE o.address != '' AND o.value_sats BETWEEN 1 AND 314159265
+  GROUP BY w.label,o.txid,o.block_height,b.time,o.value_sats
+  HAVING outputs >= 25 AND addresses >= 10
+)
+SELECT label,txid,block_height,time,value_sats,outputs,addresses,sats
+FROM fanout_hits
+ORDER BY outputs DESC,sats DESC,block_height ASC
+LIMIT 120
+)SQL"))) {
+                    local_error = fanout_query.lastError().text();
+                } else {
+                    while (fanout_query.next() && bot_rows.size() < 180) {
+                        const QString label = fanout_query.value(0).toString();
+                        const QString txid = fanout_query.value(1).toString();
+                        const int height = fanout_query.value(2).toInt();
+                        const qint64 time = fanout_query.value(3).toLongLong();
+                        const qint64 value_sats = fanout_query.value(4).toLongLong();
+                        const int outputs = fanout_query.value(5).toInt();
+                        const int addresses = fanout_query.value(6).toInt();
+                        const qint64 sats = fanout_query.value(7).toLongLong();
+                        const QString timestamp = time > 0
+                            ? QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
+                            : QStringLiteral("date unavailable");
+                        bot_rows.push_back(row_for(QVariantList{
+                            QStringLiteral("Fan-out / reload candidate"),
+                            txid,
+                            QStringLiteral("%1 block %2").arg(label, QString::number(height)),
+                            roundedExplorerAmountText(value_sats),
+                            outputs,
+                            addresses,
+                            roundedExplorerAmountText(sats),
+                            QStringLiteral("%1 identical outputs in one transaction on %2.")
+                                .arg(QString::number(outputs), timestamp)
+                        }, QVariantMap{
+                            {QStringLiteral("type"), QStringLiteral("transaction")},
+                            {QStringLiteral("id"), txid},
+                            {QStringLiteral("txid"), txid},
+                            {QStringLiteral("height"), height},
+                            {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
+                            {QStringLiteral("signal"), QStringLiteral("fanout-reload")},
+                            {QStringLiteral("valueSats"), QVariant::fromValue<qlonglong>(value_sats)},
+                            {QStringLiteral("outputs"), outputs},
+                            {QStringLiteral("addresses"), addresses},
+                            {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)}}));
+                    }
+                }
+            }
+
+            if (local_error.isEmpty()) {
+                QSqlQuery op_return_query(db);
+                if (!op_return_query.exec(QString::fromLatin1(R"SQL(
+WITH windows(label,start_h,end_h,sort_order) AS (
+  VALUES
+    ('Post-pivot sample',736611,1117682,1),
+    ('DEF CON 25 return [Caesars Palace]',736611,739117,2),
+    ('DEF CON 26 return [Caesars Palace]',901949,904119,3),
+    ('DEF CON 27 return [Paris, Ballys, Flamingo & Planet Hollywood hotels]',1115166,1117682,4)
+)
+SELECT o.txid,o.vout,o.block_height,COALESCE(b.time,0),w.label,o.value_sats,
+       o.payload_hex,o.payload_text,LENGTH(o.payload_hex)/2 AS payload_bytes
+FROM explorer_op_returns o
+LEFT JOIN explorer_blocks b ON b.height=o.block_height
+LEFT JOIN windows w ON o.block_height BETWEEN w.start_h AND w.end_h
+WHERE o.block_height >= 736611
+ORDER BY o.block_height ASC,o.txid ASC,o.vout ASC
+LIMIT 160
+)SQL"))) {
+                    local_error = op_return_query.lastError().text();
+                } else {
+                    while (op_return_query.next()) {
+                        const QString txid = op_return_query.value(0).toString();
+                        const int vout = op_return_query.value(1).toInt();
+                        const int height = op_return_query.value(2).toInt();
+                        const qint64 time = op_return_query.value(3).toLongLong();
+                        const QString label = op_return_query.value(4).toString().trimmed().isEmpty()
+                            ? QStringLiteral("Post-pivot")
+                            : op_return_query.value(4).toString();
+                        const qint64 value_sats = op_return_query.value(5).toLongLong();
+                        const QString payload_hex = op_return_query.value(6).toString();
+                        const QString payload_text = op_return_query.value(7).toString();
+                        const int payload_bytes = op_return_query.value(8).toInt();
+                        const QString timestamp = time > 0
+                            ? QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
+                            : QStringLiteral("date unavailable");
+                        const QString preview = payload_text.isEmpty()
+                            ? QStringLiteral("hex ") + payload_hex.left(96)
+                            : payload_text;
+                        op_return_rows.push_back(row_for(QVariantList{
+                            txid,
+                            vout,
+                            height,
+                            timestamp,
+                            label,
+                            payload_bytes,
+                            roundedExplorerAmountText(value_sats),
+                            preview
+                        }, QVariantMap{
+                            {QStringLiteral("type"), QStringLiteral("transaction")},
+                            {QStringLiteral("id"), txid},
+                            {QStringLiteral("txid"), txid},
+                            {QStringLiteral("vout"), vout},
+                            {QStringLiteral("height"), height},
+                            {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
+                            {QStringLiteral("label"), label},
+                            {QStringLiteral("payloadBytes"), payload_bytes},
+                            {QStringLiteral("valueSats"), QVariant::fromValue<qlonglong>(value_sats)},
+                            {QStringLiteral("payloadHex"), payload_hex},
+                            {QStringLiteral("payloadText"), payload_text}}));
+                    }
+                }
+            }
+
+            if (local_error.isEmpty()) {
+                QSqlQuery winner_query(db);
+                if (!winner_query.exec(QString::fromLatin1(R"SQL(
+SELECT address,COUNT(*) outputs,COUNT(DISTINCT txid) txs,COALESCE(SUM(value_sats),0) sats,
+       MAX(value_sats) largest_sats,MIN(block_height) first_h,MAX(block_height) last_h,COUNT(DISTINCT block_height) blocks
+FROM explorer_tx_outputs
+WHERE block_height BETWEEN 109943 AND 111441 AND address != '' AND value_sats=13370000
+GROUP BY address
+ORDER BY sats DESC,outputs DESC,address ASC
+LIMIT 100
+)SQL"))) {
+                    local_error = winner_query.lastError().text();
+                } else {
+                    while (winner_query.next()) {
+                        const QString address = winner_query.value(0).toString();
+                        const int outputs = winner_query.value(1).toInt();
+                        const int txs = winner_query.value(2).toInt();
+                        const qint64 sats = winner_query.value(3).toLongLong();
+                        const qint64 largest_sats = winner_query.value(4).toLongLong();
+                        const int first_height = winner_query.value(5).toInt();
+                        const int last_height = winner_query.value(6).toInt();
+                        const int blocks = winner_query.value(7).toInt();
+                        if (largest_winner_sats == 0) {
+                            largest_winner_sats = sats;
+                            largest_winner_address = address;
+                        }
+                        if (sats == largest_winner_sats) ++largest_winner_ties;
+                        winner_rows.push_back(row_for(QVariantList{
+                            address,
+                            roundedExplorerAmountText(sats),
+                            outputs,
+                            txs,
+                            roundedExplorerAmountText(largest_sats),
+                            blocks,
+                            QStringLiteral("%1-%2").arg(QString::number(first_height), QString::number(last_height))
+                        }, QVariantMap{
+                            {QStringLiteral("type"), QStringLiteral("address")},
+                            {QStringLiteral("id"), address},
+                            {QStringLiteral("address"), address},
+                            {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)},
+                            {QStringLiteral("outputs"), outputs},
+                            {QStringLiteral("transactions"), txs},
+                            {QStringLiteral("largestSats"), QVariant::fromValue<qlonglong>(largest_sats)},
+                            {QStringLiteral("blocks"), blocks},
+                            {QStringLiteral("firstHeight"), first_height},
+                            {QStringLiteral("lastHeight"), last_height}}));
+                    }
+                }
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+
+    evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Registration / sync"),
+        QStringLiteral("Small player sends to a per-droid registration or sync address, then a near-return or later recognized action."),
+        QStringLiteral("candidate without live API")
+    }, QVariantMap{{QStringLiteral("confidence"), QStringLiteral("medium")}}));
+    evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Attack sends"),
+        QStringLiteral("Registered-player source spends into a droid attack address; repeated fan-in marks likely droid targets."),
+        QStringLiteral("candidate from fan-in")
+    }, QVariantMap{{QStringLiteral("confidence"), QStringLiteral("medium")}}));
+    evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Shield / cover"),
+        QStringLiteral("Repeated exact-cost sends to global defense endpoints; Defcoin launch data shows many 0.01 DFC action-cost candidates."),
+        QStringLiteral("candidate from cost hubs")
+    }, QVariantMap{{QStringLiteral("confidence"), QStringLiteral("medium")}}));
+    evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Payout / spillage swarm"),
+        QStringLiteral("Many equal 0.13370000 DFC outputs to the same 64 recipients in the launch window."),
+        QStringLiteral("high")
+    }, QVariantMap{{QStringLiteral("confidence"), QStringLiteral("high")}}));
+    evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("2014 vanity battle response"),
+        QStringLiteral("A tx with three or more known cosmetic response addresses decodes output satoshis into attacker/defender level, HP, damage, and counter-damage."),
+        vanity_rows.isEmpty() ? QStringLiteral("available after matching outputs") : QStringLiteral("high")
+    }, QVariantMap{{QStringLiteral("confidence"), vanity_rows.isEmpty() ? QStringLiteral("candidate") : QStringLiteral("high")}}));
+    evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("25 Jul 2017 processing shift"),
+        QStringLiteral("Defcoin mempool support exposed pending action estimates, but state changes, inventory changes, and payouts still required confirmed blocks."),
+        QStringLiteral("source-backed")
+    }, QVariantMap{{QStringLiteral("confidence"), QStringLiteral("source-backed")}}));
+    evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Dust to OP_RETURN pivot"),
+        QStringLiteral("Early blocks score exact fractional DFC outputs; later blocks scan indexed OP_RETURN payload hex/text because action semantics can move into transaction metadata."),
+        op_return_rows.isEmpty() ? QStringLiteral("indexed, waiting for matches") : QStringLiteral("payloads indexed")
+    }, QVariantMap{{QStringLiteral("confidence"), op_return_rows.isEmpty() ? QStringLiteral("candidate") : QStringLiteral("medium")}}));
+    evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("Known API metadata"),
+        QStringLiteral("The Coindroids API documented currencies, attack addresses, ammunition clips, mempool actions, and payouts, but the live API did not answer during this build."),
+        QStringLiteral("exact when available")
+    }, QVariantMap{{QStringLiteral("confidence"), QStringLiteral("external")}}));
+
+    summary.insert(QStringLiteral("actionOutputs"), QVariant::fromValue<qlonglong>(total_action_outputs));
+    summary.insert(QStringLiteral("actionTransactions"), QVariant::fromValue<qlonglong>(total_action_txs));
+    summary.insert(QStringLiteral("actionAddresses"), QVariant::fromValue<qlonglong>(total_action_addresses));
+    summary.insert(QStringLiteral("actionAmount"), explorerAmountText(total_action_sats));
+    summary.insert(QStringLiteral("actionAmountRounded"), roundedExplorerAmountText(total_action_sats));
+    summary.insert(QStringLiteral("windowCount"), window_rows.size());
+    summary.insert(QStringLiteral("strongestWindowLabel"), strongest_window_label);
+    summary.insert(QStringLiteral("strongestWindowAmount"), roundedExplorerAmountText(strongest_window_sats));
+    summary.insert(QStringLiteral("strongestWindowOutputs"), QVariant::fromValue<qlonglong>(strongest_window_outputs));
+    summary.insert(QStringLiteral("launch001Outputs"), QVariant::fromValue<qlonglong>(launch_001_outputs));
+    summary.insert(QStringLiteral("launch1337Outputs"), QVariant::fromValue<qlonglong>(launch_1337_outputs));
+    summary.insert(QStringLiteral("launch1337Amount"), explorerAmountText(launch_1337_sats));
+    summary.insert(QStringLiteral("launch1337AmountRounded"), roundedExplorerAmountText(launch_1337_sats));
+    summary.insert(QStringLiteral("launch1337Recipients"), QVariant::fromValue<qlonglong>(launch_1337_recipients));
+    summary.insert(QStringLiteral("largestWinnerAddress"), largest_winner_address);
+    summary.insert(QStringLiteral("largestWinnerAmount"), explorerAmountText(largest_winner_sats));
+    summary.insert(QStringLiteral("largestWinnerAmountRounded"), roundedExplorerAmountText(largest_winner_sats));
+    summary.insert(QStringLiteral("largestWinnerTies"), largest_winner_ties);
+    summary.insert(QStringLiteral("endpointCount"), endpoint_rows.size());
+    summary.insert(QStringLiteral("winnerCount"), winner_rows.size());
+    summary.insert(QStringLiteral("phaseCount"), phase_rows.size());
+    summary.insert(QStringLiteral("publishedAnchorCount"), published_rows.size());
+    summary.insert(QStringLiteral("vanityResponseCount"), vanity_rows.size());
+    summary.insert(QStringLiteral("opReturnCandidateCount"), op_return_rows.size());
+    summary.insert(QStringLiteral("botCandidateCount"), bot_rows.size());
+    summary.insert(QStringLiteral("transitionDate"), QStringLiteral("2017-07-25"));
+    summary.insert(QStringLiteral("transitionLabel"), QStringLiteral("Defcoin mempool support added"));
+    summary.insert(QStringLiteral("bountyTerminologyDate"), QStringLiteral("2017-08-11"));
+    summary.insert(QStringLiteral("publishedLargestWinner"), QStringLiteral("ModemBot1138"));
+    summary.insert(QStringLiteral("publishedLargestWinnerAmount"), QStringLiteral("100.0605 DFC"));
+    summary.insert(QStringLiteral("analysisNote"),
+                   QStringLiteral("Offline chain heuristics based on the documented transaction-driven Coindroids protocol and local Defcoin explorer index."));
+    summary.insert(QStringLiteral("droidTrailsCacheStatus"), QStringLiteral("rebuilt"));
+    summary.insert(QStringLiteral("droidTrailsCacheVersion"), DROIDTRAILS_CACHE_SCHEMA_VERSION);
+    summary.insert(QStringLiteral("droidTrailsCachePath"), droidTrailsDatabasePath());
+    summary.insert(QStringLiteral("droidTrailsSourceHeight"), explorerHighestIndexedBlock());
+    summary.insert(QStringLiteral("droidTrailsSourceOutputs"), explorerIndexedOutputCountFromDb());
+
+    result.insert(QStringLiteral("summary"), summary);
+    result.insert(QStringLiteral("windows"), window_rows);
+    result.insert(QStringLiteral("endpoints"), endpoint_rows);
+    result.insert(QStringLiteral("winners"), winner_rows);
+    result.insert(QStringLiteral("phases"), phase_rows);
+    result.insert(QStringLiteral("published"), published_rows);
+    result.insert(QStringLiteral("vanity"), vanity_rows);
+    result.insert(QStringLiteral("opReturns"), op_return_rows);
+    result.insert(QStringLiteral("bots"), bot_rows);
+    result.insert(QStringLiteral("evidence"), evidence_rows);
+    if (local_error.isEmpty()) saveCoindroidsAnalyticsCache(result);
+    if (!local_error.isEmpty() && error) *error = local_error;
+    return result;
 }
 
 void NuRpcService::loadExplorerContacts()
@@ -8669,6 +10618,67 @@ void NuRpcService::refreshExplorerContactRelationships()
         });
     }
     Q_EMIT explorerChanged();
+}
+
+void NuRpcService::refreshCoindroidsAnalytics()
+{
+    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+    if (m_coindroids_scanning) {
+        m_coindroids_status = QStringLiteral("Coindroids analysis is already reading the local explorer index.");
+        Q_EMIT explorerChanged();
+        return;
+    }
+    if (!m_coindroids_window_rows.isEmpty() && m_coindroids_last_refresh_ms > 0 &&
+        now_ms - m_coindroids_last_refresh_ms < 30000) {
+        return;
+    }
+
+    const int generation = ++m_coindroids_generation;
+    m_coindroids_scanning = true;
+    m_coindroids_status = QStringLiteral("Coindroids analysis loading: scanning launch windows, action-cost endpoints, and payout swarms.");
+    Q_EMIT explorerChanged();
+
+    QPointer<NuRpcService> guard(this);
+    QThread* thread = QThread::create([guard, generation] {
+        if (!guard) return;
+        QString error;
+        QVariantMap analysis = guard->coindroidsAnalyticsFromDb(&error);
+        QMetaObject::invokeMethod(guard, [guard, generation, analysis = std::move(analysis), error]() mutable {
+            if (!guard || generation != guard->m_coindroids_generation) return;
+            guard->m_coindroids_scanning = false;
+            guard->m_coindroids_last_refresh_ms = QDateTime::currentMSecsSinceEpoch();
+            if (!error.isEmpty()) {
+                guard->m_coindroids_status = QStringLiteral("Coindroids analysis could not load: %1").arg(error);
+            } else {
+                guard->m_coindroids_summary = analysis.value(QStringLiteral("summary")).toMap();
+                guard->m_coindroids_window_rows = analysis.value(QStringLiteral("windows")).toList();
+                guard->m_coindroids_endpoint_rows = analysis.value(QStringLiteral("endpoints")).toList();
+                guard->m_coindroids_winner_rows = analysis.value(QStringLiteral("winners")).toList();
+                guard->m_coindroids_phase_rows = analysis.value(QStringLiteral("phases")).toList();
+                guard->m_coindroids_published_rows = analysis.value(QStringLiteral("published")).toList();
+                guard->m_coindroids_vanity_rows = analysis.value(QStringLiteral("vanity")).toList();
+                guard->m_coindroids_op_return_rows = analysis.value(QStringLiteral("opReturns")).toList();
+                guard->m_coindroids_bot_rows = analysis.value(QStringLiteral("bots")).toList();
+                guard->m_coindroids_evidence_rows = analysis.value(QStringLiteral("evidence")).toList();
+                const QString cache_status = guard->m_coindroids_summary.value(QStringLiteral("droidTrailsCacheStatus")).toString();
+                const QString cache_label = cache_status == QLatin1String("hit")
+                    ? QStringLiteral("Loaded saved Droid Trails DB")
+                    : QStringLiteral("Rebuilt Droid Trails DB");
+                guard->m_coindroids_status = QStringLiteral("%1 v%2: %3 candidate endpoint clusters, %4 payout recipients, %5 launch-window 0.1337 DFC swarm outputs, %6 vanity-response candidates, %7 OP_RETURN payload candidates, %8 bot/reload candidates. Major processing shift: 2017-07-25 dust/amount era toward mempool and payload-aware processing.")
+                    .arg(cache_label,
+                         guard->m_coindroids_summary.value(QStringLiteral("droidTrailsCacheVersion")).toString(),
+                         QString::number(guard->m_coindroids_endpoint_rows.size()),
+                         QString::number(guard->m_coindroids_winner_rows.size()),
+                         guard->m_coindroids_summary.value(QStringLiteral("launch1337Outputs")).toString(),
+                         QString::number(guard->m_coindroids_vanity_rows.size()),
+                         QString::number(guard->m_coindroids_op_return_rows.size()),
+                         QString::number(guard->m_coindroids_bot_rows.size()));
+            }
+            Q_EMIT guard->explorerChanged();
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start(QThread::LowPriority);
 }
 
 void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins, const QString& scope)
@@ -9141,6 +11151,13 @@ bool NuRpcService::explorerPruneFromHeight(int height, QString* error)
             }
             if (ok) {
                 QSqlQuery query(db);
+                query.prepare(QStringLiteral("DELETE FROM explorer_op_returns WHERE block_height >= ?"));
+                query.addBindValue(prune_height);
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
                 query.prepare(QStringLiteral("DELETE FROM explorer_block_transactions WHERE block_height >= ?"));
                 query.addBindValue(prune_height);
                 ok = query.exec();
@@ -9185,6 +11202,30 @@ bool NuRpcService::explorerPruneFromHeight(int height, QString* error)
                 QSqlQuery query(db);
                 query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('balance_deltas_height', ?)"));
                 query.addBindValue(QString::number(prune_height - 1));
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            qint64 output_count_after_prune = 0;
+            if (ok) {
+                QSqlQuery query(db);
+                if (query.exec(QStringLiteral("SELECT COUNT(*) FROM explorer_tx_outputs")) && query.next()) {
+                    output_count_after_prune = query.value(0).toLongLong();
+                } else {
+                    ok = false;
+                    local_error = query.lastError().text();
+                }
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('indexed_block_count', ?)"));
+                query.addBindValue(QString::number(std::max(0, prune_height)));
+                ok = query.exec();
+                if (!ok) local_error = query.lastError().text();
+            }
+            if (ok) {
+                QSqlQuery query(db);
+                query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('indexed_output_count', ?)"));
+                query.addBindValue(QString::number(output_count_after_prune));
                 ok = query.exec();
                 if (!ok) local_error = query.lastError().text();
             }
@@ -9237,15 +11278,32 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
             } else {
                 pragma.exec(QStringLiteral("PRAGMA cache_size=-65536"));
             }
+            qint64 starting_output_count = -1;
+            {
+                QSqlQuery count_query(db);
+                count_query.prepare(QStringLiteral("SELECT value FROM explorer_meta WHERE key = 'indexed_output_count'"));
+                if (count_query.exec() && count_query.next()) {
+                    starting_output_count = count_query.value(0).toLongLong();
+                }
+                if (starting_output_count < 0 &&
+                    count_query.exec(QStringLiteral("SELECT COUNT(*) FROM explorer_tx_outputs")) &&
+                    count_query.next()) {
+                    starting_output_count = count_query.value(0).toLongLong();
+                }
+                if (starting_output_count < 0) starting_output_count = 0;
+            }
             ok = db.transaction();
             if (!ok) local_error = db.lastError().text();
 
             QSqlQuery block_query(db);
             QSqlQuery delete_tx_query(db);
             QSqlQuery delete_out_query(db);
+            QSqlQuery delete_op_return_query(db);
             QSqlQuery delete_delta_query(db);
+            QSqlQuery previous_output_count_query(db);
             QSqlQuery tx_query(db);
             QSqlQuery output_query(db);
+            QSqlQuery op_return_query(db);
             QSqlQuery spend_lookup_query(db);
             QSqlQuery spend_query(db);
             QSqlQuery delta_query(db);
@@ -9255,14 +11313,20 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                 "VALUES(?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(height) DO UPDATE SET "
                 "hash=excluded.hash, time=excluded.time, tx_count=excluded.tx_count, raw_json=excluded.raw_json, indexed_at=excluded.indexed_at"));
+            if (ok) ok = previous_output_count_query.prepare(QStringLiteral("SELECT COUNT(*) FROM explorer_tx_outputs WHERE block_height = ?"));
             if (ok) ok = delete_tx_query.prepare(QStringLiteral("DELETE FROM explorer_block_transactions WHERE block_height = ?"));
             if (ok) ok = delete_out_query.prepare(QStringLiteral("DELETE FROM explorer_tx_outputs WHERE block_height = ?"));
+            if (ok) ok = delete_op_return_query.prepare(QStringLiteral("DELETE FROM explorer_op_returns WHERE block_height = ?"));
             if (ok) ok = delete_delta_query.prepare(QStringLiteral("DELETE FROM explorer_balance_deltas WHERE height = ?"));
             if (ok) ok = tx_query.prepare(QStringLiteral("INSERT INTO explorer_block_transactions(block_height, tx_index, txid) VALUES(?, ?, ?)"));
             if (ok) ok = output_query.prepare(QStringLiteral(
                 "INSERT OR REPLACE INTO explorer_tx_outputs("
                 "txid, vout, block_height, address, value_sats, value_text, script_type, spent_by_txid, spent_in_height, spent_vin) "
                 "VALUES(?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)"));
+            if (ok) ok = op_return_query.prepare(QStringLiteral(
+                "INSERT OR REPLACE INTO explorer_op_returns("
+                "txid, vout, block_height, value_sats, script_hex, payload_hex, payload_text) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?)"));
             if (ok) ok = spend_lookup_query.prepare(QStringLiteral(
                 "SELECT address, value_sats FROM explorer_tx_outputs WHERE txid = ? AND vout = ?"));
             if (ok) ok = spend_query.prepare(QStringLiteral(
@@ -9278,6 +11342,7 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
 
             int last_height = -1;
             int local_output_rows = 0;
+            int local_removed_output_rows = 0;
             const qint64 indexed_at = QDateTime::currentSecsSinceEpoch();
             for (const QJsonObject& block : blocks) {
                 if (!ok) break;
@@ -9312,6 +11377,17 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                     break;
                 }
 
+                previous_output_count_query.bindValue(0, height);
+                ok = previous_output_count_query.exec();
+                if (!ok) {
+                    local_error = previous_output_count_query.lastError().text();
+                    break;
+                }
+                if (previous_output_count_query.next()) {
+                    local_removed_output_rows += previous_output_count_query.value(0).toInt();
+                }
+                previous_output_count_query.finish();
+
                 delete_tx_query.bindValue(0, height);
                 ok = delete_tx_query.exec();
                 if (!ok) {
@@ -9322,6 +11398,12 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                 ok = delete_out_query.exec();
                 if (!ok) {
                     local_error = delete_out_query.lastError().text();
+                    break;
+                }
+                delete_op_return_query.bindValue(0, height);
+                ok = delete_op_return_query.exec();
+                if (!ok) {
+                    local_error = delete_op_return_query.lastError().text();
                     break;
                 }
                 delete_delta_query.bindValue(0, height);
@@ -9366,6 +11448,22 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                         const QString value_text = explorerAmountText(value_sats, false);
                         const QJsonObject script = out.value(QStringLiteral("scriptPubKey")).toObject();
                         const QString script_type = script.value(QStringLiteral("type")).toString();
+                        const QString script_hex = script.value(QStringLiteral("hex")).toString();
+                        if (script_type == QLatin1String("nulldata") || script_hex.startsWith(QStringLiteral("6a"), Qt::CaseInsensitive)) {
+                            const QByteArray payload = explorerOpReturnPayloadBytes(script_hex);
+                            op_return_query.bindValue(0, txid);
+                            op_return_query.bindValue(1, n);
+                            op_return_query.bindValue(2, height);
+                            op_return_query.bindValue(3, value_sats);
+                            op_return_query.bindValue(4, script_hex);
+                            op_return_query.bindValue(5, QString::fromLatin1(payload.toHex()));
+                            op_return_query.bindValue(6, explorerPrintablePayloadText(payload));
+                            ok = op_return_query.exec();
+                            if (!ok) {
+                                local_error = op_return_query.lastError().text();
+                                break;
+                            }
+                        }
                         const QStringList addresses = explorerOutputAddresses(script);
                         for (const QString& address : addresses) {
                             output_query.bindValue(0, txid);
@@ -9445,6 +11543,19 @@ bool NuRpcService::storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* 
                 ok = meta_query.exec();
                 if (!ok) local_error = meta_query.lastError().text();
             }
+            if (ok && last_height >= 0) {
+                meta_query.bindValue(0, QStringLiteral("indexed_block_count"));
+                meta_query.bindValue(1, QString::number(last_height + 1));
+                ok = meta_query.exec();
+                if (!ok) local_error = meta_query.lastError().text();
+            }
+            if (ok && last_height >= 0) {
+                const qint64 indexed_output_count = std::max<qint64>(0, starting_output_count - local_removed_output_rows + local_output_rows);
+                meta_query.bindValue(0, QStringLiteral("indexed_output_count"));
+                meta_query.bindValue(1, QString::number(indexed_output_count));
+                ok = meta_query.exec();
+                if (!ok) local_error = meta_query.lastError().text();
+            }
             if (ok) {
                 ok = db.commit();
                 if (!ok) local_error = db.lastError().text();
@@ -9486,7 +11597,7 @@ void NuRpcService::startExplorerIndexing()
     m_explorer_index_started_ms = QDateTime::currentMSecsSinceEpoch();
     m_explorer_index_started_block_count = m_explorer_indexed_block_count;
     m_explorer_index_last_ui_update_ms = 0;
-    m_explorer_index_status = QStringLiteral("Reading current chain height...");
+    m_explorer_index_status = QStringLiteral("Loading index 0%: reading current chain height...");
     if (m_explorer_top100_focused_indexing) {
         trySetProcessNiceForIndexing(true);
     }
@@ -9524,8 +11635,12 @@ void NuRpcService::startExplorerIndexing()
                 m_explorer_index_height = highest;
                 m_explorer_indexed_block_count = explorerIndexedBlockCountFromDb();
                 m_explorer_indexed_output_count = explorerIndexedOutputCountFromDb();
-                m_explorer_index_status = QStringLiteral("Detected stale indexed tip. Pruned back to block %1 and resuming.")
-                    .arg(QString::number(std::max(0, highest - 1)));
+                const double repair_pct = m_explorer_index_tip > 0
+                    ? std::clamp(100.0 * static_cast<double>(std::max(0, highest - 1)) / static_cast<double>(m_explorer_index_tip), 0.0, 100.0)
+                    : 0.0;
+                m_explorer_index_status = QStringLiteral("Loading index %1%: detected stale indexed tip, pruned back to block %2, and resumed.")
+                    .arg(QString::number(repair_pct, 'f', 2),
+                         QString::number(std::max(0, highest - 1)));
                 emitExplorerChangedThrottled(true);
                 scheduleExplorerIndexStep(0);
                 return;
@@ -9585,7 +11700,9 @@ void NuRpcService::resetExplorerIndex()
             if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_balance_deltas"));
             if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_top100_events"));
             if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_top100_ranges"));
-            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_meta WHERE key IN ('last_indexed_height', 'tip_height', 'balance_deltas_height')"));
+            if (ok) ok = query.exec(QStringLiteral("DELETE FROM explorer_meta WHERE key IN ('last_indexed_height', 'tip_height', 'balance_deltas_height', 'indexed_block_count', 'indexed_output_count')"));
+            if (ok) ok = query.exec(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('indexed_block_count', '0')"));
+            if (ok) ok = query.exec(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('indexed_output_count', '0')"));
             if (!ok) local_error = query.lastError().text();
         } else {
             local_error = db.lastError().text();
@@ -9965,8 +12082,22 @@ bool NuRpcService::initializeExplorerTop100Scan(int start_height, int end_height
     return true;
 }
 
-bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool force_anchor, QString* error)
+bool NuRpcService::prepareExplorerTop100EventWrite(int height,
+                                                   qint64 block_time,
+                                                   bool force_anchor,
+                                                   ExplorerTop100EventWrite* event,
+                                                   QString* error)
 {
+    if (!event) {
+        if (error) *error = QStringLiteral("Internal Holder timeline event target was not available.");
+        return false;
+    }
+
+    event->height = height;
+    event->time = block_time;
+    event->is_anchor = false;
+    event->rows.clear();
+
     QVector<QPair<QString, int>> current_rows;
     current_rows.reserve(100);
     int rank = 1;
@@ -9991,15 +12122,60 @@ bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool
 
     if (!effective_force_anchor && current_rows == m_explorer_top100_previous_rows) return true;
 
+    event->is_anchor = effective_force_anchor;
+    const int max_rows = std::max(current_rows.size(), m_explorer_top100_previous_rows.size());
+    event->rows.reserve(std::min(max_rows, 100));
+    for (int i = 0; i < max_rows && i < 100; ++i) {
+        const QPair<QString, int> current = i < current_rows.size() ? current_rows.at(i) : qMakePair(QStringLiteral(""), 0);
+        const QPair<QString, int> previous = i < m_explorer_top100_previous_rows.size() ? m_explorer_top100_previous_rows.at(i) : qMakePair(QString(), -1);
+        if (!effective_force_anchor && current == previous) continue;
+        ExplorerTop100EventRow row;
+        row.rank = i + 1;
+        row.address = current.first.isNull() ? QStringLiteral("") : current.first;
+        row.percent = current.second;
+        row.color_index = i % EXPLORER_TOP100_COLORS.size();
+        event->rows.push_back(row);
+    }
+
+    m_explorer_top100_previous_rows = current_rows;
+    m_explorer_top100_last_rank_count = std::max(m_explorer_top100_last_rank_count, rank_count);
+    if (effective_force_anchor) {
+        while (m_explorer_top100_next_checkpoint_height <= height) {
+            m_explorer_top100_next_checkpoint_height += std::max(1, m_explorer_top100_checkpoint_interval_blocks);
+        }
+    }
+    return true;
+}
+
+bool NuRpcService::writeExplorerTop100EventBatch(const QVector<ExplorerTop100EventWrite>& events, QString* error)
+{
+    bool has_rows = false;
+    for (const ExplorerTop100EventWrite& event : events) {
+        if (!event.rows.isEmpty()) {
+            has_rows = true;
+            break;
+        }
+    }
+    if (!has_rows) return true;
+
     const QString connection_name = QStringLiteral("nu_explorer_top100_events_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
     bool ok = false;
     QString local_error;
+    int rows_written = 0;
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
         db.setDatabaseName(explorerDatabasePath());
         if (!db.open()) {
             local_error = db.lastError().text();
         } else {
+            QSqlQuery pragma(db);
+            pragma.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+            pragma.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+            pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+            if (m_explorer_top100_focused_indexing) {
+                pragma.exec(QStringLiteral("PRAGMA cache_size=-262144"));
+                pragma.exec(QStringLiteral("PRAGMA mmap_size=268435456"));
+            }
             ok = db.transaction();
             if (!ok) local_error = db.lastError().text();
             QSqlQuery query(db);
@@ -10009,33 +12185,32 @@ bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool
                     "VALUES(?, ?, ?, ?, ?, ?, ?)"));
                 if (!ok) local_error = query.lastError().text();
             }
-            const int max_rows = std::max(current_rows.size(), m_explorer_top100_previous_rows.size());
-            for (int i = 0; ok && i < max_rows && i < 100; ++i) {
-                const QPair<QString, int> current = i < current_rows.size() ? current_rows.at(i) : qMakePair(QStringLiteral(""), 0);
-                const QPair<QString, int> previous = i < m_explorer_top100_previous_rows.size() ? m_explorer_top100_previous_rows.at(i) : qMakePair(QString(), -1);
-                if (!effective_force_anchor && current == previous) continue;
-                query.bindValue(0, height);
-                query.bindValue(1, QVariant::fromValue<qlonglong>(block_time));
-                query.bindValue(2, i + 1);
-                query.bindValue(3, current.first.isNull() ? QStringLiteral("") : current.first);
-                query.bindValue(4, current.second);
-                query.bindValue(5, i % EXPLORER_TOP100_COLORS.size());
-                query.bindValue(6, effective_force_anchor ? 1 : 0);
-                ok = query.exec();
-                if (!ok) local_error = query.lastError().text();
-                else ++m_explorer_top100_events_written;
+            for (const ExplorerTop100EventWrite& event : events) {
+                for (const ExplorerTop100EventRow& row : event.rows) {
+                    if (!ok) break;
+                    query.bindValue(0, event.height);
+                    query.bindValue(1, QVariant::fromValue<qlonglong>(event.time));
+                    query.bindValue(2, row.rank);
+                    query.bindValue(3, row.address);
+                    query.bindValue(4, row.percent);
+                    query.bindValue(5, row.color_index);
+                    query.bindValue(6, event.is_anchor ? 1 : 0);
+                    ok = query.exec();
+                    if (!ok) local_error = query.lastError().text();
+                    else ++rows_written;
+                }
+                if (!ok) break;
+            }
+            if (ok) {
+                QSqlQuery meta_query(db);
+                ok = meta_query.exec(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('top100_percent_scale', 'basis_points')"));
+                if (!ok) local_error = meta_query.lastError().text();
             }
             if (ok) {
                 ok = db.commit();
                 if (!ok) local_error = db.lastError().text();
             } else {
                 db.rollback();
-            }
-            if (ok) {
-                QSqlQuery meta_query(db);
-                meta_query.prepare(QStringLiteral("INSERT OR REPLACE INTO explorer_meta(key, value) VALUES('top100_percent_scale', 'basis_points')"));
-                ok = meta_query.exec();
-                if (!ok) local_error = meta_query.lastError().text();
             }
         }
         db.close();
@@ -10045,14 +12220,19 @@ bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool
         if (error) *error = local_error;
         return false;
     }
-    m_explorer_top100_previous_rows = current_rows;
-    m_explorer_top100_last_rank_count = std::max(m_explorer_top100_last_rank_count, rank_count);
-    if (effective_force_anchor) {
-        while (m_explorer_top100_next_checkpoint_height <= height) {
-            m_explorer_top100_next_checkpoint_height += std::max(1, m_explorer_top100_checkpoint_interval_blocks);
-        }
-    }
+    m_explorer_top100_events_written += rows_written;
     return true;
+}
+
+bool NuRpcService::writeExplorerTop100Events(int height, qint64 block_time, bool force_anchor, QString* error)
+{
+    ExplorerTop100EventWrite event;
+    if (!prepareExplorerTop100EventWrite(height, block_time, force_anchor, &event, error)) return false;
+    if (event.rows.isEmpty()) return true;
+    QVector<ExplorerTop100EventWrite> events;
+    events.reserve(1);
+    events.push_back(event);
+    return writeExplorerTop100EventBatch(events, error);
 }
 
 bool NuRpcService::finishExplorerTop100Scan(bool completed, QString* error)
@@ -10119,6 +12299,18 @@ void NuRpcService::explorerTop100Step()
     int last_height = -1;
     qint64 last_time = 0;
     int rows_read = 0;
+    QVector<ExplorerTop100EventWrite> event_writes;
+    int event_rows_pending = 0;
+    auto append_event_write = [&](const ExplorerTop100EventWrite& event) {
+        if (event.rows.isEmpty()) return true;
+        event_writes.push_back(event);
+        event_rows_pending += event.rows.size();
+        if (event_rows_pending < EXPLORER_TOP100_EVENT_WRITE_BATCH_ROWS) return true;
+        if (!writeExplorerTop100EventBatch(event_writes, &local_error)) return false;
+        event_writes.clear();
+        event_rows_pending = 0;
+        return true;
+    };
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
         db.setDatabaseName(explorerDatabasePath());
@@ -10150,7 +12342,12 @@ void NuRpcService::explorerTop100Step()
                         const bool force_anchor = m_explorer_top100_previous_rows.isEmpty()
                             || last_height == m_explorer_top100_scan_start_height
                             || last_height >= m_explorer_top100_scan_end_height;
-                        if (!writeExplorerTop100Events(last_height, last_time, force_anchor, &local_error)) {
+                        ExplorerTop100EventWrite event;
+                        if (!prepareExplorerTop100EventWrite(last_height, last_time, force_anchor, &event, &local_error)) {
+                            ok = false;
+                            break;
+                        }
+                        if (!append_event_write(event)) {
                             ok = false;
                             break;
                         }
@@ -10182,7 +12379,13 @@ void NuRpcService::explorerTop100Step()
         const bool force_anchor = m_explorer_top100_previous_rows.isEmpty()
             || last_height == m_explorer_top100_scan_start_height
             || chunk_end >= m_explorer_top100_scan_end_height;
-        ok = writeExplorerTop100Events(last_height, last_time, force_anchor, &local_error);
+        ExplorerTop100EventWrite event;
+        ok = prepareExplorerTop100EventWrite(last_height, last_time, force_anchor, &event, &local_error);
+        if (ok && !append_event_write(event)) ok = false;
+    }
+
+    if (ok && !event_writes.isEmpty()) {
+        ok = writeExplorerTop100EventBatch(event_writes, &local_error);
     }
 
     if (!ok) {
@@ -10845,8 +13048,8 @@ void NuRpcService::openTransactionInExplorer(const QString& txid)
         emitExplorerError(QStringLiteral("Transaction not opened"), QStringLiteral("Transaction IDs must be 64 hexadecimal characters."));
         return;
     }
-#if !DEFCOIN_NU_EXPFOR_APP
-    if (usingInternalExplorer() && launchExpForLookup(QStringLiteral("--open-transaction"), clean_txid)) return;
+#if !DEFCOIN_NU_EXPLORE_APP
+    if (usingInternalExplorer() && launchExploreLookup(QStringLiteral("--open-transaction"), clean_txid)) return;
 #endif
     if (!usingInternalExplorer()) {
         const QString url = explorerUrlForTransaction(clean_txid);
@@ -10861,7 +13064,10 @@ void NuRpcService::openTransactionInExplorer(const QString& txid)
                                QStringLiteral("External explorer links must use a valid http:// or https:// URL without embedded credentials."));
             return;
         }
-        QDesktopServices::openUrl(external_url);
+        if (!QDesktopServices::openUrl(external_url)) {
+            Q_EMIT userMessage(QStringLiteral("Explorer link failed"),
+                               QStringLiteral("Nu could not open the external transaction explorer link."));
+        }
         return;
     }
     if (!m_rpc_connected) {
@@ -10965,8 +13171,8 @@ void NuRpcService::openAddressInExplorer(const QString& address)
         return;
     }
 
-#if !DEFCOIN_NU_EXPFOR_APP
-    if (usingInternalExplorer() && launchExpForLookup(QStringLiteral("--open-address"), clean_address)) return;
+#if !DEFCOIN_NU_EXPLORE_APP
+    if (usingInternalExplorer() && launchExploreLookup(QStringLiteral("--open-address"), clean_address)) return;
 #endif
 
     if (usingInternalExplorer()) {
@@ -11030,7 +13236,10 @@ void NuRpcService::openAddressInExplorer(const QString& address)
                            QStringLiteral("External explorer links must use a valid http:// or https:// URL without embedded credentials."));
         return;
     }
-    QDesktopServices::openUrl(external_url);
+    if (!QDesktopServices::openUrl(external_url)) {
+        Q_EMIT userMessage(QStringLiteral("Explorer link failed"),
+                           QStringLiteral("Nu could not open the external address explorer link."));
+    }
 }
 
 void NuRpcService::openBlockInExplorer(const QString& block_id)
@@ -11044,8 +13253,8 @@ void NuRpcService::openBlockInExplorer(const QString& block_id)
         emitExplorerError(QStringLiteral("Block not opened"), QStringLiteral("Block lookups must use a non-negative height or a 64-character hexadecimal block hash."));
         return;
     }
-#if !DEFCOIN_NU_EXPFOR_APP
-    if (usingInternalExplorer() && launchExpForLookup(QStringLiteral("--open-block"), clean)) return;
+#if !DEFCOIN_NU_EXPLORE_APP
+    if (usingInternalExplorer() && launchExploreLookup(QStringLiteral("--open-block"), clean)) return;
 #endif
     if (!usingInternalExplorer()) {
         Q_EMIT userMessage(QStringLiteral("External block links unavailable"),
@@ -11145,8 +13354,8 @@ void NuRpcService::searchExplorer(const QString& query)
         emitExplorerError(QStringLiteral("Explorer search"), QStringLiteral("Search input is too long. Enter a block height, 64-character hash, or Defcoin address."));
         return;
     }
-#if !DEFCOIN_NU_EXPFOR_APP
-    if (usingInternalExplorer() && launchExpForLookup(QStringLiteral("--search"), clean)) return;
+#if !DEFCOIN_NU_EXPLORE_APP
+    if (usingInternalExplorer() && launchExploreLookup(QStringLiteral("--search"), clean)) return;
 #endif
     bool is_height = false;
     clean.toInt(&is_height);
@@ -11198,7 +13407,10 @@ void NuRpcService::openExplorerLink(const QString& link)
                                QStringLiteral("Nu blocked an explorer link that was not a valid http://, https://, or internal nu:// link."));
             return;
         }
-        QDesktopServices::openUrl(url);
+        if (!QDesktopServices::openUrl(url)) {
+            Q_EMIT userMessage(QStringLiteral("Explorer link failed"),
+                               QStringLiteral("Nu could not open that explorer link."));
+        }
         return;
     }
     const QString kind = url.host();
@@ -11217,7 +13429,37 @@ void NuRpcService::openExplorerLink(const QString& link)
 
 void NuRpcService::copyText(const QString& text)
 {
+    if (looksLikeRecoveryPhraseText(text)) {
+        Q_EMIT userMessage(QStringLiteral("Clipboard copy blocked"),
+                           QStringLiteral("This text looks like a recovery phrase. Use the recovery phrase copy control and acknowledge the clipboard warning before copying phrase text."));
+        return;
+    }
     QApplication::clipboard()->setText(text);
+}
+
+void NuRpcService::copySensitiveTextAfterWarning(const QString& text)
+{
+    const QString clean_text = text.trimmed();
+    if (clean_text.isEmpty() || clean_text.size() > SENSITIVE_CLIPBOARD_MAX_CHARS) {
+        Q_EMIT userMessage(QStringLiteral("Clipboard copy blocked"),
+                           QStringLiteral("Sensitive clipboard text is empty or too large to copy safely from Nu."));
+        return;
+    }
+    QApplication::clipboard()->setText(clean_text);
+}
+
+void NuRpcService::openExternalUrl(const QString& url)
+{
+    const QUrl clean_url(singleLineLimited(url, 2048), QUrl::StrictMode);
+    if (!isSafeHttpUrl(clean_url)) {
+        Q_EMIT userMessage(QStringLiteral("Link blocked"),
+                           QStringLiteral("Nu blocked a link that was not a valid http:// or https:// URL without embedded credentials."));
+        return;
+    }
+    if (!QDesktopServices::openUrl(clean_url)) {
+        Q_EMIT userMessage(QStringLiteral("Link failed"),
+                           QStringLiteral("Nu could not open that link."));
+    }
 }
 
 void NuRpcService::backupWallet()
@@ -12714,7 +14956,15 @@ QVariantList NuRpcService::suggestedTableColumnWidths(const QVariantList& column
         for (const QVariant& row_value : rows) {
             const QVariantList row = tableRowCells(row_value);
             if (row.size() <= c) continue;
-            data_wanted = qMax(data_wanted, double(cell_metrics.horizontalAdvance(row.at(c).toString()) + padding));
+            QString cell_text = row.at(c).toString();
+            int extra_padding = 0;
+            if (type == QLatin1String("seedLanSource")) {
+                const QVariantMap meta = row_value.toMap().value(QStringLiteral("meta")).toMap();
+                if (meta.value(QStringLiteral("isLanPeer")).toBool()) {
+                    extra_padding = compact ? 28 : 32;
+                }
+            }
+            data_wanted = qMax(data_wanted, double(cell_metrics.horizontalAdvance(cell_text) + padding + extra_padding));
         }
         double header_wanted = double(title_metrics.horizontalAdvance(title) + padding);
         if (title.contains(QRegularExpression(QStringLiteral("\\s")))) {
