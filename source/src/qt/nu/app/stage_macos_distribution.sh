@@ -13,12 +13,12 @@ DMG_SUFFIX="${4:-macOS-AppleSilicon}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILT_APP_BASENAME="$(basename "$BUILT_APP")"
 if [[ "$BUILT_APP_BASENAME" == *Explore* || "$BUILT_APP" == *DefcoinCoreExplore* ]]; then
-  PRODUCT_NAME="Defcoin Core Explore"
-  PRODUCT_SLUG="Defcoin-Core-Explore"
+  PRODUCT_NAME="Defcoin Core Nu Explore"
+  PRODUCT_SLUG="Defcoin-Core-Nu-Explore"
   APP_EXECUTABLE_NAME="DefcoinCoreExplore"
-  DEST_DMG_BACKGROUND_BASENAME="defcoin-core-explore-dmg-background.png"
+  DEST_DMG_BACKGROUND_BASENAME="defcoin-core-nu-explore-dmg-background.png"
   DMG_STAGE_TEMPLATE="/tmp/defcoin-explore-dmg-stage.XXXXXX"
-  WORDMARK_THIRD_LINE="Explore"
+  WORDMARK_THIRD_LINE="EXPLORE"
 else
   PRODUCT_NAME="Defcoin Core Nu"
   PRODUCT_SLUG="Defcoin-Core-Nu"
@@ -42,7 +42,15 @@ rm -rf "$DEST_APP" "$DEST_DMG"
 
 ditto "$BUILT_APP" "$DEST_APP"
 chmod -R u+w "$DEST_APP"
+APP_PLIST="$DEST_APP/Contents/Info.plist"
+if [ -f "$APP_PLIST" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName $PRODUCT_NAME" "$APP_PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleName string $PRODUCT_NAME" "$APP_PLIST"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $PRODUCT_NAME" "$APP_PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $PRODUCT_NAME" "$APP_PLIST"
+fi
 rm -f "$DEST_APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
+find "$DEST_APP/Contents/Frameworks" -type f \( -name '*.a' -o -name '*.la' \) -delete 2>/dev/null || true
 "$(dirname "$0")/bundle_macos_backend_deps.sh" "$DEST_APP"
 
 find_existing_dir() {
@@ -80,7 +88,8 @@ QT_QML_ROOT="$(find_existing_dir \
 "/bin/sh" "$(dirname "$0")/deploy_macos_qt_runtime.sh" "$QT_ROOT" "$QT_PLUGIN_ROOT" "$QT_QML_ROOT" "$DEST_APP"
 
 PYTHON_FOR_QT_REPAIR="${DEFCOIN_NU_PACKAGING_PYTHON:-$(command -v python3)}"
-"$PYTHON_FOR_QT_REPAIR" "$(dirname "$0")/repair_macos_qt_bundle.py" /opt/homebrew "$DEST_APP"
+"$PYTHON_FOR_QT_REPAIR" "$(dirname "$0")/repair_macos_qt_bundle.py" "$QT_ROOT" "$DEST_APP"
+find "$DEST_APP/Contents/Frameworks" -type f \( -name '*.a' -o -name '*.la' \) -delete 2>/dev/null || true
 
 APP_EXE="$DEST_APP/Contents/MacOS/$APP_EXECUTABLE_NAME"
 while IFS= read -r rpath; do
@@ -101,12 +110,52 @@ done < <(otool -l "$APP_EXE" | awk '
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_EXE" 2>/dev/null || true
 xattr -cr "$DEST_APP" || true
 
-find "$DEST_APP/Contents" -type f -print0 | while IFS= read -r -d '' candidate; do
-  if file -b "$candidate" | grep -q 'Mach-O'; then
+sign_macho_tree() {
+  local root="$1"
+  local exclude_dir="${2:-}"
+  while IFS= read -r -d '' candidate; do
     chmod u+w "$candidate" 2>/dev/null || true
     codesign --force --sign - --timestamp=none "$candidate" >/dev/null
-  fi
-done
+  done < <("$PYTHON_FOR_QT_REPAIR" - "$root" "$exclude_dir" <<'PY'
+import os
+import sys
+
+root = sys.argv[1]
+exclude_dir = sys.argv[2]
+magics = {
+    b"\xfe\xed\xfa\xce",
+    b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe",
+    b"\xbe\xba\xfe\xca",
+    b"\xca\xfe\xba\xbf",
+    b"\xbf\xba\xfe\xca",
+}
+paths = []
+for base, dirs, files in os.walk(root, followlinks=False):
+    for name in files:
+        path = os.path.join(base, name)
+        if exclude_dir and os.path.commonpath([path, exclude_dir]) == exclude_dir:
+            continue
+        try:
+            with open(path, "rb") as handle:
+                head = handle.read(4)
+        except OSError:
+            continue
+        if head in magics:
+            paths.append(path)
+for path in sorted(paths):
+    sys.stdout.buffer.write(path.encode() + b"\0")
+PY
+)
+}
+
+sign_macho_tree "$DEST_APP/Contents" "$DEST_APP/Contents/MacOS"
+if [ -x "$APP_EXE" ]; then
+  chmod u+w "$APP_EXE" 2>/dev/null || true
+  codesign --force --sign - --timestamp=none "$APP_EXE" >/dev/null
+fi
 codesign --force --sign - --timestamp=none "$DEST_APP" >/dev/null
 codesign --verify --deep --strict --verbose=4 "$DEST_APP"
 
@@ -120,7 +169,7 @@ trap cleanup EXIT
 find_python_module() {
   module="$1"
   shift || true
-  for candidate in "${DEFCOIN_NU_PACKAGING_PYTHON:-}" /usr/local/bin/python3 /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 /opt/homebrew/bin/python3 /usr/bin/python3 "$(command -v python3 2>/dev/null || true)"; do
+  for candidate in "${DEFCOIN_NU_PACKAGING_PYTHON:-}" /opt/local/bin/python3 /usr/local/bin/python3 /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 /opt/homebrew/bin/python3 /usr/bin/python3 "$(command -v python3 2>/dev/null || true)"; do
     [ -n "$candidate" ] || continue
     [ -x "$candidate" ] || continue
     if "$candidate" -c "import ${module}" >/dev/null 2>&1; then
@@ -232,26 +281,32 @@ def draw_logo_wordmark(draw, x, y, fill, shadow=None):
     letter_spacing = 1.15 * scale
     join_gap = 2 * scale
     line_gap = 50 * scale
-    def draw_spaced(text, tx, ty, color):
+    def draw_spaced(text, tx, ty, color, spacing=letter_spacing):
         cursor = tx
         for ch in text:
             draw.text((cursor, ty), ch, font=title_font, fill=color)
-            cursor += draw.textlength(ch, font=title_font) + letter_spacing
+            cursor += draw.textlength(ch, font=title_font) + spacing
         return cursor
-    def measure_spaced(text):
+    def measure_spaced(text, spacing=letter_spacing):
         if not text:
             return 0
-        return sum(draw.textlength(ch, font=title_font) for ch in text) + letter_spacing * max(0, len(text) - 1)
+        return sum(draw.textlength(ch, font=title_font) for ch in text) + spacing * max(0, len(text) - 1)
     core_width = measure_spaced("CORE NU")
     coin_width = measure_spaced("COIN")
     def_width = measure_spaced("DEF")
-    third_width = measure_spaced(third_line)
+    target_width = max(def_width + join_gap + coin_width, core_width)
+    if third_line and len(third_line) > 1:
+        third_base_width = measure_spaced(third_line, 0)
+        third_spacing = max(0, (target_width - third_base_width) / (len(third_line) - 1))
+    else:
+        third_spacing = letter_spacing
+    third_width = measure_spaced(third_line, third_spacing)
     def draw_lines(offset_x, offset_y, color):
         draw_spaced("DEF", x + offset_x, y + offset_y, color)
         draw_spaced("COIN", x + offset_x + def_width + join_gap, y + offset_y, color)
         draw_spaced("CORE NU", x + offset_x, y + line_gap + offset_y, color)
         if third_line:
-            draw_spaced(third_line, x + offset_x, y + (line_gap * 2) + offset_y, color)
+            draw_spaced(third_line, x + offset_x, y + (line_gap * 2) + offset_y, color, third_spacing)
     if shadow:
         draw_lines(3 * scale, 3 * scale, shadow)
     draw_lines(0, 0, fill)
@@ -262,26 +317,42 @@ word_y = (34 if third_line else 58) * scale
 draw_logo_wordmark(draw, word_x, word_y, (246, 246, 242, 255), (0, 0, 0, 110))
 
 # Finder draws icon labels in dark text. Add quiet light label fields behind
-# the text so names remain readable on the dark purple background.
+# the text so names remain readable on the dark purple background. These
+# backplates are derived from the icon centers and measured label bounds rather
+# than hand-tuned rectangle centers, which keeps them aligned when labels change.
 label_bg = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
 label_draw = ImageDraw.Draw(label_bg, "RGBA")
 label_font = ui_font(13)
-def finder_label_box(center_x, center_y, label):
-    label_width = draw.textlength(label, font=label_font) / scale
-    box_width = max(88, min(248, label_width + 24))
-    box_height = 34
-    left = int((center_x - box_width / 2) * scale)
-    right = int((center_x + box_width / 2) * scale)
-    top = int((center_y - box_height / 2) * scale)
-    bottom = int((center_y + box_height / 2) * scale)
-    return (left, top, right, bottom)
+FINDER_ICON_SIZE = 96
+FINDER_LABEL_GAP = 10
+FINDER_LABEL_PAD_X = 9
+FINDER_LABEL_PAD_Y = 5
+
+def finder_label_backplate(icon_center_x, icon_center_y, label):
+    text_bbox = draw.textbbox((0, 0), label, font=label_font)
+    text_width = (text_bbox[2] - text_bbox[0]) / scale
+    text_anchor_x = icon_center_x - (text_width / 2) - (text_bbox[0] / scale)
+    text_anchor_y = icon_center_y + (FINDER_ICON_SIZE / 2) + FINDER_LABEL_GAP - (text_bbox[1] / scale)
+    actual_left = text_anchor_x + (text_bbox[0] / scale)
+    actual_top = text_anchor_y + (text_bbox[1] / scale)
+    actual_right = text_anchor_x + (text_bbox[2] / scale)
+    actual_bottom = text_anchor_y + (text_bbox[3] / scale)
+    min_width = 84 if label == "Applications" else 126
+    rect_width = max(min_width, (actual_right - actual_left) + (FINDER_LABEL_PAD_X * 2))
+    rect_center = (actual_left + actual_right) / 2
+    return (
+        int((rect_center - rect_width / 2) * scale),
+        int((actual_top - FINDER_LABEL_PAD_Y) * scale),
+        int((rect_center + rect_width / 2) * scale),
+        int((actual_bottom + FINDER_LABEL_PAD_Y) * scale),
+    )
 
 for box in [
-    finder_label_box(220, 328, f"{product_name}.app"),
-    finder_label_box(512, 328, "Applications"),
+    finder_label_backplate(220, 250, f"{product_name}.app"),
+    finder_label_backplate(512, 250, "Applications"),
 ]:
-    label_draw.rounded_rectangle(box, radius=8 * scale, fill=(246, 246, 242, 178))
-label_bg = label_bg.filter(ImageFilter.GaussianBlur(0.35 * scale))
+    label_draw.rounded_rectangle(box, radius=7 * scale, fill=(246, 246, 242, 174))
+label_bg = label_bg.filter(ImageFilter.GaussianBlur(0.2 * scale))
 base.alpha_composite(label_bg)
 
 arrow_y = 250 * scale
@@ -368,21 +439,9 @@ hdiutil verify "$DEST_DMG"
 
 touch -ch "$RELEASE_DIR" "$DEST_PLATFORM_DIR" "$DEST_APP" "$DEST_DMG" "$DEST_DMG_BACKGROUND"
 
-STAMP_FILE="$DEST_PLATFORM_DIR/BUILD_STAGED_AT.txt"
-{
-  echo "$PRODUCT_NAME staged distribution"
-  echo "Release: $RELEASE_VERSION"
-  echo "Staged at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
-  echo "Built app: $BUILT_APP"
-  echo "App: $DEST_APP"
-  echo "DMG: $DEST_DMG"
-  echo "DMG background: $DEST_DMG_BACKGROUND"
-} > "$STAMP_FILE"
-touch -ch "$STAMP_FILE"
-
 if command -v SetFile >/dev/null 2>&1; then
   FINDER_DATE="$(date '+%m/%d/%Y %H:%M:%S')"
-  for path in "$RELEASE_DIR" "$DEST_PLATFORM_DIR" "$DEST_APP" "$DEST_DMG" "$DEST_DMG_BACKGROUND" "$STAMP_FILE"; do
+  for path in "$RELEASE_DIR" "$DEST_PLATFORM_DIR" "$DEST_APP" "$DEST_DMG" "$DEST_DMG_BACKGROUND"; do
     SetFile -d "$FINDER_DATE" "$path" >/dev/null 2>&1 || true
     SetFile -m "$FINDER_DATE" "$path" >/dev/null 2>&1 || true
   done

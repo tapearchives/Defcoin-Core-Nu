@@ -87,6 +87,9 @@ correct user-facing behavior is to prompt only when firewall state is restrictiv
 and otherwise reachable Fast Sync peers repeatedly fail UDP probes. Do not use
 firewall state to suppress the Fast Sync service bit.
 
+The best next step is to add a targeted prompt only when firewall is on and UDP
+probes repeatedly fail, with a button to open Firewall settings.
+
 ## Packet Format
 
 Every datagram is:
