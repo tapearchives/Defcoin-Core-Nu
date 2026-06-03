@@ -1,4 +1,3 @@
-pragma ComponentBehavior: Bound
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 
@@ -11,6 +10,8 @@ Item {
     property string currentRoute: "home"
     property int nodeInitialTab: 0
     property int peerInitialView: 0
+    readonly property int pageMargin: width < 1280 ? NuTokens.spaceLg : NuTokens.spaceXl
+    readonly property int railWidth: width < 1280 ? 204 : 216
 
     signal aboutRequested
     signal createWalletRequested
@@ -41,7 +42,7 @@ Item {
 
         NavigationRail {
             id: nav
-            Layout.preferredWidth: 216
+            Layout.preferredWidth: root.railWidth
             Layout.fillHeight: true
             currentRoute: root.currentRoute
             onRouteRequested: (route) => root.currentRoute = route
@@ -55,7 +56,7 @@ Item {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: NuTokens.spaceXl
+                anchors.margins: root.pageMargin
                 spacing: NuTokens.spaceLg
 
                 StatusStrip {

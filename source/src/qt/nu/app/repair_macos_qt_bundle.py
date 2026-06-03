@@ -20,6 +20,16 @@ from pathlib import Path
 
 
 QT_FRAMEWORK_RE = re.compile(r"(Qt[^/\s]+\.framework)/Versions/([^/\s]+)/([^/\s]+)$")
+MACHO_MAGICS = {
+    b"\xfe\xed\xfa\xce",
+    b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe",
+    b"\xbe\xba\xfe\xca",
+    b"\xca\xfe\xba\xbf",
+    b"\xbf\xba\xfe\xca",
+}
 
 
 def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -28,17 +38,20 @@ def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[s
 
 def is_macho(path: Path) -> bool:
     try:
-        result = run(["file", "-b", str(path)], check=False)
+        with path.open("rb") as handle:
+            return handle.read(4) in MACHO_MAGICS
     except OSError:
         return False
-    return "Mach-O" in result.stdout
 
 
 def macho_files(contents_dir: Path) -> list[Path]:
     files: list[Path] = []
-    for root, _, names in os.walk(contents_dir):
+    for root, dirs, names in os.walk(contents_dir):
+        root_path = Path(root)
+        if any(part.endswith(".framework") for part in root_path.parts):
+            dirs[:] = [name for name in dirs if name not in {"Headers", "Modules", "Resources"}]
         for name in names:
-            path = Path(root) / name
+            path = root_path / name
             if is_macho(path):
                 files.append(path)
     return files
@@ -61,6 +74,17 @@ def qt_framework_from_dep(dep: str) -> tuple[str, str] | None:
         return None
     framework, _version, library = match.groups()
     return framework, library
+
+
+def flat_dylib_name(dep: str) -> str | None:
+    if ".framework/" in dep:
+        return None
+    if dep.startswith("/usr/lib/") or dep.startswith("/System/"):
+        return None
+    name = dep.rsplit("/", 1)[-1]
+    if not name.endswith(".dylib"):
+        return None
+    return name
 
 
 def candidate_roots(qt_root: Path) -> list[Path]:
@@ -107,6 +131,25 @@ def source_framework_for(framework: str, dep: str, roots: list[Path]) -> Path | 
     return None
 
 
+def source_flat_dylib_for(dep: str, macho: Path, roots: list[Path]) -> Path | None:
+    name = flat_dylib_name(dep)
+    if name is None:
+        return None
+    if dep.startswith("/"):
+        source = Path(dep)
+        if source.exists():
+            return source
+    if dep.startswith("@loader_path/"):
+        source = macho.parent / dep[len("@loader_path/") :]
+        if source.exists():
+            return source
+    for root in roots:
+        source = root / name
+        if source.exists():
+            return source
+    return None
+
+
 def chmod_writable(path: Path) -> None:
     try:
         mode = path.stat().st_mode
@@ -123,14 +166,67 @@ def add_rpath(path: Path, rpath: str) -> None:
     run(["install_name_tool", "-add_rpath", rpath, str(path)], check=False)
 
 
+def remove_suffix(value: str, suffix: str) -> str:
+    if value.endswith(suffix):
+        return value[: -len(suffix)]
+    return value
+
+
 def bundled_framework_identity(path: Path) -> tuple[str, str] | None:
     for part in path.parts:
         if part.startswith("Qt") and part.endswith(".framework"):
             framework = part
-            library = framework.removesuffix(".framework")
+            library = remove_suffix(framework, ".framework")
             if path.name == library:
                 return framework, library
     return None
+
+
+def bundled_flat_dylib_identity(path: Path, contents_dir: Path) -> str | None:
+    try:
+        if path.parent != contents_dir / "Frameworks":
+            return None
+    except OSError:
+        return None
+    if not path.name.endswith(".dylib"):
+        return None
+    return f"@executable_path/../Frameworks/{path.name}"
+
+
+def path_is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def executable_frameworks_prefix(macho: Path, contents_dir: Path) -> str:
+    backend_bin_dir = contents_dir / "Resources" / "nu" / "bin"
+    if path_is_relative_to(macho, backend_bin_dir):
+        return "@executable_path/../../../Frameworks"
+    return "@executable_path/../Frameworks"
+
+
+def framework_install_name(macho: Path, contents_dir: Path, framework: str, library: str) -> str:
+    return f"{executable_frameworks_prefix(macho, contents_dir)}/{framework}/Versions/A/{library}"
+
+
+def flat_dylib_install_name(macho: Path, contents_dir: Path, name: str) -> str:
+    return f"{executable_frameworks_prefix(macho, contents_dir)}/{name}"
+
+
+def framework_local_flat_dylib(dep: str, macho: Path, contents_dir: Path) -> str | None:
+    if not dep.startswith("@loader_path/") or "/" in dep[len("@loader_path/") :]:
+        return None
+    if ".framework/Versions/" not in str(macho):
+        return None
+    library = dep.rsplit("/", 1)[-1]
+    if not library.endswith(".dylib"):
+        return None
+    if not (contents_dir / "Frameworks" / library).exists():
+        return None
+    return flat_dylib_install_name(macho, contents_dir, library)
 
 
 def copy_framework(source: Path, target: Path) -> None:
@@ -138,6 +234,14 @@ def copy_framework(source: Path, target: Path) -> None:
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target, symlinks=True)
+
+
+def copy_flat_dylib(source: Path, target: Path) -> None:
+    if target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target, follow_symlinks=True)
+    chmod_writable(target)
 
 
 def ensure_frameworks(app_bundle: Path, qt_root: Path) -> None:
@@ -168,6 +272,33 @@ def ensure_frameworks(app_bundle: Path, qt_root: Path) -> None:
     raise RuntimeError("Qt framework dependency copy did not converge")
 
 
+def ensure_flat_dylibs(app_bundle: Path, qt_root: Path) -> None:
+    contents_dir = app_bundle / "Contents"
+    frameworks_dir = contents_dir / "Frameworks"
+    frameworks_dir.mkdir(parents=True, exist_ok=True)
+    roots = candidate_roots(qt_root)
+
+    for _ in range(10):
+        copied = False
+        for macho in macho_files(contents_dir):
+            for dep in otool_deps(macho):
+                name = flat_dylib_name(dep)
+                if name is None:
+                    continue
+                target = frameworks_dir / name
+                if target.exists():
+                    continue
+                source = source_flat_dylib_for(dep, macho, roots)
+                if source is None:
+                    continue
+                copy_flat_dylib(source, target)
+                copied = True
+        if not copied:
+            return
+
+    raise RuntimeError("Flat dylib dependency copy did not converge")
+
+
 def normalize_qt_deps(app_bundle: Path) -> None:
     contents_dir = app_bundle / "Contents"
     for macho in macho_files(contents_dir):
@@ -177,17 +308,30 @@ def normalize_qt_deps(app_bundle: Path) -> None:
             framework_id = f"@executable_path/../Frameworks/{framework}/Versions/A/{library}"
             chmod_writable(macho)
             run(["install_name_tool", "-id", framework_id, str(macho)], check=False)
+        else:
+            flat_id = bundled_flat_dylib_identity(macho, contents_dir)
+            if flat_id:
+                chmod_writable(macho)
+                run(["install_name_tool", "-id", flat_id, str(macho)], check=False)
 
         add_rpath(macho, "@executable_path/../Frameworks")
         if ".framework/Versions/" in str(macho):
             add_rpath(macho, "@loader_path/../../../")
 
         for dep in otool_deps(macho):
+            desired: str | None
             info = qt_framework_from_dep(dep)
-            if not info:
-                continue
-            framework, library = info
-            desired = f"@executable_path/../Frameworks/{framework}/Versions/A/{library}"
+            if info:
+                framework, library = info
+                desired = framework_install_name(macho, contents_dir, framework, library)
+            else:
+                desired = framework_local_flat_dylib(dep, macho, contents_dir)
+                if desired is None:
+                    name = flat_dylib_name(dep)
+                    if name is not None and (contents_dir / "Frameworks" / name).exists():
+                        desired = flat_dylib_install_name(macho, contents_dir, name)
+                if desired is None:
+                    continue
             if dep == desired:
                 continue
             chmod_writable(macho)
@@ -224,14 +368,33 @@ def validate_bundle(app_bundle: Path) -> None:
     for macho in macho_files(contents_dir):
         for dep in otool_deps(macho):
             info = qt_framework_from_dep(dep)
-            if not info:
+            if info:
+                framework, library = info
+                bundled = contents_dir / "Frameworks" / framework / "Versions" / "A" / library
+                if not bundled.exists():
+                    missing.append(f"{macho}: {dep}")
+                if dep.startswith("/opt/homebrew/") or dep.startswith("@rpath/"):
+                    unresolved.append(f"{macho}: {dep}")
                 continue
-            framework, library = info
-            bundled = contents_dir / "Frameworks" / framework / "Versions" / "A" / library
-            if not bundled.exists():
-                missing.append(f"{macho}: {dep}")
-            if dep.startswith("/opt/homebrew/") or dep.startswith("@rpath/"):
-                unresolved.append(f"{macho}: {dep}")
+            if dep.startswith("@loader_path/") and ".framework/Versions/" in str(macho):
+                library = dep.rsplit("/", 1)[-1]
+                if (contents_dir / "Frameworks" / library).exists():
+                    unresolved.append(f"{macho}: {dep}")
+                continue
+            name = flat_dylib_name(dep)
+            if name is not None:
+                bundled = contents_dir / "Frameworks" / name
+                desired = flat_dylib_install_name(macho, contents_dir, name)
+                if not bundled.exists() and (dep.startswith("/opt/homebrew/") or dep.startswith("@rpath/")):
+                    missing.append(f"{macho}: {dep}")
+                elif (
+                    bundled.exists()
+                    and dep != desired
+                    and (
+                        dep.startswith("/opt/homebrew/") or dep.startswith("@rpath/") or dep.startswith("@loader_path/")
+                    )
+                ):
+                    unresolved.append(f"{macho}: {dep}")
 
     if missing or unresolved:
         details = []
@@ -255,7 +418,10 @@ def main() -> int:
         print(f"not a macOS app bundle: {app_bundle}", file=sys.stderr)
         return 2
 
+    prune_non_runtime_framework_files(app_bundle)
     ensure_frameworks(app_bundle, qt_root)
+    ensure_flat_dylibs(app_bundle, qt_root)
+    prune_non_runtime_framework_files(app_bundle)
     normalize_qt_deps(app_bundle)
     prune_non_runtime_framework_files(app_bundle)
     validate_bundle(app_bundle)

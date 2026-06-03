@@ -4,6 +4,7 @@ import QtQuick 2.15
 QtObject {
     readonly property color backgroundBase: "#f5f5f2"
     readonly property color panelBase: "#ffffff"
+    readonly property color panelHover: "#ecefeb"
     readonly property color inverseBase: "#0b0d0f"
     readonly property color inversePanel: "#12161a"
 

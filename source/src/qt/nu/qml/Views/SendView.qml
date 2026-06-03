@@ -315,7 +315,6 @@ ColumnLayout {
                             selectByMouse: true
                             selectByKeyboard: true
                             activeFocusOnPress: true
-                            focusPolicy: Qt.StrongFocus
                             wrapMode: Text.WrapAnywhere
                             text: NuService.currentPsbtSummary
                             color: NuTokens.textPrimary

@@ -18,7 +18,7 @@ ColumnLayout {
     property int heroHeight: 184
     property int textHeight: 126
 
-    readonly property string summaryText: "Defcoin Core Nu v" + root.buildVersion + " • " + root.codeName + " • Backend originated from Litecoin Core v0.21.5.5 + Defcoin parameters\n© 2014-2026 Defcoin Core developers • © 2011-2026 Litecoin Core developers • © 2009-2026 Bitcoin Core developers" + (root.buildId.length > 0 ? "\nBuild ID: " + root.buildId : "")
+    readonly property string summaryText: "Defcoin Core Nu v" + root.buildVersion + " • " + root.codeName + " • Backend derives from Litecoin Core v0.21.5.5 + Defcoin parameters\n© 2014-2026 Defcoin Core developers • © 2011-2026 Litecoin Core developers • © 2009-2026 Bitcoin Core developers" + (root.buildId.length > 0 ? "\nBuild ID: " + root.buildId : "")
 
     Item {
         id: hero

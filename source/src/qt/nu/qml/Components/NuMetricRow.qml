@@ -11,10 +11,12 @@ RowLayout {
     property string label: ""
     property string value: ""
     property string helpText: ""
+    property int labelMaximumWidth: 150
     property int valueMaximumWidth: 180
+    readonly property string displayHelpText: helpText.length > 0 ? helpText : (label + ": " + value)
 
-    ToolTip.visible: metricHover.hovered && root.helpText.length > 0
-    ToolTip.text: root.helpText
+    ToolTip.visible: metricHover.hovered && root.displayHelpText.length > 1
+    ToolTip.text: root.displayHelpText
     ToolTip.delay: NuTokens.tooltipDelay
     ToolTip.timeout: NuTokens.tooltipTimeout
 
@@ -24,8 +26,10 @@ RowLayout {
 
     Label {
         text: root.label
+        Layout.maximumWidth: root.labelMaximumWidth
         color: NuTokens.textSecondary
         font.pixelSize: NuTokens.fontSmall
+        elide: Text.ElideRight
     }
 
     Label {

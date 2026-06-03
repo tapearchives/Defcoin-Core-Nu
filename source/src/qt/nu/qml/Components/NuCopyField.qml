@@ -34,7 +34,6 @@ Rectangle {
             text: "Copy"
             enabled: root.copyEnabled
             activeFocusOnTab: true
-            focusPolicy: Qt.StrongFocus
             Accessible.role: Accessible.Button
             Accessible.name: text
             Accessible.description: root.copyEnabled ? "Copy this value." : "No value is available to copy."

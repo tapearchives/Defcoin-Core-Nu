@@ -103,8 +103,8 @@ Basic.ComboBox {
     }
 
     background: Rectangle {
-        color: NuTokens.panelBase
-        border.color: root.activeFocus ? NuTokens.lineStrong : NuTokens.lineSubtle
+        color: root.enabled ? NuTokens.panelBase : NuTokens.backgroundBase
+        border.color: root.activeFocus || root.popup.visible ? NuTokens.accentSky : (root.hovered ? NuTokens.lineStrong : NuTokens.lineSubtle)
         border.width: root.activeFocus ? 2 : 1
         radius: NuTokens.radiusSmall
     }
@@ -162,7 +162,7 @@ Basic.ComboBox {
             model: root.popup.visible ? root.delegateModel : null
             boundsBehavior: Flickable.StopAtBounds
             Basic.ScrollBar.vertical: Basic.ScrollBar {
-                policy: popupList.contentHeight > popupList.height ? Basic.ScrollBar.AlwaysOn : Basic.ScrollBar.AsNeeded
+                policy: popupList.contentHeight > popupList.height ? Basic.ScrollBar.AlwaysOn : Basic.ScrollBar.AlwaysOff
             }
         }
         background: Rectangle {

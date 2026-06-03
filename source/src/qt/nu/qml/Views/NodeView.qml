@@ -40,7 +40,7 @@ ColumnLayout {
         "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
         "Peer endpoint, including IP address and TCP port.",
         "Transport methods that have successfully exchanged data with this peer during this Nu session: TCP, UDP, or TCP+UDP.",
-        "Current round-trip latency reported by the backend.",
+        "Current round-trip latency reported by the backend. This is Core's P2P ping time, not the same as an ICMP ping command in Terminal; ICMP can differ because it uses a different protocol and may be filtered or prioritized differently.",
         "Total bytes sent to this peer since the connection opened.",
         "Total bytes received from this peer since the connection opened.",
         "Software name and version reported by the peer."
@@ -66,7 +66,7 @@ ColumnLayout {
         "Compact service flags advertised by the peer. Hover an entry for the full service-bit names and meanings.",
         "UDP fast-sync capability state. Advertised means bit 29 is present but no UDP probe has succeeded yet. Probe sent means Nu has sent a UDP negotiation probe. No reply means the probe timed out or failed. Yes means a valid UDP Fast Sync response was received.",
         "Transport methods that have successfully exchanged data with this peer during this Nu session: TCP means normal peer sync bytes; UDP means fast-sync block data; TCP+UDP means both.",
-        "Current round-trip latency reported by the backend.",
+        "Current round-trip latency reported by the backend. This is Core's P2P ping time, not the same as an ICMP ping command in Terminal; ICMP can differ because it uses a different protocol and may be filtered or prioritized differently.",
         "Best observed ping for this connection.",
         "Total bytes sent to this peer since the connection opened.",
         "Total bytes received from this peer since the connection opened.",

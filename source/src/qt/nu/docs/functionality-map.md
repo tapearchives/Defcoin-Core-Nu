@@ -1,4 +1,4 @@
-# Defcoin Core Nu 26.5.5w Functionality Map
+# Defcoin Core Nu 26.6.4a Functionality Map
 
 This map is the release checklist for preserving useful Litecoin Core wallet
 capabilities while reorganizing them into the Nu interface. Nu does not copy
@@ -16,7 +16,7 @@ review history, manage wallets, inspect the node, and configure the app.
 | Activity | Transaction history, date/type/search filters, CSV export | History is a retrieval task, not part of payment composition. |
 | Wallet | Wallet files, backup, BIP39 recovery, compatibility encoding tools, passphrase protection, message signing, and address book | Key and wallet maintenance are now first-class wallet tasks instead of being buried under Settings. |
 | Mining | External miner executable setup, pool presets, CPU thread/nice settings, and miner output | Mining helpers stay separate from wallet spending and node diagnostics. |
-| Explorer | Explorer Search, Holder Atlas, Movement Map, and Index Engines | Chain-wide public data stays separate from wallet-owned funds and keys; ExpFor groups lookup, analysis, and indexing by user task. |
+| Explorer | Explorer Search, Network Pulse, Holder Atlas, Movement Map, Droid Trails, and Index Engines | Chain-wide public data stays separate from wallet-owned funds and keys; Explore groups lookup, macro network state, holder analysis, Coindroids-era token-flow discovery, and indexing by user task. |
 | Forensics | Message Scan, Witness Repair, and Contacts | Blockchain oddities, maintenance checks, and local address clusters are readable without exposing raw RPC or requiring manual block scans. |
 | Diagnostics | Status, peers, traffic, debug log, local RPC console | Node transparency is preserved while keeping it out of the main wallet path. |
 | Settings | Network controls, display behavior, update checks, and background-close behavior | App preferences stay together; wallet operations live in Wallet. Node diagnostics stay in Diagnostics. |
@@ -79,7 +79,8 @@ review history, manage wallets, inspect the node, and configure the app.
 | Defcoin-only peer user-agent filtering | Settings > Network, Diagnostics peer table | Implemented as `/Defcoin` prefix only |
 | Network connect/isolate control | Settings > Network and status strip | Implemented |
 | Dual magic migration control | Settings > Network | Implemented as startup option for accepting both legacy `fbc0b6db` and new `defc014e` peer message bytes. In dual mode, outbound handshakes prefer the new `defc014e` bytes while bounded legacy probes keep old-only Defcoin peers reachable; with dual mode off, the backend uses new Defcoin magic only. |
-| UDP fast sync | Settings > Network, Diagnostics > Status | Experimental helper using checksum-protected UDP block transfer from connected Defcoin peers and normal `submitblock` validation. LAN discovery adds local broadcast; TCP/Core sync stays active as fallback. See `fast-sync-protocol.md`. |
+| UDP fast sync | Settings > Network, Diagnostics > Status | Experimental helper using checksum-protected UDP block transfer from connected Defcoin peers and normal backend validation. LAN discovery adds local broadcast; normal TCP sync stays active as fallback. See `fast-sync-protocol.md`. |
+| Network Pulse | Explore > Network Pulse and status strip | Recent hashrate, difficulty, and average block time are visible in the mast; indexed history charts show estimated hashrate, difficulty, and sampled block spacing. |
 | LAN firehose tester | `source/src/qt/nu/tools/lan_firehose` | Standalone developer diagnostic for measuring TCP/UDP LAN throughput and payload-size behavior before changing wallet fast-sync defaults. Includes both CLI and native Qt wrapper. |
 | Network traffic graph | Diagnostics > Traffic | Implemented in neutral form |
 | Debug log tab/readout | Diagnostics > Log | Implemented |

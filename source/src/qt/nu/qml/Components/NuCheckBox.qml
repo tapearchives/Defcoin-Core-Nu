@@ -10,10 +10,10 @@ Basic.CheckBox {
     font.pixelSize: NuTokens.fontBody
     hoverEnabled: true
     activeFocusOnTab: true
-    focusPolicy: Qt.StrongFocus
 
     property string helpText: ""
     property bool suppressToolTip: false
+    property bool inverse: false
 
     Accessible.role: Accessible.CheckBox
     Accessible.name: text
@@ -37,7 +37,7 @@ Basic.CheckBox {
         y: root.topPadding + (root.availableHeight - height) / 2
         radius: NuTokens.radiusSmall
         color: root.checked ? NuTokens.accentSky : "transparent"
-        border.color: root.checked ? NuTokens.accentSky : NuTokens.lineStrong
+        border.color: root.checked ? NuTokens.accentSky : (root.inverse ? Qt.rgba(255, 255, 255, 0.72) : NuTokens.lineStrong)
         border.width: root.activeFocus ? 2 : 1
 
         Canvas {
@@ -48,7 +48,7 @@ Basic.CheckBox {
             onPaint: {
                 var ctx = getContext("2d")
                 ctx.reset()
-                ctx.strokeStyle = NuTokens.checkMarkGreen
+                ctx.strokeStyle = root.inverse ? NuTokens.inverseBase : NuTokens.checkMarkGreen
                 ctx.lineWidth = 2.2
                 ctx.lineCap = "round"
                 ctx.lineJoin = "round"
@@ -63,7 +63,8 @@ Basic.CheckBox {
 
     contentItem: Text {
         text: root.text
-        color: root.enabled ? NuTokens.textPrimary : NuTokens.textMuted
+        color: root.enabled ? (root.inverse ? NuTokens.textInverse : NuTokens.textPrimary)
+                            : (root.inverse ? Qt.rgba(246, 246, 242, 0.48) : NuTokens.textMuted)
         font: root.font
         verticalAlignment: Text.AlignVCenter
         leftPadding: root.indicator.width + root.spacing

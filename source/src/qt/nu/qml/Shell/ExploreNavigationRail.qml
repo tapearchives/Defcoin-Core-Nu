@@ -1,4 +1,3 @@
-pragma ComponentBehavior: Bound
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
@@ -21,6 +20,12 @@ Rectangle {
     ]
     readonly property var analysisRoutes: [
         {
+            route: "pulse",
+            label: "Network Pulse",
+            icon: "../../assets/icons/activity.svg",
+            help: "Monitor hashrate, difficulty, block spacing, and indexed macro network history."
+        },
+        {
             route: "holders",
             label: "Holder Atlas",
             icon: "../../assets/icons/explorer.svg",
@@ -31,6 +36,20 @@ Rectangle {
             label: "Movement Map",
             icon: "../../assets/icons/activity.svg",
             help: "Trace large DFC transfers, movement tables, and address-to-address flow graphs."
+        },
+        {
+            route: "coindroids",
+            label: "Droid Trails",
+            icon: "../../assets/icons/forensics.svg",
+            help: "Discover Coindroids-era action endpoints, payout swarms, candidate winners, and transaction evidence."
+        }
+    ]
+    readonly property var communityRoutes: [
+        {
+            route: "reddit",
+            label: "/r/Defcoin",
+            icon: "../../assets/icons/activity.svg",
+            help: "Scan Defcoin community history from the subreddit event index and annual DEF CON anchors."
         }
     ]
     readonly property var evidenceRoutes: [
@@ -128,10 +147,10 @@ Rectangle {
             activeFocusOnTab: true
 
             Accessible.role: Accessible.Button
-            Accessible.name: "About Defcoin Core ExpFor"
+            Accessible.name: "About Defcoin Core Nu Explore"
             Accessible.description: "Open build and application details."
             ToolTip.visible: !brandButtonMouse.suppressToolTip && (brandButtonMouse.containsMouse || activeFocus)
-            ToolTip.text: "Open About Defcoin Core ExpFor."
+            ToolTip.text: "Open About Defcoin Core Nu Explore."
             ToolTip.delay: NuTokens.tooltipDelay
             ToolTip.timeout: NuTokens.tooltipTimeout
 
@@ -139,7 +158,7 @@ Rectangle {
                 id: brandLockup
                 anchors.left: parent.left
                 anchors.top: parent.top
-                thirdLine: "ExpFor"
+                thirdLine: "EXPLORE"
             }
 
             Rectangle {
@@ -185,49 +204,84 @@ Rectangle {
             }
         }
 
-        Label {
+        Flickable {
+            id: navScroll
             Layout.fillWidth: true
-            text: "LOOK UP"
-            color: "#dccfee"
-            font.pixelSize: NuTokens.fontTiny
-            font.weight: Font.DemiBold
+            Layout.fillHeight: true
+            clip: true
+            interactive: contentHeight > height
+            boundsBehavior: Flickable.StopAtBounds
+            contentWidth: width
+            contentHeight: navItems.implicitHeight
+
+            ScrollBar.vertical: ScrollBar {
+                policy: navScroll.contentHeight > navScroll.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            }
+
+            ColumnLayout {
+                id: navItems
+                width: navScroll.width
+                spacing: NuTokens.spaceSm
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "LOOK UP"
+                    color: "#dccfee"
+                    font.pixelSize: NuTokens.fontTiny
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+
+                Repeater { model: root.lookupRoutes; delegate: navButtonDelegate }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.topMargin: NuTokens.spaceXs
+                    text: "ANALYZE"
+                    color: "#dccfee"
+                    font.pixelSize: NuTokens.fontTiny
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+
+                Repeater { model: root.analysisRoutes; delegate: navButtonDelegate }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.topMargin: NuTokens.spaceXs
+                    text: "COMMUNITY"
+                    color: "#dccfee"
+                    font.pixelSize: NuTokens.fontTiny
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+
+                Repeater { model: root.communityRoutes; delegate: navButtonDelegate }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.topMargin: NuTokens.spaceXs
+                    text: "EVIDENCE"
+                    color: "#dccfee"
+                    font.pixelSize: NuTokens.fontTiny
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+
+                Repeater { model: root.evidenceRoutes; delegate: navButtonDelegate }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.topMargin: NuTokens.spaceXs
+                    text: "OPERATIONS"
+                    color: "#dccfee"
+                    font.pixelSize: NuTokens.fontTiny
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                }
+
+                Repeater { model: root.operationsRoutes; delegate: navButtonDelegate }
+            }
         }
-
-        Repeater { model: root.lookupRoutes; delegate: navButtonDelegate }
-
-        Label {
-            Layout.fillWidth: true
-            Layout.topMargin: NuTokens.spaceXs
-            text: "ANALYZE"
-            color: "#dccfee"
-            font.pixelSize: NuTokens.fontTiny
-            font.weight: Font.DemiBold
-        }
-
-        Repeater { model: root.analysisRoutes; delegate: navButtonDelegate }
-
-        Label {
-            Layout.fillWidth: true
-            Layout.topMargin: NuTokens.spaceXs
-            text: "EVIDENCE"
-            color: "#dccfee"
-            font.pixelSize: NuTokens.fontTiny
-            font.weight: Font.DemiBold
-        }
-
-        Repeater { model: root.evidenceRoutes; delegate: navButtonDelegate }
-
-        Label {
-            Layout.fillWidth: true
-            Layout.topMargin: NuTokens.spaceXs
-            text: "OPERATIONS"
-            color: "#dccfee"
-            font.pixelSize: NuTokens.fontTiny
-            font.weight: Font.DemiBold
-        }
-
-        Repeater { model: root.operationsRoutes; delegate: navButtonDelegate }
-
-        Item { Layout.fillHeight: true }
     }
 }

@@ -23,11 +23,21 @@ RowLayout {
     }
 
     Rectangle {
-        implicitWidth: 10
-        implicitHeight: 10
-        radius: 5
-        color: root.stateColor
+        implicitWidth: 14
+        implicitHeight: 14
+        radius: 7
+        color: Qt.rgba(root.stateColor.r, root.stateColor.g, root.stateColor.b, 0.16)
+        border.color: Qt.rgba(root.stateColor.r, root.stateColor.g, root.stateColor.b, 0.38)
+        border.width: 1
         Layout.alignment: Qt.AlignVCenter
+
+        Rectangle {
+            width: 8
+            height: 8
+            radius: 4
+            anchors.centerIn: parent
+            color: root.stateColor
+        }
     }
 
     Label {

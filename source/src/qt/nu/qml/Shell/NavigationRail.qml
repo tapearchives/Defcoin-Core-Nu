@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import Defcoin.Nu 1.0
 
 import "../Theme"
 import "../Components"
@@ -13,6 +14,70 @@ Rectangle {
     property string currentRoute: "home"
     signal routeRequested(string route)
     signal aboutRequested
+
+    function isAdvancedRoute(route) {
+        return route === "mining" || route === "node" || route === "settings"
+    }
+
+    function navigationItems() {
+        const items = [
+            {
+                route: "home",
+                label: "Home",
+                icon: "../../assets/icons/home.svg",
+                help: "Balances, recent activity, and quick wallet actions."
+            },
+            {
+                route: "send",
+                label: "Send",
+                icon: "../../assets/icons/send.svg",
+                help: "Create, review, and submit outgoing payments."
+            },
+            {
+                route: "receive",
+                label: "Receive",
+                icon: "../../assets/icons/receive.svg",
+                help: "Generate payment requests and copy wallet addresses."
+            },
+            {
+                route: "activity",
+                label: "Transactions",
+                icon: "../../assets/icons/activity.svg",
+                help: "Search, inspect, and export wallet transaction history."
+            },
+            {
+                route: "wallet",
+                label: "Wallet",
+                icon: "../../assets/icons/wallet.svg",
+                help: "Wallet files, recovery phrases, passphrases, signing, and addresses."
+            }
+        ]
+
+        if (NuService.advancedToolsVisible) {
+            items.push(
+                {
+                    route: "mining",
+                    label: "Mining",
+                    icon: "../../assets/icons/mining.svg",
+                    help: "Configure and monitor a local scrypt miner executable."
+                },
+                {
+                    route: "node",
+                    label: "Diagnostics",
+                    icon: "../../assets/icons/node.svg",
+                    help: "Node status, peers, traffic, log, and console access."
+                },
+                {
+                    route: "settings",
+                    label: "Settings",
+                    icon: "../../assets/icons/settings.svg",
+                    help: "Network, display, and update settings."
+                }
+            )
+        }
+
+        return items
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -131,71 +196,83 @@ Rectangle {
             }
         }
 
-        Repeater {
-            model: [
-                {
-                    route: "home",
-                    label: "Home",
-                    icon: "../../assets/icons/home.svg",
-                    help: "Balances, recent activity, and quick wallet actions."
-                },
-                {
-                    route: "send",
-                    label: "Send",
-                    icon: "../../assets/icons/send.svg",
-                    help: "Create, review, and submit outgoing payments."
-                },
-                {
-                    route: "receive",
-                    label: "Receive",
-                    icon: "../../assets/icons/receive.svg",
-                    help: "Generate payment requests and copy wallet addresses."
-                },
-                {
-                    route: "activity",
-                    label: "Transactions",
-                    icon: "../../assets/icons/activity.svg",
-                    help: "Search, inspect, and export wallet transaction history."
-                },
-                {
-                    route: "wallet",
-                    label: "Wallet",
-                    icon: "../../assets/icons/wallet.svg",
-                    help: "Wallet files, recovery phrases, passphrases, signing, and addresses."
-                },
-                {
-                    route: "mining",
-                    label: "Mining",
-                    icon: "../../assets/icons/mining.svg",
-                    help: "Configure and monitor a local scrypt miner executable."
-                },
-                {
-                    route: "node",
-                    label: "Diagnostics",
-                    icon: "../../assets/icons/node.svg",
-                    help: "Node status, peers, traffic, log, and console access."
-                },
-                {
-                    route: "settings",
-                    label: "Settings",
-                    icon: "../../assets/icons/settings.svg",
-                    help: "Network, display, and update settings."
-                }
-            ]
+        Flickable {
+            id: navScroll
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            interactive: contentHeight > height
+            boundsBehavior: Flickable.StopAtBounds
+            contentWidth: width
+            contentHeight: navItems.implicitHeight
 
-            NuNavButton {
-                required property var modelData
-                Layout.fillWidth: true
-                text: modelData.label
-                iconSource: modelData.icon
-                helpText: modelData.help
-                selected: root.currentRoute === modelData.route
-                onClicked: root.routeRequested(modelData.route)
+            ScrollBar.vertical: ScrollBar {
+                policy: navScroll.contentHeight > navScroll.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+            }
+
+            ColumnLayout {
+                id: navItems
+                width: navScroll.width
+                spacing: NuTokens.spaceSm
+
+                Repeater {
+                    model: root.navigationItems()
+
+                    NuNavButton {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        text: modelData.label
+                        iconSource: modelData.icon
+                        helpText: modelData.help
+                        selected: root.currentRoute === modelData.route
+                        onClicked: root.routeRequested(modelData.route)
+                    }
+                }
             }
         }
 
-        Item {
-            Layout.fillHeight: true
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: Math.max(48, advancedToggle.implicitHeight + NuTokens.spaceMd)
+            radius: NuTokens.radiusSmall
+            color: NuService.advancedToolsVisible
+                   ? Qt.rgba(NuTokens.accentSky.r, NuTokens.accentSky.g, NuTokens.accentSky.b, advancedMouse.containsMouse ? 0.24 : 0.17)
+                   : (advancedMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(1, 1, 1, 0.055))
+            border.color: NuService.advancedToolsVisible ? NuTokens.accentSky : Qt.rgba(255, 255, 255, advancedMouse.containsMouse ? 0.28 : 0.16)
+            border.width: 1
+
+            ToolTip.visible: advancedMouse.containsMouse
+            ToolTip.text: NuService.advancedToolsVisible
+                          ? "Hide Mining, Diagnostics, and Settings from the left menu."
+                          : "Show Mining, Diagnostics, and Settings."
+            ToolTip.delay: NuTokens.tooltipDelay
+            ToolTip.timeout: NuTokens.tooltipTimeout
+
+            MouseArea {
+                id: advancedMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: advancedToggle.toggle()
+            }
+
+            NuCheckBox {
+                id: advancedToggle
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: NuTokens.spaceSm
+                anchors.rightMargin: NuTokens.spaceSm
+                text: "Advanced tools"
+                inverse: true
+                checked: NuService.advancedToolsVisible
+                helpText: "Show or hide Mining, Diagnostics, and Settings in the main menu."
+                onToggled: {
+                    NuService.advancedToolsVisible = checked
+                    if (!checked && root.isAdvancedRoute(root.currentRoute))
+                        root.routeRequested("home")
+                }
+            }
         }
     }
 }

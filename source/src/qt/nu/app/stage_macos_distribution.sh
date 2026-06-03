@@ -52,6 +52,7 @@ fi
 rm -f "$DEST_APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
 find "$DEST_APP/Contents/Frameworks" -type f \( -name '*.a' -o -name '*.la' \) -delete 2>/dev/null || true
 "$(dirname "$0")/bundle_macos_backend_deps.sh" "$DEST_APP"
+PYTHON_FOR_QT_REPAIR="${DEFCOIN_NU_PACKAGING_PYTHON:-$(command -v python3)}"
 
 find_existing_dir() {
   for candidate in "$@"; do
@@ -64,31 +65,35 @@ find_existing_dir() {
   return 1
 }
 
-QT_ROOT="${DEFCOIN_NU_QT_ROOT:-/opt/homebrew}"
-QT_PLUGIN_ROOT="$(find_existing_dir \
-  "$QT_ROOT/plugins" \
-  "$QT_ROOT/share/qt/plugins" \
-  "$QT_ROOT/opt/qt/plugins" \
-  "$QT_ROOT/opt/qt/share/qt/plugins" \
-  "$QT_ROOT/opt/qtbase/share/qt/plugins" \
-  "/opt/homebrew/share/qt/plugins" \
-  "/opt/homebrew/opt/qtbase/share/qt/plugins" \
-  "/opt/homebrew/opt/qt/share/qt/plugins" \
-  "/usr/local/share/qt/plugins")"
-QT_QML_ROOT="$(find_existing_dir \
-  "$QT_ROOT/qml" \
-  "$QT_ROOT/share/qt/qml" \
-  "$QT_ROOT/opt/qt/qml" \
-  "$QT_ROOT/opt/qt/share/qt/qml" \
-  "$QT_ROOT/opt/qtdeclarative/share/qt/qml" \
-  "/opt/homebrew/share/qt/qml" \
-  "/opt/homebrew/opt/qtdeclarative/share/qt/qml" \
-  "/opt/homebrew/opt/qt/share/qt/qml" \
-  "/usr/local/share/qt/qml")"
-"/bin/sh" "$(dirname "$0")/deploy_macos_qt_runtime.sh" "$QT_ROOT" "$QT_PLUGIN_ROOT" "$QT_QML_ROOT" "$DEST_APP"
-
-PYTHON_FOR_QT_REPAIR="${DEFCOIN_NU_PACKAGING_PYTHON:-$(command -v python3)}"
-"$PYTHON_FOR_QT_REPAIR" "$(dirname "$0")/repair_macos_qt_bundle.py" "$QT_ROOT" "$DEST_APP"
+if [ -z "${DEFCOIN_NU_QT_ROOT:-}" ] \
+  && [ -d "$DEST_APP/Contents/Frameworks/QtCore.framework" ] \
+  && [ -f "$DEST_APP/Contents/PlugIns/platforms/libqcocoa.dylib" ]; then
+  echo "Using Qt runtime already bundled in $DEST_APP"
+else
+  QT_ROOT="${DEFCOIN_NU_QT_ROOT:-/opt/homebrew}"
+  QT_PLUGIN_ROOT="$(find_existing_dir \
+    "$QT_ROOT/plugins" \
+    "$QT_ROOT/share/qt/plugins" \
+    "$QT_ROOT/opt/qt/plugins" \
+    "$QT_ROOT/opt/qt/share/qt/plugins" \
+    "$QT_ROOT/opt/qtbase/share/qt/plugins" \
+    "/opt/homebrew/share/qt/plugins" \
+    "/opt/homebrew/opt/qtbase/share/qt/plugins" \
+    "/opt/homebrew/opt/qt/share/qt/plugins" \
+    "/usr/local/share/qt/plugins")"
+  QT_QML_ROOT="$(find_existing_dir \
+    "$QT_ROOT/qml" \
+    "$QT_ROOT/share/qt/qml" \
+    "$QT_ROOT/opt/qt/qml" \
+    "$QT_ROOT/opt/qt/share/qt/qml" \
+    "$QT_ROOT/opt/qtdeclarative/share/qt/qml" \
+    "/opt/homebrew/share/qt/qml" \
+    "/opt/homebrew/opt/qtdeclarative/share/qt/qml" \
+    "/opt/homebrew/opt/qt/share/qt/qml" \
+    "/usr/local/share/qt/qml")"
+  "/bin/sh" "$(dirname "$0")/deploy_macos_qt_runtime.sh" "$QT_ROOT" "$QT_PLUGIN_ROOT" "$QT_QML_ROOT" "$DEST_APP"
+  "$PYTHON_FOR_QT_REPAIR" "$(dirname "$0")/repair_macos_qt_bundle.py" "$QT_ROOT" "$DEST_APP"
+fi
 find "$DEST_APP/Contents/Frameworks" -type f \( -name '*.a' -o -name '*.la' \) -delete 2>/dev/null || true
 
 APP_EXE="$DEST_APP/Contents/MacOS/$APP_EXECUTABLE_NAME"

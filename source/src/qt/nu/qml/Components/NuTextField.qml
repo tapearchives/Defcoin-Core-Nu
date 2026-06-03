@@ -31,8 +31,8 @@ Basic.TextField {
     ToolTip.timeout: NuTokens.tooltipTimeout
 
     background: Rectangle {
-        color: NuTokens.panelBase
-        border.color: root.activeFocus ? NuTokens.lineStrong : NuTokens.lineSubtle
+        color: root.enabled ? NuTokens.panelBase : NuTokens.backgroundBase
+        border.color: root.activeFocus ? NuTokens.accentSky : (root.hovered ? NuTokens.lineStrong : NuTokens.lineSubtle)
         border.width: root.activeFocus ? 2 : 1
         radius: NuTokens.radiusSmall
     }

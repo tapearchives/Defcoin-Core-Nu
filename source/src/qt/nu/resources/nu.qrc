@@ -16,7 +16,10 @@
         <file>../qml/Components/NuNavButton.qml</file>
         <file>../qml/Components/NuPageHeader.qml</file>
         <file>../qml/Components/NuPanel.qml</file>
+        <file>../qml/Components/NuSelectableText.qml</file>
         <file>../qml/Components/NuStatusDot.qml</file>
+        <file>../qml/Components/NuTabBar.qml</file>
+        <file>../qml/Components/NuTabButton.qml</file>
         <file>../qml/Components/NuTextField.qml</file>
         <file>../qml/Components/NuTimelineGraph.qml</file>
         <file>../qml/Components/NuTimelineWindow.qml</file>
@@ -29,10 +32,12 @@
         <file>../qml/Views/ExplorerView.qml</file>
         <file>../qml/Views/ForensicsView.qml</file>
         <file>../qml/Views/HomeView.qml</file>
+        <file>../qml/Views/MiningView.qml</file>
         <file>../qml/Views/NodeView.qml</file>
         <file>../qml/Views/ReceiveView.qml</file>
         <file>../qml/Views/SendView.qml</file>
         <file>../qml/Views/SettingsView.qml</file>
+        <file>../qml/Views/WalletView.qml</file>
         <file>../assets/icons/activity.svg</file>
         <file>../assets/icons/copy.svg</file>
         <file>../assets/icons/external-link.svg</file>
@@ -51,6 +56,8 @@
         <file>../assets/icons/sync.svg</file>
         <file>../assets/icons/wallet.svg</file>
         <file>../assets/icons/warning.svg</file>
+        <file>../assets/data/coindroids_dc25_chain_forensics.json</file>
+        <file>../assets/data/defcoin_reddit_timeline.json</file>
         <file>../assets/brand/defcoin-nu-icon-1024.png</file>
         <file>../assets/brand/defcoin-nu-coin-stack-hires.png</file>
     </qresource>

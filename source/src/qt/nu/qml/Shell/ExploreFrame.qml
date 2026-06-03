@@ -1,4 +1,3 @@
-pragma ComponentBehavior: Bound
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import Defcoin.Nu 1.0
@@ -19,11 +18,13 @@ Item {
     property string explorerResultTitle: ""
     property string explorerResultHtml: ""
     property int explorerResultNonce: 0
+    readonly property int pageMargin: width < 1280 ? NuTokens.spaceLg : NuTokens.spaceXl
+    readonly property int railWidth: width < 1280 ? 204 : 216
 
     signal aboutRequested
 
     onCurrentRouteChanged: {
-        if (currentRoute === "explorer" || currentRoute === "holders" || currentRoute === "movements" || currentRoute === "indexing")
+        if (currentRoute === "explorer" || currentRoute === "pulse" || currentRoute === "holders" || currentRoute === "movements" || currentRoute === "coindroids" || currentRoute === "reddit" || currentRoute === "indexing")
             explorerLoaded = true
         else
             forensicsLoaded = true
@@ -32,8 +33,11 @@ Item {
     function routeIndex(route) {
         switch (route) {
         case "explorer":
+        case "pulse":
         case "holders":
         case "movements":
+        case "coindroids":
+        case "reddit":
         case "indexing":
             return 1
         default: return 0
@@ -42,8 +46,11 @@ Item {
 
     function explorerRouteActive() {
         return root.currentRoute === "explorer"
+               || root.currentRoute === "pulse"
                || root.currentRoute === "holders"
                || root.currentRoute === "movements"
+               || root.currentRoute === "coindroids"
+               || root.currentRoute === "reddit"
                || root.currentRoute === "indexing"
     }
 
@@ -68,24 +75,36 @@ Item {
     }
 
     function explorerPreferredTab(route) {
+        if (route === "pulse") return 6
         if (route === "holders") return 1
         if (route === "movements") return 2
-        if (route === "indexing") return 3
+        if (route === "coindroids") return 3
+        if (route === "indexing") return 4
+        if (route === "reddit") return 5
         return 0
     }
 
     function explorerSectionTitle(route) {
+        if (route === "pulse") return "Network Pulse"
         if (route === "holders") return "Holder Atlas"
         if (route === "movements") return "Movement Map"
+        if (route === "coindroids") return "Droid Trails"
+        if (route === "reddit") return "/r/Defcoin"
         if (route === "indexing") return "Index Engines"
         return "Explorer Search"
     }
 
     function explorerSectionDetail(route) {
+        if (route === "pulse")
+            return "At-a-glance macro network state and indexed history for hash estimate, difficulty, and recent block spacing."
         if (route === "holders")
             return "Largest holders, supply bands, concentration, and holder timeline checkpoints."
         if (route === "movements")
             return "Large transfer tables and address-to-address flow graphs backed by the local explorer index."
+        if (route === "coindroids")
+            return "Coindroids-era action endpoints, payout swarms, candidate winners, and detection rules mined from the local Defcoin index."
+        if (route === "reddit")
+            return "Community timeline from the curated /r/Defcoin event index merged with annual DEF CON anchors."
         if (route === "indexing")
             return "Monitor and tune the Explorer, Holder Atlas, movement, and forensics indexing engines."
         return "Local block, transaction, address, Holder Atlas, and movement lookups backed by a SQLite WAL cache."
@@ -113,8 +132,8 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        ExpForNavigationRail {
-            Layout.preferredWidth: 216
+        ExploreNavigationRail {
+            Layout.preferredWidth: root.railWidth
             Layout.fillHeight: true
             currentRoute: root.currentRoute
             onRouteRequested: (route) => root.currentRoute = route
@@ -128,7 +147,7 @@ Item {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: NuTokens.spaceXl
+                anchors.margins: root.pageMargin
                 spacing: NuTokens.spaceLg
 
                 StatusStrip {

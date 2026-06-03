@@ -107,7 +107,7 @@ constexpr int EXPLORER_TOP100_MIN_PLAYBACK_CHECKPOINTS = 250;
 constexpr int EXPLORER_TOP100_LARGE_PLAYBACK_CHECKPOINTS = 500;
 constexpr int EXPLORER_TOP100_EVENT_WRITE_BATCH_ROWS = 5000;
 constexpr qint64 EXPLORER_TOP100_UI_REFRESH_MS = 5000;
-constexpr int DROIDTRAILS_CACHE_SCHEMA_VERSION = 3;
+constexpr int DROIDTRAILS_CACHE_SCHEMA_VERSION = 5;
 constexpr int DEFCOIN_REDDIT_TIMELINE_SCHEMA_VERSION = 1;
 constexpr quint16 LAN_FAST_SYNC_PORT = 10334;
 constexpr int LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES = 1232;
@@ -1663,6 +1663,24 @@ QString formatHashrateMetric(double value)
     return QStringLiteral("%1 %2").arg(value, 0, 'f', value >= 100.0 ? 0 : 2).arg(units.at(unit));
 }
 
+QString formatBlockSpacingMetric(double seconds)
+{
+    if (!std::isfinite(seconds) || seconds <= 0.0) return QStringLiteral("-");
+    if (seconds < 90.0) return QStringLiteral("%1s").arg(QString::number(seconds, 'f', seconds < 10.0 ? 1 : 0));
+    const double minutes = seconds / 60.0;
+    if (minutes < 120.0) return QStringLiteral("%1m").arg(QString::number(minutes, 'f', minutes < 10.0 ? 1 : 0));
+    const double hours = minutes / 60.0;
+    return QStringLiteral("%1h").arg(QString::number(hours, 'f', hours < 10.0 ? 1 : 0));
+}
+
+QString formatCompactDifficulty(double value)
+{
+    if (!std::isfinite(value) || value <= 0.0) return QStringLiteral("-");
+    return QString::number(value, 'f', value >= 100.0 ? 2 : 8)
+        .remove(QRegularExpression(QStringLiteral("0+$")))
+        .remove(QRegularExpression(QStringLiteral("\\.$")));
+}
+
 QString formatMinerHashrateText(const QString& amount, const QString& unit)
 {
     QString normalized_unit = unit.trimmed().toUpper();
@@ -2098,6 +2116,8 @@ QStringList splitConsolePasteCommands(const QString& text, QString* error)
     }
     if (lines.size() > 1) return lines;
 
+    // Accept compact paste batches such as:
+    // addnode host1 add addnode host2 add
     QString split_error;
     const QStringList tokens = splitConsoleCommandLine(normalized, &split_error);
     if (!split_error.isEmpty()) {
@@ -3480,6 +3500,7 @@ void NuRpcService::schedulePeerNameLookups(const QString& host)
 
 void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
 {
+    if (m_stopping_helper_processes) return;
     if (!m_lan_node_discovery_enabled && !m_lan_fast_sync_enabled) return;
     const QString key = normalizedPeerHost(host);
     const bool has_local_dns_hint = !lanAliasFromDnsName(m_peer_dns_name_by_host.value(key)).isEmpty();
@@ -3615,6 +3636,7 @@ ipv4=$(/usr/sbin/arp -an 2>/dev/null |
     auto lan_lookup_id = std::make_shared<int>(-1);
     *lan_lookup_id = QHostInfo::lookupHost(address.toString(), this, [this, key, lan_lookup_id](const QHostInfo& info) {
         if (*lan_lookup_id >= 0) m_host_lookup_ids.remove(*lan_lookup_id);
+        if (m_stopping_helper_processes) return;
         if (info.error() != QHostInfo::NoError) return;
         const QString name = lanWorkstationNameFromCandidate(info.hostName());
         if (name.isEmpty()) return;
@@ -3637,6 +3659,10 @@ ipv4=$(/usr/sbin/arp -an 2>/dev/null |
     auto aggregate_details = std::make_shared<QStringList>();
     auto run_next = std::make_shared<std::function<void(int)>>();
     *run_next = [this, key, command_list, aggregate_name, aggregate_details, run_next](int index) {
+        if (m_stopping_helper_processes) {
+            m_peer_lan_lookup_pending.remove(key);
+            return;
+        }
         if (index >= command_list->size()) {
             m_peer_lan_lookup_pending.remove(key);
             bool changed = false;
@@ -3683,21 +3709,23 @@ ipv4=$(/usr/sbin/arp -an 2>/dev/null |
                 process->waitForFinished(500);
             }
 
-            const QString output = QString::fromLocal8Bit(process->readAllStandardOutput())
-                + QLatin1Char('\n')
-                + QString::fromLocal8Bit(process->readAllStandardError());
-            const QString name = parseLanPeerNameLookupOutput(output);
-            const QStringList details = parseLanPeerFingerprintDetails(output);
-            if (!name.isEmpty() && aggregate_name->isEmpty()) {
-                *aggregate_name = name;
-            }
-            for (const QString& detail : details) {
-                if (!aggregate_details->contains(detail, Qt::CaseInsensitive)) aggregate_details->push_back(detail);
+            if (!m_stopping_helper_processes) {
+                const QString output = QString::fromLocal8Bit(process->readAllStandardOutput())
+                    + QLatin1Char('\n')
+                    + QString::fromLocal8Bit(process->readAllStandardError());
+                const QString name = parseLanPeerNameLookupOutput(output);
+                const QStringList details = parseLanPeerFingerprintDetails(output);
+                if (!name.isEmpty() && aggregate_name->isEmpty()) {
+                    *aggregate_name = name;
+                }
+                for (const QString& detail : details) {
+                    if (!aggregate_details->contains(detail, Qt::CaseInsensitive)) aggregate_details->push_back(detail);
+                }
             }
 
             m_helper_processes.remove(process);
             process->deleteLater();
-            (*run_next)(index + 1);
+            if (!m_stopping_helper_processes) (*run_next)(index + 1);
         };
 
         connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
@@ -3851,8 +3879,12 @@ void NuRpcService::refreshNode()
         m_metric_headers = QString::number(headers);
         m_metric_verification = progress_text;
         m_metric_difficulty = chain.value(QStringLiteral("difficulty")).isDouble()
-            ? QString::number(chain.value(QStringLiteral("difficulty")).toDouble(), 'f', 8).remove(QRegularExpression(QStringLiteral("0+$"))).remove(QRegularExpression(QStringLiteral("\\.$")))
+            ? formatCompactDifficulty(chain.value(QStringLiteral("difficulty")).toDouble())
             : QStringLiteral("Unknown");
+#if DEFCOIN_NU_EXPLORE_APP
+        refreshRecentAverageBlockTimeFromIndex();
+#endif
+        refreshRecentAverageBlockTimeFromRpc(m_block_height);
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
 
@@ -5178,7 +5210,6 @@ void NuRpcService::lanFastSyncTick()
     }
     if (m_lan_fast_sync_submit_in_flight || m_lan_fast_sync_reserve_in_flight) return;
 
-    const int next_height = m_block_height + 1;
     if (m_lan_fast_sync_request_in_flight) {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         if (m_lan_fast_sync_request_ms > 0 && now - m_lan_fast_sync_request_ms > LAN_FAST_SYNC_REQUEST_TIMEOUT_MS) {
@@ -5195,15 +5226,14 @@ void NuRpcService::lanFastSyncTick()
                 resetLanFastSyncTransfer(QStringLiteral("UDP fast sync fell back to normal TCP sync at block %1 after missing chunks.").arg(m_lan_fast_sync_current_height));
                 return;
             }
-            const int retry_height = m_lan_fast_sync_current_height;
-            resetLanFastSyncTransfer(QStringLiteral("UDP fast sync retrying block %1 after missing chunks.").arg(retry_height));
-            requestLanFastSyncBlock(retry_height);
+            resetLanFastSyncTransfer(QStringLiteral("UDP fast sync retrying through Core's next block reservation after missing chunks."));
+            requestLanFastSyncBlock();
         }
         return;
     }
 
     if (!shouldAttemptUdpFastSync()) return;
-    requestLanFastSyncBlock(next_height);
+    requestLanFastSyncBlock();
 }
 
 bool NuRpcService::isUdpFastSyncHostVerified(const QString& host) const
@@ -5441,9 +5471,9 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
     Q_EMIT stateChanged();
 }
 
-void NuRpcService::requestLanFastSyncBlock(int height)
+void NuRpcService::requestLanFastSyncBlock()
 {
-    if (!m_lan_fast_sync_socket || height <= 0 || m_lan_fast_sync_reserve_in_flight) return;
+    if (!m_lan_fast_sync_socket || m_lan_fast_sync_reserve_in_flight) return;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     QStringList expired_probe_hosts;
     for (auto it = m_udp_fast_sync_probe_ids_by_host.constBegin(); it != m_udp_fast_sync_probe_ids_by_host.constEnd(); ++it) {
@@ -5479,24 +5509,26 @@ void NuRpcService::requestLanFastSyncBlock(int height)
         }
         return;
     }
+    // Reserve through Core first; UDP only carries the block body selected by
+    // the normal downloader and does not create an independent block schedule.
     m_lan_fast_sync_reserve_in_flight = true;
-    m_lan_fast_sync_status = QStringLiteral("UDP fast sync reserving block %1 with Core before requesting peer %2.").arg(height).arg(node_id);
+    m_lan_fast_sync_status = QStringLiteral("UDP fast sync asking Core to reserve the next block from peer %1.").arg(node_id);
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
     rpcCall(QStringLiteral("reservefastsyncblock"),
-            {QStringLiteral("reserve"), node_id, QString::number(height)},
+            {QStringLiteral("reserve-next"), node_id},
             false,
-            [this, height, host, node_id](const QJsonValue& result, const QString& error) {
+            [this, host, node_id](const QJsonValue& result, const QString& error) {
         m_lan_fast_sync_reserve_in_flight = false;
         const QJsonObject obj = result.toObject();
         const bool success = error.isEmpty() && obj.value(QStringLiteral("success")).toBool(false);
         const QString reason = error.isEmpty() ? obj.value(QStringLiteral("reason")).toString(QStringLiteral("unknown")) : error;
         const QString hash = obj.value(QStringLiteral("hash")).toString();
-        if (!success || hash.size() != 64) {
+        const int height = obj.value(QStringLiteral("height")).toInt(-1);
+        if (!success || hash.size() != 64 || height <= 0) {
             recordFastSyncUdpDiagnostic(QStringLiteral("Core reservation rejected"),
-                QStringLiteral("block %1 peer %2: %3").arg(height).arg(node_id).arg(reason));
-            m_lan_fast_sync_status = QStringLiteral("UDP fast sync did not reserve block %1 (%2); normal TCP fallback remains active.")
-                .arg(height)
+                QStringLiteral("peer %1: %2").arg(node_id).arg(reason));
+            m_lan_fast_sync_status = QStringLiteral("UDP fast sync did not reserve a Core-selected block (%1); normal TCP fallback remains active.")
                 .arg(reason);
             rebuildNodeMetrics();
             Q_EMIT stateChanged();
@@ -6953,6 +6985,8 @@ void NuRpcService::rebuildNodeMetrics()
                   QStringLiteral("Current active-chain proof-of-work difficulty. It can change at retarget boundaries.")),
         metricRow(QStringLiteral("Network hashrate (120 blocks)"), m_metric_network_hashrate,
                   QStringLiteral("Estimated recent network hashrate from getnetworkhashps over the last 120 blocks.")),
+        metricRow(QStringLiteral("Average block time (120 blocks)"), m_metric_average_block_time,
+                  QStringLiteral("Recent active-chain block spacing sampled from RPC block headers, with the Explorer index used as fallback.")),
         metricRow(QStringLiteral("Chain tips"), m_metric_chain_tips,
                   QStringLiteral("Summary of active and known stale/header-only chain tips reported by the backend.")),
         metricRow(QStringLiteral("Top sent P2P messages"), m_metric_peer_messages_sent,
@@ -7303,6 +7337,30 @@ void NuRpcService::loadDefcoinTimeline()
 void NuRpcService::refreshDefcoinTimeline()
 {
     loadDefcoinTimeline();
+    Q_EMIT explorerChanged();
+}
+
+void NuRpcService::refreshNetworkPulseHistory(int window_blocks)
+{
+    QString error;
+    const QVariantMap analysis = networkPulseHistoryFromDb(window_blocks, &error);
+    if (!error.isEmpty()) {
+        m_network_pulse_summary = QVariantMap{{QStringLiteral("windowBlocks"), qBound(10, window_blocks, 20160)}};
+        m_network_pulse_history_rows.clear();
+        m_network_pulse_status = error;
+    } else {
+        m_network_pulse_summary = analysis.value(QStringLiteral("summary")).toMap();
+        m_network_pulse_history_rows = analysis.value(QStringLiteral("rows")).toList();
+        m_network_pulse_status = analysis.value(QStringLiteral("status")).toString();
+        if (m_network_pulse_status.isEmpty())
+            m_network_pulse_status = QStringLiteral("Network Pulse history loaded.");
+        const QString average_block_time = m_network_pulse_summary.value(QStringLiteral("currentAvgBlockTime")).toString();
+        if (!average_block_time.isEmpty() && average_block_time != QLatin1String("-")) {
+            m_metric_average_block_time = average_block_time;
+            rebuildNodeMetrics();
+            Q_EMIT stateChanged();
+        }
+    }
     Q_EMIT explorerChanged();
 }
 
@@ -9151,6 +9209,260 @@ bool NuRpcService::ensureExplorerDatabase(QString* error) const
     return ok;
 }
 
+void NuRpcService::refreshRecentAverageBlockTimeFromRpc(int tip_height)
+{
+    if (tip_height <= 1) {
+        refreshRecentAverageBlockTimeFromIndex();
+        return;
+    }
+
+    const int window_blocks = std::min(120, tip_height);
+    const int start_height = tip_height - window_blocks;
+    rpcCall(QStringLiteral("getblockhash"), {tip_height}, false, [this, tip_height, start_height, window_blocks](const QJsonValue& tip_result, const QString& tip_error) {
+        if (!tip_error.isEmpty() || !tip_result.isString()) {
+            refreshRecentAverageBlockTimeFromIndex();
+            return;
+        }
+        const QString tip_hash = tip_result.toString();
+        rpcCall(QStringLiteral("getblockheader"), {tip_hash}, false, [this, start_height, window_blocks](const QJsonValue& tip_header_result, const QString& tip_header_error) {
+            if (!tip_header_error.isEmpty() || !tip_header_result.isObject()) {
+                refreshRecentAverageBlockTimeFromIndex();
+                return;
+            }
+            const qint64 tip_time = tip_header_result.toObject().value(QStringLiteral("time")).toVariant().toLongLong();
+            rpcCall(QStringLiteral("getblockhash"), {start_height}, false, [this, tip_time, window_blocks](const QJsonValue& start_result, const QString& start_error) {
+                if (!start_error.isEmpty() || !start_result.isString()) {
+                    refreshRecentAverageBlockTimeFromIndex();
+                    return;
+                }
+                rpcCall(QStringLiteral("getblockheader"), {start_result.toString()}, false, [this, tip_time, window_blocks](const QJsonValue& start_header_result, const QString& start_header_error) {
+                    if (!start_header_error.isEmpty() || !start_header_result.isObject()) {
+                        refreshRecentAverageBlockTimeFromIndex();
+                        return;
+                    }
+                    const qint64 start_time = start_header_result.toObject().value(QStringLiteral("time")).toVariant().toLongLong();
+                    if (tip_time <= start_time || window_blocks <= 0) {
+                        refreshRecentAverageBlockTimeFromIndex();
+                        return;
+                    }
+                    m_metric_average_block_time = formatBlockSpacingMetric(double(tip_time - start_time) / double(window_blocks));
+                    rebuildNodeMetrics();
+                    Q_EMIT stateChanged();
+                });
+            });
+        });
+    });
+}
+
+void NuRpcService::refreshRecentAverageBlockTimeFromIndex()
+{
+#if DEFCOIN_NU_EXPLORE_APP
+    QString error;
+    if (!ensureExplorerDatabase(&error)) {
+        m_metric_average_block_time = QStringLiteral("Unknown");
+        rebuildNodeMetrics();
+        Q_EMIT stateChanged();
+        return;
+    }
+
+    QString local_value = QStringLiteral("Index warming");
+    const QString connection_name = QStringLiteral("nu_explorer_block_time_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            if (query.exec(QStringLiteral("SELECT height, time FROM explorer_blocks ORDER BY height DESC LIMIT 121"))) {
+                int newest_height = -1;
+                int oldest_height = -1;
+                qint64 newest_time = 0;
+                qint64 oldest_time = 0;
+                int row_count = 0;
+                while (query.next()) {
+                    const int height = query.value(0).toInt();
+                    const qint64 block_time = query.value(1).toLongLong();
+                    if (row_count == 0) {
+                        newest_height = height;
+                        newest_time = block_time;
+                    }
+                    oldest_height = height;
+                    oldest_time = block_time;
+                    ++row_count;
+                }
+                const int span_blocks = newest_height - oldest_height;
+                const qint64 span_seconds = newest_time - oldest_time;
+                if (row_count >= 2 && span_blocks > 0 && span_seconds > 0)
+                    local_value = formatBlockSpacingMetric(double(span_seconds) / double(span_blocks));
+            }
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    m_metric_average_block_time = local_value;
+#else
+    m_metric_average_block_time = QStringLiteral("Explore only");
+#endif
+    rebuildNodeMetrics();
+    Q_EMIT stateChanged();
+}
+
+QVariantMap NuRpcService::networkPulseHistoryFromDb(int window_blocks, QString* error) const
+{
+    QVariantMap analysis;
+    QVariantList rows;
+    QVariantMap summary;
+#if !DEFCOIN_NU_EXPLORE_APP
+    if (error) *error = QStringLiteral("Network Pulse history is only available in Defcoin Core Nu Explore.");
+    return analysis;
+#else
+    QString db_error;
+    if (!ensureExplorerDatabase(&db_error)) {
+        if (error) *error = db_error;
+        return analysis;
+    }
+
+    const int clean_window = qBound(10, window_blocks, 20160);
+    const QString connection_name = QStringLiteral("nu_network_pulse_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    QString local_error;
+    bool ok = false;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        ok = db.open();
+        if (!ok) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery query(db);
+            query.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+            ok = query.exec(QStringLiteral("SELECT MIN(height), MAX(height), COUNT(*) FROM explorer_blocks"));
+            if (!ok || !query.next()) {
+                local_error = ok ? QStringLiteral("Explorer block table is not readable.") : query.lastError().text();
+                ok = false;
+            } else {
+                const int min_height = query.value(0).toInt();
+                const int max_height = query.value(1).toInt();
+                const int block_count = query.value(2).toInt();
+                if (block_count < 2 || max_height <= min_height) {
+                    local_error = QStringLiteral("Explorer index needs at least two cached blocks before Network Pulse can chart history.");
+                    ok = false;
+                } else {
+                    const int target_samples = 360;
+                    const int chain_span = std::max(1, max_height - min_height);
+                    const int stride = std::max(clean_window, std::max(1, chain_span / target_samples));
+                    QSqlQuery sample(db);
+                    sample.prepare(QStringLiteral(
+                        "SELECT height, hash, time, tx_count, raw_json "
+                        "FROM explorer_blocks "
+                        "WHERE height = ? OR height = ? OR ((height - ?) % ?) = 0 "
+                        "ORDER BY height ASC "
+                        "LIMIT 720"));
+                    sample.addBindValue(min_height);
+                    sample.addBindValue(max_height);
+                    sample.addBindValue(min_height);
+                    sample.addBindValue(stride);
+                    ok = sample.exec();
+                    if (!ok) {
+                        local_error = sample.lastError().text();
+                    } else {
+                        int previous_height = -1;
+                        qint64 previous_time = 0;
+                        int first_row_height = -1;
+                        int last_row_height = -1;
+                        qint64 first_row_time = 0;
+                        qint64 last_row_time = 0;
+                        double last_spacing = 0.0;
+                        double last_difficulty = 0.0;
+                        double last_hashrate = 0.0;
+                        while (sample.next()) {
+                            const int height = sample.value(0).toInt();
+                            const QString hash = sample.value(1).toString();
+                            const qint64 block_time = sample.value(2).toLongLong();
+                            const int tx_count = sample.value(3).toInt();
+                            const QString raw_json = sample.value(4).toString();
+                            double difficulty = 0.0;
+                            const QJsonDocument raw_doc = QJsonDocument::fromJson(raw_json.toUtf8());
+                            if (raw_doc.isObject())
+                                difficulty = raw_doc.object().value(QStringLiteral("difficulty")).toDouble();
+                            if (previous_height >= 0 && height > previous_height && block_time > previous_time) {
+                                const int span_blocks = height - previous_height;
+                                const qint64 span_seconds = block_time - previous_time;
+                                const double average_spacing = double(span_seconds) / double(span_blocks);
+                                const double estimated_hashrate = difficulty > 0.0 && average_spacing > 0.0
+                                    ? difficulty * 4294967296.0 / average_spacing
+                                    : 0.0;
+                                const QString date_text = QDateTime::fromSecsSinceEpoch(block_time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"));
+                                QVariantMap meta{
+                                    {QStringLiteral("type"), QStringLiteral("block")},
+                                    {QStringLiteral("id"), hash},
+                                    {QStringLiteral("height"), height},
+                                    {QStringLiteral("time"), block_time},
+                                    {QStringLiteral("avgSpacingSeconds"), average_spacing},
+                                    {QStringLiteral("difficulty"), difficulty},
+                                    {QStringLiteral("hashrate"), estimated_hashrate},
+                                    {QStringLiteral("spanBlocks"), span_blocks},
+                                    {QStringLiteral("spanSeconds"), span_seconds},
+                                    {QStringLiteral("txCount"), tx_count}
+                                };
+                                rows.push_back(tableRow({
+                                    QString::number(height),
+                                    date_text,
+                                    formatBlockSpacingMetric(average_spacing),
+                                    formatCompactDifficulty(difficulty),
+                                    formatHashrateMetric(estimated_hashrate),
+                                    QStringLiteral("%1 blocks").arg(QString::number(span_blocks)),
+                                    QString::number(tx_count)
+                                }, meta));
+                                if (first_row_height < 0) {
+                                    first_row_height = height;
+                                    first_row_time = block_time;
+                                }
+                                last_row_height = height;
+                                last_row_time = block_time;
+                                last_spacing = average_spacing;
+                                last_difficulty = difficulty;
+                                last_hashrate = estimated_hashrate;
+                            }
+                            previous_height = height;
+                            previous_time = block_time;
+                        }
+                        if (rows.isEmpty()) {
+                            local_error = QStringLiteral("Explorer index has block rows, but sampled timestamps were not usable.");
+                            ok = false;
+                        } else {
+                            summary.insert(QStringLiteral("windowBlocks"), clean_window);
+                            summary.insert(QStringLiteral("strideBlocks"), stride);
+                            summary.insert(QStringLiteral("sampleRows"), rows.size());
+                            summary.insert(QStringLiteral("indexedBlocks"), block_count);
+                            summary.insert(QStringLiteral("firstHeight"), first_row_height);
+                            summary.insert(QStringLiteral("lastHeight"), last_row_height);
+                            summary.insert(QStringLiteral("firstDate"), first_row_time > 0 ? QDateTime::fromSecsSinceEpoch(first_row_time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd")) : QStringLiteral("-"));
+                            summary.insert(QStringLiteral("lastDate"), last_row_time > 0 ? QDateTime::fromSecsSinceEpoch(last_row_time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd")) : QStringLiteral("-"));
+                            summary.insert(QStringLiteral("currentAvgBlockTime"), formatBlockSpacingMetric(last_spacing));
+                            summary.insert(QStringLiteral("currentDifficulty"), formatCompactDifficulty(last_difficulty));
+                            summary.insert(QStringLiteral("currentHashrate"), formatHashrateMetric(last_hashrate));
+                            summary.insert(QStringLiteral("currentAvgBlockSeconds"), last_spacing);
+                            summary.insert(QStringLiteral("currentHashrateRaw"), last_hashrate);
+                            summary.insert(QStringLiteral("currentDifficultyRaw"), last_difficulty);
+                            analysis.insert(QStringLiteral("rows"), rows);
+                            analysis.insert(QStringLiteral("summary"), summary);
+                            analysis.insert(QStringLiteral("status"), QStringLiteral("Network Pulse chart sampled %1 indexed block intervals from %2 cached blocks. Window target: %3 blocks; sampled stride: %4 blocks.")
+                                            .arg(QString::number(rows.size()),
+                                                 QString::number(block_count),
+                                                 QString::number(clean_window),
+                                                 QString::number(stride)));
+                        }
+                    }
+                }
+            }
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (!ok && error) *error = QStringLiteral("Network Pulse history unavailable: %1").arg(local_error);
+    return analysis;
+#endif
+}
+
 bool NuRpcService::acquireExplorerWriterLock(QString* error)
 {
     if (m_explorer_writer_lock && m_explorer_writer_lock->isLocked()) return true;
@@ -9781,7 +10093,14 @@ QVariantMap NuRpcService::coindroidsAnalyticsFromDb(QString* error) const
     QVariantList vanity_rows;
     QVariantList op_return_rows;
     QVariantList bot_rows;
+    QVariantList payout_rows;
+    QVariantList attack_address_rows;
+    QVariantList qr_seed_rows;
+    QVariantList source_ammo_rows;
+    QVariantList olo_rows;
+    QVariantList game_address_rows;
     QVariantList evidence_rows;
+    QVariantMap dc25_chain_summary;
     QString db_error;
     if (!ensureExplorerDatabase(&db_error)) {
         if (error) *error = db_error;
@@ -9796,6 +10115,285 @@ QVariantMap NuRpcService::coindroidsAnalyticsFromDb(QString* error) const
         row.insert(QStringLiteral("meta"), meta);
         return row;
     };
+    auto add_game_address_lead = [&game_address_rows, &row_for](const QString& role,
+                                                                const QString& name,
+                                                                const QString& address,
+                                                                const QString& amount,
+                                                                int score,
+                                                                const QString& confidence,
+                                                                const QString& evidence,
+                                                                const QVariantMap& extra_meta = QVariantMap()) {
+        if (address.trimmed().isEmpty()) return;
+        for (const QVariant& value : game_address_rows) {
+            const QVariantMap row = value.toMap();
+            const QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
+            if (meta.value(QStringLiteral("address")).toString() == address &&
+                meta.value(QStringLiteral("role")).toString() == role &&
+                meta.value(QStringLiteral("name")).toString() == name) {
+                return;
+            }
+        }
+        QVariantMap meta = extra_meta;
+        meta.insert(QStringLiteral("type"), QStringLiteral("address"));
+        meta.insert(QStringLiteral("id"), address);
+        meta.insert(QStringLiteral("address"), address);
+        meta.insert(QStringLiteral("role"), role);
+        meta.insert(QStringLiteral("name"), name);
+        meta.insert(QStringLiteral("score"), score);
+        meta.insert(QStringLiteral("confidence"), confidence);
+        meta.insert(QStringLiteral("contactName"),
+                    QStringLiteral("Coindroids %1 %2 [%3]")
+                        .arg(role, name.isEmpty() ? address.left(10) : name, confidence));
+        game_address_rows.push_back(row_for(QVariantList{
+            role,
+            name,
+            address,
+            amount,
+            score,
+            confidence,
+            evidence
+        }, meta));
+    };
+
+    auto decimal_dfc_text = [](const QVariant& value, int decimals = 4) {
+        const double amount = value.toDouble();
+        QString text = QString::number(amount, 'f', decimals);
+        while (text.contains(QLatin1Char('.')) && text.endsWith(QLatin1Char('0'))) text.chop(1);
+        if (text.endsWith(QLatin1Char('.'))) text.chop(1);
+        return text + QStringLiteral(" DFC");
+    };
+    auto decimal_text = [](const QVariant& value, int decimals = 3) {
+        QString text = QString::number(value.toDouble(), 'f', decimals);
+        while (text.contains(QLatin1Char('.')) && text.endsWith(QLatin1Char('0'))) text.chop(1);
+        if (text.endsWith(QLatin1Char('.'))) text.chop(1);
+        return text;
+    };
+
+    {
+        const QString relative_path = QStringLiteral("assets/data/coindroids_dc25_chain_forensics.json");
+        QStringList candidates;
+        candidates << QDir(nuResourceRoot()).filePath(relative_path)
+                   << QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("nu/%1").arg(relative_path))
+                   << QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../Resources/nu/%1").arg(relative_path))
+                   << QStringLiteral(":/nu/assets/data/coindroids_dc25_chain_forensics.json");
+
+        QFile file;
+        for (const QString& candidate : candidates) {
+            file.setFileName(candidate);
+            if (file.open(QIODevice::ReadOnly | QIODevice::Text))
+                break;
+        }
+
+        if (file.isOpen()) {
+            QJsonParseError parse_error;
+            const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parse_error);
+            if (parse_error.error == QJsonParseError::NoError && doc.isObject()) {
+                const QJsonObject object = doc.object();
+                dc25_chain_summary = object.value(QStringLiteral("summary")).toObject().toVariantMap();
+                dc25_chain_summary.insert(QStringLiteral("dc25ChainForensicsStatus"), QStringLiteral("loaded"));
+
+                const QJsonArray qr_array = object.value(QStringLiteral("qrSeeds")).toArray();
+                for (const QJsonValue& value : qr_array) {
+                    const QVariantMap source = value.toObject().toVariantMap();
+                    const QString name = source.value(QStringLiteral("droid_name")).toString();
+                    const QString legacy = source.value(QStringLiteral("legacy_3_p2sh")).toString();
+                    const QString current = source.value(QStringLiteral("current_m_p2sh")).toString();
+                    const int dc25_outputs = source.value(QStringLiteral("dc25_outputs")).toInt();
+                    const int photo_outputs = source.value(QStringLiteral("photo_window_outputs")).toInt();
+                    const QString evidence = QStringLiteral("QR card seed converted from legacy P2SH %1; %2 DC25 outputs and %3 photo-window outputs.")
+                        .arg(legacy, QString::number(dc25_outputs), QString::number(photo_outputs));
+                    qr_seed_rows.push_back(row_for(QVariantList{
+                        name,
+                        legacy,
+                        current,
+                        dc25_outputs,
+                        decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 8),
+                        photo_outputs,
+                        decimal_dfc_text(source.value(QStringLiteral("photo_window_dfc")), 8),
+                        QStringLiteral("%1-%2").arg(source.value(QStringLiteral("dc25_first_height")).toString(),
+                                                    source.value(QStringLiteral("dc25_last_height")).toString()),
+                        QStringLiteral("%1 - %2").arg(source.value(QStringLiteral("dc25_first_utc")).toString(),
+                                                      source.value(QStringLiteral("dc25_last_utc")).toString())
+                    }, QVariantMap{
+                        {QStringLiteral("type"), QStringLiteral("address")},
+                        {QStringLiteral("id"), current},
+                        {QStringLiteral("address"), current},
+                        {QStringLiteral("legacyP2sh"), legacy},
+                        {QStringLiteral("name"), name},
+                        {QStringLiteral("dc25Outputs"), dc25_outputs},
+                        {QStringLiteral("photoWindowOutputs"), photo_outputs},
+                        {QStringLiteral("dc25Dfc"), source.value(QStringLiteral("dc25_dfc"))},
+                        {QStringLiteral("confidence"), QStringLiteral("Seed-confirmed")}}));
+                    add_game_address_lead(QStringLiteral("DC25 QR-confirmed attack address"), name, current,
+                                          decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 4),
+                                          92, QStringLiteral("Seed-confirmed"), evidence,
+                                          QVariantMap{
+                                              {QStringLiteral("source"), QStringLiteral("dc25-qr-seed-converted")},
+                                              {QStringLiteral("legacyP2sh"), legacy},
+                                              {QStringLiteral("dc25Outputs"), dc25_outputs},
+                                              {QStringLiteral("photoWindowOutputs"), photo_outputs}});
+                }
+
+                const QJsonArray attack_array = object.value(QStringLiteral("attackAddresses")).toArray();
+                for (const QJsonValue& value : attack_array) {
+                    const QVariantMap source = value.toObject().toVariantMap();
+                    const QString name = source.value(QStringLiteral("known_droid_name")).toString();
+                    const QString legacy = source.value(QStringLiteral("legacy_3_p2sh")).toString();
+                    const QString current = source.value(QStringLiteral("current_m_p2sh")).toString();
+                    const int dc25_outputs = source.value(QStringLiteral("dc25_outputs")).toInt();
+                    const int signature_outputs = source.value(QStringLiteral("signature_outputs")).toInt();
+                    const double signature_ratio = source.value(QStringLiteral("signature_ratio")).toDouble();
+                    const QString confidence = source.value(QStringLiteral("confidence")).toString();
+                    const QString role = confidence.contains(QStringLiteral("Broad"))
+                        ? QStringLiteral("DC25 broad attack cohort")
+                        : (confidence.contains(QStringLiteral("Seed"))
+                               ? QStringLiteral("DC25 QR-confirmed attack address")
+                               : QStringLiteral("DC25 attack candidate"));
+                    int score = 45 + std::min(34, static_cast<int>(signature_ratio * 34.0)) + std::min(15, dc25_outputs / 70);
+                    if (confidence.contains(QStringLiteral("Seed"))) score += 10;
+                    if (confidence.contains(QStringLiteral("Broad"))) score -= 8;
+                    score = std::max(20, std::min(99, score));
+                    const QString display_name = name.isEmpty() ? QStringLiteral("candidate %1").arg(current.left(8)) : name;
+                    const QString evidence = QStringLiteral("%1 DC25 outputs, %2 signature outputs, ratio %3; legacy QR/P2SH form %4.")
+                        .arg(QString::number(dc25_outputs),
+                             QString::number(signature_outputs),
+                             decimal_text(source.value(QStringLiteral("signature_ratio")), 3),
+                             legacy);
+                    attack_address_rows.push_back(row_for(QVariantList{
+                        display_name,
+                        legacy,
+                        current,
+                        dc25_outputs,
+                        decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 8),
+                        signature_outputs,
+                        decimal_text(source.value(QStringLiteral("signature_ratio")), 3),
+                        QStringLiteral("%1-%2").arg(source.value(QStringLiteral("first_height")).toString(),
+                                                    source.value(QStringLiteral("last_height")).toString()),
+                        confidence
+                    }, QVariantMap{
+                        {QStringLiteral("type"), QStringLiteral("address")},
+                        {QStringLiteral("id"), current},
+                        {QStringLiteral("address"), current},
+                        {QStringLiteral("legacyP2sh"), legacy},
+                        {QStringLiteral("name"), display_name},
+                        {QStringLiteral("knownName"), name},
+                        {QStringLiteral("dc25Outputs"), dc25_outputs},
+                        {QStringLiteral("dc25Dfc"), source.value(QStringLiteral("dc25_dfc"))},
+                        {QStringLiteral("signatureOutputs"), signature_outputs},
+                        {QStringLiteral("signatureDfc"), source.value(QStringLiteral("signature_dfc"))},
+                        {QStringLiteral("signatureRatio"), signature_ratio},
+                        {QStringLiteral("minDfc"), source.value(QStringLiteral("min_dfc"))},
+                        {QStringLiteral("avgDfc"), source.value(QStringLiteral("avg_dfc"))},
+                        {QStringLiteral("maxDfc"), source.value(QStringLiteral("max_dfc"))},
+                        {QStringLiteral("firstHeight"), source.value(QStringLiteral("first_height"))},
+                        {QStringLiteral("lastHeight"), source.value(QStringLiteral("last_height"))},
+                        {QStringLiteral("confidence"), confidence},
+                        {QStringLiteral("score"), score}}));
+                    add_game_address_lead(role, display_name, current,
+                                          decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 4),
+                                          score, confidence, evidence,
+                                          QVariantMap{
+                                              {QStringLiteral("source"), QStringLiteral("dc25-attack-address-csv")},
+                                              {QStringLiteral("legacyP2sh"), legacy},
+                                              {QStringLiteral("dc25Outputs"), dc25_outputs},
+                                              {QStringLiteral("signatureOutputs"), signature_outputs},
+                                              {QStringLiteral("signatureRatio"), signature_ratio}});
+                }
+
+                const QJsonArray source_array = object.value(QStringLiteral("sourceAmmo")).toArray();
+                for (const QJsonValue& value : source_array) {
+                    const QVariantMap source = value.toObject().toVariantMap();
+                    const QString address = source.value(QStringLiteral("source_address")).toString();
+                    const int attack_txs = source.value(QStringLiteral("attack_txs")).toInt();
+                    const int input_utxos = source.value(QStringLiteral("input_utxos")).toInt();
+                    const int targets = source.value(QStringLiteral("distinct_targets")).toInt();
+                    int score = 34 + std::min(35, attack_txs / 20) + std::min(25, targets);
+                    if (attack_txs >= 50) score += 8;
+                    score = std::max(20, std::min(99, score));
+                    const QString evidence = QStringLiteral("%1 attack txs, %2 input UTXOs, %3 distinct attack targets; source blocks %4-%5.")
+                        .arg(QString::number(attack_txs),
+                             QString::number(input_utxos),
+                             QString::number(targets),
+                             source.value(QStringLiteral("first_source_output_height")).toString(),
+                             source.value(QStringLiteral("last_source_output_height")).toString());
+                    source_ammo_rows.push_back(row_for(QVariantList{
+                        address,
+                        attack_txs,
+                        input_utxos,
+                        targets,
+                        decimal_dfc_text(source.value(QStringLiteral("input_dfc")), 8),
+                        QStringLiteral("%1-%2").arg(source.value(QStringLiteral("first_source_output_height")).toString(),
+                                                    source.value(QStringLiteral("last_source_output_height")).toString()),
+                        score
+                    }, QVariantMap{
+                        {QStringLiteral("type"), QStringLiteral("address")},
+                        {QStringLiteral("id"), address},
+                        {QStringLiteral("address"), address},
+                        {QStringLiteral("attackTxs"), attack_txs},
+                        {QStringLiteral("inputUtxos"), input_utxos},
+                        {QStringLiteral("distinctTargets"), targets},
+                        {QStringLiteral("inputDfc"), source.value(QStringLiteral("input_dfc"))},
+                        {QStringLiteral("firstHeight"), source.value(QStringLiteral("first_source_output_height"))},
+                        {QStringLiteral("lastHeight"), source.value(QStringLiteral("last_source_output_height"))},
+                        {QStringLiteral("score"), score},
+                        {QStringLiteral("confidence"), attack_txs >= 50 ? QStringLiteral("High source lead") : QStringLiteral("Source lead")}}));
+                    add_game_address_lead(QStringLiteral("DC25 source/ammo clip"), QStringLiteral("source %1").arg(address.left(8)), address,
+                                          decimal_dfc_text(source.value(QStringLiteral("input_dfc")), 2),
+                                          score, attack_txs >= 50 ? QStringLiteral("High source lead") : QStringLiteral("Source lead"),
+                                          evidence,
+                                          QVariantMap{
+                                              {QStringLiteral("source"), QStringLiteral("dc25-source-ammo-csv")},
+                                              {QStringLiteral("attackTxs"), attack_txs},
+                                              {QStringLiteral("inputUtxos"), input_utxos},
+                                              {QStringLiteral("distinctTargets"), targets}});
+                }
+
+                const QJsonArray olo_array = object.value(QStringLiteral("oloCandidates")).toArray();
+                for (const QJsonValue& value : olo_array) {
+                    const QVariantMap source = value.toObject().toVariantMap();
+                    const QString legacy = source.value(QStringLiteral("legacy_3_p2sh")).toString();
+                    const QString current = source.value(QStringLiteral("current_m_p2sh")).toString();
+                    const QString evidence = source.value(QStringLiteral("evidence_type")).toString();
+                    olo_rows.push_back(row_for(QVariantList{
+                        QStringLiteral("Olo"),
+                        legacy,
+                        current,
+                        source.value(QStringLiteral("dc25_outputs")).toInt(),
+                        decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 8),
+                        source.value(QStringLiteral("signature_outputs")).toInt(),
+                        decimal_text(source.value(QStringLiteral("signature_ratio")), 3),
+                        source.value(QStringLiteral("status")).toString().isEmpty()
+                            ? QStringLiteral("Accepted DC25 lead")
+                            : source.value(QStringLiteral("status")).toString(),
+                        source.value(QStringLiteral("notes")).toString()
+                    }, QVariantMap{
+                        {QStringLiteral("type"), QStringLiteral("address")},
+                        {QStringLiteral("id"), current},
+                        {QStringLiteral("address"), current},
+                        {QStringLiteral("legacyP2sh"), legacy},
+                        {QStringLiteral("name"), QStringLiteral("Olo")},
+                        {QStringLiteral("dc25Outputs"), source.value(QStringLiteral("dc25_outputs")).toInt()},
+                        {QStringLiteral("dc25Dfc"), source.value(QStringLiteral("dc25_dfc"))},
+                        {QStringLiteral("signatureOutputs"), source.value(QStringLiteral("signature_outputs")).toInt()},
+                        {QStringLiteral("signatureRatio"), source.value(QStringLiteral("signature_ratio")).toDouble()},
+                        {QStringLiteral("evidence"), evidence},
+                        {QStringLiteral("confidence"), QStringLiteral("Accepted DC25 lead")}}));
+                    add_game_address_lead(QStringLiteral("DC25 Olo lead"), QStringLiteral("Olo"), current,
+                                          decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 4),
+                                          84, QStringLiteral("Accepted DC25 lead"),
+                                          evidence,
+                                          QVariantMap{
+                                              {QStringLiteral("source"), QStringLiteral("dc25-olo-image-assisted")},
+                                              {QStringLiteral("legacyP2sh"), legacy}});
+                }
+            } else {
+                dc25_chain_summary.insert(QStringLiteral("dc25ChainForensicsStatus"),
+                                          QStringLiteral("parse error: %1").arg(parse_error.errorString()));
+            }
+        } else {
+            dc25_chain_summary.insert(QStringLiteral("dc25ChainForensicsStatus"), QStringLiteral("bundled data unavailable"));
+        }
+    }
 
     phase_rows.push_back(row_for(QVariantList{
         QStringLiteral("2014 on-chain response era"),
@@ -9886,6 +10484,42 @@ QVariantMap NuRpcService::coindroidsAnalyticsFromDb(QString* error) const
         QStringLiteral("Ballhair"),
         QStringLiteral("Published event winner; DETH-MASHENE was an honorable mention and bot-code catalyst.")
     }));
+
+    add_game_address_lead(QStringLiteral("DC25 QR seed"), QStringLiteral("an0n"),
+                          QStringLiteral("MSL4CPocyHsDBwn1qoEzq5ESEusNXyjps5"),
+                          QStringLiteral("Human card"), 35, QStringLiteral("Seed"),
+                          QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the indexed M... address."),
+                          QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3L7utWPf2B1nPSW7jvFf1Rz2vDGvVcp2y1")}});
+    add_game_address_lead(QStringLiteral("DC25 QR seed"), QStringLiteral("jklol_b0t"),
+                          QStringLiteral("MMvkAH6WRx2QCDyMCaqTUNcY2bbfB8oakY"),
+                          QStringLiteral("Human card"), 35, QStringLiteral("Seed"),
+                          QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the indexed M... address."),
+                          QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3FibrPgYUqAyPihT6hr7ejN8hu1DEvYDT1")}});
+    add_game_address_lead(QStringLiteral("DC25 QR seed"), QStringLiteral("Ax0n"),
+                          QStringLiteral("MHscJrLV2LbobKNfRgFNZywKcFLfyaMtMH"),
+                          QStringLiteral("Human card"), 35, QStringLiteral("Seed"),
+                          QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the indexed M... address."),
+                          QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3BfTzxvX5DkNnp6mKoG2kLgvHYkE2Mec8T")}});
+    add_game_address_lead(QStringLiteral("DC25 QR seed"), QStringLiteral("xan"),
+                          QStringLiteral("MCMWstrBmosLWiS9Em4hV5jYviBFaKvrrg"),
+                          QStringLiteral("Human card"), 35, QStringLiteral("Seed"),
+                          QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the indexed M... address."),
+                          QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("369Na1SDph1uiDAF8t5MfSV9c1aobbdt3Q")}});
+    add_game_address_lead(QStringLiteral("DC25 QR seed"), QStringLiteral("Def-crunch"),
+                          QStringLiteral("MTeggkYKzmwts4tuGfMRZQx7Rk842gcKsL"),
+                          QStringLiteral("Human card"), 35, QStringLiteral("Seed"),
+                          QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the indexed M... address."),
+                          QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3MSYNs8N3f6U4Zd1AnN5jmhi73Xc52etzd")}});
+    add_game_address_lead(QStringLiteral("DC25 QR seed"), QStringLiteral("nekodroid"),
+                          QStringLiteral("MLcZtx8smqFWJ83PKh5XJ19KBbjWHGZaoP"),
+                          QStringLiteral("Human card"), 35, QStringLiteral("Seed"),
+                          QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the indexed M... address."),
+                          QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3EQRb4iupiQ5VcmVDp6BUMturu94Me87us")}});
+    add_game_address_lead(QStringLiteral("DC25 QR seed"), QStringLiteral("Slick-Willy1"),
+                          QStringLiteral("MJNT1e2PviEyxYytTE8zRciMResD4RHiUL"),
+                          QStringLiteral("Human card"), 35, QStringLiteral("Seed"),
+                          QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the indexed M... address."),
+                          QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3CAJhkcRybPZA3hzMM9ebyTx6xGm3fG67Z")}});
 
     auto classify_endpoint = [](qint64 value_sats, int outputs) {
         if (value_sats == 1000000) {
@@ -10299,6 +10933,278 @@ LIMIT 160
             }
 
             if (local_error.isEmpty()) {
+                QSqlQuery payout_query(db);
+                if (!payout_query.exec(QString::fromLatin1(R"SQL(
+WITH targets(name,target_sats,published_dfc,sort_order) AS (
+  VALUES
+    ('ModemBot1138',10006050000,'100.0605 DFC',1),
+    ('LuckyBot',6011600000,'60.116 DFC',2),
+    ('xan',1166000000,'11.660 DFC',3),
+    ('DETH-MASHENE',781800000,'7.818 DFC',4),
+    ('BadIdea',499900000,'4.999 DFC',5),
+    ('Luca-B0T',452600000,'4.526 DFC',6),
+    ('Droidazon_Prime',354300000,'3.543 DFC',7),
+    ('Nesa',304100000,'3.041 DFC',8),
+    ('Mabuhay',270900000,'2.709 DFC',9),
+    ('Satya',231200000,'2.312 DFC',10),
+    ('BldyFrg',165500000,'1.655 DFC',11),
+    ('10u_b07',157700000,'1.577 DFC',12),
+    ('FUBrandon',117400000,'1.174 DFC',13),
+    ('bob',101400000,'1.014 DFC',14)
+), active AS (
+  SELECT address
+  FROM explorer_tx_outputs
+  WHERE block_height BETWEEN 736611 AND 739756 AND address != ''
+  UNION
+  SELECT address
+  FROM explorer_balance_deltas
+  WHERE height BETWEEN 736611 AND 739756 AND address != ''
+), ordered AS (
+  SELECT d.address,d.height,d.delta_sats
+  FROM explorer_balance_deltas d
+  JOIN active a ON a.address=d.address
+  WHERE d.height <= 739756
+), balances AS (
+  SELECT address,height,
+         SUM(delta_sats) OVER (
+           PARTITION BY address ORDER BY height
+           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+         ) AS balance_sats
+  FROM ordered
+), candidate_balances AS (
+  SELECT t.name,t.target_sats,t.published_dfc,t.sort_order,b.address,b.height,b.balance_sats,
+         ABS(b.balance_sats - t.target_sats) AS diff_sats
+  FROM balances b
+  JOIN targets t
+  WHERE b.height BETWEEN 736611 AND 739756
+    AND ABS(b.balance_sats - t.target_sats) <= 500000
+), per_address_best AS (
+  SELECT *,
+         ROW_NUMBER() OVER (
+           PARTITION BY name,address
+           ORDER BY diff_sats ASC,height DESC
+         ) AS address_rank
+  FROM candidate_balances
+), address_stats AS (
+  SELECT address,
+         COUNT(*) AS outputs,
+         COUNT(DISTINCT txid) AS txs,
+         COALESCE(SUM(value_sats),0) AS incoming_sats,
+         MIN(block_height) AS first_h,
+         MAX(block_height) AS last_h,
+         SUM(CASE WHEN value_sats BETWEEN 100000 AND 314159265 THEN 1 ELSE 0 END) AS action_outputs
+  FROM explorer_tx_outputs
+  WHERE block_height BETWEEN 736611 AND 739756 AND address != ''
+  GROUP BY address
+), direct_hits AS (
+  SELECT o.address,t.target_sats,COUNT(*) AS direct_outputs,MIN(o.block_height) AS direct_first_h,
+         GROUP_CONCAT(SUBSTR(o.txid,1,12), ' ') AS tx_preview
+  FROM explorer_tx_outputs o
+  JOIN targets t ON t.target_sats=o.value_sats
+  WHERE o.block_height BETWEEN 736611 AND 739756 AND o.address != ''
+  GROUP BY o.address,t.target_sats
+), exact_counts AS (
+  SELECT name,COUNT(DISTINCT address) AS exact_candidates
+  FROM per_address_best
+  WHERE address_rank=1 AND diff_sats=0
+  GROUP BY name
+), ranked AS (
+  SELECT b.name,b.target_sats,b.published_dfc,b.sort_order,b.address,b.height,b.balance_sats,b.diff_sats,
+         COALESCE(s.outputs,0) AS outputs,
+         COALESCE(s.txs,0) AS txs,
+         COALESCE(s.incoming_sats,0) AS incoming_sats,
+         COALESCE(s.first_h,0) AS first_h,
+         COALESCE(s.last_h,0) AS last_h,
+         COALESCE(s.action_outputs,0) AS action_outputs,
+         COALESCE(d.direct_outputs,0) AS direct_outputs,
+         COALESCE(d.direct_first_h,0) AS direct_first_h,
+         COALESCE(d.tx_preview,'') AS tx_preview,
+         COALESCE(e.exact_candidates,0) AS exact_candidates,
+         ROW_NUMBER() OVER (
+           PARTITION BY b.name
+           ORDER BY b.diff_sats ASC,COALESCE(s.action_outputs,0) DESC,COALESCE(s.outputs,0) DESC,b.height DESC,b.address ASC
+         ) AS target_rank
+  FROM per_address_best b
+  LEFT JOIN address_stats s ON s.address=b.address
+  LEFT JOIN direct_hits d ON d.address=b.address AND d.target_sats=b.target_sats
+  LEFT JOIN exact_counts e ON e.name=b.name
+  WHERE b.address_rank=1
+)
+SELECT r.name,r.published_dfc,r.target_sats,r.address,r.height,COALESCE(bl.time,0),
+       r.balance_sats,r.diff_sats,r.outputs,r.txs,r.incoming_sats,r.first_h,r.last_h,
+       r.action_outputs,r.direct_outputs,r.direct_first_h,r.tx_preview,r.exact_candidates,r.target_rank
+FROM ranked r
+LEFT JOIN explorer_blocks bl ON bl.height=r.height
+WHERE r.target_rank <= 8 OR r.diff_sats=0
+ORDER BY r.sort_order,r.target_rank,r.address
+)SQL"))) {
+                    local_error = payout_query.lastError().text();
+                } else {
+                    while (payout_query.next()) {
+                        const QString name = payout_query.value(0).toString();
+                        const QString published = payout_query.value(1).toString();
+                        const qint64 target_sats = payout_query.value(2).toLongLong();
+                        const QString address = payout_query.value(3).toString();
+                        const int height = payout_query.value(4).toInt();
+                        const qint64 time = payout_query.value(5).toLongLong();
+                        const qint64 balance_sats = payout_query.value(6).toLongLong();
+                        const qint64 diff_sats = payout_query.value(7).toLongLong();
+                        const int outputs = payout_query.value(8).toInt();
+                        const int txs = payout_query.value(9).toInt();
+                        const qint64 incoming_sats = payout_query.value(10).toLongLong();
+                        const int first_height = payout_query.value(11).toInt();
+                        const int last_height = payout_query.value(12).toInt();
+                        const int action_outputs = payout_query.value(13).toInt();
+                        const int direct_outputs = payout_query.value(14).toInt();
+                        const int direct_first_height = payout_query.value(15).toInt();
+                        const QString tx_preview = payout_query.value(16).toString();
+                        const int exact_candidates = payout_query.value(17).toInt();
+                        const int target_rank = payout_query.value(18).toInt();
+                        int score = diff_sats == 0 ? 70 : std::max(20, 62 - static_cast<int>(diff_sats / 10000));
+                        if (direct_outputs > 0) score += 12;
+                        if (action_outputs >= 25) score += 12;
+                        else if (action_outputs >= 5) score += 6;
+                        if (outputs >= 5) score += 4;
+                        score = std::min(score, 99);
+                        const QString confidence = diff_sats == 0
+                            ? (exact_candidates > 1 ? QStringLiteral("Ambiguous") : QStringLiteral("High"))
+                            : (diff_sats <= 10000 ? QStringLiteral("Medium") : QStringLiteral("Low"));
+                        const QString match_type = diff_sats == 0
+                            ? QStringLiteral("point_balance_exact")
+                            : QStringLiteral("point_balance_near");
+                        const QString timestamp = time > 0
+                            ? QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
+                            : QStringLiteral("date unavailable");
+                        QStringList evidence;
+                        evidence.push_back(diff_sats == 0
+                            ? QStringLiteral("historical balance exactly reached the published amount")
+                            : QStringLiteral("historical balance came within %1 of the published amount").arg(explorerAmountText(diff_sats)));
+                        if (direct_outputs > 0) {
+                            evidence.push_back(QStringLiteral("%1 exact payout-size output%2 in settlement window")
+                                .arg(QString::number(direct_outputs), direct_outputs == 1 ? QString() : QStringLiteral("s")));
+                        }
+                        if (action_outputs > 0) {
+                            evidence.push_back(QStringLiteral("%1 action-range output%2 in DC25 window")
+                                .arg(QString::number(action_outputs), action_outputs == 1 ? QString() : QStringLiteral("s")));
+                        }
+                        if (exact_candidates > 1 && diff_sats == 0) {
+                            evidence.push_back(QStringLiteral("%1 exact amount-matched addresses; identity remains unresolved")
+                                .arg(QString::number(exact_candidates)));
+                        }
+                        payout_rows.push_back(row_for(QVariantList{
+                            name,
+                            published,
+                            address,
+                            explorerAmountText(balance_sats),
+                            QStringLiteral("%1 / %2").arg(QString::number(height), timestamp),
+                            diff_sats == 0 ? QStringLiteral("exact") : explorerAmountText(diff_sats),
+                            confidence,
+                            evidence.join(QStringLiteral("; "))
+                        }, QVariantMap{
+                            {QStringLiteral("type"), QStringLiteral("address")},
+                            {QStringLiteral("id"), address},
+                            {QStringLiteral("address"), address},
+                            {QStringLiteral("droidName"), name},
+                            {QStringLiteral("published"), published},
+                            {QStringLiteral("targetSats"), QVariant::fromValue<qlonglong>(target_sats)},
+                            {QStringLiteral("balanceSats"), QVariant::fromValue<qlonglong>(balance_sats)},
+                            {QStringLiteral("differenceSats"), QVariant::fromValue<qlonglong>(diff_sats)},
+                            {QStringLiteral("height"), height},
+                            {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
+                            {QStringLiteral("outputs"), outputs},
+                            {QStringLiteral("transactions"), txs},
+                            {QStringLiteral("incomingSats"), QVariant::fromValue<qlonglong>(incoming_sats)},
+                            {QStringLiteral("firstHeight"), first_height},
+                            {QStringLiteral("lastHeight"), last_height},
+                            {QStringLiteral("actionOutputs"), action_outputs},
+                            {QStringLiteral("directOutputs"), direct_outputs},
+                            {QStringLiteral("directFirstHeight"), direct_first_height},
+                            {QStringLiteral("txPreview"), tx_preview},
+                            {QStringLiteral("exactCandidates"), exact_candidates},
+                            {QStringLiteral("targetRank"), target_rank},
+                            {QStringLiteral("score"), score},
+                            {QStringLiteral("confidence"), confidence},
+                            {QStringLiteral("matchType"), match_type}}));
+                        if (confidence != QLatin1String("Low") || action_outputs >= 25 || direct_outputs > 0) {
+                            add_game_address_lead(QStringLiteral("DC25 payout lead"), name, address,
+                                                  explorerAmountText(balance_sats), score, confidence,
+                                                  evidence.join(QStringLiteral("; ")),
+                                                  QVariantMap{
+                                                      {QStringLiteral("source"), QStringLiteral("dc25-payout-hunt")},
+                                                      {QStringLiteral("droidName"), name},
+                                                      {QStringLiteral("height"), height},
+                                                      {QStringLiteral("targetSats"), QVariant::fromValue<qlonglong>(target_sats)},
+                                                      {QStringLiteral("balanceSats"), QVariant::fromValue<qlonglong>(balance_sats)},
+                                                      {QStringLiteral("differenceSats"), QVariant::fromValue<qlonglong>(diff_sats)}});
+                        }
+                    }
+                }
+            }
+
+            if (local_error.isEmpty()) {
+                QSqlQuery game_lead_query(db);
+                if (!game_lead_query.exec(QString::fromLatin1(R"SQL(
+SELECT address,
+       COUNT(*) AS outputs,
+       COUNT(DISTINCT txid) AS txs,
+       COALESCE(SUM(value_sats),0) AS sats,
+       MIN(block_height) AS first_h,
+       MAX(block_height) AS last_h,
+       SUM(CASE WHEN value_sats BETWEEN 100000 AND 314159265 THEN 1 ELSE 0 END) AS action_outputs,
+       SUM(CASE WHEN value_sats=1000000 THEN 1 ELSE 0 END) AS exact001_outputs,
+       SUM(CASE WHEN value_sats IN (1620000,3210000,1190000,2524000,540000) THEN 1 ELSE 0 END) AS repeated_amount_outputs
+FROM explorer_tx_outputs
+WHERE block_height BETWEEN 736611 AND 739756 AND address != ''
+GROUP BY address
+HAVING action_outputs >= 40 OR exact001_outputs >= 10 OR repeated_amount_outputs >= 40
+ORDER BY action_outputs DESC,sats DESC,address ASC
+LIMIT 80
+)SQL"))) {
+                    local_error = game_lead_query.lastError().text();
+                } else {
+                    while (game_lead_query.next()) {
+                        const QString address = game_lead_query.value(0).toString();
+                        const int outputs = game_lead_query.value(1).toInt();
+                        const int txs = game_lead_query.value(2).toInt();
+                        const qint64 sats = game_lead_query.value(3).toLongLong();
+                        const int first_height = game_lead_query.value(4).toInt();
+                        const int last_height = game_lead_query.value(5).toInt();
+                        const int action_outputs = game_lead_query.value(6).toInt();
+                        const int exact001_outputs = game_lead_query.value(7).toInt();
+                        const int repeated_amount_outputs = game_lead_query.value(8).toInt();
+                        int score = 40 + std::min(35, action_outputs / 8);
+                        if (exact001_outputs >= 10) score += 8;
+                        if (repeated_amount_outputs >= 40) score += 8;
+                        score = std::min(score, 95);
+                        const QString role = action_outputs >= 100
+                            ? QStringLiteral("DC25 high-cadence endpoint")
+                            : QStringLiteral("DC25 action endpoint");
+                        const QString confidence = action_outputs >= 100
+                            ? QStringLiteral("Medium")
+                            : QStringLiteral("Candidate");
+                        const QString evidence = QStringLiteral("%1 action-range outputs, %2 exact 0.01 sends, %3 repeated-cost outputs across blocks %4-%5.")
+                            .arg(QString::number(action_outputs),
+                                 QString::number(exact001_outputs),
+                                 QString::number(repeated_amount_outputs),
+                                 QString::number(first_height),
+                                 QString::number(last_height));
+                        add_game_address_lead(role, QStringLiteral("address %1").arg(address.left(8)), address,
+                                              roundedExplorerAmountText(sats), score, confidence, evidence,
+                                              QVariantMap{
+                                                  {QStringLiteral("source"), QStringLiteral("dc25-action-pattern")},
+                                                  {QStringLiteral("outputs"), outputs},
+                                                  {QStringLiteral("transactions"), txs},
+                                                  {QStringLiteral("actionOutputs"), action_outputs},
+                                                  {QStringLiteral("exact001Outputs"), exact001_outputs},
+                                                  {QStringLiteral("repeatedAmountOutputs"), repeated_amount_outputs},
+                                                  {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)},
+                                                  {QStringLiteral("firstHeight"), first_height},
+                                                  {QStringLiteral("lastHeight"), last_height}});
+                    }
+                }
+            }
+
+            if (local_error.isEmpty()) {
                 QSqlQuery winner_query(db);
                 if (!winner_query.exec(QString::fromLatin1(R"SQL(
 SELECT address,COUNT(*) outputs,COUNT(DISTINCT txid) txs,COALESCE(SUM(value_sats),0) sats,
@@ -10373,6 +11279,11 @@ LIMIT 100
         QStringLiteral("high")
     }, QVariantMap{{QStringLiteral("confidence"), QStringLiteral("high")}}));
     evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("DC25 point-balance payout hunt"),
+        QStringLiteral("Published leaderboard amounts are matched against historical balances reached during the DC25 game and settlement window; later spends do not disqualify a candidate."),
+        payout_rows.isEmpty() ? QStringLiteral("waiting for indexed matches") : QStringLiteral("candidate rows")
+    }, QVariantMap{{QStringLiteral("confidence"), payout_rows.isEmpty() ? QStringLiteral("candidate") : QStringLiteral("medium")}}));
+    evidence_rows.push_back(row_for(QVariantList{
         QStringLiteral("2014 vanity battle response"),
         QStringLiteral("A tx with three or more known cosmetic response addresses decodes output satoshis into attacker/defender level, HP, damage, and counter-damage."),
         vanity_rows.isEmpty() ? QStringLiteral("available after matching outputs") : QStringLiteral("high")
@@ -10392,6 +11303,15 @@ LIMIT 100
         QStringLiteral("The Coindroids API documented currencies, attack addresses, ammunition clips, mempool actions, and payouts, but the live API did not answer during this build."),
         QStringLiteral("exact when available")
     }, QVariantMap{{QStringLiteral("confidence"), QStringLiteral("external")}}));
+    evidence_rows.push_back(row_for(QVariantList{
+        QStringLiteral("DC25 attack-address chain forensics"),
+        dc25_chain_summary.value(QStringLiteral("cohortNote")).toString().isEmpty()
+            ? QStringLiteral("The bundled DC25 chain-forensics data separates eight named DC25 leads including Olo, high-confidence attack-address candidates, broad cohort candidates, and source/ammo clips.")
+            : dc25_chain_summary.value(QStringLiteral("cohortNote")).toString(),
+        dc25_chain_summary.value(QStringLiteral("dc25ChainForensicsStatus")).toString().isEmpty()
+            ? QStringLiteral("loaded")
+            : dc25_chain_summary.value(QStringLiteral("dc25ChainForensicsStatus")).toString()
+    }, QVariantMap{{QStringLiteral("confidence"), QStringLiteral("source-backed")}}));
 
     summary.insert(QStringLiteral("actionOutputs"), QVariant::fromValue<qlonglong>(total_action_outputs));
     summary.insert(QStringLiteral("actionTransactions"), QVariant::fromValue<qlonglong>(total_action_txs));
@@ -10418,6 +11338,19 @@ LIMIT 100
     summary.insert(QStringLiteral("vanityResponseCount"), vanity_rows.size());
     summary.insert(QStringLiteral("opReturnCandidateCount"), op_return_rows.size());
     summary.insert(QStringLiteral("botCandidateCount"), bot_rows.size());
+    summary.insert(QStringLiteral("payoutCandidateCount"), payout_rows.size());
+    summary.insert(QStringLiteral("gameAddressLeadCount"), game_address_rows.size());
+    for (auto it = dc25_chain_summary.constBegin(); it != dc25_chain_summary.constEnd(); ++it)
+        summary.insert(it.key(), it.value());
+    summary.insert(QStringLiteral("dc25AttackAddressRowCount"), attack_address_rows.size());
+    summary.insert(QStringLiteral("dc25QrSeedRowCount"), qr_seed_rows.size());
+    summary.insert(QStringLiteral("dc25NamedLeadCount"), qr_seed_rows.size() + olo_rows.size());
+    summary.insert(QStringLiteral("dc25SourceAmmoRowCount"), source_ammo_rows.size());
+    summary.insert(QStringLiteral("dc25OloCandidateRowCount"), olo_rows.size());
+    summary.insert(QStringLiteral("dc25PublishedTopPayoutTotal"), QStringLiteral("206.2045 DFC"));
+    summary.insert(QStringLiteral("dc25PublishedOverallPayoutTotal"), QStringLiteral("227.046 DFC"));
+    summary.insert(QStringLiteral("dc25PayoutHuntNote"),
+                   QStringLiteral("Published DC25 payout values are treated as point-in-time contest/payout measurements. The scanner looks for historical balances reached during the DC25 settlement window, not final or current wallet balances."));
     summary.insert(QStringLiteral("transitionDate"), QStringLiteral("2017-07-25"));
     summary.insert(QStringLiteral("transitionLabel"), QStringLiteral("Defcoin mempool support added"));
     summary.insert(QStringLiteral("bountyTerminologyDate"), QStringLiteral("2017-08-11"));
@@ -10440,62 +11373,311 @@ LIMIT 100
     result.insert(QStringLiteral("vanity"), vanity_rows);
     result.insert(QStringLiteral("opReturns"), op_return_rows);
     result.insert(QStringLiteral("bots"), bot_rows);
+    result.insert(QStringLiteral("payouts"), payout_rows);
+    result.insert(QStringLiteral("attackAddresses"), attack_address_rows);
+    result.insert(QStringLiteral("qrSeeds"), qr_seed_rows);
+    result.insert(QStringLiteral("sourceAmmo"), source_ammo_rows);
+    result.insert(QStringLiteral("oloCandidates"), olo_rows);
+    result.insert(QStringLiteral("gameAddresses"), game_address_rows);
     result.insert(QStringLiteral("evidence"), evidence_rows);
     if (local_error.isEmpty()) saveCoindroidsAnalyticsCache(result);
     if (!local_error.isEmpty() && error) *error = local_error;
     return result;
 }
 
+QVariantList NuRpcService::explorerContactsFromJsonArray(const QJsonArray& raw_contacts) const
+{
+    QVariantList contacts;
+    for (const QJsonValue& value : raw_contacts) {
+        const QJsonObject object = value.toObject();
+        const QString username = singleLineLimited(object.value(QStringLiteral("username")).toString(), 96).trimmed();
+        const QJsonArray raw_addresses = object.value(QStringLiteral("addresses")).toArray();
+        QVariantList addresses;
+        QStringList address_strings;
+        QSet<QString> seen;
+        for (const QJsonValue& address_value : raw_addresses) {
+            const QString address = singleLineLimited(address_value.toString(), 128).trimmed();
+            if (address.isEmpty() || seen.contains(address)) continue;
+            seen.insert(address);
+            addresses.push_back(address);
+            address_strings.push_back(address);
+        }
+        if (!username.isEmpty() && !addresses.isEmpty()) {
+            contacts.push_back(QVariantMap{
+                {QStringLiteral("username"), username},
+                {QStringLiteral("addresses"), addresses},
+                {QStringLiteral("addressText"), address_strings.join(QStringLiteral(", "))}});
+        }
+    }
+    return contacts;
+}
+
+QJsonArray NuRpcService::explorerContactsToJsonArray(const QVariantList& contacts) const
+{
+    QJsonArray out;
+    for (const QVariant& value : contacts) {
+        const QVariantMap contact = value.toMap();
+        const QString username = singleLineLimited(contact.value(QStringLiteral("username")).toString(), 96).trimmed();
+        QJsonArray addresses;
+        QSet<QString> seen;
+        for (const QVariant& address_value : contact.value(QStringLiteral("addresses")).toList()) {
+            const QString address = singleLineLimited(address_value.toString(), 128).trimmed();
+            if (address.isEmpty() || seen.contains(address)) continue;
+            seen.insert(address);
+            addresses.push_back(address);
+        }
+        if (username.isEmpty() || addresses.isEmpty()) continue;
+        QJsonObject object;
+        object.insert(QStringLiteral("username"), username);
+        object.insert(QStringLiteral("addresses"), addresses);
+        out.push_back(object);
+    }
+    return out;
+}
+
+QVariantMap NuRpcService::explorerContactSetRow(const QString& name, const QVariantList& contacts, qint64 updated_at) const
+{
+    int address_count = 0;
+    for (const QVariant& value : contacts) {
+        address_count += value.toMap().value(QStringLiteral("addresses")).toList().size();
+    }
+    const QString clean_name = singleLineLimited(name, 96).trimmed();
+    const QString updated_text = updated_at > 0
+        ? QDateTime::fromSecsSinceEpoch(updated_at).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss t"))
+        : QStringLiteral("not saved");
+    return QVariantMap{
+        {QStringLiteral("cells"), QVariantList{
+            clean_name,
+            contacts.size(),
+            address_count,
+            updated_text
+        }},
+        {QStringLiteral("meta"), QVariantMap{
+            {QStringLiteral("name"), clean_name},
+            {QStringLiteral("contacts"), contacts},
+            {QStringLiteral("contactCount"), contacts.size()},
+            {QStringLiteral("addressCount"), address_count},
+            {QStringLiteral("updatedAt"), QVariant::fromValue<qlonglong>(updated_at)}}}
+    };
+}
+
+int NuRpcService::explorerContactSetIndex(const QString& name) const
+{
+    const QString clean_name = singleLineLimited(name, 96).trimmed();
+    if (clean_name.isEmpty()) return -1;
+    for (int i = 0; i < m_explorer_contact_sets.size(); ++i) {
+        const QVariantMap meta = m_explorer_contact_sets.at(i).toMap().value(QStringLiteral("meta")).toMap();
+        if (meta.value(QStringLiteral("name")).toString().compare(clean_name, Qt::CaseInsensitive) == 0) return i;
+    }
+    return -1;
+}
+
+void NuRpcService::upsertExplorerContactSet(const QString& name, const QVariantList& contacts, qint64 updated_at)
+{
+    const QString clean_name = singleLineLimited(name, 96).trimmed().isEmpty()
+        ? QStringLiteral("Default")
+        : singleLineLimited(name, 96).trimmed();
+    const int index = explorerContactSetIndex(clean_name);
+    const QVariantMap row = explorerContactSetRow(clean_name, contacts, updated_at);
+    if (index >= 0) {
+        m_explorer_contact_sets[index] = row;
+    } else {
+        m_explorer_contact_sets.push_back(row);
+    }
+}
+
+void NuRpcService::persistExplorerContactSets()
+{
+    QJsonArray sets;
+    for (const QVariant& value : m_explorer_contact_sets) {
+        const QVariantMap row = value.toMap();
+        const QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
+        const QString name = singleLineLimited(meta.value(QStringLiteral("name")).toString(), 96).trimmed();
+        if (name.isEmpty()) continue;
+        QJsonObject object;
+        object.insert(QStringLiteral("name"), name);
+        object.insert(QStringLiteral("updatedAt"), static_cast<qint64>(meta.value(QStringLiteral("updatedAt")).toLongLong()));
+        object.insert(QStringLiteral("contacts"), explorerContactsToJsonArray(meta.value(QStringLiteral("contacts")).toList()));
+        sets.push_back(object);
+    }
+    QSettings settings;
+    settings.setValue(QStringLiteral("ExplorerContactSetsJson"), QJsonDocument(sets).toJson(QJsonDocument::Compact));
+    settings.setValue(QStringLiteral("ExplorerActiveContactSetName"), m_current_explorer_contact_set_name);
+    settings.setValue(QStringLiteral("ExplorerContactsJson"), QJsonDocument(explorerContactsToJsonArray(m_explorer_contacts)).toJson(QJsonDocument::Compact));
+}
+
 void NuRpcService::loadExplorerContacts()
 {
     m_explorer_contacts.clear();
-    const QByteArray raw = QSettings().value(QStringLiteral("ExplorerContactsJson"), QByteArray()).toByteArray();
-    if (!raw.isEmpty()) {
-        const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    m_explorer_contact_sets.clear();
+    QSettings settings;
+    const QByteArray raw_sets = settings.value(QStringLiteral("ExplorerContactSetsJson"), QByteArray()).toByteArray();
+    if (!raw_sets.isEmpty()) {
+        const QJsonDocument doc = QJsonDocument::fromJson(raw_sets);
         if (doc.isArray()) {
             for (const QJsonValue& value : doc.array()) {
                 const QJsonObject object = value.toObject();
-                const QString username = singleLineLimited(object.value(QStringLiteral("username")).toString(), 96).trimmed();
-                const QJsonArray raw_addresses = object.value(QStringLiteral("addresses")).toArray();
-                QVariantList addresses;
-                QStringList address_strings;
-                QSet<QString> seen;
-                for (const QJsonValue& address_value : raw_addresses) {
-                    const QString address = singleLineLimited(address_value.toString(), 128).trimmed();
-                    if (address.isEmpty() || seen.contains(address)) continue;
-                    seen.insert(address);
-                    addresses.push_back(address);
-                    address_strings.push_back(address);
-                }
-                if (!username.isEmpty() && !addresses.isEmpty()) {
-                    m_explorer_contacts.push_back(QVariantMap{
-                        {QStringLiteral("username"), username},
-                        {QStringLiteral("addresses"), addresses},
-                        {QStringLiteral("addressText"), address_strings.join(QStringLiteral(", "))}});
-                }
+                const QString name = singleLineLimited(object.value(QStringLiteral("name")).toString(), 96).trimmed();
+                if (name.isEmpty()) continue;
+                upsertExplorerContactSet(name,
+                                         explorerContactsFromJsonArray(object.value(QStringLiteral("contacts")).toArray()),
+                                         static_cast<qint64>(object.value(QStringLiteral("updatedAt")).toDouble()));
             }
         }
     }
+
+    if (m_explorer_contact_sets.isEmpty()) {
+        const QByteArray raw = settings.value(QStringLiteral("ExplorerContactsJson"), QByteArray()).toByteArray();
+        QVariantList migrated_contacts;
+        if (!raw.isEmpty()) {
+            const QJsonDocument doc = QJsonDocument::fromJson(raw);
+            if (doc.isArray()) migrated_contacts = explorerContactsFromJsonArray(doc.array());
+        }
+        upsertExplorerContactSet(QStringLiteral("Default"), migrated_contacts, QDateTime::currentSecsSinceEpoch());
+    }
+
+    QString active_name = singleLineLimited(settings.value(QStringLiteral("ExplorerActiveContactSetName"), QString()).toString(), 96).trimmed();
+    int active_index = explorerContactSetIndex(active_name);
+    if (active_index < 0 && !m_explorer_contact_sets.isEmpty()) {
+        active_index = 0;
+        active_name = m_explorer_contact_sets.first().toMap().value(QStringLiteral("meta")).toMap().value(QStringLiteral("name")).toString();
+    }
+    m_current_explorer_contact_set_name = active_name.isEmpty() ? QStringLiteral("Default") : active_name;
+    if (active_index >= 0) {
+        m_explorer_contacts = m_explorer_contact_sets.at(active_index).toMap().value(QStringLiteral("meta")).toMap().value(QStringLiteral("contacts")).toList();
+    }
+    persistExplorerContactSets();
     refreshExplorerContactRelationships();
 }
 
 void NuRpcService::persistExplorerContacts()
 {
-    QJsonArray contacts;
-    for (const QVariant& value : m_explorer_contacts) {
-        const QVariantMap contact = value.toMap();
-        QJsonArray addresses;
-        for (const QVariant& address_value : contact.value(QStringLiteral("addresses")).toList()) {
-            const QString address = address_value.toString().trimmed();
-            if (!address.isEmpty()) addresses.push_back(address);
-        }
-        if (contact.value(QStringLiteral("username")).toString().trimmed().isEmpty() || addresses.isEmpty()) continue;
-        QJsonObject object;
-        object.insert(QStringLiteral("username"), contact.value(QStringLiteral("username")).toString().trimmed());
-        object.insert(QStringLiteral("addresses"), addresses);
-        contacts.push_back(object);
+    if (m_current_explorer_contact_set_name.trimmed().isEmpty())
+        m_current_explorer_contact_set_name = QStringLiteral("Default");
+    upsertExplorerContactSet(m_current_explorer_contact_set_name, m_explorer_contacts, QDateTime::currentSecsSinceEpoch());
+    persistExplorerContactSets();
+}
+
+void NuRpcService::createExplorerContactSet(const QString& name)
+{
+    const QString clean_name = singleLineLimited(name, 96).trimmed();
+    if (clean_name.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Contact set not created"), QStringLiteral("Enter a contact set name."));
+        return;
     }
-    QSettings().setValue(QStringLiteral("ExplorerContactsJson"), QJsonDocument(contacts).toJson(QJsonDocument::Compact));
+    if (explorerContactSetIndex(clean_name) >= 0) {
+        Q_EMIT userMessage(QStringLiteral("Contact set already exists"),
+                           QStringLiteral("Load or rename the existing \"%1\" set instead.").arg(clean_name));
+        return;
+    }
+    m_current_explorer_contact_set_name = clean_name;
+    m_explorer_contacts.clear();
+    upsertExplorerContactSet(clean_name, m_explorer_contacts, QDateTime::currentSecsSinceEpoch());
+    persistExplorerContactSets();
+    refreshExplorerContactRelationships();
+    Q_EMIT userMessage(QStringLiteral("Contact set created"),
+                       QStringLiteral("\"%1\" is now the active empty contact set.").arg(clean_name));
+}
+
+void NuRpcService::saveExplorerContactSet(const QString& name)
+{
+    const QString clean_name = singleLineLimited(name, 96).trimmed().isEmpty()
+        ? m_current_explorer_contact_set_name
+        : singleLineLimited(name, 96).trimmed();
+    if (clean_name.trimmed().isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Contact set not saved"), QStringLiteral("Enter a contact set name."));
+        return;
+    }
+    m_current_explorer_contact_set_name = clean_name;
+    upsertExplorerContactSet(clean_name, m_explorer_contacts, QDateTime::currentSecsSinceEpoch());
+    persistExplorerContactSets();
+    refreshExplorerContactRelationships();
+    Q_EMIT userMessage(QStringLiteral("Contact set saved"),
+                       QStringLiteral("\"%1\" now contains %2 contact%3.")
+                           .arg(clean_name,
+                                QString::number(m_explorer_contacts.size()),
+                                m_explorer_contacts.size() == 1 ? QString() : QStringLiteral("s")));
+}
+
+void NuRpcService::loadExplorerContactSet(const QString& name)
+{
+    const QString clean_name = singleLineLimited(name, 96).trimmed();
+    const int index = explorerContactSetIndex(clean_name);
+    if (index < 0) {
+        Q_EMIT userMessage(QStringLiteral("Contact set not loaded"),
+                           QStringLiteral("No saved contact set named \"%1\" was found.").arg(clean_name));
+        return;
+    }
+    const QVariantMap meta = m_explorer_contact_sets.at(index).toMap().value(QStringLiteral("meta")).toMap();
+    m_current_explorer_contact_set_name = meta.value(QStringLiteral("name")).toString();
+    m_explorer_contacts = meta.value(QStringLiteral("contacts")).toList();
+    persistExplorerContactSets();
+    refreshExplorerContactRelationships();
+    Q_EMIT userMessage(QStringLiteral("Contact set loaded"),
+                       QStringLiteral("\"%1\" is active for relationship graphing.").arg(m_current_explorer_contact_set_name));
+}
+
+void NuRpcService::renameExplorerContactSet(const QString& old_name, const QString& new_name)
+{
+    const QString clean_old = singleLineLimited(old_name, 96).trimmed().isEmpty()
+        ? m_current_explorer_contact_set_name
+        : singleLineLimited(old_name, 96).trimmed();
+    const QString clean_new = singleLineLimited(new_name, 96).trimmed();
+    if (clean_old.isEmpty() || clean_new.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Contact set not renamed"),
+                           QStringLiteral("Choose an existing set and enter the new name."));
+        return;
+    }
+    const int index = explorerContactSetIndex(clean_old);
+    if (index < 0) {
+        Q_EMIT userMessage(QStringLiteral("Contact set not renamed"),
+                           QStringLiteral("No saved contact set named \"%1\" was found.").arg(clean_old));
+        return;
+    }
+    const int duplicate_index = explorerContactSetIndex(clean_new);
+    if (duplicate_index >= 0 && duplicate_index != index) {
+        Q_EMIT userMessage(QStringLiteral("Contact set not renamed"),
+                           QStringLiteral("\"%1\" already exists.").arg(clean_new));
+        return;
+    }
+    const QVariantMap old_meta = m_explorer_contact_sets.at(index).toMap().value(QStringLiteral("meta")).toMap();
+    const QVariantList contacts = old_meta.value(QStringLiteral("contacts")).toList();
+    const qint64 updated_at = old_meta.value(QStringLiteral("updatedAt")).toLongLong();
+    m_explorer_contact_sets[index] = explorerContactSetRow(clean_new, contacts, updated_at > 0 ? updated_at : QDateTime::currentSecsSinceEpoch());
+    if (m_current_explorer_contact_set_name.compare(clean_old, Qt::CaseInsensitive) == 0)
+        m_current_explorer_contact_set_name = clean_new;
+    persistExplorerContactSets();
+    Q_EMIT explorerChanged();
+    Q_EMIT userMessage(QStringLiteral("Contact set renamed"),
+                       QStringLiteral("\"%1\" is now \"%2\".").arg(clean_old, clean_new));
+}
+
+void NuRpcService::deleteExplorerContactSet(const QString& name)
+{
+    const QString clean_name = singleLineLimited(name, 96).trimmed();
+    const int index = explorerContactSetIndex(clean_name);
+    if (index < 0) {
+        Q_EMIT userMessage(QStringLiteral("Contact set not deleted"),
+                           QStringLiteral("No saved contact set named \"%1\" was found.").arg(clean_name));
+        return;
+    }
+    const bool deleted_active = m_current_explorer_contact_set_name.compare(clean_name, Qt::CaseInsensitive) == 0;
+    m_explorer_contact_sets.removeAt(index);
+    if (m_explorer_contact_sets.isEmpty()) {
+        m_current_explorer_contact_set_name = QStringLiteral("Default");
+        m_explorer_contacts.clear();
+        upsertExplorerContactSet(m_current_explorer_contact_set_name, m_explorer_contacts, QDateTime::currentSecsSinceEpoch());
+    } else if (deleted_active) {
+        const QVariantMap meta = m_explorer_contact_sets.first().toMap().value(QStringLiteral("meta")).toMap();
+        m_current_explorer_contact_set_name = meta.value(QStringLiteral("name")).toString();
+        m_explorer_contacts = meta.value(QStringLiteral("contacts")).toList();
+    }
+    persistExplorerContactSets();
+    refreshExplorerContactRelationships();
+    Q_EMIT userMessage(QStringLiteral("Contact set deleted"),
+                       deleted_active
+                           ? QStringLiteral("\"%1\" was deleted. \"%2\" is now active.").arg(clean_name, m_current_explorer_contact_set_name)
+                           : QStringLiteral("\"%1\" was deleted.").arg(clean_name));
 }
 
 void NuRpcService::saveExplorerContact(const QString& username, const QString& addresses, int edit_index)
@@ -10547,10 +11729,16 @@ void NuRpcService::refreshExplorerContactRelationships()
     m_explorer_contact_relationships.clear();
     QHash<QString, QString> owner_by_address;
     QHash<QString, QStringList> addresses_by_owner;
+    QHash<QString, qint64> balance_by_owner;
+    QHash<QString, qint64> received_by_owner;
+    QHash<QString, int> tx_count_by_owner;
     for (const QVariant& value : m_explorer_contacts) {
         const QVariantMap contact = value.toMap();
         const QString username = contact.value(QStringLiteral("username")).toString().trimmed();
         if (username.isEmpty()) continue;
+        balance_by_owner.insert(username, 0);
+        received_by_owner.insert(username, 0);
+        tx_count_by_owner.insert(username, 0);
         for (const QVariant& address_value : contact.value(QStringLiteral("addresses")).toList()) {
             const QString address = address_value.toString().trimmed();
             if (address.isEmpty()) continue;
@@ -10560,7 +11748,7 @@ void NuRpcService::refreshExplorerContactRelationships()
     }
 
     QString error;
-    if (owner_by_address.size() >= 2 && ensureExplorerDatabase(&error)) {
+    if (!owner_by_address.isEmpty() && ensureExplorerDatabase(&error)) {
         const QString connection_name = QStringLiteral("nu_explorer_contacts_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
         db.setDatabaseName(explorerDatabasePath());
@@ -10569,6 +11757,27 @@ void NuRpcService::refreshExplorerContactRelationships()
             QStringList addresses = owner_by_address.keys();
             for (int i = 0; i < addresses.size(); ++i) placeholders.push_back(QStringLiteral("?"));
             {
+                QSqlQuery balance_query(db);
+                balance_query.prepare(QStringLiteral(
+                    "SELECT address, "
+                    "COALESCE(SUM(CASE WHEN spent_by_txid IS NULL THEN value_sats ELSE 0 END), 0) AS balance_sats, "
+                    "COALESCE(SUM(value_sats), 0) AS received_sats, "
+                    "COUNT(DISTINCT txid) AS tx_count "
+                    "FROM explorer_tx_outputs "
+                    "WHERE address IN (%1) "
+                    "GROUP BY address").arg(placeholders.join(QStringLiteral(","))));
+                for (const QString& address : addresses) balance_query.addBindValue(address);
+                if (balance_query.exec()) {
+                    while (balance_query.next()) {
+                        const QString owner = owner_by_address.value(balance_query.value(0).toString());
+                        if (owner.isEmpty()) continue;
+                        balance_by_owner[owner] += balance_query.value(1).toLongLong();
+                        received_by_owner[owner] += balance_query.value(2).toLongLong();
+                        tx_count_by_owner[owner] += balance_query.value(3).toInt();
+                    }
+                }
+            }
+            if (owner_by_address.size() >= 2) {
                 QSqlQuery query(db);
                 query.prepare(QStringLiteral(
                     "SELECT spent.address AS source_address, received.address AS target_address, "
@@ -10599,17 +11808,30 @@ void NuRpcService::refreshExplorerContactRelationships()
                             {QStringLiteral("cells"), QVariantList{parts.at(0), parts.at(1), explorerAmountText(it.value().first), it.value().second}},
                             {QStringLiteral("meta"), QVariantMap{
                                 {QStringLiteral("source"), parts.at(0)},
-                                {QStringLiteral("target"), parts.at(1)},
-                                {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(it.value().first)},
-                                {QStringLiteral("txCount"), it.value().second}}}
-                        });
-                    }
-                }
-            }
+	                            {QStringLiteral("target"), parts.at(1)},
+	                            {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(it.value().first)},
+	                            {QStringLiteral("txCount"), it.value().second}}}
+	                        });
+	                    }
+	                }
+	            }
         }
         db.close();
         db = QSqlDatabase();
         QSqlDatabase::removeDatabase(connection_name);
+    }
+
+    for (int i = 0; i < m_explorer_contacts.size(); ++i) {
+        QVariantMap contact = m_explorer_contacts.at(i).toMap();
+        const QString username = contact.value(QStringLiteral("username")).toString().trimmed();
+        const qint64 balance_sats = balance_by_owner.value(username, 0);
+        const qint64 received_sats = received_by_owner.value(username, 0);
+        contact.insert(QStringLiteral("balanceSats"), QVariant::fromValue<qlonglong>(balance_sats));
+        contact.insert(QStringLiteral("receivedSats"), QVariant::fromValue<qlonglong>(received_sats));
+        contact.insert(QStringLiteral("txCount"), tx_count_by_owner.value(username, 0));
+        contact.insert(QStringLiteral("balanceText"), explorerAmountText(balance_sats));
+        contact.insert(QStringLiteral("receivedText"), explorerAmountText(received_sats));
+        m_explorer_contacts[i] = contact;
     }
 
     if (m_explorer_contact_relationships.isEmpty() && owner_by_address.size() >= 2) {
@@ -10619,6 +11841,311 @@ void NuRpcService::refreshExplorerContactRelationships()
         });
     }
     Q_EMIT explorerChanged();
+}
+
+void NuRpcService::loadExplorerContactRows(const QString& name, const QVariantList& rows)
+{
+    const QString clean_name = singleLineLimited(name, 96).trimmed().isEmpty()
+        ? QStringLiteral("Ad-hoc Relationship Set")
+        : singleLineLimited(name, 96).trimmed();
+    QVariantList contacts;
+    QSet<QString> seen_addresses;
+
+    auto add_candidates = [&seen_addresses](QStringList& target, const QString& raw_text) {
+        QString clean = raw_text.trimmed();
+        if (clean.isEmpty()) return;
+        clean.replace(QRegularExpression(QStringLiteral("[<>\\[\\]\\(\\)\\\",;|]")), QStringLiteral(" "));
+        clean.replace(QRegularExpression(QStringLiteral(R"(\s+)")), QStringLiteral(" "));
+        const QStringList parts = clean.split(QRegularExpression(QStringLiteral(R"(\s+)")), Qt::SkipEmptyParts);
+        const QStringList recognized = recognizedExplorerAddresses(parts);
+        for (const QString& address : recognized) {
+            if (seen_addresses.contains(address)) continue;
+            seen_addresses.insert(address);
+            target.push_back(address);
+        }
+    };
+
+    auto display_name_for_row = [](const QVariantMap& row, const QVariantMap& meta) {
+        const QStringList keys{
+            QStringLiteral("name"),
+            QStringLiteral("knownName"),
+            QStringLiteral("role"),
+            QStringLiteral("label"),
+            QStringLiteral("droid")
+        };
+        for (const QString& key : keys) {
+            const QString value = meta.value(key).toString().trimmed();
+            if (!value.isEmpty()) return value;
+        }
+        const QVariantList cells = row.value(QStringLiteral("cells")).toList();
+        for (const QVariant& cell : cells) {
+            const QString value = cell.toString().trimmed();
+            if (value.isEmpty()) continue;
+            if (isLikelyBase58AddressText(value)) continue;
+            if (value.size() > 96) continue;
+            return value;
+        }
+        return QString();
+    };
+
+    for (const QVariant& value : rows) {
+        const QVariantMap row = value.toMap();
+        const QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
+        QStringList addresses;
+        const QStringList preferred_meta_keys{
+            QStringLiteral("address"),
+            QStringLiteral("legacyP2sh"),
+            QStringLiteral("indexedP2sh"),
+            QStringLiteral("sourceAddress"),
+            QStringLiteral("targetAddress"),
+            QStringLiteral("id")
+        };
+        for (const QString& key : preferred_meta_keys) {
+            add_candidates(addresses, meta.value(key).toString());
+        }
+        const QVariantList cells = row.value(QStringLiteral("cells")).toList();
+        for (const QVariant& cell : cells) {
+            add_candidates(addresses, cell.toString());
+        }
+        addresses.removeDuplicates();
+        if (addresses.isEmpty()) continue;
+
+        const QString label = singleLineLimited(display_name_for_row(row, meta).trimmed(), 96);
+        contacts.push_back(QVariantMap{
+            {QStringLiteral("username"), label.isEmpty() ? QStringLiteral("Contact %1").arg(addresses.first().left(10)) : label},
+            {QStringLiteral("addresses"), [&addresses]() {
+                 QVariantList list;
+                 for (const QString& address : addresses) list.push_back(address);
+                 return list;
+             }()},
+            {QStringLiteral("addressText"), addresses.join(QStringLiteral(", "))}});
+    }
+
+    if (contacts.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("No relationship contacts loaded"),
+                           QStringLiteral("This table does not contain recognized Defcoin addresses."));
+        return;
+    }
+
+    m_current_explorer_contact_set_name = clean_name;
+    m_explorer_contacts = contacts;
+    upsertExplorerContactSet(clean_name, contacts, QDateTime::currentSecsSinceEpoch());
+    persistExplorerContactSets();
+    refreshExplorerContactRelationships();
+    Q_EMIT userMessage(QStringLiteral("Relationship contacts loaded"),
+                       QStringLiteral("Loaded %1 contact%2 from %3.")
+                           .arg(QString::number(contacts.size()),
+                                contacts.size() == 1 ? QString() : QStringLiteral("s"),
+                                clean_name));
+}
+
+QString NuRpcService::coindroidsContactSetName(const QString& key) const
+{
+    const QString normalized = key.trimmed().toLower();
+    if (normalized == QLatin1String("dc25-qr-seeds"))
+        return QStringLiteral("Coindroids DC25 Eight Leads");
+    if (normalized == QLatin1String("dc25-attack-cohort"))
+        return QStringLiteral("Coindroids DC25 Attack Cohort");
+    if (normalized == QLatin1String("dc25-source-ammo"))
+        return QStringLiteral("Coindroids DC25 Source Ammo");
+    if (normalized == QLatin1String("dc25-olo"))
+        return QStringLiteral("Coindroids DC25 Olo");
+    if (normalized == QLatin1String("dc25-investigation"))
+        return QStringLiteral("Coindroids DC25 Investigation");
+    return QString();
+}
+
+QVariantList NuRpcService::coindroidsContactsForSetKey(const QString& key) const
+{
+    const QString normalized = key.trimmed().toLower();
+    QVariantList contacts;
+    QSet<QString> seen_addresses;
+
+    auto add_contact = [&contacts, &seen_addresses, this](const QString& raw_name, const QString& raw_address) {
+        const QStringList clean_addresses = recognizedExplorerAddresses(QStringList{raw_address.trimmed()});
+        if (clean_addresses.isEmpty()) return;
+        const QString address = clean_addresses.first();
+        if (seen_addresses.contains(address)) return;
+        seen_addresses.insert(address);
+        const QString fallback_name = QStringLiteral("Coindroids %1").arg(address.left(10));
+        const QString name = singleLineLimited(raw_name.trimmed().isEmpty() ? fallback_name : raw_name, 96).trimmed();
+        if (name.isEmpty()) return;
+        contacts.push_back(QVariantMap{
+            {QStringLiteral("username"), name},
+            {QStringLiteral("addresses"), QVariantList{address}},
+            {QStringLiteral("addressText"), address}});
+    };
+
+    auto add_rows = [&add_contact](const QVariantList& rows, const QString& prefix) {
+        for (const QVariant& value : rows) {
+            const QVariantMap row = value.toMap();
+            const QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
+            const QString address = meta.value(QStringLiteral("address")).toString();
+            const QString name = meta.value(QStringLiteral("name")).toString();
+            add_contact(prefix + (name.isEmpty() ? address.left(10) : name), address);
+        }
+    };
+
+    if (normalized == QLatin1String("dc25-qr-seeds")) {
+        add_rows(m_coindroids_qr_seed_rows, QStringLiteral("Coindroids QR "));
+        add_rows(m_coindroids_olo_rows, QStringLiteral("Coindroids "));
+    } else if (normalized == QLatin1String("dc25-attack-cohort")) {
+        add_rows(m_coindroids_attack_address_rows, QStringLiteral("Coindroids attack "));
+    } else if (normalized == QLatin1String("dc25-source-ammo")) {
+        add_rows(m_coindroids_source_ammo_rows, QStringLiteral("Coindroids source "));
+    } else if (normalized == QLatin1String("dc25-olo")) {
+        add_rows(m_coindroids_olo_rows, QStringLiteral("Coindroids "));
+    } else if (normalized == QLatin1String("dc25-investigation")) {
+        add_rows(m_coindroids_qr_seed_rows, QStringLiteral("Coindroids QR "));
+        add_rows(m_coindroids_attack_address_rows, QStringLiteral("Coindroids attack "));
+        add_rows(m_coindroids_source_ammo_rows, QStringLiteral("Coindroids source "));
+        add_rows(m_coindroids_olo_rows, QStringLiteral("Coindroids "));
+    }
+
+    return contacts;
+}
+
+void NuRpcService::ensureCoindroidsPrebuiltContactSets(bool emit_signal)
+{
+    const QStringList keys{
+        QStringLiteral("dc25-qr-seeds"),
+        QStringLiteral("dc25-attack-cohort"),
+        QStringLiteral("dc25-source-ammo"),
+        QStringLiteral("dc25-olo"),
+        QStringLiteral("dc25-investigation")
+    };
+    bool changed = false;
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    for (const QString& key : keys) {
+        const QString name = coindroidsContactSetName(key);
+        const QVariantList contacts = coindroidsContactsForSetKey(key);
+        if (name.isEmpty() || contacts.isEmpty()) continue;
+        upsertExplorerContactSet(name, contacts, now);
+        changed = true;
+    }
+    if (!changed) return;
+    persistExplorerContactSets();
+    if (emit_signal) Q_EMIT explorerChanged();
+}
+
+void NuRpcService::loadCoindroidsContactSet(const QString& key)
+{
+    if (m_coindroids_attack_address_rows.isEmpty() &&
+        m_coindroids_qr_seed_rows.isEmpty() &&
+        m_coindroids_source_ammo_rows.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Coindroids contact set not ready"),
+                           QStringLiteral("Refresh Droid Trails first so Nu Explore can build the prebuilt Coindroids contact sets."));
+        return;
+    }
+    const QString name = coindroidsContactSetName(key);
+    const QVariantList contacts = coindroidsContactsForSetKey(key);
+    if (name.isEmpty() || contacts.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Coindroids contact set not ready"),
+                           QStringLiteral("That Coindroids relationship set has no addresses in the loaded analysis."));
+        return;
+    }
+
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    upsertExplorerContactSet(name, contacts, now);
+    m_current_explorer_contact_set_name = name;
+    m_explorer_contacts = contacts;
+    persistExplorerContactSets();
+    refreshExplorerContactRelationships();
+    Q_EMIT userMessage(QStringLiteral("Coindroids contact set loaded"),
+                       QStringLiteral("Loaded %1 addresses into %2 for relationship graphing.")
+                           .arg(QString::number(contacts.size()), name));
+    Q_EMIT explorerChanged();
+}
+
+void NuRpcService::importCoindroidsGameContacts()
+{
+    if (m_coindroids_game_address_rows.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("No Coindroids contacts imported"),
+                           QStringLiteral("Refresh Droid Trails first so the DC25 payout hunt and game-address leads are loaded."));
+        return;
+    }
+
+    QSet<QString> existing_addresses;
+    QHash<QString, int> index_by_name;
+    for (int i = 0; i < m_explorer_contacts.size(); ++i) {
+        const QVariantMap contact = m_explorer_contacts.at(i).toMap();
+        const QString username = contact.value(QStringLiteral("username")).toString().trimmed();
+        if (!username.isEmpty()) index_by_name.insert(username, i);
+        for (const QVariant& address_value : contact.value(QStringLiteral("addresses")).toList()) {
+            const QString address = address_value.toString().trimmed();
+            if (!address.isEmpty()) existing_addresses.insert(address);
+        }
+    }
+
+    int added = 0;
+    int updated = 0;
+    int skipped = 0;
+    for (const QVariant& row_value : m_coindroids_game_address_rows) {
+        const QVariantMap row = row_value.toMap();
+        const QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
+        const QString address = meta.value(QStringLiteral("address")).toString().trimmed();
+        const QStringList clean_addresses = recognizedExplorerAddresses(QStringList{address});
+        if (clean_addresses.isEmpty()) {
+            ++skipped;
+            continue;
+        }
+        const QString clean_address = clean_addresses.first();
+        if (existing_addresses.contains(clean_address)) {
+            ++skipped;
+            continue;
+        }
+        const QString contact_name = singleLineLimited(
+            meta.value(QStringLiteral("contactName")).toString().trimmed().isEmpty()
+                ? QStringLiteral("Coindroids lead %1").arg(clean_address.left(10))
+                : meta.value(QStringLiteral("contactName")).toString(),
+            96).trimmed();
+        if (contact_name.isEmpty()) {
+            ++skipped;
+            continue;
+        }
+
+        const int existing_index = index_by_name.value(contact_name, -1);
+        if (existing_index >= 0 && existing_index < m_explorer_contacts.size()) {
+            QVariantMap contact = m_explorer_contacts.at(existing_index).toMap();
+            QVariantList addresses = contact.value(QStringLiteral("addresses")).toList();
+            QStringList address_strings;
+            for (const QVariant& value : addresses) address_strings.push_back(value.toString());
+            address_strings.push_back(clean_address);
+            address_strings.removeDuplicates();
+            addresses.clear();
+            for (const QString& value : address_strings) addresses.push_back(value);
+            contact.insert(QStringLiteral("addresses"), addresses);
+            contact.insert(QStringLiteral("addressText"), address_strings.join(QStringLiteral(", ")));
+            m_explorer_contacts[existing_index] = contact;
+            ++updated;
+        } else {
+            QVariantList addresses;
+            addresses.push_back(clean_address);
+            m_explorer_contacts.push_back(QVariantMap{
+                {QStringLiteral("username"), contact_name},
+                {QStringLiteral("addresses"), addresses},
+                {QStringLiteral("addressText"), clean_address}});
+            index_by_name.insert(contact_name, m_explorer_contacts.size() - 1);
+            ++added;
+        }
+        existing_addresses.insert(clean_address);
+    }
+
+    if (added == 0 && updated == 0) {
+        Q_EMIT userMessage(QStringLiteral("No Coindroids contacts imported"),
+                           QStringLiteral("All loaded Coindroids game-address leads were already present or were not valid Defcoin addresses."));
+        return;
+    }
+
+    persistExplorerContacts();
+    refreshExplorerContactRelationships();
+    Q_EMIT userMessage(QStringLiteral("Coindroids contacts imported"),
+                       QStringLiteral("Added %1 contact%2, updated %3, skipped %4 existing or invalid address%5.")
+                           .arg(QString::number(added),
+                                added == 1 ? QString() : QStringLiteral("s"),
+                                QString::number(updated),
+                                QString::number(skipped),
+                                skipped == 1 ? QString() : QStringLiteral("es")));
 }
 
 void NuRpcService::refreshCoindroidsAnalytics()
@@ -10660,20 +12187,31 @@ void NuRpcService::refreshCoindroidsAnalytics()
                 guard->m_coindroids_vanity_rows = analysis.value(QStringLiteral("vanity")).toList();
                 guard->m_coindroids_op_return_rows = analysis.value(QStringLiteral("opReturns")).toList();
                 guard->m_coindroids_bot_rows = analysis.value(QStringLiteral("bots")).toList();
+                guard->m_coindroids_payout_rows = analysis.value(QStringLiteral("payouts")).toList();
+                guard->m_coindroids_attack_address_rows = analysis.value(QStringLiteral("attackAddresses")).toList();
+                guard->m_coindroids_qr_seed_rows = analysis.value(QStringLiteral("qrSeeds")).toList();
+                guard->m_coindroids_source_ammo_rows = analysis.value(QStringLiteral("sourceAmmo")).toList();
+                guard->m_coindroids_olo_rows = analysis.value(QStringLiteral("oloCandidates")).toList();
+                guard->m_coindroids_game_address_rows = analysis.value(QStringLiteral("gameAddresses")).toList();
                 guard->m_coindroids_evidence_rows = analysis.value(QStringLiteral("evidence")).toList();
+                guard->ensureCoindroidsPrebuiltContactSets(false);
                 const QString cache_status = guard->m_coindroids_summary.value(QStringLiteral("droidTrailsCacheStatus")).toString();
                 const QString cache_label = cache_status == QLatin1String("hit")
                     ? QStringLiteral("Loaded saved Droid Trails DB")
                     : QStringLiteral("Rebuilt Droid Trails DB");
-                guard->m_coindroids_status = QStringLiteral("%1 v%2: %3 candidate endpoint clusters, %4 payout recipients, %5 launch-window 0.1337 DFC swarm outputs, %6 vanity-response candidates, %7 OP_RETURN payload candidates, %8 bot/reload candidates. Major processing shift: 2017-07-25 dust/amount era toward mempool and payload-aware processing.")
+                guard->m_coindroids_status = QStringLiteral("%1 v%2: %3 candidate endpoint clusters, %4 payout recipients, %5 DC25 point-balance payout leads, %6 game-address leads, %7 launch-window 0.1337 DFC swarm outputs, %8 vanity-response candidates, %9 OP_RETURN payload candidates, %10 bot/reload candidates, %11 DC25 attack-address rows, %12 source/ammo clips. Published DC25 payouts are treated as point-in-time measurements, not final balances. Major processing shift: 2017-07-25 dust/amount era toward mempool and payload-aware processing.")
                     .arg(cache_label,
                          guard->m_coindroids_summary.value(QStringLiteral("droidTrailsCacheVersion")).toString(),
                          QString::number(guard->m_coindroids_endpoint_rows.size()),
                          QString::number(guard->m_coindroids_winner_rows.size()),
+                         QString::number(guard->m_coindroids_payout_rows.size()),
+                         QString::number(guard->m_coindroids_game_address_rows.size()),
                          guard->m_coindroids_summary.value(QStringLiteral("launch1337Outputs")).toString(),
                          QString::number(guard->m_coindroids_vanity_rows.size()),
                          QString::number(guard->m_coindroids_op_return_rows.size()),
-                         QString::number(guard->m_coindroids_bot_rows.size()));
+                         QString::number(guard->m_coindroids_bot_rows.size()),
+                         QString::number(guard->m_coindroids_attack_address_rows.size()),
+                         QString::number(guard->m_coindroids_source_ammo_rows.size()));
             }
             Q_EMIT guard->explorerChanged();
         }, Qt::QueuedConnection);
@@ -13463,6 +15001,28 @@ void NuRpcService::openExternalUrl(const QString& url)
     }
 }
 
+void NuRpcService::openCoindroidsReportPdf()
+{
+    const QString relative_path = QStringLiteral("assets/docs/coindroids_defcoin_forensics_story_report_v6.pdf");
+    const QStringList candidates{
+        QDir(nuResourceRoot()).filePath(relative_path),
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("nu/%1").arg(relative_path)),
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../Resources/nu/%1").arg(relative_path)),
+        QStringLiteral("/Volumes/TB5_4TB/d/Downloads/coindroids_defcoin_forensics_story_report_v6.pdf")
+    };
+    for (const QString& candidate : candidates) {
+        const QFileInfo info(candidate);
+        if (!info.exists() || !info.isFile()) continue;
+        if (!QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath()))) {
+            Q_EMIT userMessage(QStringLiteral("PDF failed"),
+                               QStringLiteral("Nu could not open the Coindroids PDF report."));
+        }
+        return;
+    }
+    Q_EMIT userMessage(QStringLiteral("PDF not found"),
+                       QStringLiteral("The bundled Coindroids story report placeholder is missing from this build."));
+}
+
 void NuRpcService::backupWallet()
 {
     if (!ensureCurrentWalletSelected(QStringLiteral("Wallet backup failed"))) return;
@@ -14501,6 +16061,8 @@ QString NuRpcService::debugLogPath() const
 
 void NuRpcService::stopHelperProcesses()
 {
+    m_stopping_helper_processes = true;
+
     const QList<int> lookup_ids = m_host_lookup_ids.values();
     for (int lookup_id : lookup_ids) {
         QHostInfo::abortHostLookup(lookup_id);

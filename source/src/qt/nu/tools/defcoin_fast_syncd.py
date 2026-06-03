@@ -67,11 +67,7 @@ def is_private_or_local(host):
         pass
     try:
         packed = socket.inet_pton(socket.AF_INET6, host)
-        return (
-            host == "::1"
-            or (packed[0] & 0xFE) == 0xFC
-            or (packed[0] == 0xFE and (packed[1] & 0xC0) == 0x80)
-        )
+        return host == "::1" or (packed[0] & 0xFE) == 0xFC or (packed[0] == 0xFE and (packed[1] & 0xC0) == 0x80)
     except OSError:
         return False
 
@@ -81,7 +77,7 @@ def normalize_ip(host):
         return ""
     value = host.strip()
     if value.startswith("[") and "]" in value:
-        value = value[1:value.find("]")]
+        value = value[1 : value.find("]")]
     if value.startswith("::ffff:"):
         maybe_v4 = value[7:]
         try:
@@ -97,7 +93,7 @@ def peer_host_from_addr(addr):
         return ""
     value = addr.strip()
     if value.startswith("[") and "]" in value:
-        return normalize_ip(value[1:value.find("]")])
+        return normalize_ip(value[1 : value.find("]")])
     if value.count(":") == 1:
         return normalize_ip(value.rsplit(":", 1)[0])
     return normalize_ip(value)
@@ -108,12 +104,6 @@ def is_loopback(host):
         return ipaddress.ip_address(normalize_ip(host)).is_loopback
     except ValueError:
         return False
-
-
-def is_nu_subver(subver):
-    if not isinstance(subver, str):
-        return False
-    return "DefcoinCoreNu" in subver
 
 
 def peer_advertises_fast_sync_service(peer):
@@ -154,16 +144,16 @@ def parse_datagram(datagram):
     split = datagram.find(b"\n\n", len(PREFIX))
     if split < 0:
         return None, None
-    header_bytes = datagram[len(PREFIX):split]
+    header_bytes = datagram[len(PREFIX) : split]
     if not header_bytes or len(header_bytes) > MAX_HEADER_BYTES:
         return None, None
     try:
         header = json.loads(header_bytes.decode("utf-8"))
-    except Exception:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None, None
     if not isinstance(header, dict):
         return None, None
-    payload = datagram[split + 2:]
+    payload = datagram[split + 2 :]
     payload_size = header.get("payload_size")
     if not isinstance(payload_size, int) or payload_size < 0 or payload_size > MAX_CHUNK_BYTES:
         return None, None
@@ -201,12 +191,14 @@ class RpcClient:
 
     def call(self, method, params=None):
         self.request_id += 1
-        body = json.dumps({
-            "jsonrpc": "1.0",
-            "id": self.request_id,
-            "method": method,
-            "params": params or [],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "jsonrpc": "1.0",
+                "id": self.request_id,
+                "method": method,
+                "params": params or [],
+            }
+        ).encode("utf-8")
         conn = http.client.HTTPConnection(self.host, self.port, timeout=15)
         try:
             conn.request(
@@ -241,16 +233,17 @@ class FastSyncDaemon:
         self.selector = selectors.DefaultSelector()
         self.block_cache = OrderedDict()
         self.last_request_by_host = {}
-        self.allowed_nu_hosts = {}
-        self.allowed_nu_hosts_refreshed = 0.0
+        self.allowed_fast_sync_hosts = {}
+        self.allowed_fast_sync_hosts_refreshed = 0.0
         self.last_ignore_log_by_host = {}
         self.stats = {
             "requests": 0,
+            "probes": 0,
             "served_blocks": 0,
             "sent_datagrams": 0,
             "sent_bytes": 0,
             "dropped": 0,
-            "ignored_non_nu_peer": 0,
+            "ignored_non_fast_sync_peer": 0,
             "peer_allowlist_refreshes": 0,
         }
 
@@ -296,27 +289,83 @@ class FastSyncDaemon:
         if header is None or payload:
             self.stats["dropped"] += 1
             return
-        if header.get("type") != "request-block":
+        message_type = header.get("type")
+        if message_type not in ("probe", "request-block"):
             self.stats["dropped"] += 1
             return
         try:
-            self.handle_request(sock, sender, header)
+            if message_type == "probe":
+                self.handle_probe(sock, sender, header)
+            else:
+                self.handle_request(sock, sender, header)
         except Exception as exc:
             self.stats["dropped"] += 1
             logging.warning("request from %s failed: %s", sender[0], exc)
 
-    def handle_request(self, sock, sender, header):
-        host = normalize_ip(sender[0])
-        now = time.time()
+    def throttle_sender(self, host, now):
         last = self.last_request_by_host.get(host, 0.0)
         if now - last < MIN_REQUEST_INTERVAL_SECONDS:
-            return
+            return False
         self.last_request_by_host[host] = now
         if len(self.last_request_by_host) > 2048:
             self.last_request_by_host = {
-                key: value for key, value in self.last_request_by_host.items()
-                if now - value < 300
+                key: value for key, value in self.last_request_by_host.items() if now - value < 300
             }
+        return True
+
+    def handle_probe(self, sock, sender, header):
+        host = normalize_ip(sender[0])
+        now = time.time()
+        if not self.throttle_sender(host, now):
+            return
+
+        request_id = header.get("id", "")
+        if not isinstance(request_id, str) or not re.match(r"^[0-9A-Fa-f]{32}$", request_id):
+            return
+        if not self.is_allowed_fast_sync_client(host, now):
+            self.stats["ignored_non_fast_sync_peer"] += 1
+            self.log_ignored_client(host, now)
+            return
+
+        sender_cap = MAX_DATAGRAM_BYTES if is_private_or_local(host) else INTERNET_PROBE_DATAGRAM_BYTES
+        peer_max_datagram = max(576, min(sender_cap, int(header.get("max_datagram", SAFE_DATAGRAM_BYTES))))
+        requested_chunk = int(header.get("chunk_bytes", chunk_bytes_for_datagram(peer_max_datagram)))
+        peer_chunk_bytes = max(
+            MIN_CHUNK_BYTES,
+            min(MAX_CHUNK_BYTES, requested_chunk, chunk_bytes_for_datagram(peer_max_datagram)),
+        )
+        try:
+            tip = int(self.rpc.call("getblockcount"))
+        except Exception:
+            tip = 0
+
+        ack = {
+            "type": "probe-ack",
+            "version": PROTOCOL_VERSION,
+            "capability": CAPABILITY,
+            "id": request_id,
+            "port": self.port,
+            "tip": tip,
+            "max_datagram": peer_max_datagram,
+            "chunk_bytes": peer_chunk_bytes,
+            "observed_sender_port": int(sender[1]),
+        }
+        out = build_datagram(ack, b"", SAFE_DATAGRAM_BYTES)
+        if out is None:
+            self.stats["dropped"] += 1
+            return
+        sent = sock.sendto(out, sender)
+        if sent > 0:
+            self.stats["probes"] += 1
+            self.stats["sent_datagrams"] += 1
+            self.stats["sent_bytes"] += sent
+            logging.info("acked probe host=%s datagram=%s chunk=%s", host, peer_max_datagram, peer_chunk_bytes)
+
+    def handle_request(self, sock, sender, header):
+        host = normalize_ip(sender[0])
+        now = time.time()
+        if not self.throttle_sender(host, now):
+            return
 
         request_id = header.get("id", "")
         if not isinstance(request_id, str) or not re.match(r"^[0-9A-Fa-f]{32}$", request_id):
@@ -326,7 +375,7 @@ class FastSyncDaemon:
             return
 
         if not self.is_allowed_fast_sync_client(host, now):
-            self.stats["ignored_non_nu_peer"] += 1
+            self.stats["ignored_non_fast_sync_peer"] += 1
             self.log_ignored_client(host, now)
             return
 
@@ -351,10 +400,12 @@ class FastSyncDaemon:
 
         self.stats["requests"] += 1
         block_sum = checksum(raw_block)
-        reply_port = sender[1]
+        # Reply to the exact source tuple. Reconstructing an address from the
+        # normalized host can lose IPv6 scope/flow fields and is less precise.
+        reply_address = sender
         sent_any = False
         for seq in range(total_chunks):
-            chunk = raw_block[seq * peer_chunk_bytes:(seq + 1) * peer_chunk_bytes]
+            chunk = raw_block[seq * peer_chunk_bytes : (seq + 1) * peer_chunk_bytes]
             chunk_header = {
                 "type": "block-chunk",
                 "version": PROTOCOL_VERSION,
@@ -374,9 +425,9 @@ class FastSyncDaemon:
             if out is None:
                 return
             try:
-                sent = sock.sendto(out, (host, reply_port))
+                sent = sock.sendto(out, reply_address)
             except OSError as exc:
-                logging.warning("send to %s:%s failed: %s", host, reply_port, exc)
+                logging.warning("send to %s failed: %s", reply_address, exc)
                 return
             if sent > 0:
                 sent_any = True
@@ -386,7 +437,12 @@ class FastSyncDaemon:
             self.stats["served_blocks"] += 1
             logging.info(
                 "served height=%s host=%s chunks=%s datagram=%s chunk=%s bytes=%s",
-                height, host, total_chunks, peer_max_datagram, peer_chunk_bytes, len(raw_block)
+                height,
+                host,
+                total_chunks,
+                peer_max_datagram,
+                peer_chunk_bytes,
+                len(raw_block),
             )
 
     def log_ignored_client(self, host, now):
@@ -394,11 +450,10 @@ class FastSyncDaemon:
         if now - last < MAX_IGNORED_LOG_INTERVAL_SECONDS:
             return
         self.last_ignore_log_by_host[host] = now
-        logging.info("ignored udp request from non-Nu/non-connected host=%s", host)
+        logging.info("ignored udp request from host without connected Fast Sync service bit=%s", host)
         if len(self.last_ignore_log_by_host) > 2048:
             self.last_ignore_log_by_host = {
-                key: value for key, value in self.last_ignore_log_by_host.items()
-                if now - value < 600
+                key: value for key, value in self.last_ignore_log_by_host.items() if now - value < 600
             }
 
     def is_allowed_fast_sync_client(self, host, now):
@@ -406,22 +461,22 @@ class FastSyncDaemon:
             return True
         if self.allow_loopback and is_loopback(host):
             return True
-        self.refresh_allowed_nu_hosts(now)
-        return host in self.allowed_nu_hosts
+        self.refresh_allowed_fast_sync_hosts(now)
+        return host in self.allowed_fast_sync_hosts
 
-    def refresh_allowed_nu_hosts(self, now):
-        if now - self.allowed_nu_hosts_refreshed < PEER_ALLOWLIST_REFRESH_SECONDS:
+    def refresh_allowed_fast_sync_hosts(self, now):
+        if now - self.allowed_fast_sync_hosts_refreshed < PEER_ALLOWLIST_REFRESH_SECONDS:
             return
-        self.allowed_nu_hosts_refreshed = now
+        self.allowed_fast_sync_hosts_refreshed = now
         allowed = {}
         try:
             peers = self.rpc.call("getpeerinfo")
         except Exception as exc:
-            logging.warning("could not refresh Nu peer allowlist: %s", exc)
-            self.allowed_nu_hosts = {}
+            logging.warning("could not refresh Fast Sync peer allowlist: %s", exc)
+            self.allowed_fast_sync_hosts = {}
             return
         if not isinstance(peers, list):
-            self.allowed_nu_hosts = {}
+            self.allowed_fast_sync_hosts = {}
             return
         for peer in peers:
             if not isinstance(peer, dict):
@@ -432,9 +487,9 @@ class FastSyncDaemon:
             host = peer_host_from_addr(peer.get("addr", ""))
             if host:
                 allowed[host] = "service-bit"
-        self.allowed_nu_hosts = allowed
+        self.allowed_fast_sync_hosts = allowed
         self.stats["peer_allowlist_refreshes"] += 1
-        logging.debug("Nu UDP peer allowlist hosts=%s", sorted(allowed.keys()))
+        logging.debug("Fast Sync UDP peer allowlist hosts=%s", sorted(allowed.keys()))
 
     def raw_block(self, height):
         cached = self.block_cache.get(height)
@@ -460,7 +515,7 @@ def main():
     parser.add_argument(
         "--allow-unconnected",
         action="store_true",
-        help="serve valid UDP requests without requiring a connected DefcoinCoreNu TCP peer; not recommended for public servers",
+        help="serve valid UDP requests without requiring a connected TCP peer advertising NODE_DEFCOIN_FASTSYNC; not recommended for public servers",
     )
     parser.add_argument(
         "--no-loopback-test",
@@ -484,7 +539,10 @@ def main():
     allow_loopback = not args.no_loopback_test
     logging.info(
         "defcoin-fast-syncd starting rpc=127.0.0.1 port=%s udp=%s require_nu_peer=%s allow_loopback=%s",
-        rpc.port, args.port, require_nu_peer, allow_loopback
+        rpc.port,
+        args.port,
+        require_nu_peer,
+        allow_loopback,
     )
     daemon = FastSyncDaemon(rpc, args.bind, args.port, require_nu_peer, allow_loopback)
     daemon.run()

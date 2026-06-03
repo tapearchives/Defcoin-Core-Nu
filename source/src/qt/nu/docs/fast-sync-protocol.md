@@ -19,6 +19,12 @@ block download remains available as fallback and repair path. UDP and TCP are
 treated as transport choices for one logical connected peer, not as independent
 reasons to request the same block twice.
 
+The current protocol is intentionally one versioned public protocol. Earlier
+experiments that treated UDP as a separate requester are obsolete. The stable
+rule is simpler: Core selects and reserves a block for a connected peer, then
+UDP may carry the block bytes for that exact reservation. If Core cannot reserve
+a block for that peer, no UDP block request is sent.
+
 The public dc903 server implementation is a responder-only sidecar
 (`defcoin-fast-syncd`) that talks to the local `defcoind` over RPC. The sidecar
 does not replace Core P2P, does not mine, and does not validate blocks on behalf
@@ -139,29 +145,29 @@ The requester sends `type=request-block` with:
 Requests are always sent as safe small datagrams even when the requested reply
 size is larger.
 
-Before sending the request, Nu asks the backend to reserve the requested block
-height for the selected connected peer in Core's in-flight table. The backend
-returns the exact block hash Core expects that peer to be able to serve. Core
-allows one UDP Fast Sync reservation beyond the normal per-peer TCP block window
-so a saturated but capable LAN peer can still be tested without waiting for the
-ordinary 16-block TCP queue to drain. The global in-flight map still prevents
-duplicate block requests, and a second extra Fast Sync reservation is rejected
-until the first succeeds, times out, or is released.
+Before sending the request, Nu asks the backend to reserve the next
+Core-selected block for the selected connected peer in Core's in-flight table.
+The UI does not choose `current_height + 1` itself. The backend calls Core's
+normal block download selection logic, reserves that exact block for the peer,
+and returns the height plus the exact block hash Core expects that peer to be
+able to serve.
+
+Core allows one UDP Fast Sync reservation beyond the normal per-peer TCP block
+window so a saturated but capable LAN peer can still be tested without waiting
+for the ordinary 16-block TCP queue to drain. The global in-flight map still
+prevents duplicate block requests, and a second extra Fast Sync reservation is
+rejected until the first succeeds, times out, or is released.
 
 Fast Sync reservation still depends on Core's normal per-peer header state. A
 peer advertising `NODE_DEFCOIN_FASTSYNC` is not eligible for UDP block requests
-until Core knows enough of that peer's header chain to set
-`pindexBestKnownBlock`. During IBD Core may not immediately start headers sync
-with every connected peer, so Nu sends a one-shot normal `getheaders` probe to a
-Fast Sync peer whose best-known block is still unknown. This is deliberately
-done through Core's existing peer logic rather than by trusting the UDP sidecar:
-the UDP transport only becomes usable after Core's ordinary header availability
-checks can prove that the peer should be able to serve the requested height.
+until Core's ordinary peer state says it has a downloadable block. This keeps
+UDP as a transport helper only: Core chooses and tracks the block exactly as it
+does for normal TCP sync, and UDP merely moves the bytes for that reservation.
 
-If Core reports that the block is already present, already in flight from another
-peer, outside the peer's known header chain, or unavailable from that peer, Nu
-does not send the UDP request and leaves normal TCP sync to continue normally.
-This reservation is a local coordination step, not a wire-protocol change.
+If Core reports that no block is currently downloadable from that peer, Nu does
+not send the UDP request and leaves normal TCP sync to continue normally. This
+reservation is a local coordination step, not a consensus or wire-protocol
+change.
 
 ### Response
 
@@ -171,10 +177,10 @@ fetches the active-chain block through RPC (`getblockhash`, then
 desktop responder restricts response traffic to eligible Nu peers. The dc903
 sidecar uses the same boundary in headless form: it periodically reads
 `getpeerinfo` and only serves UDP block chunks to source IPs that are currently
-connected over normal Core TCP and advertise `NODE_DEFCOIN_FASTSYNC`. During
-the 26.6.1 transition it can still accept a connected `DefcoinCoreNu`
-User-Agent as a fallback hint. Loopback can be allowed for local administrator
-tests, but public requesters must first be normal connected Nu peers.
+connected over normal Core TCP and advertise `NODE_DEFCOIN_FASTSYNC`. The
+User-Agent string is not a Fast Sync authorization mechanism. Loopback can be
+allowed for local administrator tests, but public requesters must first be
+normal connected peers advertising the Fast Sync service bit.
 
 Each chunk header includes:
 
@@ -353,8 +359,7 @@ so their addresses are not placed in the UDP response allowlist.
 - Never accept datagrams without the protocol prefix, version, and capability.
 - Keep datagram, header, payload, chunk-count, block-size, and request-rate caps.
 - On public sidecars, serve only currently connected TCP peers advertising
-  `NODE_DEFCOIN_FASTSYNC`, with temporary `DefcoinCoreNu` User-Agent fallback
-  only during the 26.6.1 transition.
+  `NODE_DEFCOIN_FASTSYNC`.
 - Reply to the datagram source address and source port; do not use UDP requests
   as a reflection mechanism to an arbitrary advertised port.
 - Restrict broadcast handling to LAN/private mode.

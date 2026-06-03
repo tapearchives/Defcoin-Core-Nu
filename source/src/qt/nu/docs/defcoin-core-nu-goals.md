@@ -1,7 +1,7 @@
 # Defcoin Core Nu Goals
 
 This note defines the product and community goals for Defcoin Core Nu and the
-ExpFor explorer/forensics surface. It treats the local Defcoin Core Nu source
+Explore explorer/forensics surface. It treats the local Defcoin Core Nu source
 tree as authoritative for protocol parameters when public copy conflicts with
 the code. In particular, the defcoin.io 60-second block-time copy is not used as
 the protocol baseline here.
@@ -65,7 +65,7 @@ For Defcoin, that means the app should invite users to do things:
 
 1. Explorer first.
 
-   ExpFor must behave like a normal block explorer before it behaves like a
+   Explore must behave like a normal block explorer before it behaves like a
    specialty forensic tool. The main mast search should accept wallet addresses,
    txids, block hashes, and heights, then route directly to Explorer results.
 
@@ -83,7 +83,7 @@ For Defcoin, that means the app should invite users to do things:
 
 4. Separate observation from custody.
 
-   ExpFor can inspect public chain data and local SQLite indexes. It must not
+   Explore can inspect public chain data and local SQLite indexes. It must not
    duplicate consensus rules, wallet signing, private-key handling, or validation
    logic in QML. The backend remains authoritative.
 
@@ -95,7 +95,7 @@ For Defcoin, that means the app should invite users to do things:
 
 6. Make builders feel invited.
 
-   Nu and ExpFor should expose enough local data, RPC examples, and schema
+   Nu and Explore should expose enough local data, RPC examples, and schema
    documentation that a curious user can build a dashboard, bot, indexer, miner
    monitor, or research notebook without reverse-engineering the app first.
 
@@ -106,19 +106,19 @@ For Defcoin, that means the app should invite users to do things:
    decade about maintainable tooling, active nodes, visible mining, and usable
    public data.
 
-## ExpFor Experience Goals
+## Explore Experience Goals
 
 - The first screen should feel like an explorer command center, not a marketing
   page.
 - The top-left lockup should state the product clearly: DEFCOIN / CORE NU /
-  ExpFor.
+  EXPLORE.
 - The first left-pane section should be the Holder Atlas: Largest Holders,
   Supply Bands, and Whale Lens grouped as one study of holder accumulation and
   concentration.
 - The Indexer Console should be framed as the monitor and settings page for
   long-running data engines.
 - Search results should remain inside the Explorer workflow so users understand
-  that ExpFor is the app's investigative home.
+  that Explore is the app's investigative home.
 
 ## Voice
 

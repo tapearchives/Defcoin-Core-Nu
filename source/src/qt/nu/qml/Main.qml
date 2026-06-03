@@ -1,5 +1,3 @@
-pragma ComponentBehavior: Bound
-
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Basic 2.15 as Basic
@@ -58,6 +56,7 @@ ApplicationWindow {
     }
 
     function openPreferences() {
+        NuService.advancedToolsVisible = true
         frame.currentRoute = "settings"
     }
 
@@ -119,6 +118,7 @@ ApplicationWindow {
         mnemonicClipboardWarningDialog.open()
     }
 
+    // qmllint disable missing-property
     function runEditAction(actionName) {
         var target = root.activeFocusItem
         if (!target)
@@ -141,6 +141,7 @@ ApplicationWindow {
         } catch (e) {
         }
     }
+    // qmllint enable missing-property
 
     function walletIsLoaded(walletName) {
         var loaded = NuService.loadedWallets
@@ -172,11 +173,12 @@ ApplicationWindow {
     }
 
     function openNode() {
+        NuService.advancedToolsVisible = true
         frame.currentRoute = "node"
     }
 
     function basicAboutText() {
-        return "Defcoin Core Nu v" + root.buildVersion + " - " + root.releaseCodeName + ". New Qt Quick interface build. Backend originated from Litecoin Core v0.21.5.5 with Defcoin consensus and network parameters. Verify recipients, amounts, and backups carefully before use. © 2014-2026 The Defcoin Core developers. © 2011-2026 The Litecoin Core developers. © 2009-2021 The Bitcoin Core developers."
+        return "Defcoin Core Nu v" + root.buildVersion + " - " + root.releaseCodeName + ". New Qt Quick interface build. Backend derives from Litecoin Core v0.21.5.5 with Defcoin consensus and network parameters. Verify recipients, amounts, and backups carefully before use. © 2014-2026 The Defcoin Core developers. © 2011-2026 The Litecoin Core developers. © 2009-2021 The Bitcoin Core developers."
     }
 
     function showHelpPage(windowTitle, page) {
@@ -196,7 +198,7 @@ ApplicationWindow {
     function nuBuildDetailsHtml() {
         return "<h1>Defcoin Core Nu v" + root.buildVersion + "</h1>"
              + "<p><b>Codename:</b> Core Memories</p>"
-             + "<p><b>Status:</b> Nu is a new Qt Quick interface for Defcoin Core. Its backend originated from Litecoin Core v0.21.5.5 and keeps Defcoin consensus parameters and the existing Defcoin data directory, while introducing a desktop shell inspired by Nothing Company product design and the Bitcoin Design Community.</p>"
+             + "<p><b>Status:</b> Nu is a new Qt Quick interface for Defcoin Core. Its backend derives from Litecoin Core v0.21.5.5 and keeps Defcoin consensus parameters and the existing Defcoin data directory, while introducing a desktop shell inspired by Nothing Company product design and the Bitcoin Design Community.</p>"
              + "<h2>Build metadata</h2>"
              + "<ul>"
              + "<li><b>Release:</b> " + root.buildVersion + "</li>"
@@ -207,18 +209,18 @@ ApplicationWindow {
              + "</ul>"
              + "<h2>What went into Nu</h2>"
              + "<ul>"
-             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, Diagnostics, and Settings. Explorer and Forensics analysis now live in the separate Defcoin Core ExpFor app so Nu can stay wallet-first.</li>"
+             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, Diagnostics, and Settings. Explorer and Forensics analysis now live in the separate Defcoin Core Nu Explore app so Nu can stay wallet-first.</li>"
              + "<li>Visual system, copy, and interaction patterns are guided by Nothing-style restraint and Bitcoin Design Community wallet usability patterns.</li>"
              + "<li>Bundled backend autostart, RPC connection handling, launch diagnostics, and current-launch log viewing.</li>"
              + "<li><b>Enable LAN node discovery</b> is off by default. When enabled, macOS may ask for Local Network access so Nu can find Defcoin nodes on the same LAN, which can help another local wallet copy blockchain data faster. The permission does not grant access to wallet keys, passphrases, or private wallet data.</li>"
-             + "<li><b>UDP fast sync</b> is an experimental transfer helper enabled by default. Nu can request sub-MTU checksum-protected raw block chunks over UDP port 10334 from connected Defcoin peers over IPv4 or IPv6; LAN discovery also enables local broadcast. Every received block is still passed to Core validation with TCP/Core sync left active as the fallback.</li>"
+             + "<li><b>UDP fast sync</b> is an experimental transfer helper enabled by default. Nu can request checksum-protected raw block chunks over UDP port 10334 from connected Defcoin peers over IPv4 or IPv6; LAN discovery also enables local broadcast. Every received block is still passed to backend validation with normal TCP sync left active as the fallback.</li>"
              + "<li><b>Apple Silicon validation speedup:</b> Apple Silicon builds now use Bitcoin Core-derived ARM SHA2 intrinsics for SHA256 and SHA256D64. On the Mac Mini M4 Pro test machine, Nu's double-SHA256 batch path measured 1232.94 MiB/s versus 187.53 MiB/s for the generic path, a 6.6x improvement, with identical output checksums over a 1 GiB validation-style workload.</li>"
              + "<li>Dual-magic migration support for legacy <code>fbc0b6db</code> and Defcoin-specific <code>defc014e</code> P2P message headers.</li>"
              + "<li>Peer pollution filtering now happens at both the peer and address-relay layers: non-Defcoin-prefixed peers are disconnected before their address tables are accepted, and unvalidated relayed mainnet addresses are only stored when they advertise Defcoin service ports.</li>"
              + "<li>The address filter is endpoint-specific, not IP-wide. If the same host runs Litecoin Core on one port and Defcoin Core on another, Nu keeps the Defcoin endpoint eligible and can replace older same-IP non-Defcoin ports in addrman. Defcoin nodes on non-standard ports can still communicate and be retained after completing an actual Defcoin handshake.</li>"
              + "<li>Peer inspection with simple and detailed views, including actual per-peer magic bytes where reported by the backend.</li>"
              + "<li>Network diagnostics now include difficulty, 120-block network hashrate, chain-tip counts, sync progress, and top P2P message types where the backend reports them. [Thanks to packetloss404 / Ian S. Walmsley's v1.0.2 build.]</li>"
-             + "<li>Defcoin Core ExpFor carries the Explorer and Forensics surfaces from Nu, including irregular OP_RETURN scans, Holder Atlas analytics, movements, contacts, relationship graphs, and index controls. Nu can hand address and transaction inspections to ExpFor when the internal explorer mode is selected.</li>"
+             + "<li>Defcoin Core Nu Explore carries the Explorer and Forensics surfaces from Nu, including irregular OP_RETURN scans, Holder Atlas analytics, movements, contacts, relationship graphs, and index controls. Nu can hand address and transaction inspections to Explore when the internal explorer mode is selected.</li>"
              + "<li>BIP39 recovery phrase creation and restore workflows for Nu/Core HD wallets, plus an advanced preview-gated external derivation scan with Defcoin WIF compatibility options.</li>"
              + "<li>Local mining setup can select an external cpuminer-compatible executable, build scrypt stratum arguments, and monitor miner output without bundling miner binaries into the wallet app.</li>"
              + "<li>Wallet basics including receive requests, transaction inspection, PSBT tools, message signing, wallet backup, encryption, and optional third-party explorer links.</li>"
@@ -295,8 +297,10 @@ ApplicationWindow {
             Qt.callLater(function() { root.scrollHelpToAnchor(anchor) })
         } else {
             Qt.callLater(function() {
+                // qmllint disable missing-property
                 if (helpScroll.contentItem && helpScroll.contentItem.contentY !== undefined)
                     helpScroll.contentItem.contentY = 0
+                // qmllint enable missing-property
             })
         }
     }
@@ -321,15 +325,17 @@ ApplicationWindow {
         if (pos < 0) return
         helpText.cursorPosition = pos
         var rect = helpText.positionToRectangle(pos)
+        // qmllint disable missing-property
         if (helpScroll.contentItem && helpScroll.contentItem.contentY !== undefined) {
             helpScroll.contentItem.contentY = Math.max(0, rect.y - 24)
         }
+        // qmllint enable missing-property
     }
 
     function openHelpLink(link) {
         var target = String(link)
         if (target.indexOf("http://") === 0 || target.indexOf("https://") === 0) {
-            Qt.openUrlExternally(target)
+            NuService.openExternalUrl(target)
             return
         }
         if (target.charAt(0) === "#") {
@@ -420,7 +426,14 @@ ApplicationWindow {
             NuMenuItem { text: qsTr("Receive"); shortcut: Qt.platform.os === "osx" ? "Meta+3" : "Ctrl+3"; onTriggered: frame.currentRoute = "receive" }
             NuMenuItem { text: qsTr("Transactions"); shortcut: Qt.platform.os === "osx" ? "Meta+4" : "Ctrl+4"; onTriggered: frame.currentRoute = "activity" }
             NuMenuItem { text: qsTr("Wallet"); shortcut: Qt.platform.os === "osx" ? "Meta+5" : "Ctrl+5"; onTriggered: frame.currentRoute = "wallet" }
-            NuMenuItem { text: qsTr("Mining"); shortcut: Qt.platform.os === "osx" ? "Meta+6" : "Ctrl+6"; onTriggered: frame.currentRoute = "mining" }
+            NuMenuItem {
+                text: qsTr("Mining")
+                shortcut: Qt.platform.os === "osx" ? "Meta+6" : "Ctrl+6"
+                onTriggered: {
+                    NuService.advancedToolsVisible = true
+                    frame.currentRoute = "mining"
+                }
+            }
             NuMenuItem { text: qsTr("Diagnostics"); shortcut: Qt.platform.os === "osx" ? "Meta+7" : "Ctrl+7"; onTriggered: root.openNode() }
         }
 
@@ -455,7 +468,7 @@ ApplicationWindow {
                 text: qsTr("Developer Documentation")
                 visible: Qt.platform.os === "osx"
                 height: visible ? implicitHeight : 0
-                onTriggered: Qt.openUrlExternally("https://github.com/DefcoinCore/Defcoin-Core-Nu/tree/main/doc")
+                onTriggered: NuService.openExternalUrl("https://github.com/DefcoinCore/Defcoin-Core-Nu/tree/main/doc")
             }
             NuMenuItem {
                 text: qsTr("About Defcoin Core Nu")
@@ -498,7 +511,9 @@ ApplicationWindow {
                 "title": title,
                 "explorerHtml": html
             })
+            // qmllint disable missing-property
             if (explorerWindow) explorerWindow.show()
+            // qmllint enable missing-property
         }
         function onUpdateAvailable(version, message) {
             updateAvailableDialog.version = version
@@ -639,7 +654,7 @@ ApplicationWindow {
         property string pendingText: ""
 
         onAccepted: {
-            NuService.copyText(pendingText)
+            NuService.copySensitiveTextAfterWarning(pendingText)
             pendingText = ""
         }
         onRejected: pendingText = ""
@@ -1449,9 +1464,11 @@ ApplicationWindow {
             phraseUiSyncing = true
             for (var i = 0; i < restoreWords.count; ++i) {
                 var item = restoreWords.itemAt(i)
+                // qmllint disable missing-property
                 if (item && item["text"] !== undefined) {
                     item["text"] = i < phraseWords.length ? phraseWords[i] : ""
                 }
+                // qmllint enable missing-property
             }
             phraseUiSyncing = false
         }
@@ -2115,8 +2132,8 @@ ApplicationWindow {
 
                     background: Rectangle {
                         color: NuTokens.panelBase
-                        border.color: parent.wordInvalid ? NuTokens.stateError : (parent.activeFocus ? NuTokens.lineStrong : NuTokens.lineSubtle)
-                        border.width: parent.activeFocus ? 2 : 1
+                        border.color: recoveryWordField.wordInvalid ? NuTokens.stateError : (recoveryWordField.activeFocus ? NuTokens.lineStrong : NuTokens.lineSubtle)
+                        border.width: recoveryWordField.activeFocus ? 2 : 1
                         radius: NuTokens.radiusSmall
                     }
 
@@ -2404,7 +2421,9 @@ ApplicationWindow {
             clearSuggestions()
             for (var i = 0; i < restoreWords.count; ++i) {
                 var item = restoreWords.itemAt(i)
+                // qmllint disable missing-property
                 if (item && item["text"] !== undefined) item["text"] = ""
+                // qmllint enable missing-property
             }
         }
     }

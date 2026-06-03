@@ -9,7 +9,6 @@ TabButton {
     font.pixelSize: NuTokens.fontTiny
     font.weight: checked ? Font.DemiBold : Font.Normal
     activeFocusOnTab: true
-    focusPolicy: Qt.StrongFocus
 
     contentItem: Text {
         text: root.text

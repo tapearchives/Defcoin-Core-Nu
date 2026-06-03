@@ -167,6 +167,7 @@ bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats);
 
 /** Reserve/release one block in Core's in-flight table for Fast Sync UDP transport coordination. */
 bool ReserveFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, int height, uint256& hash_out, std::string& reason);
+bool ReserveNextFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, uint256& hash_out, int& height_out, std::string& reason);
 bool ReleaseFastSyncBlockInFlight(NodeId nodeid, const uint256& hash);
 
 /** Relay transaction to every node */

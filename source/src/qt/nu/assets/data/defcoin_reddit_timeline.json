@@ -1,0 +1,3616 @@
+{
+  "schemaVersion": 1,
+  "name": "/r/Defcoin Community Timeline",
+  "generatedAt": "2026-06-02",
+  "sources": [
+    "/Volumes/TB5_4TB/d/defcoin_reddit/outputs/defcoin_subreddit_event_index_2026-06-02/defcoin_subreddit_event_index.md",
+    "/Volumes/TB5_4TB/d/defcoin_reddit/outputs/defcoin_related_historical_events_2026-06-02/defcoin_related_historical_events.md"
+  ],
+  "criteria": {
+    "included": [
+      "Project launches, wallet releases, binaries, upgrade plans, and protocol events.",
+      "Mining, pool, p2pool, seed, peer, outage, restoration, and explorer/stat/richlist infrastructure.",
+      "DEF CON, Coindroids, auctions, giveaways, bounties, and meetups that shaped the community culture.",
+      "Market access and directory/listing events that changed how people found or acquired DFC.",
+      "High- or medium-confidence events from the subreddit index when they changed public utility, trust, coordination, or chain security."
+    ],
+    "removed": [
+      "Duplicate announcements where a stronger launch/support row already captured the same historical fact.",
+      "Invite refreshes that did not mark a new community shift or service launch.",
+      "Low-confidence proposal/request-only rows with no launch, completion, outage, restoration, or durable follow-up signal.",
+      "Isolated troubleshooting complaints unless they affected a wallet service, pool, explorer, or network-wide availability."
+    ],
+    "duplicatePolicy": "Prefer subreddit rows when normalized event name and date match a historical anchor row."
+  },
+  "summary": {
+    "schemaVersion": 1,
+    "generatedAt": "2026-06-02",
+    "sourceSubredditRows": 133,
+    "sourceHistoryRows": 13,
+    "includedRows": 135,
+    "includedSubredditRows": 122,
+    "includedHistoryRows": 13,
+    "removedRows": 11,
+    "firstDate": "2014-04-01",
+    "lastDate": "2026-08-06",
+    "criteriaText": "Included: Project launches, wallet releases, binaries, upgrade plans, and protocol events. Mining, pool, p2pool, seed, peer, outage, restoration, and explorer/stat/richlist infrastructure. DEF CON, Coindroids, auctions, giveaways, bounties, and meetups that shaped the community culture. Market access and directory/listing events that changed how people found or acquired DFC. High- or medium-confidence events from the subreddit index when they changed public utility, trust, coordination, or chain security. Removed: Duplicate announcements where a stronger launch/support row already captured the same historical fact. Invite refreshes that did not mark a new community shift or service launch. Low-confidence proposal/request-only rows with no launch, completion, outage, restoration, or durable follow-up signal. Isolated troubleshooting complaints unless they affected a wallet service, pool, explorer, or network-wide availability. Duplicate policy: when the subreddit index and historical anchor file have the same normalized event name and date, the subreddit row is kept and the historical duplicate is dropped."
+  },
+  "rows": [
+    {
+      "cells": [
+        "2014-04-01",
+        "Mining / pools",
+        "Defcoin launch; private mining pool",
+        "Announced",
+        "Defcoin was announced publicly; poster also said they had started a private mining pool and could do exchanges.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 21ys0l by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 1,
+        "sortDate": "2014-04-01",
+        "dateRaw": "2014-04-01",
+        "type": "Project launch / pool / informal exchange",
+        "status": "Announced",
+        "title": "Defcoin launch; private mining pool",
+        "poster": "darkmatter1",
+        "post": "21ys0l",
+        "url": "https://www.reddit.com/r/defcoin/comments/21ys0l/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-01 - Project launch / pool / informal exchange - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-01",
+        "Services",
+        "defcoin.org",
+        "Announced",
+        "Official Defcoin website link was posted.",
+        "Service signal: websites and tools made Defcoin easier to discover or use.",
+        "/r/Defcoin 21ys7c by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 2,
+        "sortDate": "2014-04-01",
+        "dateRaw": "2014-04-01",
+        "type": "Website launch",
+        "status": "Announced",
+        "title": "defcoin.org",
+        "poster": "darkmatter1",
+        "post": "21ys7c",
+        "url": "https://www.reddit.com/r/defcoin/comments/21ys7c/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-01 - Website launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-01",
+        "Wallets",
+        "OS X and Linux binaries",
+        "Released",
+        "OS X and Linux binaries were published; Windows wallet was expected soon.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin 21yxoo by Anch"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 3,
+        "sortDate": "2014-04-01",
+        "dateRaw": "2014-04-01",
+        "type": "Wallet / binary release",
+        "status": "Released",
+        "title": "OS X and Linux binaries",
+        "poster": "Anch",
+        "post": "21yxoo",
+        "url": "https://www.reddit.com/r/defcoin/comments/21yxoo/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-01 - Wallet / binary release - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-02",
+        "Mining / pools",
+        "Early pool list",
+        "Announced / updated",
+        "A pool list was posted with ChunkyPools, Subba, RedBaron, Defcoin.io, and coin.iptron.net.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 220h0a by occ4m"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 4,
+        "sortDate": "2014-04-02",
+        "dateRaw": "2014-04-02",
+        "type": "Pool directory",
+        "status": "Announced / updated",
+        "title": "Early pool list",
+        "poster": "occ4m",
+        "post": "220h0a",
+        "url": "https://www.reddit.com/r/defcoin/comments/220h0a/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-02 - Pool directory - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-03",
+        "Community",
+        "Bring your friends to Defcoin Day",
+        "Started",
+        "Poster declared Defcoin Day and offered rewards for commenters and friends.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 2233ns by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 5,
+        "sortDate": "2014-04-03",
+        "dateRaw": "2014-04-03",
+        "type": "Community event / giveaway",
+        "status": "Started",
+        "title": "Bring your friends to Defcoin Day",
+        "poster": "darkmatter1",
+        "post": "2233ns",
+        "url": "https://www.reddit.com/r/defcoin/comments/2233ns/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-03 - Community event / giveaway - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-08",
+        "Community",
+        "Defcoin bounties",
+        "Planned",
+        "Poster said a bounty list was coming by Friday.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 22ibbp by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 6,
+        "sortDate": "2014-04-08",
+        "dateRaw": "2014-04-08",
+        "type": "Bounty program",
+        "status": "Planned",
+        "title": "Defcoin bounties",
+        "poster": "darkmatter1",
+        "post": "22ibbp",
+        "url": "https://www.reddit.com/r/defcoin/comments/22ibbp/",
+        "confidence": "Medium",
+        "rowTooltip": "2014-04-08 - Bounty program - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-10",
+        "Wallets",
+        "Android wallet bounty",
+        "Announced",
+        "First bounty offered 500 DFC for a Defcoin Android wallet.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin 22r4tv by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 7,
+        "sortDate": "2014-04-10",
+        "dateRaw": "2014-04-10",
+        "type": "Bounty / wallet development",
+        "status": "Announced",
+        "title": "Android wallet bounty",
+        "poster": "darkmatter1",
+        "post": "22r4tv",
+        "url": "https://www.reddit.com/r/defcoin/comments/22r4tv/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-10 - Bounty / wallet development - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-11",
+        "Explorer / stats",
+        "block1.assmeow.org / blockchain explorer",
+        "Down / expected return",
+        "Blockchain explorer was offline after being built on an AWS spot instance; poster said it would return shortly.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin 22sx8o by sethalump"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 8,
+        "sortDate": "2014-04-11",
+        "dateRaw": "2014-04-11",
+        "type": "Explorer outage",
+        "status": "Down / expected return",
+        "title": "block1.assmeow.org / blockchain explorer",
+        "poster": "sethalump",
+        "post": "22sx8o",
+        "url": "https://www.reddit.com/r/defcoin/comments/22sx8o/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-11 - Explorer outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-12",
+        "Mining / pools",
+        "Chunky Pools",
+        "Announced",
+        "Chunky Pools was presented as the first Defcoin pool.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 22u7t0 by mculp"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 9,
+        "sortDate": "2014-04-12",
+        "dateRaw": "2014-04-12",
+        "type": "Pool launch",
+        "status": "Announced",
+        "title": "Chunky Pools",
+        "poster": "mculp",
+        "post": "22u7t0",
+        "url": "https://www.reddit.com/r/defcoin/comments/22u7t0/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-12 - Pool launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-12",
+        "Mining / pools",
+        "Defcoin.IO",
+        "Testing",
+        "Post requested testers for a new Defcoin.IO pool.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 22vnrl by traid"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 10,
+        "sortDate": "2014-04-12",
+        "dateRaw": "2014-04-12",
+        "type": "Pool launch / testing",
+        "status": "Testing",
+        "title": "Defcoin.IO",
+        "poster": "traid",
+        "post": "22vnrl",
+        "url": "https://www.reddit.com/r/defcoin/comments/22vnrl/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-12 - Pool launch / testing - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-12",
+        "Mining / pools",
+        "RedBaron pool",
+        "Announced",
+        "New RedBaron Defcoin pool was announced.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 22vvru by _RedBaron_"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 11,
+        "sortDate": "2014-04-12",
+        "dateRaw": "2014-04-12",
+        "type": "Pool launch",
+        "status": "Announced",
+        "title": "RedBaron pool",
+        "poster": "_RedBaron_",
+        "post": "22vvru",
+        "url": "https://www.reddit.com/r/defcoin/comments/22vvru/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-12 - Pool launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-13",
+        "Mining / pools",
+        "Defcoin P2Pool / coin.iptron.net",
+        "Up",
+        "A Defcoin P2Pool node was announced as up and running.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 22y6s5 by zzCougar"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 12,
+        "sortDate": "2014-04-13",
+        "dateRaw": "2014-04-13",
+        "type": "Pool launch",
+        "status": "Up",
+        "title": "Defcoin P2Pool / coin.iptron.net",
+        "poster": "zzCougar",
+        "post": "22y6s5",
+        "url": "https://www.reddit.com/r/defcoin/comments/22y6s5/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-13 - Pool launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-14",
+        "Explorer / stats",
+        "Defcoin Stats",
+        "Announced",
+        "Defcoin Stats link was posted.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin 2327fq by coolacid"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 13,
+        "sortDate": "2014-04-14",
+        "dateRaw": "2014-04-14",
+        "type": "Stats website launch",
+        "status": "Announced",
+        "title": "Defcoin Stats",
+        "poster": "coolacid",
+        "post": "2327fq",
+        "url": "https://www.reddit.com/r/defcoin/comments/2327fq/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-14 - Stats website launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-15",
+        "Explorer / stats",
+        "defcoin.assmeow.org",
+        "Back online",
+        "Block explorer came back online with added capacity and geo load balancing.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin 232sn5 by sethalump"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 14,
+        "sortDate": "2014-04-15",
+        "dateRaw": "2014-04-15",
+        "type": "Explorer restoration",
+        "status": "Back online",
+        "title": "defcoin.assmeow.org",
+        "poster": "sethalump",
+        "post": "232sn5",
+        "url": "https://www.reddit.com/r/defcoin/comments/232sn5/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-15 - Explorer restoration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-15",
+        "Wallets",
+        "Defcoin Android Wallet",
+        "Available outside store",
+        "Android wallet was made available for download, not yet live in Google Play.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin 234pzl by jus341"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 15,
+        "sortDate": "2014-04-15",
+        "dateRaw": "2014-04-15",
+        "type": "Wallet release",
+        "status": "Available outside store",
+        "title": "Defcoin Android Wallet",
+        "poster": "jus341",
+        "post": "234pzl",
+        "url": "https://www.reddit.com/r/defcoin/comments/234pzl/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-15 - Wallet release - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-18",
+        "Community",
+        "Defcoin tipbot",
+        "Testing",
+        "Tipbot test thread invited replies for Defcoin tips.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 23c5ch by sethalump"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 16,
+        "sortDate": "2014-04-18",
+        "dateRaw": "2014-04-18",
+        "type": "Tipbot testing",
+        "status": "Testing",
+        "title": "Defcoin tipbot",
+        "poster": "sethalump",
+        "post": "23c5ch",
+        "url": "https://www.reddit.com/r/defcoin/comments/23c5ch/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-18 - Tipbot testing - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-04-18",
+        "Community",
+        "/u/DefcoinTipBot",
+        "Online",
+        "DefcoinTipBot announced online with usage instructions and funding information.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 23c5qc by _mr3x_"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 17,
+        "sortDate": "2014-04-18",
+        "dateRaw": "2014-04-18",
+        "type": "Tipbot launch",
+        "status": "Online",
+        "title": "/u/DefcoinTipBot",
+        "poster": "_mr3x_",
+        "post": "23c5qc",
+        "url": "https://www.reddit.com/r/defcoin/comments/23c5qc/",
+        "confidence": "High",
+        "rowTooltip": "2014-04-18 - Tipbot launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-05-09",
+        "Services",
+        "Defcoin QR code generator",
+        "Announced",
+        "Defcoin QR code generator link was posted.",
+        "Service signal: websites and tools made Defcoin easier to discover or use.",
+        "/r/Defcoin 254t2x by coolacid"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 18,
+        "sortDate": "2014-05-09",
+        "dateRaw": "2014-05-09",
+        "type": "Website tool launch",
+        "status": "Announced",
+        "title": "Defcoin QR code generator",
+        "poster": "coolacid",
+        "post": "254t2x",
+        "url": "https://www.reddit.com/r/defcoin/comments/254t2x/",
+        "confidence": "High",
+        "rowTooltip": "2014-05-09 - Website tool launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-07-17",
+        "Explorer / stats",
+        "faucet.defcoinstats.com",
+        "Announced",
+        "Defcoin Faucet link was posted.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin 2azcui by coolacid"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 20,
+        "sortDate": "2014-07-17",
+        "dateRaw": "2014-07-17",
+        "type": "Faucet launch",
+        "status": "Announced",
+        "title": "faucet.defcoinstats.com",
+        "poster": "coolacid",
+        "post": "2azcui",
+        "url": "https://www.reddit.com/r/defcoin/comments/2azcui/",
+        "confidence": "High",
+        "rowTooltip": "2014-07-17 - Faucet launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-08-04",
+        "DEF CON",
+        "Coindroids",
+        "Beta testing",
+        "Coindroids beta test was requested before DEFCON.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 2cm298 by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 21,
+        "sortDate": "2014-08-04",
+        "dateRaw": "2014-08-04",
+        "type": "Game/service beta",
+        "status": "Beta testing",
+        "title": "Coindroids",
+        "poster": "Abstrct",
+        "post": "2cm298",
+        "url": "https://www.reddit.com/r/defcoin/comments/2cm298/",
+        "confidence": "High",
+        "rowTooltip": "2014-08-04 - Game/service beta - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-08-05",
+        "DEF CON",
+        "Defcon Defcoin Hangout",
+        "Planned",
+        "Poster proposed a DEFCON hangout and said they were making paper wallets loaded with coins.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 2co4jd by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 22,
+        "sortDate": "2014-08-05",
+        "dateRaw": "2014-08-05",
+        "type": "DEFCON meetup / giveaway",
+        "status": "Planned",
+        "title": "Defcon Defcoin Hangout",
+        "poster": "darkmatter1",
+        "post": "2co4jd",
+        "url": "https://www.reddit.com/r/defcoin/comments/2co4jd/",
+        "confidence": "High",
+        "rowTooltip": "2014-08-05 - DEFCON meetup / giveaway - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-08-07",
+        "DEF CON anchor",
+        "DEF CON 22",
+        "Past",
+        "Includes a DEF CON 22 talk titled The Making of DEFCOIN on Aug. 7, 2014 at 17:00.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 1,
+        "sortDate": "2014-08-07",
+        "dateRaw": "2014-08-07 10:00",
+        "endDateRaw": "2014-08-10 16:30",
+        "title": "DEF CON 22",
+        "venue": "Rio Hotel & Casino, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times",
+        "url": "https://infocondb.org/con/def-con/def-con-22/",
+        "rowTooltip": "DEF CON 22: 2014-08-07 10:00 to 2014-08-10 16:30 - Rio Hotel & Casino, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2014-08-20",
+        "Mining / pools",
+        "defcoinpool.com",
+        "Online",
+        "New Defcoin pool at defcoinpool.com was announced online.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 2e29rd by protoCall7"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 23,
+        "sortDate": "2014-08-20",
+        "dateRaw": "2014-08-20",
+        "type": "Pool launch",
+        "status": "Online",
+        "title": "defcoinpool.com",
+        "poster": "protoCall7",
+        "post": "2e29rd",
+        "url": "https://www.reddit.com/r/defcoin/comments/2e29rd/",
+        "confidence": "High",
+        "rowTooltip": "2014-08-20 - Pool launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2014-11-07",
+        "Mining / pools",
+        "Defcoin.io, RedBaron, Subba",
+        "Partial outage / maintenance",
+        "Post said only two accessible pools were available; Defcoin.io was down for maintenance.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 2lmrx9 by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 24,
+        "sortDate": "2014-11-07",
+        "dateRaw": "2014-11-07",
+        "type": "Pool availability status",
+        "status": "Partial outage / maintenance",
+        "title": "Defcoin.io, RedBaron, Subba",
+        "poster": "[deleted]",
+        "post": "2lmrx9",
+        "url": "https://www.reddit.com/r/defcoin/comments/2lmrx9/",
+        "confidence": "High",
+        "rowTooltip": "2014-11-07 - Pool availability status - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-01-25",
+        "Services",
+        "DefcoinTalk.org",
+        "Announced",
+        "DefcoinTalk.org link was posted.",
+        "Service signal: websites and tools made Defcoin easier to discover or use.",
+        "/r/Defcoin 2tml6z by chrislolds"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 25,
+        "sortDate": "2015-01-25",
+        "dateRaw": "2015-01-25",
+        "type": "Website launch",
+        "status": "Announced",
+        "title": "DefcoinTalk.org",
+        "poster": "chrislolds",
+        "post": "2tml6z",
+        "url": "https://www.reddit.com/r/defcoin/comments/2tml6z/",
+        "confidence": "High",
+        "rowTooltip": "2015-01-25 - Website launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-01-25",
+        "Community",
+        "DefcoinFaucet.com",
+        "Announced",
+        "DefcoinFaucet.com was announced with up to 1337 DFC daily.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 2tmxs3 by chrislolds"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 26,
+        "sortDate": "2015-01-25",
+        "dateRaw": "2015-01-25",
+        "type": "Faucet launch",
+        "status": "Announced",
+        "title": "DefcoinFaucet.com",
+        "poster": "chrislolds",
+        "post": "2tmxs3",
+        "url": "https://www.reddit.com/r/defcoin/comments/2tmxs3/",
+        "confidence": "High",
+        "rowTooltip": "2015-01-25 - Faucet launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-02-08",
+        "Services",
+        "DefcoinDice.com",
+        "Announced",
+        "DefcoinDice.com gambling service link was posted.",
+        "Service signal: websites and tools made Defcoin easier to discover or use.",
+        "/r/Defcoin 2v96wm by chrislolds"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 27,
+        "sortDate": "2015-02-08",
+        "dateRaw": "2015-02-08",
+        "type": "Website service launch",
+        "status": "Announced",
+        "title": "DefcoinDice.com",
+        "poster": "chrislolds",
+        "post": "2v96wm",
+        "url": "https://www.reddit.com/r/defcoin/comments/2v96wm/",
+        "confidence": "High",
+        "rowTooltip": "2015-02-08 - Website service launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-03-31",
+        "Services",
+        "Defcoin.io -> Defcoin.us",
+        "Moved",
+        "Defcoin.io moved to Defcoin.us after missed renewal window and registry issues.",
+        "Service signal: websites and tools made Defcoin easier to discover or use.",
+        "/r/Defcoin 30yqw3 by traid"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 28,
+        "sortDate": "2015-03-31",
+        "dateRaw": "2015-03-31",
+        "type": "Website migration",
+        "status": "Moved",
+        "title": "Defcoin.io -> Defcoin.us",
+        "poster": "traid",
+        "post": "30yqw3",
+        "url": "https://www.reddit.com/r/defcoin/comments/30yqw3/",
+        "confidence": "High",
+        "rowTooltip": "2015-03-31 - Website migration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-05-01",
+        "Community",
+        "Donate 4 Defcoin",
+        "Started",
+        "Poster offered to send Defcoins to users who donated to EFF or similar organizations.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 34kyfp by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 29,
+        "sortDate": "2015-05-01",
+        "dateRaw": "2015-05-01",
+        "type": "Donation-for-DFC campaign",
+        "status": "Started",
+        "title": "Donate 4 Defcoin",
+        "poster": "[deleted]",
+        "post": "34kyfp",
+        "url": "https://www.reddit.com/r/defcoin/comments/34kyfp/",
+        "confidence": "Medium",
+        "rowTooltip": "2015-05-01 - Donation-for-DFC campaign - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2015-06-07",
+        "DEF CON",
+        "DC801 party badge auction",
+        "Completed",
+        "DC801 party badge auction was run for Defcoin; winner noted in the post.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 38zaqr by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 30,
+        "sortDate": "2015-06-07",
+        "dateRaw": "2015-06-07",
+        "type": "DEFCON auction",
+        "status": "Completed",
+        "title": "DC801 party badge auction",
+        "poster": "darkmatter1",
+        "post": "38zaqr",
+        "url": "https://www.reddit.com/r/defcoin/comments/38zaqr/",
+        "confidence": "High",
+        "rowTooltip": "2015-06-07 - DEFCON auction - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-06-14",
+        "DEF CON",
+        "Defcoin Meetup @ Defcon",
+        "Planning",
+        "Poster began planning a Defcoin meetup at DEFCON and asked for attendee counts.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 39s2c8 by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 31,
+        "sortDate": "2015-06-14",
+        "dateRaw": "2015-06-14",
+        "type": "DEFCON meetup",
+        "status": "Planning",
+        "title": "Defcoin Meetup @ Defcon",
+        "poster": "darkmatter1",
+        "post": "39s2c8",
+        "url": "https://www.reddit.com/r/defcoin/comments/39s2c8/",
+        "confidence": "High",
+        "rowTooltip": "2015-06-14 - DEFCON meetup - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-07-14",
+        "Wallets",
+        "iOS Defcoin wallet",
+        "Beta testing",
+        "iOS Defcoin wallet was ready for App Store beta testing.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin 3davem by mperklin"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 32,
+        "sortDate": "2015-07-14",
+        "dateRaw": "2015-07-14",
+        "type": "Wallet beta",
+        "status": "Beta testing",
+        "title": "iOS Defcoin wallet",
+        "poster": "mperklin",
+        "post": "3davem",
+        "url": "https://www.reddit.com/r/defcoin/comments/3davem/",
+        "confidence": "High",
+        "rowTooltip": "2015-07-14 - Wallet beta - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-08-03",
+        "Wallets",
+        "Beerwallet Defcoin Wallet",
+        "Released",
+        "Beerwallet Defcoin Wallet was released on the App Store.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin 3fmyea by mperklin"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 33,
+        "sortDate": "2015-08-03",
+        "dateRaw": "2015-08-03",
+        "type": "Wallet release",
+        "status": "Released",
+        "title": "Beerwallet Defcoin Wallet",
+        "poster": "mperklin",
+        "post": "3fmyea",
+        "url": "https://www.reddit.com/r/defcoin/comments/3fmyea/",
+        "confidence": "High",
+        "rowTooltip": "2015-08-03 - Wallet release - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-08-06",
+        "DEF CON anchor",
+        "DEF CON 23",
+        "Past",
+        "Defcoin subreddit activity included DEFCON/Defcoin meetup, paper-wallet, and service planning around this period.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 2,
+        "sortDate": "2015-08-06",
+        "dateRaw": "2015-08-06 10:00",
+        "endDateRaw": "2015-08-09 16:30",
+        "title": "DEF CON 23",
+        "venue": "Paris Hotel and Bally's Hotel, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times",
+        "url": "https://infocondb.org/con/def-con/def-con-23/",
+        "rowTooltip": "DEF CON 23: 2015-08-06 10:00 to 2015-08-09 16:30 - Paris Hotel and Bally's Hotel, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2015-08-12",
+        "Explorer / stats",
+        "DefcoinStats.com",
+        "Down / replacement implied",
+        "Post title indicates DefcoinStats.com was dead or changing.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin 3gq354 by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 34,
+        "sortDate": "2015-08-12",
+        "dateRaw": "2015-08-12",
+        "type": "Stats site outage / rebirth",
+        "status": "Down / replacement implied",
+        "title": "DefcoinStats.com",
+        "poster": "[deleted]",
+        "post": "3gq354",
+        "url": "https://www.reddit.com/r/defcoin/comments/3gq354/",
+        "confidence": "Medium",
+        "rowTooltip": "2015-08-12 - Stats site outage / rebirth - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2015-08-14",
+        "Mining / pools",
+        "Active Defcoin Pools",
+        "Updated",
+        "A status list of active pools was posted, including RedBaron, Defcoin.us, defcoinpool.com, cryptoheater, and defcoinpool.co.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 3h0kdw by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 35,
+        "sortDate": "2015-08-14",
+        "dateRaw": "2015-08-14",
+        "type": "Pool directory",
+        "status": "Updated",
+        "title": "Active Defcoin Pools",
+        "poster": "[deleted]",
+        "post": "3h0kdw",
+        "url": "https://www.reddit.com/r/defcoin/comments/3h0kdw/",
+        "confidence": "High",
+        "rowTooltip": "2015-08-14 - Pool directory - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-08-25",
+        "Mining / pools",
+        "cryptoheater.com",
+        "Possibly broken",
+        "Poster asked whether cryptoheater.com payouts were broken after hashing without balance.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 3ibcrl by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 36,
+        "sortDate": "2015-08-25",
+        "dateRaw": "2015-08-25",
+        "type": "Pool payout issue",
+        "status": "Possibly broken",
+        "title": "cryptoheater.com",
+        "poster": "[deleted]",
+        "post": "3ibcrl",
+        "url": "https://www.reddit.com/r/defcoin/comments/3ibcrl/",
+        "confidence": "Medium",
+        "rowTooltip": "2015-08-25 - Pool payout issue - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2015-11-02",
+        "Mining / pools",
+        "Tools & Pools List",
+        "Updated",
+        "Updated tools and pools list posted, including Ribbit.me API stats, paper wallet, pool, faucet, dice, wallet, and explorer references.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 3r71fs by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 37,
+        "sortDate": "2015-11-02",
+        "dateRaw": "2015-11-02",
+        "type": "Tools and pools directory",
+        "status": "Updated",
+        "title": "Tools & Pools List",
+        "poster": "[deleted]",
+        "post": "3r71fs",
+        "url": "https://www.reddit.com/r/defcoin/comments/3r71fs/",
+        "confidence": "High",
+        "rowTooltip": "2015-11-02 - Tools and pools directory - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2015-11-11",
+        "Wallets",
+        "Beerwallet feature bounties",
+        "Announced",
+        "300,000 DFC in bounties offered for Beerwallet feature work.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin 3sgjaj by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 38,
+        "sortDate": "2015-11-11",
+        "dateRaw": "2015-11-11",
+        "type": "Bounty program",
+        "status": "Announced",
+        "title": "Beerwallet feature bounties",
+        "poster": "[deleted]",
+        "post": "3sgjaj",
+        "url": "https://www.reddit.com/r/defcoin/comments/3sgjaj/",
+        "confidence": "High",
+        "rowTooltip": "2015-11-11 - Bounty program - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2016-07-09",
+        "Services",
+        "DEFCOIN project",
+        "Planned restoration",
+        "Poster said they were working to get everything back up with the DEFCOIN project, with more news coming soon.",
+        "Service signal: websites and tools made Defcoin easier to discover or use.",
+        "/r/Defcoin 4rzbx6 by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 39,
+        "sortDate": "2016-07-09",
+        "dateRaw": "2016-07-09; fully up target 2016-07-11",
+        "type": "Project/service revival",
+        "status": "Planned restoration",
+        "title": "DEFCOIN project",
+        "poster": "darkmatter1",
+        "post": "4rzbx6",
+        "url": "https://www.reddit.com/r/defcoin/comments/4rzbx6/",
+        "confidence": "High",
+        "rowTooltip": "2016-07-09; fully up target 2016-07-11 - Project/service revival - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2016-07-19",
+        "Wallets",
+        "Beerwallet iOS 0.4.4 (4.6)",
+        "Ready to test",
+        "Beerwallet iOS beta was ready to test for peer connection, sync, and P2SH QR scanning.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin 4too1m by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 40,
+        "sortDate": "2016-07-19",
+        "dateRaw": "2016-07-19",
+        "type": "Wallet beta",
+        "status": "Ready to test",
+        "title": "Beerwallet iOS 0.4.4 (4.6)",
+        "poster": "[deleted]",
+        "post": "4too1m",
+        "url": "https://www.reddit.com/r/defcoin/comments/4too1m/",
+        "confidence": "High",
+        "rowTooltip": "2016-07-19 - Wallet beta - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2016-07-22",
+        "DEF CON",
+        "Defcoin website",
+        "Back online",
+        "Website was announced back after long delays; more news and info expected before DEF CON.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 4u1916 by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 41,
+        "sortDate": "2016-07-22",
+        "dateRaw": "2016-07-22",
+        "type": "Website restoration",
+        "status": "Back online",
+        "title": "Defcoin website",
+        "poster": "darkmatter1",
+        "post": "4u1916",
+        "url": "https://www.reddit.com/r/defcoin/comments/4u1916/",
+        "confidence": "High",
+        "rowTooltip": "2016-07-22 - Website restoration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2016-07-29",
+        "Wallets",
+        "Beerwallet",
+        "Defcoin support changed",
+        "Beerwallet was being rewritten to operate with Dogecoin instead of Defcoin to comply with App Store guidelines.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin 4v7q62 by mperklin"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 42,
+        "sortDate": "2016-07-29",
+        "dateRaw": "2016-07-29",
+        "type": "Wallet/service pivot",
+        "status": "Defcoin support changed",
+        "title": "Beerwallet",
+        "poster": "mperklin",
+        "post": "4v7q62",
+        "url": "https://www.reddit.com/r/defcoin/comments/4v7q62/",
+        "confidence": "High",
+        "rowTooltip": "2016-07-29 - Wallet/service pivot - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2016-08-04",
+        "DEF CON anchor",
+        "DEF CON 24",
+        "Past",
+        "Defcoin project revival and website restoration posts appeared shortly before DEF CON 24.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 3,
+        "sortDate": "2016-08-04",
+        "dateRaw": "2016-08-04 10:00",
+        "endDateRaw": "2016-08-07 15:00",
+        "title": "DEF CON 24",
+        "venue": "Paris Hotel and Bally's Hotel, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times",
+        "url": "https://infocondb.org/con/def-con/def-con-24/",
+        "rowTooltip": "DEF CON 24: 2016-08-04 10:00 to 2016-08-07 15:00 - Paris Hotel and Bally's Hotel, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2016-08-08",
+        "DEF CON",
+        "DC24 Defcoin activity",
+        "Reported",
+        "Post shared DEFCON 24 Defcoin stats after the event.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 4wsu4y by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 43,
+        "sortDate": "2016-08-08",
+        "dateRaw": "2016-08-08",
+        "type": "DEFCON event report",
+        "status": "Reported",
+        "title": "DC24 Defcoin activity",
+        "poster": "Abstrct",
+        "post": "4wsu4y",
+        "url": "https://www.reddit.com/r/defcoin/comments/4wsu4y/",
+        "confidence": "Medium",
+        "rowTooltip": "2016-08-08 - DEFCON event report - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2016-11-17",
+        "Mining / pools",
+        "Defcoin.us; Defcoinpool.com",
+        "Closed / down",
+        "Post said Defcoin.us had shuttered and Defcoinpool.com was down, asking whether anyone wanted to create a pool.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 5dj8x7 by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 44,
+        "sortDate": "2016-11-17",
+        "dateRaw": "2016-11-17",
+        "type": "Pool shutdown / outage",
+        "status": "Closed / down",
+        "title": "Defcoin.us; Defcoinpool.com",
+        "poster": "[deleted]",
+        "post": "5dj8x7",
+        "url": "https://www.reddit.com/r/defcoin/comments/5dj8x7/",
+        "confidence": "High",
+        "rowTooltip": "2016-11-17 - Pool shutdown / outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2017-05-30",
+        "Mining / pools",
+        "SecDSM pool / defcoin.secdsm.org",
+        "Open for registration",
+        "After RedBaron and other pool closures, SecDSM created a Defcoin pool open for registration.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 6ecle8 by zoomequipd"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 45,
+        "sortDate": "2017-05-30",
+        "dateRaw": "2017-05-30",
+        "type": "Pool launch",
+        "status": "Open for registration",
+        "title": "SecDSM pool / defcoin.secdsm.org",
+        "poster": "zoomequipd",
+        "post": "6ecle8",
+        "url": "https://www.reddit.com/r/defcoin/comments/6ecle8/",
+        "confidence": "High",
+        "rowTooltip": "2017-05-30 - Pool launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2017-06-16",
+        "Community",
+        "defcoin-ng.org",
+        "Updated",
+        "Project update said defcoin.org was no longer controlled by those involved and the new domain was defcoin-ng.org.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 6hq1jg by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 46,
+        "sortDate": "2017-06-16",
+        "dateRaw": "2017-06-16",
+        "type": "Project update / domain change",
+        "status": "Updated",
+        "title": "defcoin-ng.org",
+        "poster": "darkmatter1",
+        "post": "6hq1jg",
+        "url": "https://www.reddit.com/r/defcoin/comments/6hq1jg/",
+        "confidence": "High",
+        "rowTooltip": "2017-06-16 - Project update / domain change - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2017-07-22",
+        "Wallets",
+        "Coinomi Android wallet",
+        "Added",
+        "Coinomi announced support for Defcoin.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin 6ow0vv by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 47,
+        "sortDate": "2017-07-22",
+        "dateRaw": "2017-07-22",
+        "type": "Wallet support",
+        "status": "Added",
+        "title": "Coinomi Android wallet",
+        "poster": "Abstrct",
+        "post": "6ow0vv",
+        "url": "https://www.reddit.com/r/defcoin/comments/6ow0vv/",
+        "confidence": "High",
+        "rowTooltip": "2017-07-22 - Wallet support - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2017-07-23",
+        "DEF CON",
+        "Defcoin-ng auction",
+        "Started / completed",
+        "Auction for DC25-related items was announced; post later marked ended.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 6p2o68 by darkmatter1"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 48,
+        "sortDate": "2017-07-23",
+        "dateRaw": "2017-07-23; DC25",
+        "type": "DEFCON auction",
+        "status": "Started / completed",
+        "title": "Defcoin-ng auction",
+        "poster": "darkmatter1",
+        "post": "6p2o68",
+        "url": "https://www.reddit.com/r/defcoin/comments/6p2o68/",
+        "confidence": "High",
+        "rowTooltip": "2017-07-23; DC25 - DEFCON auction - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2017-07-24",
+        "Network / protocol",
+        "Defcoin peer list",
+        "Updated",
+        "Posted addnode commands for users unable to find peers.",
+        "Protocol-health signal: peers, seeds, halvings, and outages define chain continuity.",
+        "/r/Defcoin 6p9o6m by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 49,
+        "sortDate": "2017-07-24",
+        "dateRaw": "2017-07-24",
+        "type": "Node list / network service",
+        "status": "Updated",
+        "title": "Defcoin peer list",
+        "poster": "Abstrct",
+        "post": "6p9o6m",
+        "url": "https://www.reddit.com/r/defcoin/comments/6p9o6m/",
+        "confidence": "Medium",
+        "rowTooltip": "2017-07-24 - Node list / network service - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2017-07-24",
+        "Coindroids",
+        "Coindroids / Imperium Citizenship",
+        "Opening soon",
+        "Coindroids post said Imperium Citizenship application opens soon.",
+        "Gameplay signal: Coindroids created visible Defcoin transaction flows and community activity.",
+        "/r/Defcoin 6pb6s5 by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 51,
+        "sortDate": "2017-07-24",
+        "dateRaw": "2017-07-24",
+        "type": "Game/service opening",
+        "status": "Opening soon",
+        "title": "Coindroids / Imperium Citizenship",
+        "poster": "Abstrct",
+        "post": "6pb6s5",
+        "url": "https://www.reddit.com/r/defcoin/comments/6pb6s5/",
+        "confidence": "Medium",
+        "rowTooltip": "2017-07-24 - Game/service opening - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2017-07-25",
+        "Coindroids",
+        "Coindroids",
+        "Added",
+        "Coindroids added Defcoin mempool support.",
+        "Gameplay signal: Coindroids created visible Defcoin transaction flows and community activity.",
+        "/r/Defcoin 6phbl9 by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 52,
+        "sortDate": "2017-07-25",
+        "dateRaw": "2017-07-25",
+        "type": "Game/service update",
+        "status": "Added",
+        "title": "Coindroids",
+        "poster": "Abstrct",
+        "post": "6phbl9",
+        "url": "https://www.reddit.com/r/defcoin/comments/6phbl9/",
+        "confidence": "High",
+        "rowTooltip": "2017-07-25 - Game/service update - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2017-07-27",
+        "DEF CON anchor",
+        "DEF CON 25",
+        "Past",
+        "Defcoin-ng auction, Coinomi support, Coindroids, and peer-list posts clustered around DC25.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 4,
+        "sortDate": "2017-07-27",
+        "dateRaw": "2017-07-27 10:00",
+        "endDateRaw": "2017-07-30 15:00",
+        "title": "DEF CON 25",
+        "venue": "Caesars Palace, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times",
+        "url": "https://infocondb.org/con/def-con/def-con-25/",
+        "rowTooltip": "DEF CON 25: 2017-07-27 10:00 to 2017-07-30 15:00 - Caesars Palace, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2017-08-07",
+        "Explorer / stats",
+        "defcoin.assmeow.org",
+        "Possibly down",
+        "Post asked whether the explorer was down for everyone.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin 6s959o by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 53,
+        "sortDate": "2017-08-07",
+        "dateRaw": "2017-08-07",
+        "type": "Explorer outage",
+        "status": "Possibly down",
+        "title": "defcoin.assmeow.org",
+        "poster": "Abstrct",
+        "post": "6s959o",
+        "url": "https://www.reddit.com/r/defcoin/comments/6s959o/",
+        "confidence": "Medium",
+        "rowTooltip": "2017-08-07 - Explorer outage - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2017-08-28",
+        "Explorer / stats",
+        "defcoin.assmeow.org / ABE",
+        "Down / requested",
+        "Post said ABE at defcoin.assmeow.org had gone down after years and asked for a new explorer host.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin 6wism7 by [deleted]"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 54,
+        "sortDate": "2017-08-28",
+        "dateRaw": "2017-08-28",
+        "type": "Explorer outage / replacement request",
+        "status": "Down / requested",
+        "title": "defcoin.assmeow.org / ABE",
+        "poster": "[deleted]",
+        "post": "6wism7",
+        "url": "https://www.reddit.com/r/defcoin/comments/6wism7/",
+        "confidence": "High",
+        "rowTooltip": "2017-08-28 - Explorer outage / replacement request - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2017-09-21",
+        "Community",
+        "DFC Coin Upgrade bounties",
+        "Announced",
+        "Poster announced bounties for upgrade ideas and possibly working code.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 71m13j by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 55,
+        "sortDate": "2017-09-21",
+        "dateRaw": "2017-09-21",
+        "type": "Bounty / upgrade proposals",
+        "status": "Announced",
+        "title": "DFC Coin Upgrade bounties",
+        "poster": "def2084",
+        "post": "71m13j",
+        "url": "https://www.reddit.com/r/defcoin/comments/71m13j/",
+        "confidence": "Medium",
+        "rowTooltip": "2017-09-21 - Bounty / upgrade proposals - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2017-12-10",
+        "Mining / pools",
+        "dfc.pool.xpcoin.io",
+        "Available",
+        "Extra Defcoin pool was announced and tested overnight.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 7itrq2 by DigitalizedWarfare"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 57,
+        "sortDate": "2017-12-10",
+        "dateRaw": "2017-12-10",
+        "type": "Pool launch",
+        "status": "Available",
+        "title": "dfc.pool.xpcoin.io",
+        "poster": "DigitalizedWarfare",
+        "post": "7itrq2",
+        "url": "https://www.reddit.com/r/defcoin/comments/7itrq2/",
+        "confidence": "High",
+        "rowTooltip": "2017-12-10 - Pool launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2017-12-14",
+        "Community",
+        "Free DFC for new arrivals",
+        "Available",
+        "Poster offered free DFC to new arrivals who posted an address or sent a message.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 7jwlh3 by djwishbone"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 58,
+        "sortDate": "2017-12-14",
+        "dateRaw": "2017-12-14",
+        "type": "Faucet / giveaway",
+        "status": "Available",
+        "title": "Free DFC for new arrivals",
+        "poster": "djwishbone",
+        "post": "7jwlh3",
+        "url": "https://www.reddit.com/r/defcoin/comments/7jwlh3/",
+        "confidence": "High",
+        "rowTooltip": "2017-12-14 - Faucet / giveaway - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2018-02-20",
+        "Explorer / stats",
+        "explorer.def-coin.org",
+        "Announced",
+        "Dedicated Defcoin blockchain explorer URL was posted.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin 7z0g1h by djwishbone"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 60,
+        "sortDate": "2018-02-20",
+        "dateRaw": "2018-02-20",
+        "type": "Explorer URL launch",
+        "status": "Announced",
+        "title": "explorer.def-coin.org",
+        "poster": "djwishbone",
+        "post": "7z0g1h",
+        "url": "https://www.reddit.com/r/defcoin/comments/7z0g1h/",
+        "confidence": "High",
+        "rowTooltip": "2018-02-20 - Explorer URL launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2018-02-28",
+        "Mining / pools",
+        "All pools / defcoin.secdsm.org",
+        "Down",
+        "Post said all pools appeared to be down again and linked SecDSM dashboard.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 812rjs by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 61,
+        "sortDate": "2018-02-28",
+        "dateRaw": "2018-02-28",
+        "type": "Pool outage",
+        "status": "Down",
+        "title": "All pools / defcoin.secdsm.org",
+        "poster": "def2084",
+        "post": "812rjs",
+        "url": "https://www.reddit.com/r/defcoin/comments/812rjs/",
+        "confidence": "High",
+        "rowTooltip": "2018-02-28 - Pool outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2018-03-10",
+        "DEF CON",
+        "Coindroids",
+        "Returning",
+        "Coindroids was announced as returning to DC26.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 83izli by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 62,
+        "sortDate": "2018-03-10",
+        "dateRaw": "2018-03-10; DC26",
+        "type": "DEFCON game/service event",
+        "status": "Returning",
+        "title": "Coindroids",
+        "poster": "Abstrct",
+        "post": "83izli",
+        "url": "https://www.reddit.com/r/defcoin/comments/83izli/",
+        "confidence": "High",
+        "rowTooltip": "2018-03-10; DC26 - DEFCON game/service event - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2018-04-21",
+        "Network / protocol",
+        "Defcoin first block halving",
+        "Occurred",
+        "Poster reported the first block reward halving, from 50 DFC to 25 DFC.",
+        "Protocol-health signal: peers, seeds, halvings, and outages define chain continuity.",
+        "/r/Defcoin 8dyglq by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 63,
+        "sortDate": "2018-04-21",
+        "dateRaw": "2018-04-21",
+        "type": "Protocol event",
+        "status": "Occurred",
+        "title": "Defcoin first block halving",
+        "poster": "def2084",
+        "post": "8dyglq",
+        "url": "https://www.reddit.com/r/defcoin/comments/8dyglq/",
+        "confidence": "High",
+        "rowTooltip": "2018-04-21 - Protocol event - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2018-07-15",
+        "Listings / markets",
+        "Cheddur coin page",
+        "Added",
+        "Defcoin was added to Cheddur.",
+        "Market-access signal: listings changed whether users could acquire or exit DFC.",
+        "/r/Defcoin 8z48fx by cheddur_announce"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 65,
+        "sortDate": "2018-07-15",
+        "dateRaw": "2018-07-15",
+        "type": "Directory/listing",
+        "status": "Added",
+        "title": "Cheddur coin page",
+        "poster": "cheddur_announce",
+        "post": "8z48fx",
+        "url": "https://www.reddit.com/r/defcoin/comments/8z48fx/",
+        "confidence": "High",
+        "rowTooltip": "2018-07-15 - Directory/listing - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2018-07-17",
+        "DEF CON",
+        "Free DFC for newbies",
+        "Available",
+        "Poster offered DFC for new users just in time for DEFCON.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 8zrd3j by djwishbone"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 66,
+        "sortDate": "2018-07-17",
+        "dateRaw": "2018-07-17; DC26",
+        "type": "DEFCON giveaway",
+        "status": "Available",
+        "title": "Free DFC for newbies",
+        "poster": "djwishbone",
+        "post": "8zrd3j",
+        "url": "https://www.reddit.com/r/defcoin/comments/8zrd3j/",
+        "confidence": "High",
+        "rowTooltip": "2018-07-17; DC26 - DEFCON giveaway - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2018-07-18",
+        "Community",
+        "defcoinfaucet.org",
+        "Announced",
+        "Defcoin Faucet link was posted.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin 8zx0ax by zoomequipd"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 67,
+        "sortDate": "2018-07-18",
+        "dateRaw": "2018-07-18",
+        "type": "Faucet launch",
+        "status": "Announced",
+        "title": "defcoinfaucet.org",
+        "poster": "zoomequipd",
+        "post": "8zx0ax",
+        "url": "https://www.reddit.com/r/defcoin/comments/8zx0ax/",
+        "confidence": "High",
+        "rowTooltip": "2018-07-18 - Faucet launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2018-07-19",
+        "DEF CON",
+        "Coindroids at Imperial.One",
+        "Announced",
+        "Coindroids DC26 event/service post was published.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin 906ow0 by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 68,
+        "sortDate": "2018-07-19",
+        "dateRaw": "2018-07-19; DC26",
+        "type": "DEFCON game/service event",
+        "status": "Announced",
+        "title": "Coindroids at Imperial.One",
+        "poster": "Abstrct",
+        "post": "906ow0",
+        "url": "https://www.reddit.com/r/defcoin/comments/906ow0/",
+        "confidence": "Medium",
+        "rowTooltip": "2018-07-19; DC26 - DEFCON game/service event - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2018-08-09",
+        "DEF CON anchor",
+        "DEF CON 26",
+        "Past",
+        "Defcoin faucet, giveaway, Cheddur listing, and Coindroids DC26 posts appeared near this event.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 5,
+        "sortDate": "2018-08-09",
+        "dateRaw": "2018-08-09 10:00",
+        "endDateRaw": "2018-08-12 16:00",
+        "title": "DEF CON 26",
+        "venue": "Caesars Palace, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times",
+        "url": "https://infocondb.org/con/def-con/def-con-26/",
+        "rowTooltip": "DEF CON 26: 2018-08-09 10:00 to 2018-08-12 16:00 - Caesars Palace, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2018-11-02",
+        "Listings / markets",
+        "Emblemvault DEX",
+        "Planned",
+        "Poster said Defcoin would be listed free of charge on Emblemvault's DEX, due to be released soon.",
+        "Market-access signal: listings changed whether users could acquire or exit DFC.",
+        "/r/Defcoin 9tpgby by Desktopcommando"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 70,
+        "sortDate": "2018-11-02",
+        "dateRaw": "2018-11-02",
+        "type": "DEX listing",
+        "status": "Planned",
+        "title": "Emblemvault DEX",
+        "poster": "Desktopcommando",
+        "post": "9tpgby",
+        "url": "https://www.reddit.com/r/defcoin/comments/9tpgby/",
+        "confidence": "High",
+        "rowTooltip": "2018-11-02 - DEX listing - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2018-12-27",
+        "Mining / pools",
+        "SecDSM pool",
+        "Down",
+        "Poster asked whether anyone had reached SecDSM about the pool being down for a week.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin a9zadf by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 72,
+        "sortDate": "2018-12-27",
+        "dateRaw": "2018-12-27",
+        "type": "Pool outage",
+        "status": "Down",
+        "title": "SecDSM pool",
+        "poster": "MiningDave",
+        "post": "a9zadf",
+        "url": "https://www.reddit.com/r/defcoin/comments/a9zadf/",
+        "confidence": "High",
+        "rowTooltip": "2018-12-27 - Pool outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2019-05-06",
+        "Explorer / stats",
+        "explorer.def-coin.org",
+        "Updated / operational",
+        "Blockchain explorer was updated and operational after difficult code-version work.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin bldmab by djwishbone"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 73,
+        "sortDate": "2019-05-06",
+        "dateRaw": "2019-05-06",
+        "type": "Explorer update",
+        "status": "Updated / operational",
+        "title": "explorer.def-coin.org",
+        "poster": "djwishbone",
+        "post": "bldmab",
+        "url": "https://www.reddit.com/r/defcoin/comments/bldmab/",
+        "confidence": "High",
+        "rowTooltip": "2019-05-06 - Explorer update - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2019-07-12",
+        "Network / protocol",
+        "seed.defcoin.mikej.tech",
+        "Bot active",
+        "Poster described a bot that scans trusted public peers and updates the seed address.",
+        "Protocol-health signal: peers, seeds, halvings, and outages define chain continuity.",
+        "/r/Defcoin ccjizx by sodium_hydrogen"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 74,
+        "sortDate": "2019-07-12",
+        "dateRaw": "2019-07-12",
+        "type": "Network seed service",
+        "status": "Bot active",
+        "title": "seed.defcoin.mikej.tech",
+        "poster": "sodium_hydrogen",
+        "post": "ccjizx",
+        "url": "https://www.reddit.com/r/defcoin/comments/ccjizx/",
+        "confidence": "High",
+        "rowTooltip": "2019-07-12 - Network seed service - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2019-07-29",
+        "Coindroids",
+        "docker-droid / Coindroids bot",
+        "Work in progress",
+        "Work-in-progress Docker container combining a Defcoin client and Coindroids bot was posted.",
+        "Gameplay signal: Coindroids created visible Defcoin transaction flows and community activity.",
+        "/r/Defcoin cjga26 by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 75,
+        "sortDate": "2019-07-29",
+        "dateRaw": "2019-07-29",
+        "type": "Game/service development",
+        "status": "Work in progress",
+        "title": "docker-droid / Coindroids bot",
+        "poster": "Abstrct",
+        "post": "cjga26",
+        "url": "https://www.reddit.com/r/defcoin/comments/cjga26/",
+        "confidence": "Medium",
+        "rowTooltip": "2019-07-29 - Game/service development - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2019-08-08",
+        "DEF CON anchor",
+        "DEF CON 27",
+        "Past",
+        "Defcoin giveaway and Coindroids at DEF CON 27 posts appeared in the subreddit corpus.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 6,
+        "sortDate": "2019-08-08",
+        "dateRaw": "2019-08-08 10:00",
+        "endDateRaw": "2019-08-11 16:00",
+        "title": "DEF CON 27",
+        "venue": "Paris, Ballys, Flamingo & Planet Hollywood hotels, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times",
+        "url": "https://infocondb.org/con/def-con/def-con-27/",
+        "rowTooltip": "DEF CON 27: 2019-08-08 10:00 to 2019-08-11 16:00 - Paris, Ballys, Flamingo & Planet Hollywood hotels, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2019-08-08",
+        "DEF CON",
+        "Free Defcoins at DEFCON",
+        "Starting",
+        "Poster said free Defcoins would start after DEFCON registration opened.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin cnejib by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 76,
+        "sortDate": "2019-08-08",
+        "dateRaw": "2019-08-08; DEFCON registration 6AM Thursday",
+        "type": "DEFCON giveaway",
+        "status": "Starting",
+        "title": "Free Defcoins at DEFCON",
+        "poster": "MiningDave",
+        "post": "cnejib",
+        "url": "https://www.reddit.com/r/defcoin/comments/cnejib/",
+        "confidence": "High",
+        "rowTooltip": "2019-08-08; DEFCON registration 6AM Thursday - DEFCON giveaway - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2019-08-18",
+        "DEF CON",
+        "Coindroids @ DEFCON 27",
+        "Reported",
+        "Coindroids DEFCON 27 post was published.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin cs8d2q by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 77,
+        "sortDate": "2019-08-18",
+        "dateRaw": "2019-08-18; DEFCON 27",
+        "type": "DEFCON game/service event",
+        "status": "Reported",
+        "title": "Coindroids @ DEFCON 27",
+        "poster": "Abstrct",
+        "post": "cs8d2q",
+        "url": "https://www.reddit.com/r/defcoin/comments/cs8d2q/",
+        "confidence": "Medium",
+        "rowTooltip": "2019-08-18; DEFCON 27 - DEFCON game/service event - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2019-10-16",
+        "Coindroids",
+        "Coindroids swag shop",
+        "Announced",
+        "Coindroids swag shop was announced.",
+        "Gameplay signal: Coindroids created visible Defcoin transaction flows and community activity.",
+        "/r/Defcoin dirzdz by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 79,
+        "sortDate": "2019-10-16",
+        "dateRaw": "2019-10-16",
+        "type": "Swag shop launch",
+        "status": "Announced",
+        "title": "Coindroids swag shop",
+        "poster": "Abstrct",
+        "post": "dirzdz",
+        "url": "https://www.reddit.com/r/defcoin/comments/dirzdz/",
+        "confidence": "Medium",
+        "rowTooltip": "2019-10-16 - Swag shop launch - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2019-10-28",
+        "Listings / markets",
+        "ctcswap.com",
+        "Listed",
+        "Poster said ctcswap.com listed DFC and that buying/selling Defcoin was possible there.",
+        "Market-access signal: listings changed whether users could acquire or exit DFC.",
+        "/r/Defcoin do5fhi by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 80,
+        "sortDate": "2019-10-28",
+        "dateRaw": "2019-10-28",
+        "type": "Exchange listing",
+        "status": "Listed",
+        "title": "ctcswap.com",
+        "poster": "def2084",
+        "post": "do5fhi",
+        "url": "https://www.reddit.com/r/defcoin/comments/do5fhi/",
+        "confidence": "High",
+        "rowTooltip": "2019-10-28 - Exchange listing - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2019-10-31",
+        "Wallets",
+        "Coinomi",
+        "Send problems reported",
+        "Poster reported several days of difficulty sending DFC out of Coinomi.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin dpyaqn by sailingham"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 81,
+        "sortDate": "2019-10-31",
+        "dateRaw": "2019-10-31",
+        "type": "Wallet service issue",
+        "status": "Send problems reported",
+        "title": "Coinomi",
+        "poster": "sailingham",
+        "post": "dpyaqn",
+        "url": "https://www.reddit.com/r/defcoin/comments/dpyaqn/",
+        "confidence": "Medium",
+        "rowTooltip": "2019-10-31 - Wallet service issue - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2019-11-12",
+        "Network / protocol",
+        "Defcoin network",
+        "Recovered / investigated",
+        "Poster reported the network seemed nonfunctional for about three days and later resumed.",
+        "Protocol-health signal: peers, seeds, halvings, and outages define chain continuity.",
+        "/r/Defcoin dxr3xe by gigawatts121"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 82,
+        "sortDate": "2019-11-12",
+        "dateRaw": "2019-11-12 to about 2019-11-15; posted 2019-11-17",
+        "type": "Network outage",
+        "status": "Recovered / investigated",
+        "title": "Defcoin network",
+        "poster": "gigawatts121",
+        "post": "dxr3xe",
+        "url": "https://www.reddit.com/r/defcoin/comments/dxr3xe/",
+        "confidence": "High",
+        "rowTooltip": "2019-11-12 to about 2019-11-15; posted 2019-11-17 - Network outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2019-12-13",
+        "Mining / pools",
+        "SecDSM pool",
+        "Shutting down",
+        "Post warned the lone pool was about to be emptied for winter and asked who would start a new pool.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin eadvox by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 83,
+        "sortDate": "2019-12-13",
+        "dateRaw": "2019-12-13",
+        "type": "Pool shutdown / replacement request",
+        "status": "Shutting down",
+        "title": "SecDSM pool",
+        "poster": "def2084",
+        "post": "eadvox",
+        "url": "https://www.reddit.com/r/defcoin/comments/eadvox/",
+        "confidence": "High",
+        "rowTooltip": "2019-12-13 - Pool shutdown / replacement request - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2019-12-20",
+        "Mining / pools",
+        "pow.spectresecurity.io",
+        "Testing",
+        "New Defcoin pool was announced at pow.spectresecurity.io and users were asked to test it.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin edk331 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 84,
+        "sortDate": "2019-12-20",
+        "dateRaw": "2019-12-20",
+        "type": "Pool launch",
+        "status": "Testing",
+        "title": "pow.spectresecurity.io",
+        "poster": "def2084",
+        "post": "edk331",
+        "url": "https://www.reddit.com/r/defcoin/comments/edk331/",
+        "confidence": "High",
+        "rowTooltip": "2019-12-20 - Pool launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2019-12-22",
+        "Mining / pools",
+        "unknownminingpool.com",
+        "Working in test",
+        "UnknownMiningPool setup was announced with stratum port and payment details.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin ee4xr4 by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 85,
+        "sortDate": "2019-12-22",
+        "dateRaw": "2019-12-22",
+        "type": "Pool launch",
+        "status": "Working in test",
+        "title": "unknownminingpool.com",
+        "poster": "MiningDave",
+        "post": "ee4xr4",
+        "url": "https://www.reddit.com/r/defcoin/comments/ee4xr4/",
+        "confidence": "High",
+        "rowTooltip": "2019-12-22 - Pool launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2020-01-01",
+        "Mining / pools",
+        "SecDSM pool / defcoin.secdsm.org",
+        "Scheduled shutdown",
+        "SecDSM pool operator announced shutdown effective Jan 1, 2020 and said remaining funds would be paid out if above threshold.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin dfy3xx by zoomequipd"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 78,
+        "sortDate": "2020-01-01",
+        "dateRaw": "2020-01-01 shutdown announced on 2019-10-10",
+        "type": "Pool shutdown",
+        "status": "Scheduled shutdown",
+        "title": "SecDSM pool / defcoin.secdsm.org",
+        "poster": "zoomequipd",
+        "post": "dfy3xx",
+        "url": "https://www.reddit.com/r/defcoin/comments/dfy3xx/",
+        "confidence": "High",
+        "rowTooltip": "2020-01-01 shutdown announced on 2019-10-10 - Pool shutdown - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2020-01-12",
+        "Mining / pools",
+        "UnknownMiningPool",
+        "Under stress / partially disabled",
+        "Pool operator reported being hit by a NiceHash rental and attempting to block or kill the coin port.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin enwu8c by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 87,
+        "sortDate": "2020-01-12",
+        "dateRaw": "2020-01-12",
+        "type": "Pool operating issue",
+        "status": "Under stress / partially disabled",
+        "title": "UnknownMiningPool",
+        "poster": "MiningDave",
+        "post": "enwu8c",
+        "url": "https://www.reddit.com/r/defcoin/comments/enwu8c/",
+        "confidence": "Medium",
+        "rowTooltip": "2020-01-12 - Pool operating issue - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2020-01-28",
+        "Mining / pools",
+        "defcoin.secdsm.org",
+        "Dead",
+        "Poster said the old SecDSM pool was down and asked for an available pool.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin evcb2t by _deftoner_"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 88,
+        "sortDate": "2020-01-28",
+        "dateRaw": "2020-01-28",
+        "type": "Pool shutdown / outage",
+        "status": "Dead",
+        "title": "defcoin.secdsm.org",
+        "poster": "_deftoner_",
+        "post": "evcb2t",
+        "url": "https://www.reddit.com/r/defcoin/comments/evcb2t/",
+        "confidence": "High",
+        "rowTooltip": "2020-01-28 - Pool shutdown / outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2020-02-23",
+        "Community",
+        "Infocon.org hard drive donations",
+        "Offered",
+        "Poster offered 1,000 DFC per dollar of enterprise hard drive/funding donations to Infocon.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin f88aij by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 90,
+        "sortDate": "2020-02-23",
+        "dateRaw": "2020-02-23",
+        "type": "Donation-for-DFC campaign",
+        "status": "Offered",
+        "title": "Infocon.org hard drive donations",
+        "poster": "def2084",
+        "post": "f88aij",
+        "url": "https://www.reddit.com/r/defcoin/comments/f88aij/",
+        "confidence": "Medium",
+        "rowTooltip": "2020-02-23 - Donation-for-DFC campaign - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2020-05-08",
+        "DEF CON",
+        "DEFCON 28 Safe Mode",
+        "Remote-only announced",
+        "DEFCON 28 was announced as remote-only and not in-person in Vegas.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin gg3hjp by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 89,
+        "sortDate": "2020-05-08",
+        "dateRaw": "2020-05-08; DEFCON 28",
+        "type": "DEFCON event status",
+        "status": "Remote-only announced",
+        "title": "DEFCON 28 Safe Mode",
+        "poster": "Abstrct",
+        "post": "gg3hjp",
+        "url": "https://www.reddit.com/r/defcoin/comments/gg3hjp/",
+        "confidence": "High",
+        "rowTooltip": "2020-05-08; DEFCON 28 - DEFCON event status - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2020-08-06",
+        "DEF CON anchor",
+        "DEF CON 28 Safe Mode",
+        "Past / virtual",
+        "Included for continuity because Safe Mode replaced the annual Las Vegas DEF CON in 2020.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 7,
+        "sortDate": "2020-08-06",
+        "dateRaw": "2020-08-06 09:30",
+        "endDateRaw": "2020-08-09 16:30",
+        "title": "DEF CON 28 Safe Mode",
+        "venue": "Virtual, Virtual; original annual DEF CON series",
+        "status": "Past / virtual",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times",
+        "url": "https://infocondb.org/con/def-con/def-con-28/",
+        "rowTooltip": "DEF CON 28 Safe Mode: 2020-08-06 09:30 to 2020-08-09 16:30 - Virtual, Virtual; original annual DEF CON series"
+      }
+    },
+    {
+      "cells": [
+        "2020-08-10",
+        "Mining / pools",
+        "Defcoin p2pool",
+        "Posted",
+        "Defcoin p2pool crosspost/link was posted.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin i78m5m by Abstrct"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 91,
+        "sortDate": "2020-08-10",
+        "dateRaw": "2020-08-10",
+        "type": "P2Pool service reference",
+        "status": "Posted",
+        "title": "Defcoin p2pool",
+        "poster": "Abstrct",
+        "post": "i78m5m",
+        "url": "https://www.reddit.com/r/defcoin/comments/i78m5m/",
+        "confidence": "Medium",
+        "rowTooltip": "2020-08-10 - P2Pool service reference - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2020-08-17",
+        "Mining / pools",
+        "Defcoin code and p2pool software",
+        "Work in progress",
+        "Post said wallet/code update work was still in progress and referenced a p2pool pull request.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin ibo7bm by sodium_hydrogen"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 92,
+        "sortDate": "2020-08-17",
+        "dateRaw": "2020-08-17",
+        "type": "Code / p2pool update",
+        "status": "Work in progress",
+        "title": "Defcoin code and p2pool software",
+        "poster": "sodium_hydrogen",
+        "post": "ibo7bm",
+        "url": "https://www.reddit.com/r/defcoin/comments/ibo7bm/",
+        "confidence": "Medium",
+        "rowTooltip": "2020-08-17 - Code / p2pool update - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2020-08-19",
+        "Mining / pools",
+        "UnknownMiningPool payment daemon",
+        "Restarted / payments sent",
+        "Pool payment daemon had crashed; operator restarted it and made payments.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin icz1xj by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 93,
+        "sortDate": "2020-08-19",
+        "dateRaw": "2020-08-19",
+        "type": "Pool payment outage",
+        "status": "Restarted / payments sent",
+        "title": "UnknownMiningPool payment daemon",
+        "poster": "MiningDave",
+        "post": "icz1xj",
+        "url": "https://www.reddit.com/r/defcoin/comments/icz1xj/",
+        "confidence": "High",
+        "rowTooltip": "2020-08-19 - Pool payment outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2020-08-23",
+        "Explorer / stats",
+        "explorer.def-coin.org",
+        "Down",
+        "Post reported explorer.def-coin.org was down, with last transaction listed from 2020-08-11.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin iexztm by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 94,
+        "sortDate": "2020-08-23",
+        "dateRaw": "2020-08-23",
+        "type": "Explorer outage",
+        "status": "Down",
+        "title": "explorer.def-coin.org",
+        "poster": "def2084",
+        "post": "iexztm",
+        "url": "https://www.reddit.com/r/defcoin/comments/iexztm/",
+        "confidence": "High",
+        "rowTooltip": "2020-08-23 - Explorer outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2020-09-09",
+        "Mining / pools",
+        "UnknownMiningPool",
+        "Down",
+        "Pool was down again due to apparent hardware I/O errors; operator planned data center drive swap.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin ipduz0 by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 95,
+        "sortDate": "2020-09-09",
+        "dateRaw": "2020-09-09",
+        "type": "Pool outage",
+        "status": "Down",
+        "title": "UnknownMiningPool",
+        "poster": "MiningDave",
+        "post": "ipduz0",
+        "url": "https://www.reddit.com/r/defcoin/comments/ipduz0/",
+        "confidence": "High",
+        "rowTooltip": "2020-09-09 - Pool outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2020-12-30",
+        "Mining / pools",
+        "unknownminingpool.com",
+        "Back up / testing",
+        "UnknownMiningPool was back up in a rough UNOMP install with stratum endpoint and payment rules.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin kngkji by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 96,
+        "sortDate": "2020-12-30",
+        "dateRaw": "2020-12-30",
+        "type": "Pool restoration",
+        "status": "Back up / testing",
+        "title": "unknownminingpool.com",
+        "poster": "MiningDave",
+        "post": "kngkji",
+        "url": "https://www.reddit.com/r/defcoin/comments/kngkji/",
+        "confidence": "High",
+        "rowTooltip": "2020-12-30 - Pool restoration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-01-02",
+        "Wallets",
+        "Coinomi Defcoin wallet",
+        "Possibly dead",
+        "User reported Coinomi Defcoin wallet would not sync and asked if it was dead.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin koum87 by -__-_-___-_-__-"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 97,
+        "sortDate": "2021-01-02",
+        "dateRaw": "2021-01-02",
+        "type": "Wallet service outage",
+        "status": "Possibly dead",
+        "title": "Coinomi Defcoin wallet",
+        "poster": "-__-_-___-_-__-",
+        "post": "koum87",
+        "url": "https://www.reddit.com/r/defcoin/comments/koum87/",
+        "confidence": "Medium",
+        "rowTooltip": "2021-01-02 - Wallet service outage - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2021-02-10",
+        "Mining / pools",
+        "Coinomi Defcoin servers",
+        "Down / lacks peers or hashrate",
+        "Coinomi explained Defcoin status was down because its servers could not find other nodes or miners.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin lh9zdx by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 98,
+        "sortDate": "2021-02-10",
+        "dateRaw": "2021-02-10",
+        "type": "Wallet service outage",
+        "status": "Down / lacks peers or hashrate",
+        "title": "Coinomi Defcoin servers",
+        "poster": "def2084",
+        "post": "lh9zdx",
+        "url": "https://www.reddit.com/r/defcoin/comments/lh9zdx/",
+        "confidence": "High",
+        "rowTooltip": "2021-02-10 - Wallet service outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-02-18",
+        "Mining / pools",
+        "UnknownMiningPool; pool.laiw.com; pow.spectresecurity.io",
+        "Mixed / needs testing",
+        "Post listed three possible DFC pools and described unknownminingpool as the only confirmed-working pool at that moment.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin lmket9 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 99,
+        "sortDate": "2021-02-18",
+        "dateRaw": "2021-02-18",
+        "type": "Pool directory / service status",
+        "status": "Mixed / needs testing",
+        "title": "UnknownMiningPool; pool.laiw.com; pow.spectresecurity.io",
+        "poster": "def2084",
+        "post": "lmket9",
+        "url": "https://www.reddit.com/r/defcoin/comments/lmket9/",
+        "confidence": "High",
+        "rowTooltip": "2021-02-18 - Pool directory / service status - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-02-24",
+        "Wallets",
+        "Coinomi",
+        "Back in sync",
+        "Coinomi was reported back in sync with a green-light status.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin lrzf97 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 100,
+        "sortDate": "2021-02-24",
+        "dateRaw": "2021-02-24",
+        "type": "Wallet service restoration",
+        "status": "Back in sync",
+        "title": "Coinomi",
+        "poster": "def2084",
+        "post": "lrzf97",
+        "url": "https://www.reddit.com/r/defcoin/comments/lrzf97/",
+        "confidence": "High",
+        "rowTooltip": "2021-02-24 - Wallet service restoration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-02-24",
+        "Mining / pools",
+        "unknownminingpool.com",
+        "Working after check",
+        "Poster asked whether UnknownMiningPool was paying out; later edit said the pool was working great.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin lrzh0k by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 101,
+        "sortDate": "2021-02-24",
+        "dateRaw": "2021-02-24",
+        "type": "Pool payment status",
+        "status": "Working after check",
+        "title": "unknownminingpool.com",
+        "poster": "def2084",
+        "post": "lrzh0k",
+        "url": "https://www.reddit.com/r/defcoin/comments/lrzh0k/",
+        "confidence": "High",
+        "rowTooltip": "2021-02-24 - Pool payment status - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-02-26",
+        "Community",
+        "Defcoin Giveaway",
+        "Started",
+        "Giveaway announced with a 2.5k DFC prize; entrants were asked to comment address and reason.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin lteyau by Meap011"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 102,
+        "sortDate": "2021-02-26",
+        "dateRaw": "2021-02-26",
+        "type": "Giveaway",
+        "status": "Started",
+        "title": "Defcoin Giveaway",
+        "poster": "Meap011",
+        "post": "lteyau",
+        "url": "https://www.reddit.com/r/defcoin/comments/lteyau/",
+        "confidence": "High",
+        "rowTooltip": "2021-02-26 - Giveaway - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-03-17",
+        "Mining / pools",
+        "Defcoin mining pools",
+        "No pools reported",
+        "User reported no mining pools anymore due to difficulty conditions and a high-hash miner.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin m7fa5c by Scam_me_lol404"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 103,
+        "sortDate": "2021-03-17",
+        "dateRaw": "2021-03-17",
+        "type": "Pool availability status",
+        "status": "No pools reported",
+        "title": "Defcoin mining pools",
+        "poster": "Scam_me_lol404",
+        "post": "m7fa5c",
+        "url": "https://www.reddit.com/r/defcoin/comments/m7fa5c/",
+        "confidence": "Medium",
+        "rowTooltip": "2021-03-17 - Pool availability status - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2021-04-08",
+        "Mining / pools",
+        "DC801 hackerspace mining pool",
+        "Planned",
+        "Poster planned a permanent mining pool at DC801 and invited advice.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin mmyxqk by bash-ninja"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 104,
+        "sortDate": "2021-04-08",
+        "dateRaw": "2021-04-08",
+        "type": "Pool plan",
+        "status": "Planned",
+        "title": "DC801 hackerspace mining pool",
+        "poster": "bash-ninja",
+        "post": "mmyxqk",
+        "url": "https://www.reddit.com/r/defcoin/comments/mmyxqk/",
+        "confidence": "Medium",
+        "rowTooltip": "2021-04-08 - Pool plan - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2021-04-08",
+        "Mining / pools",
+        "MiningPoolStats.stream",
+        "Added",
+        "Defcoin was listed on MiningPoolStats.stream.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin mn2wm7 by bash-ninja"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 105,
+        "sortDate": "2021-04-08",
+        "dateRaw": "2021-04-08",
+        "type": "Pool directory listing",
+        "status": "Added",
+        "title": "MiningPoolStats.stream",
+        "poster": "bash-ninja",
+        "post": "mn2wm7",
+        "url": "https://www.reddit.com/r/defcoin/comments/mn2wm7/",
+        "confidence": "High",
+        "rowTooltip": "2021-04-08 - Pool directory listing - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-04-12",
+        "Mining / pools",
+        "UnknownMiningPool; pool.laiw.com",
+        "Two pools listed",
+        "Post listed two active NOMP-style Defcoin pools and noted the need for more hash power.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin mpjtjb by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 106,
+        "sortDate": "2021-04-12",
+        "dateRaw": "2021-04-12",
+        "type": "Pool directory / status",
+        "status": "Two pools listed",
+        "title": "UnknownMiningPool; pool.laiw.com",
+        "poster": "def2084",
+        "post": "mpjtjb",
+        "url": "https://www.reddit.com/r/defcoin/comments/mpjtjb/",
+        "confidence": "High",
+        "rowTooltip": "2021-04-12 - Pool directory / status - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-04-12",
+        "Community",
+        "Defcoin Discord Server",
+        "Server created",
+        "bashNinja set up a Defcoin Discord server and invite links were posted.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin mpkbb0 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 107,
+        "sortDate": "2021-04-12",
+        "dateRaw": "2021-04-12",
+        "type": "Community service launch",
+        "status": "Server created",
+        "title": "Defcoin Discord Server",
+        "poster": "def2084",
+        "post": "mpkbb0",
+        "url": "https://www.reddit.com/r/defcoin/comments/mpkbb0/",
+        "confidence": "High",
+        "rowTooltip": "2021-04-12 - Community service launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-04-13",
+        "Explorer / stats",
+        "explorer.def-coin.org",
+        "Down / not syncing",
+        "Post reported explorer.def-coin.org was currently down/not syncing, with last block time noted.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin mq5q23 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 108,
+        "sortDate": "2021-04-13",
+        "dateRaw": "2021-04-13",
+        "type": "Explorer outage",
+        "status": "Down / not syncing",
+        "title": "explorer.def-coin.org",
+        "poster": "def2084",
+        "post": "mq5q23",
+        "url": "https://www.reddit.com/r/defcoin/comments/mq5q23/",
+        "confidence": "High",
+        "rowTooltip": "2021-04-13 - Explorer outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-04-16",
+        "Wallets",
+        "Defcoin Wallet v1.0.1",
+        "Binaries soon",
+        "Post described a DNS seeding bug fix and expected Defcoin Wallet v1.0.1 binaries soon.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin msb7e1 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 109,
+        "sortDate": "2021-04-16",
+        "dateRaw": "2021-04-16",
+        "type": "Wallet release / DNS seed fix",
+        "status": "Binaries soon",
+        "title": "Defcoin Wallet v1.0.1",
+        "poster": "def2084",
+        "post": "msb7e1",
+        "url": "https://www.reddit.com/r/defcoin/comments/msb7e1/",
+        "confidence": "High",
+        "rowTooltip": "2021-04-16 - Wallet release / DNS seed fix - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-04-22",
+        "Wallets",
+        "Coinomi Defcoin wallet",
+        "Support engaged",
+        "Coinomi support joined the Defcoin Discord support channel to help get the wallet working again.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin mwikif by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 110,
+        "sortDate": "2021-04-22",
+        "dateRaw": "2021-04-22",
+        "type": "Wallet service support update",
+        "status": "Support engaged",
+        "title": "Coinomi Defcoin wallet",
+        "poster": "def2084",
+        "post": "mwikif",
+        "url": "https://www.reddit.com/r/defcoin/comments/mwikif/",
+        "confidence": "High",
+        "rowTooltip": "2021-04-22 - Wallet service support update - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-04-28",
+        "Explorer / stats",
+        "Defcoinstats.com",
+        "Partly working",
+        "Defcoinstats.com was described as long-running but broken; profit calculator still worked.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin n0cp26 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 111,
+        "sortDate": "2021-04-28",
+        "dateRaw": "2021-04-28",
+        "type": "Stats website status",
+        "status": "Partly working",
+        "title": "Defcoinstats.com",
+        "poster": "def2084",
+        "post": "n0cp26",
+        "url": "https://www.reddit.com/r/defcoin/comments/n0cp26/",
+        "confidence": "High",
+        "rowTooltip": "2021-04-28 - Stats website status - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-04-28",
+        "Wallets",
+        "Coinomi Defcoin wallet",
+        "Back up and running",
+        "Coinomi's Defcoin wallet was back working after ElectrumX sync issue was debugged.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin n0etq1 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 112,
+        "sortDate": "2021-04-28",
+        "dateRaw": "2021-04-28",
+        "type": "Wallet service restoration",
+        "status": "Back up and running",
+        "title": "Coinomi Defcoin wallet",
+        "poster": "def2084",
+        "post": "n0etq1",
+        "url": "https://www.reddit.com/r/defcoin/comments/n0etq1/",
+        "confidence": "High",
+        "rowTooltip": "2021-04-28 - Wallet service restoration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-05-16",
+        "Mining / pools",
+        "defcoin.host / p2pool-defcoin",
+        "Available",
+        "defcoin.host listed P2Pool info and the p2pool-defcoin GitHub was updated.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin ndiqqy by greenvironment"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 113,
+        "sortDate": "2021-05-16",
+        "dateRaw": "2021-05-16",
+        "type": "P2Pool service launch / directory",
+        "status": "Available",
+        "title": "defcoin.host / p2pool-defcoin",
+        "poster": "greenvironment",
+        "post": "ndiqqy",
+        "url": "https://www.reddit.com/r/defcoin/comments/ndiqqy/",
+        "confidence": "High",
+        "rowTooltip": "2021-05-16 - P2Pool service launch / directory - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-05-26",
+        "Wallets",
+        "Defcoin peering; Coinomi sync",
+        "Improved",
+        "Post said peering worked better with new compiled code and Coinomi server appeared to be syncing.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin nlyiu0 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 114,
+        "sortDate": "2021-05-26",
+        "dateRaw": "2021-05-26",
+        "type": "Network/wallet service improvement",
+        "status": "Improved",
+        "title": "Defcoin peering; Coinomi sync",
+        "poster": "def2084",
+        "post": "nlyiu0",
+        "url": "https://www.reddit.com/r/defcoin/comments/nlyiu0/",
+        "confidence": "High",
+        "rowTooltip": "2021-05-26 - Network/wallet service improvement - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-06-05",
+        "Network / protocol",
+        "Defcoin halving schedule",
+        "Forecast",
+        "Post calculated first reward start and halving block history, asking when next halving would occur.",
+        "Protocol-health signal: peers, seeds, halvings, and outages define chain continuity.",
+        "/r/Defcoin nt70ll by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 116,
+        "sortDate": "2021-06-05",
+        "dateRaw": "Next halving expected around block 1,680,000; post date 2021-06-05",
+        "type": "Protocol event forecast",
+        "status": "Forecast",
+        "title": "Defcoin halving schedule",
+        "poster": "def2084",
+        "post": "nt70ll",
+        "url": "https://www.reddit.com/r/defcoin/comments/nt70ll/",
+        "confidence": "Medium",
+        "rowTooltip": "Next halving expected around block 1,680,000; post date 2021-06-05 - Protocol event forecast - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2021-08-04",
+        "DEF CON",
+        "UnknownMiningPool payouts",
+        "Changed",
+        "Payment minimum was dropped to 20 DFC then 10 DFC because DEFCON was starting.",
+        "DEF CON anchor: ties Defcoin activity to the hacker-conference calendar.",
+        "/r/Defcoin oxz3bc by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 117,
+        "sortDate": "2021-08-04",
+        "dateRaw": "2021-08-04; DEFCON starts now",
+        "type": "Pool payment change / DEFCON event",
+        "status": "Changed",
+        "title": "UnknownMiningPool payouts",
+        "poster": "MiningDave",
+        "post": "oxz3bc",
+        "url": "https://www.reddit.com/r/defcoin/comments/oxz3bc/",
+        "confidence": "High",
+        "rowTooltip": "2021-08-04; DEFCON starts now - Pool payment change / DEFCON event - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-08-05",
+        "DEF CON anchor",
+        "DEF CON 29",
+        "Past",
+        "Pool payout changes and DEFCON-starting-now notes appeared in the Defcoin subreddit corpus.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 8,
+        "sortDate": "2021-08-05",
+        "dateRaw": "2021-08-05",
+        "endDateRaw": "2021-08-08 14:30",
+        "title": "DEF CON 29",
+        "venue": "Paris & Ballys hotels, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first listed presentation in archive is Fri 10:00, final listed Sunday time is 14:30",
+        "url": "https://infocondb.org/con/def-con/def-con-29/",
+        "rowTooltip": "DEF CON 29: 2021-08-05 to 2021-08-08 14:30 - Paris & Ballys hotels, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2021-09-28",
+        "Wallets",
+        "Coinomi Defcoin recovery article",
+        "Published / linked",
+        "Good article on sweeping Coinomi Defcoin funds was posted.",
+        "Usability signal: wallet releases and sync support affected whether new users could hold or move DFC.",
+        "/r/Defcoin px3fe5 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 118,
+        "sortDate": "2021-09-28",
+        "dateRaw": "2021-09-28",
+        "type": "Wallet recovery guide",
+        "status": "Published / linked",
+        "title": "Coinomi Defcoin recovery article",
+        "poster": "def2084",
+        "post": "px3fe5",
+        "url": "https://www.reddit.com/r/defcoin/comments/px3fe5/",
+        "confidence": "Medium",
+        "rowTooltip": "2021-09-28 - Wallet recovery guide - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2021-09-28",
+        "Community",
+        "Manual Defcoin faucet",
+        "Available",
+        "Poster offered random faucet drips by DM or reply with a DFC address.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin px3ibv by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 120,
+        "sortDate": "2021-09-28",
+        "dateRaw": "2021-09-28",
+        "type": "Manual faucet",
+        "status": "Available",
+        "title": "Manual Defcoin faucet",
+        "poster": "def2084",
+        "post": "px3ibv",
+        "url": "https://www.reddit.com/r/defcoin/comments/px3ibv/",
+        "confidence": "High",
+        "rowTooltip": "2021-09-28 - Manual faucet - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-09-28",
+        "Mining / pools",
+        "defcoin.dc903.org",
+        "Under testing",
+        "New pool under testing at defcoin.dc903.org was announced with status page and stratum endpoint.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin px3k48 by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 121,
+        "sortDate": "2021-09-28",
+        "dateRaw": "2021-09-28",
+        "type": "Pool launch / testing",
+        "status": "Under testing",
+        "title": "defcoin.dc903.org",
+        "poster": "def2084",
+        "post": "px3k48",
+        "url": "https://www.reddit.com/r/defcoin/comments/px3k48/",
+        "confidence": "High",
+        "rowTooltip": "2021-09-28 - Pool launch / testing - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2021-12-29",
+        "Explorer / stats",
+        "explorer.dc903.org",
+        "Up",
+        "New Iquidus-based Defcoin explorer and richlist at explorer.dc903.org was announced.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin rr4n8c by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 122,
+        "sortDate": "2021-12-29",
+        "dateRaw": "2021-12-29",
+        "type": "Explorer/richlist launch",
+        "status": "Up",
+        "title": "explorer.dc903.org",
+        "poster": "def2084",
+        "post": "rr4n8c",
+        "url": "https://www.reddit.com/r/defcoin/comments/rr4n8c/",
+        "confidence": "High",
+        "rowTooltip": "2021-12-29 - Explorer/richlist launch - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2022-08-11",
+        "DEF CON anchor",
+        "DEF CON 30",
+        "Past",
+        "Defcoin Discord activity and a later halvening notice appeared in the same year.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 9,
+        "sortDate": "2022-08-11",
+        "dateRaw": "2022-08-11 09:00",
+        "endDateRaw": "2022-08-14 15:30",
+        "title": "DEF CON 30",
+        "venue": "Caesars Forum, Flamingo, Linq, and Harrah's, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times for conference dates only",
+        "url": "https://infocondb.org/con/def-con/def-con-30/",
+        "rowTooltip": "DEF CON 30: 2022-08-11 09:00 to 2022-08-14 15:30 - Caesars Forum, Flamingo, Linq, and Harrah's, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2022-10-03",
+        "Explorer / stats",
+        "explorer.dc903.org richlist",
+        "Explorer stopped",
+        "Poster said explorer stopped on Oct 3 and saved a richlist snapshot in case the site went down.",
+        "Explorer signal: public visibility, rich lists, stats, and outages affected trust and investigation work.",
+        "/r/Defcoin yjl8it by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 124,
+        "sortDate": "2022-10-03",
+        "dateRaw": "Explorer stopped 2022-10-03; post date 2022-11-01",
+        "type": "Explorer/richlist outage snapshot",
+        "status": "Explorer stopped",
+        "title": "explorer.dc903.org richlist",
+        "poster": "def2084",
+        "post": "yjl8it",
+        "url": "https://www.reddit.com/r/defcoin/comments/yjl8it/",
+        "confidence": "High",
+        "rowTooltip": "Explorer stopped 2022-10-03; post date 2022-11-01 - Explorer/richlist outage snapshot - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2022-10-06",
+        "Community",
+        "Defcoin Discord",
+        "Invite posted",
+        "Discord invite posted because most activity had moved there.",
+        "Community signal: bounties, giveaways, meetups, and Discord moved participation forward.",
+        "/r/Defcoin xxoe1t by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 123,
+        "sortDate": "2022-10-06",
+        "dateRaw": "2022-10-06",
+        "type": "Community service invite",
+        "status": "Invite posted",
+        "title": "Defcoin Discord",
+        "poster": "def2084",
+        "post": "xxoe1t",
+        "url": "https://www.reddit.com/r/defcoin/comments/xxoe1t/",
+        "confidence": "Medium",
+        "rowTooltip": "2022-10-06 - Community service invite - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2022-11-12",
+        "Mining / pools",
+        "UnknownMiningPool",
+        "Down",
+        "Operator said something died on the pool and they could not get it running without rebuilding.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin yta9j7 by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 126,
+        "sortDate": "2022-11-12",
+        "dateRaw": "2022-11-12",
+        "type": "Pool outage",
+        "status": "Down",
+        "title": "UnknownMiningPool",
+        "poster": "MiningDave",
+        "post": "yta9j7",
+        "url": "https://www.reddit.com/r/defcoin/comments/yta9j7/",
+        "confidence": "High",
+        "rowTooltip": "2022-11-12 - Pool outage - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2022-11-12",
+        "Network / protocol",
+        "Defcoin halvening",
+        "Occurred",
+        "Block reward was reported down to 12.5 after a recent halvening.",
+        "Protocol-health signal: peers, seeds, halvings, and outages define chain continuity.",
+        "/r/Defcoin ytadvg by MiningDave"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 127,
+        "sortDate": "2022-11-12",
+        "dateRaw": "A few days before 2022-11-12",
+        "type": "Protocol event",
+        "status": "Occurred",
+        "title": "Defcoin halvening",
+        "poster": "MiningDave",
+        "post": "ytadvg",
+        "url": "https://www.reddit.com/r/defcoin/comments/ytadvg/",
+        "confidence": "High",
+        "rowTooltip": "A few days before 2022-11-12 - Protocol event - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2022-12-20",
+        "Mining / pools",
+        "144.126.151.159:8050 / p2pool",
+        "New pool observed",
+        "A new Defcoin pool appeared on MiningPoolStats.stream and was posted.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin zqibgv by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 128,
+        "sortDate": "2022-12-20",
+        "dateRaw": "2022-12-20",
+        "type": "Pool discovery",
+        "status": "New pool observed",
+        "title": "144.126.151.159:8050 / p2pool",
+        "poster": "def2084",
+        "post": "zqibgv",
+        "url": "https://www.reddit.com/r/defcoin/comments/zqibgv/",
+        "confidence": "High",
+        "rowTooltip": "2022-12-20 - Pool discovery - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2023-06-16",
+        "Mining / pools",
+        "defcoin.dc903.org; explorer.dc903.org",
+        "Back up / in sync",
+        "defcoin.dc903.org and explorer.dc903.org were back up and in sync after downtime.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 14b0c9x by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 129,
+        "sortDate": "2023-06-16",
+        "dateRaw": "2023-06-16; after about two weeks down",
+        "type": "Pool/explorer restoration",
+        "status": "Back up / in sync",
+        "title": "defcoin.dc903.org; explorer.dc903.org",
+        "poster": "def2084",
+        "post": "14b0c9x",
+        "url": "https://www.reddit.com/r/defcoin/comments/14b0c9x/",
+        "confidence": "High",
+        "rowTooltip": "2023-06-16; after about two weeks down - Pool/explorer restoration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2023-08-10",
+        "DEF CON anchor",
+        "DEF CON 31",
+        "Past",
+        "Defcoin annual hashrate reminder and dc903 service status posts occurred around this event year.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 10,
+        "sortDate": "2023-08-10",
+        "dateRaw": "2023-08-10 09:00",
+        "endDateRaw": "2023-08-13 15:30",
+        "title": "DEF CON 31",
+        "venue": "Caesars Forum, Flamingo, Linq, and Harrah's, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times",
+        "url": "https://infocondb.org/con/def-con/def-con-31/",
+        "rowTooltip": "DEF CON 31: 2023-08-10 09:00 to 2023-08-13 15:30 - Caesars Forum, Flamingo, Linq, and Harrah's, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2023-12-21",
+        "Mining / pools",
+        "explorer.dc903.org; defcoin.dc903.org",
+        "Back online",
+        "Explorer and pool were back online after downtime.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 18o2q1t by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 130,
+        "sortDate": "2023-12-21",
+        "dateRaw": "2023-12-21",
+        "type": "Pool/explorer restoration",
+        "status": "Back online",
+        "title": "explorer.dc903.org; defcoin.dc903.org",
+        "poster": "def2084",
+        "post": "18o2q1t",
+        "url": "https://www.reddit.com/r/defcoin/comments/18o2q1t/",
+        "confidence": "High",
+        "rowTooltip": "2023-12-21 - Pool/explorer restoration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2024-03-05",
+        "Network / protocol",
+        "Defcoin peer nodes",
+        "Published",
+        "10-year anniversary note with current peer-node list was posted.",
+        "Protocol-health signal: peers, seeds, halvings, and outages define chain continuity.",
+        "/r/Defcoin 1brc1cq by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 131,
+        "sortDate": "2024-03-05",
+        "dateRaw": "2024-03-05 anniversary; post 2024-03-30",
+        "type": "Anniversary / peer list",
+        "status": "Published",
+        "title": "Defcoin peer nodes",
+        "poster": "def2084",
+        "post": "1brc1cq",
+        "url": "https://www.reddit.com/r/defcoin/comments/1brc1cq/",
+        "confidence": "Medium",
+        "rowTooltip": "2024-03-05 anniversary; post 2024-03-30 - Anniversary / peer list - confidence Medium"
+      }
+    },
+    {
+      "cells": [
+        "2024-05-12",
+        "Mining / pools",
+        "defcoin.dc903.org pool",
+        "Back up",
+        "defcoin.dc903.org pool was back up after about a month down.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 1cq1ygm by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 132,
+        "sortDate": "2024-05-12",
+        "dateRaw": "2024-05-12; after about one month down",
+        "type": "Pool restoration",
+        "status": "Back up",
+        "title": "defcoin.dc903.org pool",
+        "poster": "def2084",
+        "post": "1cq1ygm",
+        "url": "https://www.reddit.com/r/defcoin/comments/1cq1ygm/",
+        "confidence": "High",
+        "rowTooltip": "2024-05-12; after about one month down - Pool restoration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2024-08-08",
+        "DEF CON anchor",
+        "DEF CON 32",
+        "Past",
+        "Useful boundary after 2024 Defcoin pool/explorer restoration posts in the subreddit corpus.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 11,
+        "sortDate": "2024-08-08",
+        "dateRaw": "2024-08-08 09:00",
+        "endDateRaw": "2024-08-11 15:00",
+        "title": "DEF CON 32",
+        "venue": "Las Vegas Convention Center, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first/last listed presentation start times",
+        "url": "https://infocondb.org/con/def-con/def-con-32/",
+        "rowTooltip": "DEF CON 32: 2024-08-08 09:00 to 2024-08-11 15:00 - Las Vegas Convention Center, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2025-08-07",
+        "DEF CON anchor",
+        "DEF CON 33",
+        "Past",
+        "No saved /r/defcoin submissions in the local scrape fall during this event year, but it preserves the annual DEF CON chronology.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 12,
+        "sortDate": "2025-08-07",
+        "dateRaw": "2025-08-07",
+        "endDateRaw": "2025-08-10 15:00",
+        "title": "DEF CON 33",
+        "venue": "Las Vegas Convention Center, Las Vegas, Nevada, USA",
+        "status": "Past",
+        "timeBasis": "InfoconDB date range; first listed presentation in archive is Fri 09:00, final listed Sunday time is 15:00",
+        "url": "https://infocondb.org/con/def-con/def-con-33/",
+        "rowTooltip": "DEF CON 33: 2025-08-07 to 2025-08-10 15:00 - Las Vegas Convention Center, Las Vegas, Nevada, USA"
+      }
+    },
+    {
+      "cells": [
+        "2026-04-16",
+        "Mining / pools",
+        "defcoin.dc903.org",
+        "Back up / recruiting hash",
+        "Poster announced getting the Defcoin pool and explorer site back up and invited mining.",
+        "Chain-security signal: mining pools, p2pool, and payout events shaped whether users could secure the chain.",
+        "/r/Defcoin 1snkjld by def2084"
+      ],
+      "meta": {
+        "source": "/r/Defcoin",
+        "sourceKind": "subreddit",
+        "sourceId": 133,
+        "sortDate": "2026-04-16",
+        "dateRaw": "2026-04-16",
+        "type": "Pool/explorer restoration",
+        "status": "Back up / recruiting hash",
+        "title": "defcoin.dc903.org",
+        "poster": "def2084",
+        "post": "1snkjld",
+        "url": "https://www.reddit.com/r/defcoin/comments/1snkjld/",
+        "confidence": "High",
+        "rowTooltip": "2026-04-16 - Pool/explorer restoration - confidence High"
+      }
+    },
+    {
+      "cells": [
+        "2026-08-06",
+        "DEF CON anchor",
+        "DEF CON 34",
+        "Announced future as of 2026-06-02",
+        "Most recent announced annual DEF CON date range after the 2026 Defcoin pool/explorer restoration post.",
+        "Annual official DEF CON timeline anchor for comparing Defcoin community activity against the conference calendar.",
+        "InfoconDB / DEF CON archive"
+      ],
+      "meta": {
+        "source": "Defcoin-related historical events",
+        "sourceKind": "defcon-history",
+        "sourceId": 13,
+        "sortDate": "2026-08-06",
+        "dateRaw": "2026-08-06",
+        "endDateRaw": "2026-08-09 22:00",
+        "title": "DEF CON 34",
+        "venue": "Las Vegas Convention Center, Las Vegas, Nevada, USA",
+        "status": "Announced future as of 2026-06-02",
+        "timeBasis": "DEF CON registration page confirms onsite registration starts Thu Aug. 6; Ham Radio Village lists Aug. 6 16:00 through Aug. 9 22:00 at LVCC",
+        "url": "https://us.shop.defcon.org/products/def-con-34-las-vegas-convention-center;",
+        "rowTooltip": "DEF CON 34: 2026-08-06 to 2026-08-09 22:00 - Las Vegas Convention Center, Las Vegas, Nevada, USA"
+      }
+    }
+  ],
+  "excludedRows": [
+    {
+      "source": "/r/Defcoin",
+      "id": 19,
+      "date": "2014-06-22",
+      "title": "Defcoin faucet server",
+      "reason": "Low-confidence faucet proposal with no launch signal in the row."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 50,
+      "date": "2017-07-24",
+      "title": "Coinomi",
+      "reason": "Duplicate Coinomi availability post; the stronger 2017-07-22 support-add row is kept."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 56,
+      "date": "2017-11-27",
+      "title": "Defcoin faucet",
+      "reason": "Low-confidence faucet request with no launch signal in the row."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 59,
+      "date": "2018-02-20",
+      "title": "defcoin.secdsm.org miner downloads",
+      "reason": "Single miner-download complaint; kept pool-wide outages and launches instead."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 64,
+      "date": "2018-05-08",
+      "title": "Coinomi",
+      "reason": "Duplicate Coinomi support confirmation; earlier support-add and later outage/restoration rows are kept."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 69,
+      "date": "2018-07-22",
+      "title": "Cheddur app page",
+      "reason": "Duplicate Cheddur app-page listing; the coin listing row is kept."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 71,
+      "date": "2018-12-17",
+      "title": "New Defcoin faucet",
+      "reason": "Low-confidence faucet proposal with no launch signal in the row."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 86,
+      "date": "2020-01-01",
+      "title": "defcoin-ng.org",
+      "reason": "Website link-maintenance note without a new service, outage, or launch."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 115,
+      "date": "2021-05-26",
+      "title": "Defcoin Discord",
+      "reason": "Discord invite refresh; the initial Discord launch and later activity-migration note are kept."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 119,
+      "date": "2021-09-28",
+      "title": "Defcoin Discord",
+      "reason": "Discord invite refresh; no new historical state beyond the launch/migration records."
+    },
+    {
+      "source": "/r/Defcoin",
+      "id": 125,
+      "date": "2022-11-09",
+      "title": "Defcoin Discord",
+      "reason": "Discord invite refresh with no new durable project event."
+    }
+  ]
+}

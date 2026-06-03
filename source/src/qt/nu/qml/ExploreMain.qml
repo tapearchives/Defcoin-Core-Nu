@@ -1,5 +1,3 @@
-pragma ComponentBehavior: Bound
-
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
@@ -16,7 +14,7 @@ ApplicationWindow {
     height: 820
     minimumWidth: 1240
     minimumHeight: 680
-    title: "Defcoin Core ExpFor"
+    title: "Defcoin Core Nu Explore"
     color: NuTokens.backgroundBase
 
     property alias currentRoute: frame.currentRoute
@@ -28,7 +26,7 @@ ApplicationWindow {
     property string gitCommit: NuGitCommit
     property bool quitRequested: false
     readonly property string releaseCodeName: "Core Memories"
-    readonly property string trademarkNotice: "Defcoin Core ExpFor is an adjunct explorer and forensics interface for local Defcoin Core Nu data. It uses the same local backend and SQLite explorer cache surfaces, but keeps heavy indexing and analysis away from the wallet-first Nu shell."
+    readonly property string trademarkNotice: "Defcoin Core Nu Explore is an adjunct explorer and forensics interface for local Defcoin Core Nu data. It uses the same local backend and SQLite explorer cache surfaces, but keeps heavy indexing and analysis away from the wallet-first Nu shell."
 
     palette.window: NuTokens.panelBase
     palette.base: NuTokens.panelBase
@@ -65,12 +63,12 @@ ApplicationWindow {
     }
 
     function basicAboutText() {
-        return "Defcoin Core ExpFor v" + root.buildVersion + " - local explorer, indexing, forensics, and contact graph analysis for Defcoin Core Nu."
+        return "Defcoin Core Nu Explore v" + root.buildVersion + " - local explorer, indexing, forensics, and contact graph analysis for Defcoin Core Nu."
     }
 
     function openHelpManual() {
         messageDialog.title = "Help not included"
-        messageDialog.text = "ExpFor currently reuses the Nu explorer and forensics screens. Build notes remain in Defcoin Core Nu."
+        messageDialog.text = "Explore currently reuses the Nu explorer and forensics screens. Build notes remain in Defcoin Core Nu."
         messageDialog.open()
     }
 
@@ -78,7 +76,7 @@ ApplicationWindow {
         root.openAboutSummary()
     }
 
-    ExpForFrame {
+    ExploreFrame {
         id: frame
         anchors.fill: parent
         onAboutRequested: root.openAboutSummary()
@@ -122,7 +120,7 @@ ApplicationWindow {
 
     NuDialog {
         id: aboutDialog
-        title: "About Defcoin Core ExpFor"
+        title: "About Defcoin Core Nu Explore"
         showCancel: false
         acceptText: "Close"
         dialogWidth: 760

@@ -17,17 +17,17 @@ CORE NU
 The renderer may draw `DEF` and `COIN` as separate runs only to reproduce the
 legacy kerning join.
 
-The ExpFor app variant keeps the same first two lines and adds a third line in
+The Explore app variant keeps the same first two lines and adds a third line in
 the same type family and weight:
 
 ```text
 DEFCOIN
 CORE NU
-ExpFor
+EXPLORE
 ```
 
-`ExpFor` is mixed case. It is a product label, not a replacement for the
-DEFCOIN / CORE NU wordmark.
+The app name is `Defcoin Core Nu Explore`, and the third logo line is set as
+`EXPLORE` to match the DEFCOIN / CORE NU lockup.
 
 ## Typeface
 
@@ -48,6 +48,9 @@ The source splash renderer in `source/src/qt/nu/app/main.cpp` is canonical:
 - Second line offset: `50 px` below the first line baseline region.
 - The `N` in `COIN` and the `U` in `NU` should optically right-align when the
   wordmark is set in the two-line lockup.
+- In the Explore variant, the `EXPLORE` line is fit to the first two-line
+  lockup width by increasing only positive tracking. Do not use negative
+  tracking or horizontal scaling.
 
 Practical PIL reproduction:
 
@@ -59,8 +62,8 @@ Practical PIL reproduction:
 ## DMG Layout Notes
 
 - The wordmark should sit in clean negative space, not on top of the coin stack.
-- `stage_macos_distribution.sh` must render the third `ExpFor` line when
-  staging `DefcoinCoreExpFor.app`; the Nu installer remains the two-line
+- `stage_macos_distribution.sh` must render the third `EXPLORE` line when
+  staging `DefcoinCoreExplore.app`; the Nu installer remains the two-line
   DEFCOIN / CORE NU lockup.
 - The corner coin stack is decorative and must not crowd the draggable app icon.
 - Finder icon labels are dark by default, so dark DMG backgrounds need a quiet

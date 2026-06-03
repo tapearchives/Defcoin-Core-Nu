@@ -85,7 +85,7 @@ require_file "${qt_plugin_root}/platforms/libqcocoa.dylib" "${plugins_dir}/platf
 require_file "${qt_plugin_root}/styles/libqmacstyle.dylib" "${plugins_dir}/styles/libqmacstyle.dylib"
 require_file "${qt_plugin_root}/sqldrivers/libqsqlite.dylib" "${plugins_dir}/sqldrivers/libqsqlite.dylib"
 require_file "${qt_plugin_root}/tls/libqcertonlybackend.dylib" "${plugins_dir}/tls/libqcertonlybackend.dylib"
-require_file "${qt_plugin_root}/tls/libqopensslbackend.dylib" "${plugins_dir}/tls/libqopensslbackend.dylib"
+copy_file "${qt_plugin_root}/tls/libqopensslbackend.dylib" "${plugins_dir}/tls/libqopensslbackend.dylib"
 require_file "${qt_plugin_root}/tls/libqsecuretransportbackend.dylib" "${plugins_dir}/tls/libqsecuretransportbackend.dylib"
 require_file "${qt_plugin_root}/iconengines/libqsvgicon.dylib" "${plugins_dir}/iconengines/libqsvgicon.dylib"
 

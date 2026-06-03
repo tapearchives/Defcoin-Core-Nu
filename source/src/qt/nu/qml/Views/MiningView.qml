@@ -227,13 +227,13 @@ ColumnLayout {
                         Layout.preferredWidth: 180
                         text: "Miner downloads"
                         helpText: "Open Defcoin Core's helper-binaries release with Defcoin-tested cpuminer-opt downloads."
-                        onClicked: Qt.openUrlExternally("https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/cpuminer-opt-v26.1-defcoin")
+                        onClicked: NuService.openExternalUrl("https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/cpuminer-opt-v26.1-defcoin")
                     }
                     NuActionButton {
                         Layout.preferredWidth: 190
                         text: "Miner source notes"
                         helpText: "Open the cpuminer-opt project page before downloading an executable."
-                        onClicked: Qt.openUrlExternally("https://github.com/JayDDee/cpuminer-opt")
+                        onClicked: NuService.openExternalUrl("https://github.com/JayDDee/cpuminer-opt")
                     }
                     Item { Layout.fillWidth: true }
                 }

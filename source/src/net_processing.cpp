@@ -1115,6 +1115,78 @@ bool ReserveFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, int height
     return true;
 }
 
+bool ReserveNextFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, uint256& hash_out, int& height_out, std::string& reason)
+{
+    LOCK(cs_main);
+
+    height_out = -1;
+    CNodeState* state = State(nodeid);
+    if (state == nullptr) {
+        reason = "peer-not-connected";
+        return false;
+    }
+
+    const bool using_fast_sync_extra_slot = state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER;
+    if (state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER + MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER) {
+        reason = "peer-in-flight-full";
+        return false;
+    }
+
+    std::vector<const CBlockIndex*> blocks_to_download;
+    NodeId staller = -1;
+    // Fast Sync is a transport optimization only. Core still chooses the
+    // peer/block pair so UDP cannot bypass or duplicate normal scheduling.
+    FindNextBlocksToDownload(nodeid, 1, blocks_to_download, staller, Params().GetConsensus());
+    if (blocks_to_download.empty()) {
+        if (state->pindexBestKnownBlock == nullptr) {
+            reason = "peer-best-block-unknown";
+        } else if (staller != -1) {
+            reason = "waiting-for-block-window";
+        } else {
+            reason = "no-downloadable-block";
+        }
+        return false;
+    }
+
+    const CBlockIndex* pindex = blocks_to_download.front();
+    if (pindex == nullptr) {
+        reason = "no-downloadable-block";
+        return false;
+    }
+    if (!pindex->IsValid(BLOCK_VALID_TREE)) {
+        reason = "block-header-not-valid";
+        return false;
+    }
+
+    const uint256 hash = pindex->GetBlockHash();
+    if ((pindex->nStatus & BLOCK_HAVE_DATA) || ::ChainActive().Contains(pindex)) {
+        hash_out = hash;
+        height_out = pindex->nHeight;
+        reason = "block-already-have-data";
+        return false;
+    }
+    if (mapBlocksInFlight.count(hash) != 0) {
+        hash_out = hash;
+        height_out = pindex->nHeight;
+        reason = "block-already-in-flight";
+        return false;
+    }
+
+    if (!MarkBlockAsInFlight(mempool, nodeid, hash, pindex)) {
+        hash_out = hash;
+        height_out = pindex->nHeight;
+        reason = "block-already-in-flight-from-peer";
+        return false;
+    }
+
+    hash_out = hash;
+    height_out = pindex->nHeight;
+    reason = "reserved";
+    LogPrint(BCLog::NET, "Fast Sync reserved next Core-selected block %s (%d) for UDP peer=%d%s\n",
+        hash.ToString(), height_out, nodeid, using_fast_sync_extra_slot ? " using extra transport slot" : "");
+    return true;
+}
+
 bool ReleaseFastSyncBlockInFlight(NodeId nodeid, const uint256& hash)
 {
     LOCK(cs_main);

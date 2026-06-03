@@ -50,6 +50,7 @@ class NuRpcService final : public QObject
     Q_PROPERTY(int syncProgressPercent READ syncProgressPercent NOTIFY stateChanged)
     Q_PROPERTY(QString recentNetworkHashrate READ recentNetworkHashrate NOTIFY stateChanged)
     Q_PROPERTY(QString networkDifficulty READ networkDifficulty NOTIFY stateChanged)
+    Q_PROPERTY(QString recentAverageBlockTime READ recentAverageBlockTime NOTIFY stateChanged)
     Q_PROPERTY(bool walletLocked READ walletLocked NOTIFY stateChanged)
     Q_PROPERTY(bool walletEncrypted READ walletEncrypted NOTIFY walletChanged)
     Q_PROPERTY(QString totalBalance READ totalBalance NOTIFY walletChanged)
@@ -156,6 +157,12 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QVariantList coindroidsVanityRows READ coindroidsVanityRows NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList coindroidsOpReturnRows READ coindroidsOpReturnRows NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList coindroidsBotRows READ coindroidsBotRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsPayoutRows READ coindroidsPayoutRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsAttackAddressRows READ coindroidsAttackAddressRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsQrSeedRows READ coindroidsQrSeedRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsSourceAmmoRows READ coindroidsSourceAmmoRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsOloRows READ coindroidsOloRows NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList coindroidsGameAddressRows READ coindroidsGameAddressRows NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList coindroidsEvidenceRows READ coindroidsEvidenceRows NOTIFY explorerChanged)
     Q_PROPERTY(QString coindroidsStatus READ coindroidsStatus NOTIFY explorerChanged)
     Q_PROPERTY(bool coindroidsScanning READ coindroidsScanning NOTIFY explorerChanged)
@@ -163,6 +170,11 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QVariantList defcoinTimelineRows READ defcoinTimelineRows NOTIFY explorerChanged)
     Q_PROPERTY(QString defcoinTimelineCriteria READ defcoinTimelineCriteria NOTIFY explorerChanged)
     Q_PROPERTY(QString defcoinTimelineStatus READ defcoinTimelineStatus NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantMap networkPulseSummary READ networkPulseSummary NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList networkPulseHistoryRows READ networkPulseHistoryRows NOTIFY explorerChanged)
+    Q_PROPERTY(QString networkPulseStatus READ networkPulseStatus NOTIFY explorerChanged)
+    Q_PROPERTY(QVariantList explorerContactSets READ explorerContactSets NOTIFY explorerChanged)
+    Q_PROPERTY(QString currentExplorerContactSetName READ currentExplorerContactSetName NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerContacts READ explorerContacts NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerContactRelationships READ explorerContactRelationships NOTIFY explorerChanged)
     Q_PROPERTY(QString explorerAnalyticsStatus READ explorerAnalyticsStatus NOTIFY explorerChanged)
@@ -211,6 +223,7 @@ public:
     int syncProgressPercent() const { return m_sync_progress_percent; }
     QString recentNetworkHashrate() const { return m_metric_network_hashrate; }
     QString networkDifficulty() const { return m_metric_difficulty; }
+    QString recentAverageBlockTime() const { return m_metric_average_block_time; }
     bool walletLocked() const { return m_wallet_locked; }
     bool walletEncrypted() const { return m_wallet_encrypted; }
     QString totalBalance() const { return m_mask_balances ? QStringLiteral("******** DFC") : m_total_balance; }
@@ -318,6 +331,12 @@ public:
     QVariantList coindroidsVanityRows() const { return m_coindroids_vanity_rows; }
     QVariantList coindroidsOpReturnRows() const { return m_coindroids_op_return_rows; }
     QVariantList coindroidsBotRows() const { return m_coindroids_bot_rows; }
+    QVariantList coindroidsPayoutRows() const { return m_coindroids_payout_rows; }
+    QVariantList coindroidsAttackAddressRows() const { return m_coindroids_attack_address_rows; }
+    QVariantList coindroidsQrSeedRows() const { return m_coindroids_qr_seed_rows; }
+    QVariantList coindroidsSourceAmmoRows() const { return m_coindroids_source_ammo_rows; }
+    QVariantList coindroidsOloRows() const { return m_coindroids_olo_rows; }
+    QVariantList coindroidsGameAddressRows() const { return m_coindroids_game_address_rows; }
     QVariantList coindroidsEvidenceRows() const { return m_coindroids_evidence_rows; }
     QString coindroidsStatus() const { return m_coindroids_status; }
     bool coindroidsScanning() const { return m_coindroids_scanning; }
@@ -325,6 +344,11 @@ public:
     QVariantList defcoinTimelineRows() const { return m_defcoin_timeline_rows; }
     QString defcoinTimelineCriteria() const { return m_defcoin_timeline_criteria; }
     QString defcoinTimelineStatus() const { return m_defcoin_timeline_status; }
+    QVariantMap networkPulseSummary() const { return m_network_pulse_summary; }
+    QVariantList networkPulseHistoryRows() const { return m_network_pulse_history_rows; }
+    QString networkPulseStatus() const { return m_network_pulse_status; }
+    QVariantList explorerContactSets() const { return m_explorer_contact_sets; }
+    QString currentExplorerContactSetName() const { return m_current_explorer_contact_set_name; }
     QVariantList explorerContacts() const { return m_explorer_contacts; }
     QVariantList explorerContactRelationships() const { return m_explorer_contact_relationships; }
     QString explorerAnalyticsStatus() const { return m_explorer_analytics_status; }
@@ -449,6 +473,7 @@ public:
     Q_INVOKABLE void refreshExplorerAnalytics(int movement_threshold_coins = 5000, const QString& scope = QStringLiteral("all"));
     Q_INVOKABLE void refreshCoindroidsAnalytics();
     Q_INVOKABLE void refreshDefcoinTimeline();
+    Q_INVOKABLE void refreshNetworkPulseHistory(int window_blocks = 120);
     Q_INVOKABLE void startExplorerIndexing();
     Q_INVOKABLE void stopExplorerIndexing();
     Q_INVOKABLE void resetExplorerIndex();
@@ -458,9 +483,18 @@ public:
     Q_INVOKABLE void resetExplorerTop100Timeline();
     Q_INVOKABLE void scanRemainingExplorerTop100Timeline();
     Q_INVOKABLE QVariantMap explorerTop100Snapshot(int height) const;
+    Q_INVOKABLE void createExplorerContactSet(const QString& name);
+    Q_INVOKABLE void saveExplorerContactSet(const QString& name);
+    Q_INVOKABLE void loadExplorerContactSet(const QString& name);
+    Q_INVOKABLE void renameExplorerContactSet(const QString& old_name, const QString& new_name);
+    Q_INVOKABLE void deleteExplorerContactSet(const QString& name);
     Q_INVOKABLE void saveExplorerContact(const QString& username, const QString& addresses, int edit_index = -1);
     Q_INVOKABLE void deleteExplorerContact(int index);
     Q_INVOKABLE void refreshExplorerContactRelationships();
+    Q_INVOKABLE void loadExplorerContactRows(const QString& name, const QVariantList& rows);
+    Q_INVOKABLE void importCoindroidsGameContacts();
+    Q_INVOKABLE void loadCoindroidsContactSet(const QString& key);
+    Q_INVOKABLE void openCoindroidsReportPdf();
     Q_INVOKABLE void refreshForensicsIrregularMessages();
     Q_INVOKABLE void startForensicsIrregularMessages(int start_height);
     Q_INVOKABLE void stopForensicsScan();
@@ -620,7 +654,7 @@ private:
     void processQueuedLanDiscoveryAddNodes();
     bool isLocalInterfaceAddress(const QHostAddress& address) const;
     void lanFastSyncTick();
-    void requestLanFastSyncBlock(int height);
+    void requestLanFastSyncBlock();
     QString selectUdpFastSyncTargetHost(int* node_id) const;
     bool isUdpFastSyncProbeAllowed(const QString& host, qint64 now) const;
     bool isUdpFastSyncHostVerified(const QString& host) const;
@@ -702,8 +736,20 @@ private:
     void saveCoindroidsAnalyticsCache(const QVariantMap& analysis, QString* error = nullptr) const;
     QVariantMap coindroidsAnalyticsFromDb(QString* error = nullptr) const;
     void loadDefcoinTimeline();
+    QVariantMap networkPulseHistoryFromDb(int window_blocks, QString* error = nullptr) const;
+    void refreshRecentAverageBlockTimeFromRpc(int tip_height);
+    void refreshRecentAverageBlockTimeFromIndex();
     void loadExplorerContacts();
     void persistExplorerContacts();
+    void persistExplorerContactSets();
+    QString coindroidsContactSetName(const QString& key) const;
+    QVariantList coindroidsContactsForSetKey(const QString& key) const;
+    void ensureCoindroidsPrebuiltContactSets(bool emit_signal);
+    QVariantList explorerContactsFromJsonArray(const QJsonArray& raw_contacts) const;
+    QJsonArray explorerContactsToJsonArray(const QVariantList& contacts) const;
+    QVariantMap explorerContactSetRow(const QString& name, const QVariantList& contacts, qint64 updated_at) const;
+    int explorerContactSetIndex(const QString& name) const;
+    void upsertExplorerContactSet(const QString& name, const QVariantList& contacts, qint64 updated_at);
     void refreshExplorerTop100TimelineStats();
     QString explorerBlockHashAtHeight(int height) const;
     QString explorerBlockHashForTransaction(const QString& txid) const;
@@ -904,6 +950,7 @@ private:
     QString m_metric_verification = QStringLiteral("Unknown");
     QString m_metric_difficulty = QStringLiteral("Unknown");
     QString m_metric_network_hashrate = QStringLiteral("Unknown");
+    QString m_metric_average_block_time = QStringLiteral("Unknown");
     QString m_metric_chain_tips = QStringLiteral("Unknown");
     QString m_metric_peer_messages_sent = QStringLiteral("Unknown");
     QString m_metric_peer_messages_received = QStringLiteral("Unknown");
@@ -926,6 +973,7 @@ private:
     QHash<QString, QString> m_peer_lan_name_by_host;
     QHash<QString, QString> m_peer_lan_info_by_host;
     QSet<QProcess*> m_helper_processes;
+    bool m_stopping_helper_processes = false;
     QSet<int> m_host_lookup_ids;
     QSet<QString> m_peer_reverse_lookup_pending;
     QSet<QString> m_peer_reverse_lookup_attempted;
@@ -1056,6 +1104,12 @@ private:
     QVariantList m_coindroids_vanity_rows;
     QVariantList m_coindroids_op_return_rows;
     QVariantList m_coindroids_bot_rows;
+    QVariantList m_coindroids_payout_rows;
+    QVariantList m_coindroids_attack_address_rows;
+    QVariantList m_coindroids_qr_seed_rows;
+    QVariantList m_coindroids_source_ammo_rows;
+    QVariantList m_coindroids_olo_rows;
+    QVariantList m_coindroids_game_address_rows;
     QVariantList m_coindroids_evidence_rows;
     QString m_coindroids_status = QStringLiteral("Coindroids analysis not loaded yet.");
     int m_coindroids_generation = 0;
@@ -1066,8 +1120,13 @@ private:
     QString m_defcoin_timeline_criteria = QStringLiteral("Timeline not loaded yet.");
     QString m_defcoin_timeline_status = QStringLiteral("/r/Defcoin timeline not loaded yet.");
     bool m_defcoin_timeline_loaded = false;
+    QVariantMap m_network_pulse_summary;
+    QVariantList m_network_pulse_history_rows;
+    QString m_network_pulse_status = QStringLiteral("Network Pulse waits for the Explorer index to cache block timestamps.");
     QVariantList m_explorer_contacts;
     QVariantList m_explorer_contact_relationships;
+    QVariantList m_explorer_contact_sets;
+    QString m_current_explorer_contact_set_name = QStringLiteral("Default");
     QString m_explorer_analytics_status = QStringLiteral("Explorer analytics not loaded yet.");
     int m_explorer_analytics_generation = 0;
     bool m_explorer_analytics_refreshing = false;

@@ -12,14 +12,31 @@ Item {
     property int wordmarkWeight: Font.ExtraBold
     property real wordmarkTracking: 1.0
     property real fcGapAdjust: 1.0
+    property bool fitThirdLineToWordmark: true
     property int lineSpacing: -8
     property color textColor: NuTokens.textInverse
     property url coinSource: "../../assets/brand/defcoin-nu-coin-stack-hires.png"
     property string thirdLine: ""
     readonly property string displayFont: Qt.platform.os === "windows" ? "Bahnschrift Condensed" : "Avenir Next Condensed"
+    readonly property real wordmarkTargetWidth: Math.max(defcoinLine.implicitWidth, coreText.implicitWidth)
+    readonly property real thirdLineTracking: {
+        if (!fitThirdLineToWordmark || root.thirdLine.length <= 1)
+            return root.wordmarkTracking
+        const extra = root.wordmarkTargetWidth - thirdLineMetrics.advanceWidth
+        return Math.max(0, extra / (root.thirdLine.length - 1))
+    }
 
-    implicitWidth: coin.width + root.gap + Math.max(defcoinLine.implicitWidth, coreText.implicitWidth, expforText.visible ? expforText.implicitWidth : 0)
+    implicitWidth: coin.width + root.gap + Math.max(root.wordmarkTargetWidth, exploreText.visible ? exploreText.width : 0)
     implicitHeight: Math.max(coin.height, wordmark.implicitHeight)
+
+    TextMetrics {
+        id: thirdLineMetrics
+        font.family: root.displayFont
+        font.pixelSize: root.wordmarkSize
+        font.weight: root.wordmarkWeight
+        font.letterSpacing: 0
+        text: root.thirdLine
+    }
 
     Image {
         id: coin
@@ -76,14 +93,15 @@ Item {
         }
 
         Text {
-            id: expforText
+            id: exploreText
             visible: root.thirdLine.length > 0
+            width: root.fitThirdLineToWordmark ? root.wordmarkTargetWidth : implicitWidth
             text: root.thirdLine
             color: root.textColor
             font.family: root.displayFont
             font.pixelSize: root.wordmarkSize
             font.weight: root.wordmarkWeight
-            font.letterSpacing: root.wordmarkTracking
+            font.letterSpacing: root.thirdLineTracking
         }
     }
 }

@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QColor>
 #include <QFile>
+#include <QFileInfo>
 #include <QFont>
 #include <QHash>
 #include <QIcon>
@@ -44,24 +45,24 @@
 
 namespace {
 constexpr bool kNuHelpEnabled = DEFCOIN_NU_HELP_ENABLED != 0;
-#ifndef DEFCOIN_NU_EXPFOR_APP
-#define DEFCOIN_NU_EXPFOR_APP 0
+#ifndef DEFCOIN_NU_EXPLORE_APP
+#define DEFCOIN_NU_EXPLORE_APP 0
 #endif
-constexpr bool kExpForApp = DEFCOIN_NU_EXPFOR_APP != 0;
+constexpr bool kExploreApp = DEFCOIN_NU_EXPLORE_APP != 0;
 
 QString productName()
 {
-    return kExpForApp ? QStringLiteral("Defcoin Core ExpFor") : QStringLiteral("Defcoin Core Nu");
+    return kExploreApp ? QStringLiteral("Defcoin Core Nu Explore") : QStringLiteral("Defcoin Core Nu");
 }
 
 QString productExecutableName()
 {
-    return kExpForApp ? QStringLiteral("DefcoinCoreExpFor") : QStringLiteral("DefcoinCoreNu");
+    return kExploreApp ? QStringLiteral("DefcoinCoreExplore") : QStringLiteral("DefcoinCoreNu");
 }
 
 QString productBundleIdentifier()
 {
-    return kExpForApp ? QStringLiteral("org.defcoincore.DefcoinCoreExpFor") : QStringLiteral("org.defcoincore.DefcoinCoreNu");
+    return kExploreApp ? QStringLiteral("org.defcoincore.DefcoinCoreNuExplore") : QStringLiteral("org.defcoincore.DefcoinCoreNu");
 }
 
 QHash<QString, QString> readBuildInfoProperties(const QString& resourceRoot)
@@ -124,12 +125,27 @@ void drawNuBrandSplash(QPixmap& pixmap, const QString& resourceRoot)
     painter.setPen(QColor("#f6f6f2"));
 
     const int wordX = logoCoinRect.right() + 30;
-    const int wordY = logoCoinRect.top() + 78;
+    const int wordY = logoCoinRect.top() + (kExploreApp ? 52 : 78);
     const int wordW = panel.right() - wordX - 44;
     QFontMetrics brandMetrics(brandFont);
     painter.drawText(QRect(wordX, wordY, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("DEF"));
     painter.drawText(QRect(wordX + brandMetrics.horizontalAdvance(QStringLiteral("DEF")) + 2, wordY, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("COIN"));
     painter.drawText(QRect(wordX, wordY + 50, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("CORE NU"));
+    if (kExploreApp) {
+        const int targetWidth = qMax(brandMetrics.horizontalAdvance(QStringLiteral("DEF")) + 2 + brandMetrics.horizontalAdvance(QStringLiteral("COIN")),
+                                    brandMetrics.horizontalAdvance(QStringLiteral("CORE NU")));
+        QFont exploreFont = brandFont;
+        QFont noSpacingFont = brandFont;
+        noSpacingFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
+        const QString exploreText = QStringLiteral("EXPLORE");
+        const int baseWidth = QFontMetrics(noSpacingFont).horizontalAdvance(exploreText);
+        const double fittedSpacing = exploreText.size() > 1
+            ? qMax(0.0, static_cast<double>(targetWidth - baseWidth) / static_cast<double>(exploreText.size() - 1))
+            : 1.15;
+        exploreFont.setLetterSpacing(QFont::AbsoluteSpacing, fittedSpacing);
+        painter.setFont(exploreFont);
+        painter.drawText(QRect(wordX, wordY + 100, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, exploreText);
+    }
 }
 
 #if defined(Q_OS_WIN)
@@ -162,6 +178,13 @@ void holdTopmostBriefly(QWindow* context, HWND hwnd)
 }
 #endif
 
+bool platformSupportsWindowActivation()
+{
+    const QString platform = QGuiApplication::platformName().toLower();
+    return !platform.contains(QStringLiteral("offscreen")) &&
+        !platform.contains(QStringLiteral("minimal"));
+}
+
 void activateWindowForUser(QQuickWindow* window)
 {
     if (!window) return;
@@ -183,8 +206,10 @@ void activateWindowForUser(QQuickWindow* window)
     if (window->windowState() == Qt::WindowMinimized) {
         window->setWindowState(Qt::WindowNoState);
     }
-    window->raise();
-    window->requestActivate();
+    if (platformSupportsWindowActivation()) {
+        window->raise();
+        window->requestActivate();
+    }
 #if defined(Q_OS_WIN)
     HWND hwnd = reinterpret_cast<HWND>(window->winId());
     if (hwnd) {
@@ -215,8 +240,10 @@ void activateTopLevelWindowsForUser()
         }
         window->setVisibility(QWindow::Windowed);
         window->showNormal();
-        window->raise();
-        window->requestActivate();
+        if (platformSupportsWindowActivation()) {
+            window->raise();
+            window->requestActivate();
+        }
     }
 }
 
@@ -224,8 +251,10 @@ void activateSplashForUser(QSplashScreen* splash)
 {
     if (!splash) return;
     splash->show();
-    splash->raise();
-    splash->activateWindow();
+    if (platformSupportsWindowActivation()) {
+        splash->raise();
+        splash->activateWindow();
+    }
 #if defined(Q_OS_WIN)
     HWND hwnd = reinterpret_cast<HWND>(splash->winId());
     if (hwnd) {
@@ -339,7 +368,7 @@ int main(int argc, char* argv[])
                                  QStringLiteral("Another %1 window appears to be running. Close the other window before opening this build. This prevents two frontends from writing the same local cache or competing for actions.").arg(productName()));
             return 2;
         }
-        singleInstanceLock = std::make_unique<QLockFile>(QDir(dataDir).filePath(kExpForApp ? QStringLiteral("defcoin-core-expfor-gui.lock") : QStringLiteral("defcoin-core-nu-gui.lock")));
+        singleInstanceLock = std::make_unique<QLockFile>(QDir(dataDir).filePath(kExploreApp ? QStringLiteral("defcoin-core-nu-explore-gui.lock") : QStringLiteral("defcoin-core-nu-gui.lock")));
         singleInstanceLock->setStaleLockTime(30000);
         if (!singleInstanceLock->tryLock(100)) {
             QMessageBox::warning(nullptr,
@@ -379,7 +408,7 @@ int main(int argc, char* argv[])
         displaySplash.fill(QColor("#05080a"));
         drawNuBrandSplash(displaySplash, resourceRoot);
         const QString splashText = QStringLiteral(
-            "%1 v%2 • Core Memories • Backend originated from Litecoin Core v0.21.5.5 + Defcoin parameters\n"
+            "%1 v%2 • Core Memories • Backend derives from Litecoin Core v0.21.5.5 + Defcoin parameters\n"
             "© 2014-2026 Defcoin Core developers • © 2011-2026 Litecoin Core developers • © 2009-2026 Bitcoin Core developers")
             .arg(productName(), QStringLiteral(DEFCOIN_NU_VERSION));
         QPainter painter(&displaySplash);
@@ -435,10 +464,16 @@ int main(int argc, char* argv[])
     engine.addImportPath(resourceRoot + "/qml");
     engine.addImportPath(resourceRoot);
 
-    const QUrl mainUrl = QUrl::fromLocalFile(resourceRoot + (kExpForApp ? QStringLiteral("/qml/ExpForMain.qml") : QStringLiteral("/qml/Main.qml")));
+    const QUrl mainUrl = QUrl::fromLocalFile(resourceRoot + (kExploreApp ? QStringLiteral("/qml/ExploreMain.qml") : QStringLiteral("/qml/Main.qml")));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] {
         QCoreApplication::exit(-1);
     }, Qt::QueuedConnection);
+#else
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app, [mainUrl](QObject* object, const QUrl& url) {
+        if (!object && url == mainUrl) QCoreApplication::exit(-1);
+    }, Qt::QueuedConnection);
+#endif
     engine.load(mainUrl);
 
     if (smokeTest && grabIndex < 0) {
@@ -486,20 +521,26 @@ int main(int argc, char* argv[])
         }
         rootObject->setProperty("visible", true);
         QMetaObject::invokeMethod(rootObject, "show");
-        QMetaObject::invokeMethod(rootObject, "raise");
-        QMetaObject::invokeMethod(rootObject, "requestActivate");
+        if (platformSupportsWindowActivation()) {
+            QMetaObject::invokeMethod(rootObject, "raise");
+            QMetaObject::invokeMethod(rootObject, "requestActivate");
+        }
         if (forceRaise) {
             QTimer::singleShot(300, rootObject, [rootObject] {
                 rootObject->setProperty("visible", true);
                 QMetaObject::invokeMethod(rootObject, "show");
-                QMetaObject::invokeMethod(rootObject, "raise");
-                QMetaObject::invokeMethod(rootObject, "requestActivate");
+                if (platformSupportsWindowActivation()) {
+                    QMetaObject::invokeMethod(rootObject, "raise");
+                    QMetaObject::invokeMethod(rootObject, "requestActivate");
+                }
             });
             QTimer::singleShot(1500, rootObject, [rootObject] {
                 rootObject->setProperty("visible", true);
                 QMetaObject::invokeMethod(rootObject, "show");
-                QMetaObject::invokeMethod(rootObject, "raise");
-                QMetaObject::invokeMethod(rootObject, "requestActivate");
+                if (platformSupportsWindowActivation()) {
+                    QMetaObject::invokeMethod(rootObject, "raise");
+                    QMetaObject::invokeMethod(rootObject, "requestActivate");
+                }
             });
         }
         if (auto* window = qobject_cast<QQuickWindow*>(rootObject)) {
@@ -578,9 +619,12 @@ int main(int argc, char* argv[])
                 }
             }
             if (targetWindow) {
-                targetWindow->grabWindow().save(outputPath);
+                const QImage grab = targetWindow->grabWindow();
+                const bool saved = !grab.isNull() && grab.save(outputPath) && QFileInfo(outputPath).size() > 0;
+                QCoreApplication::exit(saved ? 0 : 3);
+                return;
             }
-            QCoreApplication::quit();
+            QCoreApplication::exit(3);
         });
     }
 

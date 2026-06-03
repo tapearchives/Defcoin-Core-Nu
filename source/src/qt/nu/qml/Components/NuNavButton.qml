@@ -7,12 +7,15 @@ import "../Theme"
 
 Basic.Button {
     id: root
-    implicitHeight: 56
+    implicitHeight: 52
+    leftPadding: NuTokens.spaceMd
+    rightPadding: NuTokens.spaceMd
+    topPadding: NuTokens.spaceSm
+    bottomPadding: NuTokens.spaceSm
     font.pixelSize: NuTokens.fontBody
     font.weight: selected ? Font.DemiBold : Font.Normal
     hoverEnabled: true
     activeFocusOnTab: true
-    focusPolicy: Qt.StrongFocus
 
     property string iconSource: ""
     property bool selected: false
@@ -42,14 +45,16 @@ Basic.Button {
     Keys.onLeftPressed: nextItemInFocusChain(false).forceActiveFocus()
 
     contentItem: RowLayout {
-        spacing: NuTokens.spaceMd
+        spacing: NuTokens.spaceSm
+        clip: true
 
         Image {
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
+            Layout.preferredWidth: 26
+            Layout.preferredHeight: 26
             source: root.iconSource
             visible: root.iconSource.length > 0
             fillMode: Image.PreserveAspectFit
+            opacity: root.enabled ? (root.selected ? 1.0 : 0.88) : 0.42
         }
 
         Text {
@@ -57,14 +62,34 @@ Basic.Button {
             text: root.text
             color: root.selected ? NuTokens.inverseBase : NuTokens.textInverse
             font: root.font
+            minimumPixelSize: NuTokens.fontTiny
+            fontSizeMode: Text.HorizontalFit
             verticalAlignment: Text.AlignVCenter
+            maximumLineCount: 1
+            elide: Text.ElideRight
+            clip: true
         }
     }
 
     background: Rectangle {
         radius: NuTokens.radiusMedium
-        color: root.selected ? NuTokens.panelBase : "transparent"
-        border.color: root.selected ? NuTokens.panelBase : NuTokens.lineStrong
+        color: root.selected
+               ? NuTokens.panelBase
+               : (root.hovered ? Qt.rgba(1, 1, 1, 0.08) : "transparent")
+        border.color: root.activeFocus
+                      ? NuTokens.accentSky
+                      : (root.selected ? NuTokens.panelBase : Qt.rgba(1, 1, 1, 0.16))
         border.width: root.activeFocus ? 2 : 1
+
+        Rectangle {
+            width: 3
+            height: Math.max(18, parent.height - NuTokens.spaceLg)
+            radius: 2
+            anchors.left: parent.left
+            anchors.leftMargin: 4
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.selected
+            color: NuTokens.lineStrong
+        }
     }
 }

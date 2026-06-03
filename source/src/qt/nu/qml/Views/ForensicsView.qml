@@ -36,6 +36,7 @@ ColumnLayout {
         "Why Nu flagged this row as irregular compared with standard node relay policy."
     ]
     property int selectedContactIndex: -1
+    property string selectedContactSetName: ""
     property var selectedAddressBookKeys: []
     property string pendingAddressBookWallet: ""
     property string draggedAddressBookLabel: ""
@@ -74,6 +75,44 @@ ColumnLayout {
         root.selectedContactIndex = -1
         if (contactNameField) contactNameField.text = ""
         if (contactAddressArea) contactAddressArea.text = ""
+    }
+
+    function selectContactSet(row) {
+        const meta = row && row.meta ? row.meta : {}
+        root.selectedContactSetName = String(meta.name || "")
+        if (contactSetNameField)
+            contactSetNameField.text = root.selectedContactSetName
+    }
+
+    function activeContactSetLabel() {
+        const name = String(NuService.currentExplorerContactSetName || "Default")
+        return "Active contact set: " + name
+    }
+
+    function contactSetNameModel() {
+        const out = []
+        for (let i = 0; i < NuService.explorerContactSets.length; ++i) {
+            const meta = (NuService.explorerContactSets[i] || {}).meta || {}
+            const name = String(meta.name || "").trim()
+            if (name.length > 0 && out.indexOf(name) < 0) out.push(name)
+        }
+        const activeName = String(NuService.currentExplorerContactSetName || "Default").trim()
+        if (activeName.length > 0 && out.indexOf(activeName) < 0) out.unshift(activeName)
+        return out
+    }
+
+    function syncContactSetPicker() {
+        if (!contactSetPicker) return
+        const names = root.contactSetNameModel()
+        const activeName = String(NuService.currentExplorerContactSetName || "Default")
+        for (let i = 0; i < names.length; ++i) {
+            if (String(names[i] || "") === activeName) {
+                contactSetPicker.currentIndex = i
+                break
+            }
+        }
+        if (contactSetNameField && contactSetNameField.text.length === 0)
+            contactSetNameField.text = activeName
     }
 
     function selectedAddressBookRows() {
@@ -362,6 +401,7 @@ ColumnLayout {
     Connections {
         target: NuService
         function onWalletChanged() { Qt.callLater(root.syncAddressBookWalletCombo) }
+        function onExplorerChanged() { Qt.callLater(root.syncContactSetPicker) }
     }
 
     NuPageHeader {
@@ -370,12 +410,12 @@ ColumnLayout {
         detail: root.sectionDetail
     }
 
-    NuTabBar {
+    Item {
         id: forensicsTabs
         Layout.fillWidth: true
-        NuTabButton { text: "Message Scan" }
-        NuTabButton { text: "Witness Repair" }
-        NuTabButton { text: "Contacts" }
+        Layout.preferredHeight: 0
+        visible: false
+        property int currentIndex: 0
     }
 
     StackLayout {
@@ -515,7 +555,6 @@ ColumnLayout {
                     selectByMouse: true
                     persistentSelection: true
                     activeFocusOnTab: true
-                    focusPolicy: Qt.StrongFocus
                     background: Item {}
                     padding: 0
                     Shortcut {
@@ -736,6 +775,116 @@ ColumnLayout {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    Layout.preferredHeight: 112
+                    spacing: NuTokens.spaceMd
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: NuTokens.spaceXs
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: root.activeContactSetLabel()
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontSmall
+                            font.weight: Font.DemiBold
+                            wrapMode: Text.WordWrap
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            NuComboBox {
+                                id: contactSetPicker
+                                Layout.preferredWidth: Math.max(220, root.width * 0.20)
+                                model: root.contactSetNameModel()
+                                helpText: "Saved contact sets available for relationship graphing."
+                                Component.onCompleted: Qt.callLater(root.syncContactSetPicker)
+                                onActivated: {
+                                    root.selectedContactSetName = currentText
+                                    contactSetNameField.text = currentText
+                                }
+                            }
+
+                            NuTextField {
+                                id: contactSetNameField
+                                Layout.fillWidth: true
+                                text: NuService.currentExplorerContactSetName
+                                placeholderText: "contact set name"
+                                helpText: "Name for the saved wallet-address set used by the relationship graph. Edit this field to save as a new set or rename a selected set."
+                            }
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: NuTokens.spaceSm
+
+                            NuActionButton {
+                                width: 72
+                                text: "Load"
+                                enabled: root.selectedContactSetName.length > 0 || contactSetNameField.text.length > 0
+                                helpText: "Load the selected saved contact set for relationship graphing."
+                                onClicked: {
+                                    NuService.loadExplorerContactSet(root.selectedContactSetName.length > 0 ? root.selectedContactSetName : contactSetNameField.text)
+                                    root.clearContactEditor()
+                                    contactSetNameField.text = NuService.currentExplorerContactSetName
+                                }
+                            }
+
+                            NuActionButton {
+                                width: 90
+                                text: "Save set"
+                                primary: true
+                                helpText: "Save the currently visible contacts into this named set. A new name works as Save As."
+                                onClicked: {
+                                    NuService.saveExplorerContactSet(contactSetNameField.text)
+                                    root.selectedContactSetName = contactSetNameField.text
+                                }
+                            }
+
+                            NuActionButton {
+                                width: 92
+                                text: "New empty"
+                                helpText: "Create and load a new empty contact set."
+                                onClicked: {
+                                    NuService.createExplorerContactSet(contactSetNameField.text)
+                                    root.selectedContactSetName = contactSetNameField.text
+                                    root.clearContactEditor()
+                                }
+                            }
+
+                            NuActionButton {
+                                width: 86
+                                text: "Rename"
+                                enabled: contactSetNameField.text.length > 0
+                                helpText: "Rename the selected set, or the active set if no row is selected."
+                                onClicked: {
+                                    NuService.renameExplorerContactSet(root.selectedContactSetName.length > 0 ? root.selectedContactSetName : NuService.currentExplorerContactSetName,
+                                                                       contactSetNameField.text)
+                                    root.selectedContactSetName = contactSetNameField.text
+                                }
+                            }
+
+                            NuActionButton {
+                                width: 78
+                                text: "Delete"
+                                danger: true
+                                enabled: root.selectedContactSetName.length > 0 || contactSetNameField.text.length > 0
+                                helpText: "Delete the selected saved contact set."
+                                onClicked: {
+                                    NuService.deleteExplorerContactSet(root.selectedContactSetName.length > 0 ? root.selectedContactSetName : contactSetNameField.text)
+                                    root.selectedContactSetName = ""
+                                    contactSetNameField.text = NuService.currentExplorerContactSetName
+                                    root.clearContactEditor()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
                     Layout.preferredHeight: 142
                     spacing: NuTokens.spaceMd
 
@@ -943,7 +1092,7 @@ ColumnLayout {
                                 model: root.availableWalletModel()
                                 textFormatter: root.formatWalletMenuLabel
                                 enabled: count > 0
-                                helpText: "Choose the Nu wallet whose visible address-book labels and addresses ExpFor can read for Contacts."
+                                helpText: "Choose the Nu wallet whose visible address-book labels and addresses Explore can read for Contacts."
                                 Component.onCompleted: root.syncAddressBookWalletCombo()
                                 onModelChanged: Qt.callLater(root.syncAddressBookWalletCombo)
                             }
@@ -1141,7 +1290,7 @@ ColumnLayout {
 
         Label {
             Layout.fillWidth: true
-            text: "ExpFor will ask the local Defcoin backend to open or select this Nu wallet and read visible address-book labels and addresses for the Forensics Contacts list."
+            text: "Explore will ask the local Defcoin backend to open or select this Nu wallet and read visible address-book labels and addresses for the Forensics Contacts list."
             color: NuTokens.textPrimary
             font.pixelSize: NuTokens.fontBody
             wrapMode: Text.WordWrap
@@ -1167,12 +1316,16 @@ ColumnLayout {
     Window {
         id: forensicsTableWindow
         title: "Message Scan"
-        width: 1280
-        height: 760
+        property int initialWidth: 1280
+        property int initialHeight: 760
         minimumWidth: 860
         minimumHeight: 520
         visible: false
         color: NuTokens.backgroundBase
+        Component.onCompleted: {
+            width = initialWidth
+            height = initialHeight
+        }
 
         ColumnLayout {
             anchors.fill: parent
@@ -1273,13 +1426,17 @@ ColumnLayout {
 
     Window {
         id: contactGraphWindow
-        width: 1040
-        height: 760
+        property int initialWidth: 1040
+        property int initialHeight: 760
         minimumWidth: 760
         minimumHeight: 560
         visible: false
         title: "Forensics Contact Relationship Graph"
         color: NuTokens.backgroundBase
+        Component.onCompleted: {
+            width = initialWidth
+            height = initialHeight
+        }
 
         ColumnLayout {
             anchors.fill: parent
@@ -1310,7 +1467,7 @@ ColumnLayout {
 
             Label {
                 Layout.fillWidth: true
-                text: "Node size is based on saved addresses that also appear in the current largest-holder table. Each node shows rounded DFC. Line thickness is based on indexed direct spend flow between saved contact groups."
+                text: root.activeContactSetLabel() + ". Node size is based on saved addresses that also appear in the current largest-holder table. Each node shows rounded DFC. Line thickness is based on indexed direct spend flow between saved contact groups."
                 color: NuTokens.textSecondary
                 font.pixelSize: NuTokens.fontSmall
                 wrapMode: Text.WordWrap

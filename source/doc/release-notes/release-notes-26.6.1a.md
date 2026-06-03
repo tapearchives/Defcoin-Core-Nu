@@ -16,4 +16,4 @@ build over `26.6.1`. The inherited Core client build number is unchanged.
 
 - `-dbcache` remains a Core backend cache for block validation and chainstate
   work. It can improve initial sync and validation-heavy work, but Explorer and
-  ExpFor SQLite indexing use their own SQLite caches and batching.
+  Explore SQLite indexing use their own SQLite caches and batching.

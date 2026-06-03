@@ -24,9 +24,63 @@ Rectangle {
     }
 
     function explorerIndexPercentText() {
-        if (NuService.explorerIndexTip <= 0) return "0.00%"
+        if (NuService.explorerIndexTip <= 0)
+            return NuService.explorerIndexedBlockCount > 0 ? "Cached" : "0%"
         const progress = Math.max(0, Math.min(1, NuService.explorerIndexHeight / NuService.explorerIndexTip))
         return (progress * 100).toFixed(2) + "%"
+    }
+
+    function progressPercentFromText(text, fallback) {
+        const match = String(text || "").match(/([0-9]+(?:\.[0-9]+)?)%/)
+        return match ? (match[1] + "%") : fallback
+    }
+
+    function textHasProblem(text) {
+        const lower = String(text || "").toLowerCase()
+        return lower.indexOf("error") >= 0
+            || lower.indexOf("failed") >= 0
+            || lower.indexOf("failure") >= 0
+            || lower.indexOf("cannot") >= 0
+            || lower.indexOf("locked by another") >= 0
+    }
+
+    function textLooksBusy(text) {
+        const lower = String(text || "").toLowerCase()
+        return lower.indexOf("loading") >= 0
+            || lower.indexOf("reading") >= 0
+            || lower.indexOf("scanning") >= 0
+            || lower.indexOf("refresh") >= 0
+            || lower.indexOf("estimating") >= 0
+            || lower.indexOf("starting") >= 0
+            || lower.indexOf("indexing") >= 0
+    }
+
+    function textLooksReady(text) {
+        const lower = String(text || "").toLowerCase()
+        return lower.indexOf("ready") >= 0
+            || lower.indexOf("loaded") >= 0
+            || lower.indexOf("complete") >= 0
+            || lower.indexOf("covers indexed blocks") >= 0
+            || lower.indexOf("indexed through") >= 0
+    }
+
+    function explorerIndexReady() {
+        if (NuService.explorerIndexedBlockCount > 0) return true
+        return NuService.explorerIndexTip > 0 && NuService.explorerIndexHeight >= NuService.explorerIndexTip
+    }
+
+    function explorerIndexLabel() {
+        if (NuService.explorerIndexing || root.textLooksBusy(NuService.explorerIndexStatus))
+            return "Loading index " + root.explorerIndexPercentText()
+        return "Explorer index"
+    }
+
+    function explorerIndexColor() {
+        if (NuService.explorerIndexing)
+            return root.textHasProblem(NuService.explorerIndexStatus) ? NuTokens.stateError : NuTokens.stateWarning
+        if (root.explorerIndexReady()) return NuTokens.stateConnected
+        if (root.textHasProblem(NuService.explorerIndexStatus)) return NuTokens.stateError
+        return NuTokens.stateInactive
     }
 
     function holderTimelineValue() {
@@ -36,9 +90,40 @@ Rectangle {
     }
 
     function holderTimelineLabel() {
-        if (NuService.explorerTop100Scanning) return "Holder timeline indexing"
-        if (NuService.explorerTop100TimelineEventCount > 0) return "Holder timeline ready"
-        return "Holder timeline idle"
+        return "Holder timeline"
+    }
+
+    function holderTimelineColor() {
+        if (root.textHasProblem(NuService.explorerTop100Status)) return NuTokens.stateError
+        if (NuService.explorerTop100Scanning) return NuTokens.stateWarning
+        if (NuService.explorerTop100TimelineEventCount > 0) return NuTokens.stateConnected
+        return NuTokens.stateInactive
+    }
+
+    function movementStatusLabel() {
+        if (root.textLooksBusy(NuService.explorerAnalyticsStatus))
+            return "Loading analytics " + root.progressPercentFromText(NuService.explorerAnalyticsStatus, "0%")
+        return "Movements"
+    }
+
+    function movementStatusColor() {
+        if (root.textHasProblem(NuService.explorerAnalyticsStatus)) return NuTokens.stateError
+        if (root.textLooksBusy(NuService.explorerAnalyticsStatus)) return NuTokens.stateWarning
+        if (NuService.explorerMovements.length > 0 || root.textLooksReady(NuService.explorerAnalyticsStatus))
+            return NuTokens.stateConnected
+        return NuTokens.stateInactive
+    }
+
+    function coindroidsStatusLabel() {
+        return "Droid Trails"
+    }
+
+    function coindroidsStatusColor() {
+        if (root.textHasProblem(NuService.coindroidsStatus)) return NuTokens.stateError
+        if (NuService.coindroidsScanning) return NuTokens.stateWarning
+        if (NuService.coindroidsWindowRows.length > 0 || root.textLooksReady(NuService.coindroidsStatus))
+            return NuTokens.stateConnected
+        return NuTokens.stateInactive
     }
 
     function forensicsProgressValue() {
@@ -49,14 +134,19 @@ Rectangle {
         return NuService.forensicsIrregularMessageCount + " rows"
     }
 
+    function forensicsStatusLabel() {
+        return "Forensics"
+    }
+
+    function forensicsStatusColor() {
+        if (root.textHasProblem(NuService.forensicsScanStatus)) return NuTokens.stateError
+        if (NuService.forensicsScanning) return NuTokens.stateWarning
+        if (NuService.forensicsScanComplete || NuService.forensicsIrregularMessageCount > 0) return NuTokens.stateConnected
+        return NuTokens.stateInactive
+    }
+
     function networkStatusLabel() {
-        if (!NuService.rpcConnected)
-            return NuService.connectionStatus === "Starting backend" ? "Starting backend..." : "Connecting to backend..."
-        if (NuService.networkState === "connected" && NuService.peerCount <= 0)
-            return "Peers connecting..."
-        if (NuService.networkState === "connected")
-            return "Network connected"
-        return "Network isolated"
+        return "Network"
     }
 
     function networkStatusColor() {
@@ -77,6 +167,23 @@ Rectangle {
         if (NuService.networkState === "connected")
             return "The backend reports active P2P networking and at least one peer connection."
         return "Peer networking is disabled or no usable P2P state is available. Settings > Network can reconnect the node."
+    }
+
+    function walletStatusLabel() {
+        return "Wallet"
+    }
+
+    function walletStatusColor() {
+        if (!NuService.walletSelected) return NuTokens.stateInactive
+        if (NuService.walletEncrypted && !NuService.walletLocked) return NuTokens.stateWarning
+        return NuTokens.stateConnected
+    }
+
+    function walletStatusHelp() {
+        if (!NuService.walletSelected) return "No active wallet is selected."
+        if (NuService.walletEncrypted && NuService.walletLocked) return "The active wallet is encrypted and locked."
+        if (NuService.walletEncrypted) return "The active wallet is encrypted but currently unlocked."
+        return "The active wallet is loaded and not encrypted."
     }
 
     function currentWalletIndex() {
@@ -103,14 +210,13 @@ Rectangle {
             visible: root.showExplorerIndexTools
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? implicitHeight : 0
-            spacing: NuTokens.spaceMd
-
-            Item { Layout.fillWidth: true }
+            spacing: root.width < 900 ? NuTokens.spaceSm : NuTokens.spaceMd
 
             NuTextField {
                 id: mastSearchField
-                Layout.preferredWidth: Math.min(640, Math.max(420, root.width * 0.52))
-                Layout.maximumWidth: 720
+                Layout.fillWidth: true
+                Layout.minimumWidth: 260
+                Layout.maximumWidth: 760
                 Layout.preferredHeight: 42
                 placeholderText: "Search wallet address, txid, block hash, or height..."
                 helpText: "Search the local Defcoin explorer for a wallet address, transaction ID, block hash, or block height."
@@ -123,15 +229,13 @@ Rectangle {
             }
 
             NuActionButton {
-                Layout.preferredWidth: 96
+                Layout.preferredWidth: 104
                 Layout.preferredHeight: 42
                 text: "Search"
                 primary: true
                 helpText: "Switch to Explorer and open the matching local lookup result."
                 onClicked: root.runExplorerSearch()
             }
-
-            Item { Layout.fillWidth: true }
         }
 
         Flow {
@@ -139,11 +243,11 @@ Rectangle {
             visible: root.showExplorerIndexTools
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? indexFlow.implicitHeight : 0
-            spacing: NuTokens.spaceLg
+            spacing: root.width < 900 ? NuTokens.spaceMd : NuTokens.spaceLg
 
             NuStatusDot {
-                label: NuService.explorerIndexing ? "Explorer indexing" : "Explorer index idle"
-                stateColor: NuService.explorerIndexing ? NuTokens.stateWarning : NuTokens.stateInactive
+                label: root.explorerIndexLabel()
+                stateColor: root.explorerIndexColor()
                 helpText: NuService.explorerIndexStatus
                 labelMaximumWidth: root.width < 900 ? 190 : 230
             }
@@ -156,7 +260,7 @@ Rectangle {
 
             NuStatusDot {
                 label: root.holderTimelineLabel()
-                stateColor: NuService.explorerTop100Scanning ? NuTokens.stateWarning : (NuService.explorerTop100TimelineEventCount > 0 ? NuTokens.stateConnected : NuTokens.stateInactive)
+                stateColor: root.holderTimelineColor()
                 helpText: NuService.explorerTop100Status
                 labelMaximumWidth: root.width < 900 ? 200 : 260
             }
@@ -168,16 +272,37 @@ Rectangle {
                 helpText: "Sparse over-time checkpoints for largest-holder analysis."
             }
 
+            NuStatusDot {
+                label: root.movementStatusLabel()
+                stateColor: root.movementStatusColor()
+                helpText: NuService.explorerAnalyticsStatus
+                labelMaximumWidth: root.width < 900 ? 180 : 230
+            }
+
             NuMetricRow {
                 label: "Movements"
                 value: NuService.explorerMovements.length + " rows"
                 helpText: "Loaded large-movement rows from the local Explorer index."
             }
 
+            NuStatusDot {
+                label: root.coindroidsStatusLabel()
+                stateColor: root.coindroidsStatusColor()
+                helpText: NuService.coindroidsStatus
+                labelMaximumWidth: root.width < 900 ? 180 : 230
+            }
+
+            NuStatusDot {
+                label: root.forensicsStatusLabel()
+                stateColor: root.forensicsStatusColor()
+                helpText: NuService.forensicsScanStatus
+                labelMaximumWidth: root.width < 900 ? 170 : 220
+            }
+
             NuMetricRow {
                 label: "Forensics"
                 value: root.forensicsProgressValue()
-                helpText: NuService.forensicsScanStatus
+                helpText: NuService.forensicsScanSummary.length > 0 ? NuService.forensicsScanSummary : NuService.forensicsScanStatus
             }
         }
 
@@ -185,7 +310,7 @@ Rectangle {
             id: statusFlow
             Layout.fillWidth: true
             Layout.preferredHeight: statusFlow.implicitHeight
-            spacing: NuTokens.spaceLg
+            spacing: root.width < 900 ? NuTokens.spaceMd : NuTokens.spaceLg
             NuStatusDot {
                 label: root.networkStatusLabel()
                 stateColor: root.networkStatusColor()
@@ -194,7 +319,7 @@ Rectangle {
             }
 
             NuMetricRow {
-                label: "Recent hashrate:"
+                label: "Hashrate:"
                 value: NuService.recentNetworkHashrate
                 helpText: "Estimated network hashrate from getnetworkhashps over the last 120 blocks. It is a recent estimate, not an exact live measurement."
             }
@@ -203,6 +328,12 @@ Rectangle {
                 label: "Difficulty:"
                 value: NuService.networkDifficulty
                 helpText: "Current proof-of-work difficulty from chain state. It can change at retarget boundaries and may lag until RPC refreshes."
+            }
+
+            NuMetricRow {
+                label: "Avg block:"
+                value: NuService.recentAverageBlockTime
+                helpText: "Recent average block spacing over up to 120 active-chain blocks, sampled from RPC block headers with the local Explorer index used as fallback."
             }
 
             NuMetricRow {
@@ -225,9 +356,9 @@ Rectangle {
             }
 
             NuStatusDot {
-                label: NuService.walletLocked ? "Wallet locked" : "Wallet unlocked"
-                stateColor: NuService.walletLocked ? NuTokens.stateInactive : NuTokens.stateConnected
-                helpText: NuService.walletLocked ? "The active wallet is encrypted and locked." : "The active wallet is unlocked or not encrypted."
+                label: root.walletStatusLabel()
+                stateColor: root.walletStatusColor()
+                helpText: root.walletStatusHelp()
                 labelMaximumWidth: 170
             }
         }

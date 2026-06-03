@@ -24,7 +24,7 @@ mkdir -p "$FRAMEWORKS_DIR"
 is_bundle_dependency() {
   local dep="$1"
   case "$dep" in
-    /opt/homebrew/*|/usr/local/*) return 0 ;;
+    /opt/homebrew/*|/opt/local/*|/usr/local/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -36,6 +36,7 @@ is_macho_file() {
 
 declare -a queue=()
 queued_list=""
+copied_dependency=""
 
 enqueue_once() {
   local path="$1"
@@ -58,7 +59,7 @@ copy_dependency() {
   fi
 
   enqueue_once "$dest"
-  printf '%s\n' "$dest"
+  copied_dependency="$dest"
 }
 
 rewrite_image_dependencies() {
@@ -81,7 +82,8 @@ rewrite_image_dependencies() {
     if ! is_bundle_dependency "$dep"; then
       continue
     fi
-    dest="$(copy_dependency "$dep")"
+    copy_dependency "$dep"
+    dest="$copied_dependency"
     base="$(basename "$dest")"
     if [ "$mode" = "framework" ]; then
       new_path="@loader_path/$base"
@@ -97,6 +99,20 @@ for backend in "$BACKEND_BIN_DIR"/*; do
     rewrite_image_dependencies "$backend" "backend"
   fi
 done
+
+while IFS= read -r -d '' candidate; do
+  if ! is_macho_file "$candidate"; then
+    continue
+  fi
+  case "$candidate" in
+    "$FRAMEWORKS_DIR"/*)
+      rewrite_image_dependencies "$candidate" "framework"
+      ;;
+    *)
+      rewrite_image_dependencies "$candidate" "backend"
+      ;;
+  esac
+done < <(find "$APP/Contents" -type f -print0)
 
 index=0
 while [ "$index" -lt "${#queue[@]}" ]; do

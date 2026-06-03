@@ -1,8 +1,6 @@
-pragma ComponentBehavior: Bound
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Basic 2.15 as Basic
-import QtQuick.Layouts 1.15
 import Defcoin.Nu 1.0
 
 import "../Theme"
@@ -65,6 +63,7 @@ Rectangle {
     property string rowKeyMetaField: "address"
     property var selectedRowKeys: []
     property int rowSelectionAnchor: -1
+    property bool shuttingDown: false
 
     signal rowActivated(var row)
     signal rowDeleteRequested(var row)
@@ -178,6 +177,38 @@ Rectangle {
         return value === undefined || value === null ? "" : String(value)
     }
 
+    function firstAddressText(value) {
+        const match = String(value === undefined || value === null ? "" : value).match(/[DM39A][1-9A-HJ-NP-Za-km-z]{20,90}/)
+        return match ? match[0] : ""
+    }
+
+    function firstHashText(value) {
+        const match = String(value === undefined || value === null ? "" : value).match(/\b[0-9a-fA-F]{64}\b/)
+        return match ? match[0] : ""
+    }
+
+    function explorerLinkUrl(row, index) {
+        const explicit = cellLinkUrl(row, index)
+        if (explicit.length > 0) return explicit
+
+        const type = columnType(index)
+        const value = valueAt(row, index)
+        const meta = rowMeta(row)
+        const rowType = String(meta.type || "").toLowerCase()
+        const columnName = index >= 0 && index < columns.length ? String(columns[index]).toLowerCase() : ""
+        const address = firstAddressText(value)
+        if (address.length > 0 && (type === "address" || rowType === "address" || columnName.indexOf("address") >= 0 || columnName.indexOf("wallet") >= 0))
+            return "nu://address/" + encodeURIComponent(address)
+
+        const hash = firstHashText(value)
+        if (hash.length > 0 && (type === "hash" || rowType === "transaction" || rowType === "block" || columnName.indexOf("tx") >= 0 || columnName.indexOf("hash") >= 0)) {
+            if (rowType === "block" || columnName.indexOf("block") >= 0)
+                return "nu://block/" + encodeURIComponent(hash)
+            return "nu://transaction/" + encodeURIComponent(hash)
+        }
+        return ""
+    }
+
     function sortMetaField(index) {
         if (index >= 0 && index < columnSortMetaFields.length) return String(columnSortMetaFields[index])
         return ""
@@ -226,16 +257,8 @@ Rectangle {
     function cellHorizontalAlignment(row, index) {
         const type = columnType(index)
         if (type === "seedLanSource") {
-            const cells = rowCells(row)
-            let lanIndex = -1
-            for (let i = 0; i < columns.length; ++i) {
-                if (columnType(i) === "lan" || String(columns[i] || "").trim() === "LAN") {
-                    lanIndex = i
-                    break
-                }
-            }
-            const isLan = cells && lanIndex >= 0 && String(cells[lanIndex] || "").trim() === "LAN"
-            return isLan ? Text.AlignLeft : Text.AlignRight
+            const meta = rowMeta(row)
+            return meta && meta.isLanPeer === true ? Text.AlignLeft : Text.AlignRight
         }
         if (type === "knownDns") {
             return Text.AlignRight
@@ -261,6 +284,28 @@ Rectangle {
         if (tips !== undefined && tips !== null && index >= 0 && index < tips.length) return String(tips[index] || "")
         if (meta.rowTooltip !== undefined && meta.rowTooltip !== null) return String(meta.rowTooltip || "")
         return ""
+    }
+
+    function headerToolTip(index, cellWidth) {
+        const explicit = columnToolTip(index)
+        if (explicit.length > 0) return explicit
+        const title = index >= 0 && index < columns.length ? String(columns[index]) : ""
+        if (title.length === 0) return ""
+        return roughTextWidth(title.replace(/\n/g, " "), index) > Number(cellWidth) - 8 ? title : ""
+    }
+
+    function cellDisplayToolTip(row, index, cellWidth) {
+        const explicit = cellToolTip(row, index)
+        if (explicit.length > 0) return explicit
+        const value = valueAt(row, index)
+        if (value === undefined || value === null || String(value).length === 0) return ""
+        const available = Math.max(24, Number(cellWidth) - textPadding() * 2)
+        return roughTextWidth(value, index) > available ? String(value) : ""
+    }
+
+    function cellHasLanIcon(row, index) {
+        const meta = rowMeta(row)
+        return columnType(index) === "seedLanSource" && meta && meta.isLanPeer === true
     }
 
     function rowKey(row) {
@@ -687,6 +732,7 @@ Rectangle {
     }
 
     function sortedRows() {
+        if (shuttingDown) return []
         let out = rows ? rows.slice() : []
         if (sortable && sortColumn >= 0 && sortColumn < columns.length) {
             let indexed = []
@@ -942,6 +988,9 @@ Rectangle {
         }
         scheduleResize(false)
     }
+    Component.onDestruction: {
+        shuttingDown = true
+    }
     onColumnsChanged: {
         if (!userResizingColumns) scheduleResize(true)
     }
@@ -1019,8 +1068,8 @@ Rectangle {
                             activeFocusOnTab: root.sortable && !root.isActionColumn(headerCell.index)
                             Accessible.name: headerCell.modelData
                             Accessible.description: root.columnToolTip(headerCell.index)
-                            ToolTip.visible: headerHover.containsMouse && root.columnToolTip(headerCell.index).length > 0
-                            ToolTip.text: root.columnToolTip(headerCell.index)
+                            ToolTip.visible: headerHover.containsMouse && root.headerToolTip(headerCell.index, headerCell.width).length > 0
+                            ToolTip.text: root.headerToolTip(headerCell.index, headerCell.width)
                             ToolTip.delay: NuTokens.tooltipDelay
                             ToolTip.timeout: NuTokens.tooltipTimeout
 
@@ -1162,7 +1211,7 @@ Rectangle {
                 }
 
                 Repeater {
-                    model: root.sortedRows()
+                    model: root.shuttingDown ? [] : root.sortedRows()
 
                     Row {
                         id: bodyRow
@@ -1172,7 +1221,7 @@ Rectangle {
                         height: root.rowHeight()
 
                         Repeater {
-                            model: root.columns.length
+                            model: root.shuttingDown ? 0 : root.columns.length
 
                             Rectangle {
                                 id: bodyCell
@@ -1284,6 +1333,9 @@ Rectangle {
                                 TextEdit {
                                     anchors.fill: parent
                                     anchors.margins: root.compact ? NuTokens.spaceXs : NuTokens.spaceSm
+                                    anchors.leftMargin: root.cellHasLanIcon(bodyRow.modelData, bodyCell.index)
+                                                        ? (root.compact ? 28 : 32)
+                                                        : (root.compact ? NuTokens.spaceXs : NuTokens.spaceSm)
                                     visible: !root.isActionColumn(bodyCell.index)
                                              && root.columnType(bodyCell.index) !== "swatch"
                                              && root.columnType(bodyCell.index) !== "lan"
@@ -1291,12 +1343,12 @@ Rectangle {
                                     selectByMouse: true
                                     persistentSelection: true
                                     text: root.valueAt(bodyRow.modelData, bodyCell.index)
-                                    color: root.cellLinkUrl(bodyRow.modelData, bodyCell.index).length > 0 ? NuTokens.accentSky : NuTokens.textPrimary
+                                    color: root.explorerLinkUrl(bodyRow.modelData, bodyCell.index).length > 0 ? NuTokens.accentSky : NuTokens.textPrimary
                                     selectedTextColor: NuTokens.textInverse
                                     selectionColor: NuTokens.lineStrong
                                     font.family: root.isMonoColumn(bodyCell.index) ? NuTokens.monoFont : NuTokens.bodyFont
                                     font.pixelSize: root.cellFontSize()
-                                    font.underline: root.cellLinkUrl(bodyRow.modelData, bodyCell.index).length > 0
+                                    font.underline: root.explorerLinkUrl(bodyRow.modelData, bodyCell.index).length > 0
                                     verticalAlignment: Text.AlignVCenter
                                     horizontalAlignment: root.cellHorizontalAlignment(bodyRow.modelData, bodyCell.index)
                                     wrapMode: TextEdit.NoWrap
@@ -1352,16 +1404,55 @@ Rectangle {
                                     }
                                 }
 
+                                Canvas {
+                                    id: inlineLanGlyph
+                                    visible: root.cellHasLanIcon(bodyRow.modelData, bodyCell.index)
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: root.compact ? 6 : 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: root.compact ? 16 : 18
+                                    height: width
+                                    onPaint: {
+                                        const ctx = getContext("2d")
+                                        ctx.reset()
+                                        ctx.lineWidth = 1.4
+                                        ctx.strokeStyle = NuTokens.textPrimary
+                                        ctx.fillStyle = NuTokens.accentSky
+
+                                        const cx = width / 2
+                                        const topY = height * 0.28
+                                        const midY = height * 0.53
+                                        const lowY = height * 0.74
+                                        const box = Math.max(3, width * 0.2)
+
+                                        ctx.beginPath()
+                                        ctx.moveTo(cx, topY + box)
+                                        ctx.lineTo(cx, midY)
+                                        ctx.moveTo(cx, midY)
+                                        ctx.lineTo(width * 0.28, lowY - box / 2)
+                                        ctx.moveTo(cx, midY)
+                                        ctx.lineTo(width * 0.72, lowY - box / 2)
+                                        ctx.stroke()
+
+                                        ctx.fillRect(cx - box / 2, topY - box / 2, box, box)
+                                        ctx.strokeRect(cx - box / 2, topY - box / 2, box, box)
+                                        ctx.fillRect(width * 0.28 - box / 2, lowY - box / 2, box, box)
+                                        ctx.strokeRect(width * 0.28 - box / 2, lowY - box / 2, box, box)
+                                        ctx.fillRect(width * 0.72 - box / 2, lowY - box / 2, box, box)
+                                        ctx.strokeRect(width * 0.72 - box / 2, lowY - box / 2, box, box)
+                                    }
+                                }
+
                                 MouseArea {
                                     id: bodyMouse
                                     anchors.fill: parent
                                     visible: !root.isActionColumn(bodyCell.index)
                                     hoverEnabled: true
                                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                    cursorShape: root.cellLinkUrl(bodyRow.modelData, bodyCell.index).length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+                                    cursorShape: root.explorerLinkUrl(bodyRow.modelData, bodyCell.index).length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
                                     property point startPoint: Qt.point(0, 0)
-                                    ToolTip.visible: bodyMouse.containsMouse && root.cellToolTip(bodyRow.modelData, bodyCell.index).length > 0
-                                    ToolTip.text: root.cellToolTip(bodyRow.modelData, bodyCell.index)
+                                    ToolTip.visible: bodyMouse.containsMouse && root.cellDisplayToolTip(bodyRow.modelData, bodyCell.index, bodyCell.width).length > 0
+                                    ToolTip.text: root.cellDisplayToolTip(bodyRow.modelData, bodyCell.index, bodyCell.width)
                                     ToolTip.delay: NuTokens.tooltipDelay
                                     ToolTip.timeout: NuTokens.tooltipTimeout
                                     onPressed: (mouse) => {
@@ -1388,13 +1479,13 @@ Rectangle {
                                     }
                                     onReleased: (mouse) => {
                                         if (mouse.button !== Qt.RightButton) {
-                                            const link = root.cellLinkUrl(bodyRow.modelData, bodyCell.index)
+                                            const link = root.explorerLinkUrl(bodyRow.modelData, bodyCell.index)
                                             const modified = (mouse.modifiers & Qt.ShiftModifier) !== 0
                                                     || (mouse.modifiers & Qt.ControlModifier) !== 0
                                                     || (mouse.modifiers & Qt.MetaModifier) !== 0
                                             root.finishRangeSelection()
                                             if (link.length > 0 && !root.selectionDragged && !modified) {
-                                                Qt.openUrlExternally(link)
+                                                NuService.openExplorerLink(link)
                                                 mouse.accepted = true
                                             }
                                         }

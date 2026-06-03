@@ -29,7 +29,7 @@ void
 PBKDF2_SHA256(const uint8_t *passwd, size_t passwdlen, const uint8_t *salt,
     size_t saltlen, uint64_t c, uint8_t *buf, size_t dkLen);
 
-#if defined(__FreeBSD__) || (defined(__APPLE__) && !defined(le32dec))
+#if defined(__APPLE__) || defined(__FreeBSD__)
 #include <sys/endian.h>
 #else
 static inline uint32_t le32dec(const void *pp)
@@ -46,6 +46,15 @@ static inline void le32enc(void *pp, uint32_t x)
         p[1] = (x >> 8) & 0xff;
         p[2] = (x >> 16) & 0xff;
         p[3] = (x >> 24) & 0xff;
+}
+
+static inline void be32enc(void *pp, uint32_t x)
+{
+        uint8_t *p = (uint8_t *)pp;
+        p[0] = (x >> 24) & 0xff;
+        p[1] = (x >> 16) & 0xff;
+        p[2] = (x >> 8) & 0xff;
+        p[3] = x & 0xff;
 }
 #endif
 #endif // BITCOIN_CRYPTO_SCRYPT_H

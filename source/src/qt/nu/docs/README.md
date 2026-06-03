@@ -1,6 +1,6 @@
 # Defcoin Core Nu UI Implementation
 
-This directory contains the developer reference for Defcoin Core Nu 26.5.5w.
+This directory contains the developer reference for Defcoin Core Nu 26.6.4a.
 Nu is a Qt Quick interface that talks to the Defcoin Core backend through a
 small JSON-RPC service layer.
 
@@ -39,7 +39,7 @@ resources/nu.qrc          Qt resource manifest for the Nu app
 See `functionality-map.md` for the current Litecoin/Defcoin wallet function
 coverage map.
 
-See `defcoin-core-nu-goals.md` for the Defcoin Core Nu and ExpFor product,
+See `defcoin-core-nu-goals.md` for the Defcoin Core Nu and Explore product,
 community, explorer, and forensics goals.
 
 See `backend-frontend-boundary.md` for the service-boundary rules that keep
@@ -52,7 +52,7 @@ See `initial-launch-crash-prevention.md` for the confirmed recent launch-crash
 causes, smoke gates, and triage order for new app bundles.
 
 See `brand-logo-text.md` for the canonical Defcoin Core Nu wordmark font,
-kerning, ExpFor third-line variant, and DMG layout rules.
+kerning, Explore third-line variant, and DMG layout rules.
 
 See `bitcoin-core-qml-comparison.md` for the architecture comparison with
 Bitcoin Core QML.

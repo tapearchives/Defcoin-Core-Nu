@@ -1105,20 +1105,22 @@ static RPCHelpMan reservefastsyncblock()
         "not as independent reasons to request the same block twice. It does not change consensus rules and\n"
         "older Defcoin Core peers continue to use normal TCP block sync.\n",
         {
-            {"action", RPCArg::Type::STR, RPCArg::Optional::NO, "\"reserve\" or \"release\""},
+            {"action", RPCArg::Type::STR, RPCArg::Optional::NO, "\"reserve\", \"reserve-next\", or \"release\""},
             {"nodeid", RPCArg::Type::NUM, RPCArg::Optional::NO, "Connected peer id from getpeerinfo"},
-            {"height_or_hash", RPCArg::Type::STR, RPCArg::Optional::NO, "Block height for reserve, block hash for release"},
+            {"height_or_hash", RPCArg::Type::STR, RPCArg::Optional::OMITTED_NAMED_ARG, "Block height for reserve, block hash for release; omit for reserve-next"},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
             {
                 {RPCResult::Type::BOOL, "success", "whether the action succeeded"},
+                {RPCResult::Type::NUM, "height", "reserved block height, when known"},
                 {RPCResult::Type::STR_HEX, "hash", "reserved or released block hash, when known"},
                 {RPCResult::Type::STR, "reason", "short reason string"},
             },
         },
         RPCExamples{
             HelpExampleCli("reservefastsyncblock", "\"reserve\" 1 903169")
+    + HelpExampleCli("reservefastsyncblock", "\"reserve-next\" 1")
     + HelpExampleCli("reservefastsyncblock", "\"release\" 1 \"0000000000000000000000000000000000000000000000000000000000000000\"")
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
@@ -1129,8 +1131,22 @@ static RPCHelpMan reservefastsyncblock()
     }
 
     const std::string action = ToLower(request.params[0].get_str());
-    const NodeId nodeid = (NodeId)request.params[1].get_int64();
-    const std::string height_or_hash = request.params[2].get_str();
+    int64_t parsed_nodeid = -1;
+    const UniValue& nodeid_value = request.params[1];
+    if (nodeid_value.isNum()) {
+        parsed_nodeid = nodeid_value.get_int64();
+    } else if (nodeid_value.isStr() && ParseInt64(nodeid_value.get_str(), &parsed_nodeid)) {
+        // Nu's Qt front end and defcoin-cli can stringify hidden RPC args.
+        // Accept numeric strings so Fast Sync transport reservation does not
+        // depend on client-side argument conversion tables.
+    } else {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Peer node id must be a numeric value");
+    }
+    if (parsed_nodeid < 0) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Peer node id must be non-negative");
+    }
+    const NodeId nodeid = (NodeId)parsed_nodeid;
+    const std::string height_or_hash = request.params.size() > 2 ? request.params[2].get_str() : "";
 
     UniValue obj(UniValue::VOBJ);
     if (action == "reserve") {
@@ -1142,11 +1158,26 @@ static RPCHelpMan reservefastsyncblock()
         std::string reason;
         const bool reserved = ReserveFastSyncBlockInFlight(*node.mempool, nodeid, height, hash, reason);
         obj.pushKV("success", reserved);
+        obj.pushKV("height", height);
+        if (!hash.IsNull()) obj.pushKV("hash", hash.ToString());
+        obj.pushKV("reason", reason);
+        return obj;
+    }
+    if (action == "reserve-next") {
+        uint256 hash;
+        int height = -1;
+        std::string reason;
+        const bool reserved = ReserveNextFastSyncBlockInFlight(*node.mempool, nodeid, hash, height, reason);
+        obj.pushKV("success", reserved);
+        if (height >= 0) obj.pushKV("height", height);
         if (!hash.IsNull()) obj.pushKV("hash", hash.ToString());
         obj.pushKV("reason", reason);
         return obj;
     }
     if (action == "release") {
+        if (height_or_hash.empty()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Release action requires a 64-character block hash");
+        }
         uint256 hash;
         if (!ParseHashStr(height_or_hash, hash)) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Release action requires a 64-character block hash");
@@ -1158,7 +1189,7 @@ static RPCHelpMan reservefastsyncblock()
         return obj;
     }
 
-    throw JSONRPCError(RPC_INVALID_PARAMETER, "Unknown action; expected \"reserve\" or \"release\"");
+    throw JSONRPCError(RPC_INVALID_PARAMETER, "Unknown action; expected \"reserve\", \"reserve-next\", or \"release\"");
 },
     };
 }

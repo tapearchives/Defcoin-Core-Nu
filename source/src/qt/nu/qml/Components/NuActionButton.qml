@@ -22,6 +22,26 @@ Basic.Button {
     property string helpText: ""
     property bool suppressToolTip: false
 
+    function surfaceColor() {
+        if (!root.enabled) return NuTokens.backgroundBase
+        if (root.danger) {
+            if (root.pressed) return "#a32018"
+            return root.hovered ? "#c52920" : NuTokens.stateError
+        }
+        if (root.primary) {
+            if (root.pressed) return "#050607"
+            return root.hovered ? "#1b2025" : NuTokens.inverseBase
+        }
+        if (root.pressed) return "#dde2dc"
+        return root.hovered ? NuTokens.panelHover : NuTokens.panelBase
+    }
+
+    function outlineColor() {
+        if (root.activeFocus) return NuTokens.accentSky
+        if (root.danger) return root.hovered ? "#a32018" : NuTokens.stateError
+        return root.hovered ? NuTokens.lineStrong : NuTokens.lineStrong
+    }
+
     Accessible.role: Accessible.Button
     Accessible.name: text
     Accessible.description: helpText
@@ -60,8 +80,8 @@ Basic.Button {
 
     background: Rectangle {
         radius: NuTokens.radiusMedium
-        color: root.danger ? NuTokens.stateError : (root.primary ? NuTokens.inverseBase : NuTokens.panelBase)
-        border.color: root.danger ? NuTokens.stateError : NuTokens.lineStrong
+        color: root.surfaceColor()
+        border.color: root.outlineColor()
         border.width: root.activeFocus ? 2 : 1
     }
 }

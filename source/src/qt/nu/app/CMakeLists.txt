@@ -17,9 +17,9 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "${DEFCOIN_NU_DEFAULT_MACOS_DEPLOYMENT_TARGET}" CACHE STRING "Minimum macOS version for Defcoin Core Nu bundles" FORCE)
 endif()
 
-project(DefcoinCoreNuQml VERSION 26.6.3 LANGUAGES CXX)
+project(DefcoinCoreNuQml VERSION 26.6.4 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.6.3e" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.6.4a" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -187,7 +187,9 @@ set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/bip39/english.txt"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-coin-stack-hires.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-icon-1024.png"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/data/coindroids_dc25_chain_forensics.json"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/data/defcoin_reddit_timeline.json"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/docs/coindroids_defcoin_forensics_story_report_v6.pdf"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/activity.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/copy.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/external-link.svg"

@@ -11,7 +11,6 @@ Basic.Button {
     implicitHeight: 44
     hoverEnabled: true
     activeFocusOnTab: true
-    focusPolicy: Qt.StrongFocus
 
     property string helpText: ""
     property bool suppressToolTip: false
@@ -28,7 +27,11 @@ Basic.Button {
     onPressedChanged: if (pressed) suppressToolTip = true
     onClicked: suppressToolTip = true
     onHoveredChanged: if (!hovered) suppressToolTip = false
-    onActiveFocusChanged: if (!activeFocus) suppressToolTip = false
+    onActiveFocusChanged: {
+        if (!activeFocus) suppressToolTip = false
+        glyph.requestPaint()
+    }
+    onEnabledChanged: glyph.requestPaint()
 
     Keys.onReturnPressed: clicked()
     Keys.onEnterPressed: clicked()
@@ -60,11 +63,6 @@ Basic.Button {
                     ctx.fill()
                     ctx.fillRect(width / 2 - 1.1, height * 0.42, 2.2, height * 0.28)
                     ctx.fillRect(width / 2 - 2.8, height * 0.68, 5.6, 2.1)
-                }
-                Connections {
-                    target: root
-                    function onActiveFocusChanged() { glyph.requestPaint() }
-                    function onEnabledChanged() { glyph.requestPaint() }
                 }
             }
         }
