@@ -14,7 +14,7 @@ Core `submitblock` validation path.
 
 The desktop implementation coordinates the Nu Qt/RPC service layer
 (`NuRpcService`) with Core's normal block in-flight table. It mirrors raw
-active-chain blocks between eligible Nu peers over UDP while ordinary TCP/Core
+active-chain blocks between eligible Nu peers over UDP while ordinary TCP sync
 block download remains available as fallback and repair path. UDP and TCP are
 treated as transport choices for one logical connected peer, not as independent
 reasons to request the same block twice.
@@ -33,17 +33,59 @@ of clients. It only returns the raw active-chain block requested by a Nu wallet.
 - Service bit: `NODE_DEFCOIN_FASTSYNC = 1 << 29`
 
 Nu discovers Fast Sync candidates from connected peers that advertise
-`NODE_DEFCOIN_FASTSYNC`. During the transition to 26.6.1, Nu may also treat a
-connected peer whose User-Agent begins with `DefcoinCoreNu` as a tentative
-candidate, but this fallback is only for compatibility with earlier Nu builds.
-Older `DefcoinCore` peers are not marked Fast Sync capable. A candidate starts
-as `TBA`, becomes `Yes` after a valid UDP Fast Sync response, and becomes
-`Failed` after a session attempt times out or fails without usable chunks. The
-capability is proven by UDP response and normal `submitblock` acceptance, not by
-the service bit or User-Agent string alone.
+`NODE_DEFCOIN_FASTSYNC`. The service bit is the cheap candidate filter: it tells
+Nu which connected peers are worth considering, but it is not treated as proof
+that UDP can actually return datagrams through the local network, firewall, NAT,
+or public route. Older `DefcoinCore` peers are not marked Fast Sync capable.
+
+The service bit is capability-based, not firewall-state-based. A Nu node should
+advertise `NODE_DEFCOIN_FASTSYNC` when the node is capable of answering Fast
+Sync negotiation. It should not hide the service bit merely because the current
+OS firewall, router, NAT, or local-network permission may block inbound UDP at
+that moment. Reachability is learned by probes and reflected in diagnostics.
+
+Current desktop peer states are:
+
+- `No`: the peer does not advertise `NODE_DEFCOIN_FASTSYNC`.
+- `Off`: local UDP Fast Sync is disabled.
+- `Advertised`: service bit 29 is present, but this session has not yet sent or
+  completed a UDP probe for that peer.
+- `Probe sent`: Nu sent a UDP negotiation probe and is waiting for a valid
+  `probe-ack`.
+- `No reply`: a probe or transfer timed out or failed without usable chunks.
+- `Yes`: a valid UDP `probe-ack` or accepted UDP block response was received.
 
 LAN discovery may learn private/local peers, but block data requests are sent to
-one selected connected Nu peer. Broadcast is not used for block data requests.
+one selected connected Nu peer that advertised the Fast Sync service bit. LAN
+discovery alone never makes a host eligible for UDP block data. Broadcast is not
+used for block data requests.
+
+## OS Local-Network Permission Boundary
+
+macOS Local Network prompts and Windows firewall prompts can affect local
+discovery, local workstation-name lookup, and inbound UDP reachability on a LAN.
+They must not globally disable Fast Sync. Public/internet Fast Sync remains
+eligible as long as UDP Fast Sync is enabled, the peer advertises
+`NODE_DEFCOIN_FASTSYNC`, and Nu receives a valid UDP response.
+
+Nu tracks three separate states:
+
+- **Supported:** the connected peer advertised `NODE_DEFCOIN_FASTSYNC`.
+- **Enabled:** the local user has UDP Fast Sync turned on.
+- **Verified/reachable:** this session has received and accepted UDP block data
+  from that peer.
+
+If local-network permission is denied or unavailable, Nu may lose LAN discovery
+and local workstation labels, and LAN/private UDP probes may fail. That should
+show as normal UDP failure/cooldown for those private peers, while TCP sync and
+public UDP Fast Sync candidates remain available.
+
+On macOS, Nu can query the Application Firewall with
+`/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate`,
+`--getblockall`, and `--getstealthmode`. That is only a diagnostic hint. The
+correct user-facing behavior is to prompt only when firewall state is restrictive
+and otherwise reachable Fast Sync peers repeatedly fail UDP probes. Do not use
+firewall state to suppress the Fast Sync service bit.
 
 ## Packet Format
 
@@ -61,6 +103,24 @@ numeric `payload_size`. The parser rejects malformed JSON, wrong protocol
 version, wrong capability string, mismatched payload length, overlarge headers,
 overlarge payloads, and overlarge datagrams before any block assembly work.
 
+### Probe
+
+Before block data is requested from a newly seen service-bit candidate, Nu sends
+a small `type=probe` datagram. The probe uses the same protocol header, includes
+a 32-character `id`, the requester's current `tip`, the local UDP `port`, and the
+requester's desired `max_datagram` and `chunk_bytes`.
+
+The peer replies with `type=probe-ack` using the same `id`. The acknowledgement
+echoes the negotiated `max_datagram` and `chunk_bytes`, includes the responder
+tip, and is sent to the exact UDP source tuple observed by the socket. Verified
+hosts are cached for the session, so normal block requests do not probe on every
+block. Public hosts use a longer retry interval and cooldown after repeated
+misses; private/LAN hosts can be retried more quickly.
+
+The dc903 `defcoin-fast-syncd` sidecar also answers `probe` packets, but only for
+loopback tests or source hosts that are currently connected normal TCP peers and
+advertise `NODE_DEFCOIN_FASTSYNC` in Core's `getpeerinfo`.
+
 ### Request
 
 The requester sends `type=request-block` with:
@@ -77,12 +137,18 @@ Requests are always sent as safe small datagrams even when the requested reply
 size is larger.
 
 Before sending the request, Nu asks the backend to reserve the requested block
-height for the selected connected peer in Core's normal in-flight table. The
-backend returns the exact block hash Core expects that peer to be able to serve.
-If Core reports that the block is already present, already in flight, outside
-the peer's known header chain, or unavailable from that peer, Nu does not send
-the UDP request and leaves TCP/Core sync to continue normally. This reservation
-is a local coordination step, not a wire-protocol change.
+height for the selected connected peer in Core's in-flight table. The backend
+returns the exact block hash Core expects that peer to be able to serve. Core
+allows one UDP Fast Sync reservation beyond the normal per-peer TCP block window
+so a saturated but capable LAN peer can still be tested without waiting for the
+ordinary 16-block TCP queue to drain. The global in-flight map still prevents
+duplicate block requests, and a second extra Fast Sync reservation is rejected
+until the first succeeds, times out, or is released.
+
+If Core reports that the block is already present, already in flight from another
+peer, outside the peer's known header chain, or unavailable from that peer, Nu
+does not send the UDP request and leaves normal TCP sync to continue normally.
+This reservation is a local coordination step, not a wire-protocol change.
 
 ### Response
 
@@ -135,16 +201,25 @@ Candidate ladders:
 - Internet/default mode: `1232`, `1472`.
 - LAN/private mode: `1472`, `4096`, `8192`, `12000`, `16000`.
 
-The mode is LAN/private when LAN discovery is enabled or when a Fast Sync target
-is a private/local address. Non-private internet peers are capped at the
-internet probe size even if they request or advertise larger datagrams.
+The mode is LAN/private when a Fast Sync target is a private/local address.
+Non-private internet peers are capped at the internet probe size even if they
+request or advertise larger datagrams.
 
-On a receiver-confirmed success, including duplicate-valid delivery, Nu steps
-one candidate upward. On timeout, checksum failure, retransmit failure, or
-validation failure, Nu steps one candidate downward. This means the displayed
-probe pair such as
+On receiver-confirmed success, including duplicate-valid delivery, Nu grows
+conservatively: it only steps one candidate upward after several accepted UDP
+block samples at the current setting. On timeout, checksum failure, retransmit
+failure, write failure, or validation failure, Nu immediately falls back to the
+smallest candidate for that mode before probing upward again. This keeps a
+single bad jumbo/fragmented path from causing repeated UDP failures. The
+displayed probe pair such as
 `1472/1024 B` is the current datagram/chunk selection, not a permanent static
 setting.
+
+Until the desktop helper has full dual UDP socket coverage, Nu also prefers
+IPv4 Fast Sync targets unless an IPv6 peer has already proven UDP reachability
+in the current session. A failed UDP write marks that target failed for the
+session so another eligible Fast Sync peer can be tried instead of repeatedly
+choosing the same unusable address.
 
 The responder does not choose an independent packet-size strategy. The Nu
 wallet requester sends `max_datagram` and `chunk_bytes`; the responder clamps
@@ -152,15 +227,22 @@ those values to its safety limits and echoes the resulting values in each chunk.
 This keeps packet-size tuning based on receiver-confirmed success instead of
 server-side sender throughput.
 
+Responders must reply to the exact datagram source address tuple reported by
+the socket. Rebuilding a normalized `host:port` can lose IPv6 scope/flow fields
+and can send the response to a different socket than the one that sent the
+request.
+
 ## TCP/UDP Selection
 
-The selector is a two-arm online comparison between TCP/Core sync and UDP Fast
+The selector is a two-arm online comparison between normal TCP sync and UDP Fast
 Sync.
 
 Nu's UDP path is coordinated with Core P2P by reserving one block in Core's
 in-flight table before a UDP request is sent. Core's normal downloader then sees
 that block as already assigned and should not also request it by TCP unless the
-reservation is released after failure or timeout.
+reservation is released after failure or timeout. When more than one Fast Sync
+candidate is available, Tahoe Qt prefers verified peers, private/LAN reachability,
+IPv4 until proved otherwise, and lower current `getpeerinfo.inflight` load.
 
 Tracked per protocol:
 
@@ -174,7 +256,7 @@ The TCP and UDP selector counters are maintained through one shared
 transport-scoring path. The transport label decides which counters are updated;
 the scoring, reliability, and quota logic is otherwise protocol-agnostic. This
 keeps UDP from developing a separate hidden trust or scheduling model while
-leaving TCP/Core behavior intact.
+leaving normal TCP sync behavior intact.
 
 Warmup requires four UDP samples when UDP is possible. TCP-only peer traffic is
 not allowed to swamp the comparison: TCP success samples are capped relative to
@@ -198,14 +280,14 @@ The live wallet currently reserves and requests one UDP block at a time from one
 selected Nu peer. It immediately starts the next UDP probe after a
 receiver-confirmed success instead of waiting for the periodic timer. The timer
 is only a safety/maintenance cadence. This is important on LANs because a slow
-timer can make TCP/Core appear dominant even when UDP has higher raw throughput.
+timer can make normal TCP sync appear dominant even when UDP has higher raw throughput.
 
 ## Diagnostics
 
 Diagnostics exposes:
 
 - Combined syncing average.
-- Fast Sync TCP totals, recent rate, sample counts, and Core-managed packet
+- Fast Sync TCP totals, recent rate, sample counts, and backend-managed packet
   note.
 - Fast Sync UDP totals, packet counts, accepted blocks, recent rate, samples,
   and retransmit/checksum count.
@@ -213,6 +295,16 @@ Diagnostics exposes:
 - Current UDP probe datagram/chunk size.
 - Per-peer observed transfer method: `TCP`, `UDP`, or `TCP+UDP`, shown only
   after that method has transferred accepted data with that peer.
+- Per-peer Fast Sync state: `No`, `Off`, `Advertised`, `Probe sent`, `No reply`,
+  or `Yes`.
+- Peer controls:
+  - `Retest FastSync`: clears this session's cached UDP Fast Sync state for the
+    selected peer, disconnects it through Core, and asks Core to try a reconnect
+    so normal version/service negotiation and UDP probing can run again.
+  - `Ban peer`: uses Core RPC `setban <host> add` and then disconnects the peer.
+  - `Unban selected`: uses Core RPC `setban <address> remove` for rows in the
+    banned-peer table.
+  - `Refresh bans`: reloads Core RPC `listbanned`.
 
 UDP averages include time spent in failed attempts, timeouts, checksum failures,
 and retries so UDP cannot look artificially faster by ignoring failed work.
@@ -226,7 +318,7 @@ read the existing RPC credentials from `defcoin.conf`.
 
 Deployment rules:
 
-1. Keep TCP/Core `10332` as the authoritative P2P service.
+1. Keep TCP `10332` as the authoritative P2P service.
 2. Open UDP `10334` only for the Fast Sync responder.
 3. Start `defcoin-fast-syncd` after `defcoind.service`.
 4. Confirm `ss -lunp` shows UDP `10334`.
@@ -239,7 +331,7 @@ requesters are capped to the internet probe size. This avoids assuming jumbo UDP
 works across arbitrary public routes.
 
 The server sidecar is responder-only. It never asks legacy v1.0.0 wallets to
-use UDP, never sends UDP first, and never changes the ordinary TCP/Core service
+use UDP, never sends UDP first, and never changes the ordinary TCP service
 used by older wallets. Legacy peers do not advertise `NODE_DEFCOIN_FASTSYNC`,
 so their addresses are not placed in the UDP response allowlist.
 
@@ -255,7 +347,7 @@ so their addresses are not placed in the UDP response allowlist.
 - Restrict broadcast handling to LAN/private mode.
 - Never count sender-side bytes as proof of speed.
 - Never bypass `submitblock`.
-- Treat TCP/Core as the repair path.
+- Treat normal TCP sync as the repair path.
 - Keep the UDP helper disableable from Settings.
 
 ## Future Security Roadmap
@@ -273,7 +365,7 @@ tracking, timeout handling, misbehavior/disconnect paths, traffic accounting,
 and full block validation. UDP should continue borrowing those protections where
 they fit instead of growing a separate hidden scheduler or trust model.
 
-Reusable TCP/Core protections to keep applying to UDP:
+Reusable TCP protections to keep applying to UDP:
 
 - Reserve UDP-requested blocks through Core's in-flight table before sending the
   UDP request.
@@ -289,7 +381,7 @@ Reusable TCP/Core protections to keep applying to UDP:
   UDP sender.
 - Mirror Core-style rate, timeout, and memory-pressure limits rather than
   buffering unbounded out-of-order chunks.
-- Treat TCP/Core as the repair and fallback path whenever UDP is ambiguous.
+- Treat normal TCP sync as the repair and fallback path whenever UDP is ambiguous.
 
 Candidate approaches:
 
