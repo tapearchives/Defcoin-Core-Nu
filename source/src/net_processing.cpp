@@ -97,6 +97,8 @@ static constexpr std::chrono::microseconds GETDATA_TX_INTERVAL{std::chrono::seco
 static const unsigned int MAX_GETDATA_SZ = 1000;
 /** Number of blocks that can be requested at any given time from a single peer. */
 static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;
+/** Extra out-of-band UDP Fast Sync reservations allowed above the normal TCP window. */
+static const int MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER = 1;
 /** Timeout in seconds during which a peer must stall block download progress before being disconnected. */
 static const unsigned int BLOCK_STALLING_TIMEOUT = 2;
 /** Number of headers sent in one getheaders result. We rely on the assumption that if a peer sends
@@ -1047,7 +1049,8 @@ bool ReserveFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, int height
         reason = "invalid-height";
         return false;
     }
-    if (state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+    const bool using_fast_sync_extra_slot = state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER;
+    if (state->nBlocksInFlight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER + MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER) {
         reason = "peer-in-flight-full";
         return false;
     }
@@ -1104,7 +1107,8 @@ bool ReserveFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, int height
 
     hash_out = hash;
     reason = "reserved";
-    LogPrint(BCLog::NET, "Fast Sync reserved block %s (%d) for UDP peer=%d\n", hash.ToString(), height, nodeid);
+    LogPrint(BCLog::NET, "Fast Sync reserved block %s (%d) for UDP peer=%d%s\n",
+        hash.ToString(), height, nodeid, using_fast_sync_extra_slot ? " using extra transport slot" : "");
     return true;
 }
 
