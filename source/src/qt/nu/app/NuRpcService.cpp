@@ -4090,7 +4090,8 @@ void NuRpcService::refreshNode()
                 {QStringLiteral("peerAddress"), raw_addr},
                 {QStringLiteral("peerInbound"), peer.value(QStringLiteral("inbound")).toBool()},
                 {QStringLiteral("reverseDnsSort"), reverseDomainSortNotation(reverse_dns)},
-                {QStringLiteral("knownDnsSort"), lan_peer ? source_or_lan_name.toLower() : reverseDomainSortNotation(source_or_lan_name)},
+                {QStringLiteral("knownDnsSort"), (lan_peer ? QStringLiteral("0|") : QStringLiteral("1|")) +
+                    (lan_peer ? source_or_lan_name.toLower() : reverseDomainSortNotation(source_or_lan_name))},
                 {QStringLiteral("isLanPeer"), lan_peer},
                 {QStringLiteral("cellTooltips"), cell_tooltips}
             }));

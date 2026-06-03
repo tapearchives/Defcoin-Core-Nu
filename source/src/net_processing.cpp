@@ -388,6 +388,8 @@ struct CNodeState {
     int nUnconnectingHeaders;
     //! Whether we've started headers synchronization with this peer.
     bool fSyncStarted;
+    //! Whether we've sent a lightweight headers probe to initialize a Fast Sync peer.
+    bool fFastSyncHeaderProbeStarted;
     //! When to potentially disconnect peer for stalling headers download
     int64_t nHeadersSyncTimeout;
     //! Since when we're stalling block download progress (in microseconds), or 0.
@@ -496,6 +498,7 @@ struct CNodeState {
         pindexBestHeaderSent = nullptr;
         nUnconnectingHeaders = 0;
         fSyncStarted = false;
+        fFastSyncHeaderProbeStarted = false;
         nHeadersSyncTimeout = 0;
         nStallingSince = 0;
         nDownloadingSince = 0;
@@ -4814,6 +4817,18 @@ bool PeerManager::SendMessages(CNode* pto)
                 LogPrint(BCLog::NET, "initial getheaders (%d) to peer=%d (startheight:%d)\n", pindexStart->nHeight, pto->GetId(), pto->nStartingHeight);
                 m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexStart), uint256()));
             }
+        }
+        if (!state.fFastSyncHeaderProbeStarted && state.pindexBestKnownBlock == nullptr &&
+            !pto->fClient && !fImporting && !fReindex &&
+            (pto->nServices.load() & NODE_DEFCOIN_FASTSYNC) && pindexBestHeader != nullptr) {
+            state.fFastSyncHeaderProbeStarted = true;
+            const CBlockIndex* pindexStart = pindexBestHeader;
+            if (pindexStart->pprev) {
+                pindexStart = pindexStart->pprev;
+            }
+            LogPrint(BCLog::NET, "fastsync getheaders probe (%d) to peer=%d (startheight:%d)\n",
+                pindexStart->nHeight, pto->GetId(), pto->nStartingHeight);
+            m_connman.PushMessage(pto, msgMaker.Make(NetMsgType::GETHEADERS, ::ChainActive().GetLocator(pindexStart), uint256()));
         }
 
         //

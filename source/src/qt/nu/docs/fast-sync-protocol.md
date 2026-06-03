@@ -148,6 +148,16 @@ ordinary 16-block TCP queue to drain. The global in-flight map still prevents
 duplicate block requests, and a second extra Fast Sync reservation is rejected
 until the first succeeds, times out, or is released.
 
+Fast Sync reservation still depends on Core's normal per-peer header state. A
+peer advertising `NODE_DEFCOIN_FASTSYNC` is not eligible for UDP block requests
+until Core knows enough of that peer's header chain to set
+`pindexBestKnownBlock`. During IBD Core may not immediately start headers sync
+with every connected peer, so Nu sends a one-shot normal `getheaders` probe to a
+Fast Sync peer whose best-known block is still unknown. This is deliberately
+done through Core's existing peer logic rather than by trusting the UDP sidecar:
+the UDP transport only becomes usable after Core's ordinary header availability
+checks can prove that the peer should be able to serve the requested height.
+
 If Core reports that the block is already present, already in flight from another
 peer, outside the peer's known header chain, or unavailable from that peer, Nu
 does not send the UDP request and leaves normal TCP sync to continue normally.
