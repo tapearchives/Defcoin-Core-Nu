@@ -154,6 +154,7 @@ target_link_libraries(DefcoinCoreExplore
 target_include_directories(DefcoinCoreExplore PRIVATE ${QRENCODE_INCLUDE_DIR})
 
 set_target_properties(DefcoinCoreExplore PROPERTIES
+    EXCLUDE_FROM_ALL TRUE
     MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinCoreNuExplore
     MACOSX_BUNDLE_BUNDLE_NAME "Defcoin Core Nu Explore"
     MACOSX_BUNDLE_DISPLAY_NAME "Defcoin Core Nu Explore"
@@ -318,7 +319,7 @@ foreach(nu_asset IN LISTS DEFCOIN_NU_RUNTIME_ASSET_FILES)
     )
 endforeach()
 
-add_custom_target(DefcoinCoreExploreResources ALL
+add_custom_target(DefcoinCoreExploreResources
     DEPENDS ${DEFCOIN_NU_QML_FILES} ${DEFCOIN_NU_RUNTIME_ASSET_FILES}
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}"

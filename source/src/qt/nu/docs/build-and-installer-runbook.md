@@ -1,6 +1,6 @@
 # Defcoin Core Nu Build And Installer Runbook
 
-Last updated: 2026-06-03
+Last updated: 2026-06-04
 
 This runbook is public-safe. It intentionally avoids local workstation paths,
 mounted volume names, user names, and machine-specific details.
@@ -27,9 +27,9 @@ QT_WIN="$HOME/Qt/6.10.1/mingw_64"
 Finished deliverables should be staged outside source history:
 
 ```text
-$OUT/Nu-26.6.2i-20260602/apple-silicon/
-$OUT/Nu-26.6.2i-20260602/catalina-x86_64/
-$OUT/Nu-26.6.2i-20260602/windows11-x86_64/
+$OUT/Defcoin Core Nu/Nu-26.6.2i-20260602/apple-silicon/
+$OUT/Defcoin Core Nu/Nu-26.6.2i-20260602/catalina-x86_64/
+$OUT/Defcoin Core Nu/Nu-26.6.2i-20260602/windows11-x86_64/
 ```
 
 ## macOS Qt Quick App
@@ -69,19 +69,27 @@ Stage macOS bundles with the local staging helper:
 ```sh
 src/qt/nu/app/stage_macos_distribution.sh \
   "$SRC/build/nu-qml-arm64/DefcoinCoreNu.app" \
-  "$OUT/Nu-26.6.2i-20260602/apple-silicon" \
+  "$OUT/Defcoin Core Nu/Nu-26.6.2i-20260602/apple-silicon" \
   "26.6.2i" \
   "macOS-AppleSilicon"
 ```
 
-The same staging helper detects Explore bundles and switches the product name,
-DMG filename, executable name, background filename, and three-line Explore
-wordmark automatically:
+## Explore App Boundary
+
+Defcoin Core Explore is a separate application with its own distribution cycle
+and its own build thread. It currently inherits Nu's visible build number, but a
+Nu-only fix must not automatically copy Explore into a Nu distribution folder.
+
+The CMake project still defines the Explore targets for the Explore build
+thread, but they are excluded from the default Nu build. Build Explore only when
+the Explore thread explicitly requests it:
 
 ```sh
+cmake --build build/nu-qml-arm64 --target DefcoinCoreExploreResources -- -j1
+
 src/qt/nu/app/stage_macos_distribution.sh \
   "$SRC/build/nu-qml-arm64/DefcoinCoreExplore.app" \
-  "$OUT/Nu-26.6.2i-20260602/apple-silicon" \
+  "$OUT/Defcoin Core Explore/Explore-26.6.2i-20260602/apple-silicon" \
   "26.6.2i" \
   "macOS-AppleSilicon"
 ```
@@ -91,7 +99,7 @@ Mounted DMG smoke check:
 ```sh
 MOUNT_DIR="$(mktemp -d /tmp/defcoin-explore-install-qa.XXXXXX)"
 hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_DIR" \
-  "$OUT/Nu-26.6.2i-20260602/apple-silicon/Defcoin-Core-Nu-Explore-v26.6.2i-macOS-AppleSilicon.dmg"
+  "$OUT/Defcoin Core Explore/Explore-26.6.2i-20260602/apple-silicon/Defcoin-Core-Nu-Explore-v26.6.2i-macOS-AppleSilicon.dmg"
 
 "$MOUNT_DIR/Defcoin Core Nu Explore.app/Contents/MacOS/DefcoinCoreExplore" \
   --smoke-test \

@@ -53,6 +53,61 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4x packaging correction - 2026-06-04 - Explore is separate from Nu distribution
+
+Big picture:
+- Defcoin Core Explore is a separate application with its own build thread and
+  distribution folder. It can inherit Nu's visible build number, but it should
+  not be copied into `Distribution_Versions/Defcoin Core Nu/...` during a
+  Nu-only build.
+- The current `Nu-26.6.4x-20260604` distribution folder was corrected so it
+  contains only `Defcoin Core Nu.app`.
+
+Porting priority:
+- Lion Intel: keep Explore out of the Lion Nu distribution folder unless the
+  Explore thread explicitly requests an Explore build.
+- Catalina UTM: same separation.
+- Windows: same separation; Nu setup/portable folders should not contain the
+  Explore app.
+- Server: no effect.
+
+Changed behavior:
+- CMake no longer includes `DefcoinCoreExplore` or `DefcoinCoreExploreResources`
+  in the default Nu `ALL` build. Explore remains buildable through explicit
+  targets for its own thread.
+
+Changed files and important details:
+- `source/src/qt/nu/app/CMakeLists.txt`: `DefcoinCoreExplore` is marked
+  `EXCLUDE_FROM_ALL`; `DefcoinCoreExploreResources` is no longer an `ALL`
+  custom target.
+- `source/src/qt/nu/docs/build-and-installer-runbook.md`: Nu and Explore output
+  paths are now separated.
+
+Compatibility notes:
+- This is a build/distribution boundary correction only. It does not alter Nu
+  runtime behavior, backend behavior, wallet storage, Fast Sync, or Quick Clone.
+
+Build/package notes:
+- For Nu-only fixes, build/package `DefcoinCoreNuResources` and copy only
+  `Defcoin Core Nu.app`.
+- For Explore fixes, the Explore thread should explicitly build
+  `DefcoinCoreExploreResources` and stage under `Distribution_Versions/Defcoin
+  Core Explore/...`.
+
+Verification performed:
+- Removed `Defcoin Core Explore.app` from
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.4x-20260604/`.
+- `cmake -S source/src/qt/nu/app -B build/nu-qml-arm64-26.6.4x ...` configured
+  successfully after the CMake target change.
+- `ninja -C build/nu-qml-arm64-26.6.4x -t query all` now lists
+  `DefcoinCoreNu.app/Contents/MacOS/DefcoinCoreNu` and
+  `DefcoinCoreNuResources`, with no Explore target in the default `all`
+  dependency chain.
+
+Risks / follow-up:
+- Existing older Nu distribution folders may still contain historical Explore
+  copies. Correct them only when preparing those specific folders for use.
+
 ### 26.6.4x - 2026-06-04 - Peer row actions and Quick Clone offline source acknowledgement
 
 Big picture:
@@ -107,14 +162,16 @@ Build/package notes:
 - Build with `-DDEFCOIN_NU_RELEASE_NAME=26.6.4x`.
 - Run resource bundle targets before copying distribution apps; otherwise the
   app can launch with missing splash/QML resources.
+- Nu-only fixes should copy only `Defcoin Core Nu.app` into the Nu distribution
+  folder. Explore has its own distribution cycle and output folder.
 
 Verification performed:
 - `qmllint -I source/src/qt/nu/qml -I build/nu-qml-arm64-26.6.4w/DefcoinCoreNu.app/Contents/Resources/qml source/src/qt/nu/qml/Components/NuDataTable.qml source/src/qt/nu/qml/Views/NodeView.qml` exited 0; it still reports the known local `Defcoin.Nu` import warning.
 - `git diff --check` passed.
 - `cmake -S source/src/qt/nu/app -B build/nu-qml-arm64-26.6.4x -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DQt6_DIR=/opt/homebrew/lib/cmake/Qt6 -DDEFCOIN_NU_RELEASE_NAME=26.6.4x` configured successfully.
-- `cmake --build build/nu-qml-arm64-26.6.4x --target DefcoinCoreNu DefcoinCoreExplore -j 8` passed.
-- `cmake --build build/nu-qml-arm64-26.6.4x --target DefcoinCoreNuResources DefcoinCoreExploreResources -j 8` passed and codesigned both bundles.
-- `codesign --verify --deep --strict` passed for both build and distribution apps.
+- `cmake --build build/nu-qml-arm64-26.6.4x --target DefcoinCoreNu DefcoinCoreExplore -j 8` passed before the Explore distribution boundary correction.
+- `cmake --build build/nu-qml-arm64-26.6.4x --target DefcoinCoreNuResources DefcoinCoreExploreResources -j 8` passed before the Explore distribution boundary correction.
+- `codesign --verify --deep --strict` passed for the Nu build and distribution app.
 - Distribution `Defcoin Core Nu.app/Contents/MacOS/DefcoinCoreNu --smoke-test` exited 0.
 
 Risks / follow-up:
