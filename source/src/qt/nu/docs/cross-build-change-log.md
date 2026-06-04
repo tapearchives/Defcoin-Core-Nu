@@ -53,6 +53,91 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4u - 2026-06-04 - Quick Clone menu surface and validation guardrails
+
+Big picture:
+- The visible trusted-LAN copy concept is now **Quick Clone**. DCOL / Direct
+  Copy Over LAN remains the technical name in help text and developer docs.
+- The previous visible `LAN Fast Copy` wording has been removed from the app
+  surface. Existing internal member names such as `lanQuickCloneEnabled` remain
+  implementation scaffolding for now to keep the Tahoe/Lion diff smaller.
+- Quick Clone is treated as a trusted-LAN public-chain workflow. It must never
+  copy wallets, private keys, passphrases, config files, peers, bans, address
+  books, or RPC cookies.
+- The destructive snapshot install step is intentionally gated by future
+  manifest/export proof. This build adds the menu surface, prompt cycle,
+  manual arming action, and Core `verifychain` validation action without
+  allowing a live `chainstate` folder to be copied unsafely.
+
+Porting priority:
+- Lion Intel: port the same Settings > Connectivity card, signal/property
+  surface, prompt-cycle logic, and `verifychain` button. Keep any Lion-specific
+  UDP transport fixes intact.
+- Catalina UTM: same UI/API port if the QML Nu shell is present.
+- Windows: same user-facing naming and validation controls; platform firewall
+  messaging remains Windows-specific where applicable.
+- Server: no server change required for this UI pass. Server Fast Sync remains
+  transport-only and should not advertise Quick Clone/DCOL snapshot availability
+  until immutable manifest exports exist.
+
+Changed behavior:
+- Settings > Connectivity now has a **Quick Clone** card with:
+  `Allow Quick Clone from trusted LAN nodes`, `Automatically validate blocks
+  after Quick Clone`, `Sync using Quick Clone now`, and
+  `Validate existing blockchain`.
+- `Validate existing blockchain` runs Core RPC `verifychain 4 0` and reports
+  success, failure, or unsupported backend state without touching wallet files.
+- A Quick Clone prompt can be emitted once per missing-chain cycle when LAN
+  discovery is enabled, the node is more than 5% behind, and a LAN Nu candidate
+  has been seen. If rejected, it does not nag again until the node catches up
+  below the 5% threshold and later falls behind again.
+- Metrics remains read-only. It can show Quick Clone status and validation
+  status, but does not expose Quick Clone controls.
+
+Changed files and important details:
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  visible release label is `26.6.4u`.
+- `source/src/qt/nu/app/NuRpcService.h/.cpp`: added Quick Clone auto-validate
+  property, validation status/running state, prompt signal, prompt-cycle helper
+  methods, `syncUsingQuickCloneNow()`, `acceptQuickClonePrompt()`,
+  `declineQuickClonePrompt()`, and `validateExistingBlockchain()`.
+- `source/src/qt/nu/qml/Views/SettingsView.qml`: replaced the old LAN Fast
+  Copy checkbox with a Quick Clone card and manual validation controls.
+- `source/src/qt/nu/qml/Main.qml`: added a selectable/copyable Quick Clone
+  prompt dialog with `Use Quick Clone` and `Keep normal sync`.
+- `source/src/qt/nu/docs/fast-sync-protocol.md`,
+  `source/src/qt/nu/docs/defcoin-core-nu-goals.md`, and
+  `source/src/qt/nu/docs/functionality-map.md`: updated the conceptual
+  boundary so Quick Clone is the only visible name and DCOL is the technical
+  manifest-gated snapshot workflow.
+
+Compatibility notes:
+- Existing settings key `LanQuickCloneEnabled` is preserved so current users do
+  not lose their preference during the rename.
+- The current UDP block-body code still submits assembled blocks through Core
+  validation. A true validation-bypass Quick Clone must wait for immutable
+  source exports plus manifest/hash verification before replacing any public
+  chain directories.
+- Quick Clone remains LAN/trusted-owner only. Public internet Fast Sync stays
+  separate and validation-preserving.
+
+Verification performed:
+- `git diff --check` passed.
+- `cmake -S source/src/qt/nu/app -B build/nu-qml-arm64-26.6.4u -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DQt6_DIR=/opt/homebrew/lib/cmake/Qt6 -DDEFCOIN_NU_RELEASE_NAME=26.6.4u` configured successfully.
+- `cmake --build build/nu-qml-arm64-26.6.4u --target DefcoinCoreNu -j 8` passed.
+- `cmake --build build/nu-qml-arm64-26.6.4u --target DefcoinCoreExplore -j 8` passed because the shared `NuRpcService` changed.
+- `plutil -p build/nu-qml-arm64-26.6.4u/DefcoinCoreNu.app/Contents/Info.plist` reported `CFBundleShortVersionString=26.6.4u` and `CFBundleVersion=26.6.4u`.
+- `qmllint` on the touched QML files completed without syntax errors. It still reports the known context-property/unqualified-access warnings for `NuService`, `NuPlatform`, and build metadata, which predate this change.
+
+Risks / follow-up:
+- Implement immutable source export advertisements:
+  manifest id, source height, best block hash, complete file list, byte sizes,
+  per-file hashes, and export status.
+- Implement receiver staging and atomic replacement only after the receiver
+  backend is stopped and the manifest verifies.
+- Do not allow any `blocks`, `chainstate`, or `indexes` replacement without the
+  manifest gate.
+
 ### server-fast-sync-20260604 - 2026-06-04 - dc903 responder parity with current Fast Sync probes
 
 Big picture:

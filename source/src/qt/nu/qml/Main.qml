@@ -219,6 +219,7 @@ ApplicationWindow {
              + "<li>Bundled backend autostart, RPC connection handling, launch diagnostics, and current-launch log viewing.</li>"
              + "<li><b>Enable LAN node discovery</b> is off by default. When enabled, macOS may ask for Local Network access so Nu can find Defcoin nodes on the same LAN, which can help another local wallet copy blockchain data faster. The permission does not grant access to wallet keys, passphrases, or private wallet data.</li>"
              + "<li><b>UDP fast sync</b> is an experimental transfer helper enabled by default. Nu can request checksum-protected raw block chunks over UDP port 10334 from connected Defcoin peers over IPv4 or IPv6; LAN discovery also enables local broadcast. Every received block is still passed to backend validation with normal TCP sync left active as the fallback.</li>"
+             + "<li><b>Quick Clone</b> is the trusted-LAN/DCOL workflow for public blockchain data only. It never copies wallet files, private keys, passphrases, configuration, peers, bans, address books, or RPC cookies; final snapshot replacement is gated by manifests and hash verification.</li>"
              + "<li><b>Apple Silicon validation speedup:</b> Apple Silicon builds now use Bitcoin Core-derived ARM SHA2 intrinsics for SHA256 and SHA256D64. On the Mac Mini M4 Pro test machine, Nu's double-SHA256 batch path measured 1232.94 MiB/s versus 187.53 MiB/s for the generic path, a 6.6x improvement, with identical output checksums over a 1 GiB validation-style workload.</li>"
              + "<li>Dual-magic migration support for legacy <code>fbc0b6db</code> and Defcoin-specific <code>defc014e</code> P2P message headers.</li>"
              + "<li>Peer pollution filtering now happens at both the peer and address-relay layers: non-Defcoin-prefixed peers are disconnected before their address tables are accepted, and unvalidated relayed mainnet addresses are only stored when they advertise Defcoin service ports.</li>"
@@ -521,6 +522,11 @@ ApplicationWindow {
             messageDialog.text = message
             messageDialog.open()
         }
+        function onQuickClonePromptRequested(title, message) {
+            quickClonePromptDialog.title = title
+            quickClonePromptDialog.text = message
+            quickClonePromptDialog.open()
+        }
         function onTransactionDetailsReady(title, html) {
             transactionDetailsDialog.title = title
             transactionDetailsText.text = html
@@ -642,6 +648,36 @@ ApplicationWindow {
             Layout.preferredWidth: Math.max(1, messageDialog.availableWidth)
             width: Math.max(1, messageDialog.availableWidth)
             Layout.preferredHeight: Math.min(Math.max(contentHeight + NuTokens.spaceSm, 104), Math.max(160, root.height - 300))
+            readOnly: true
+            selectByMouse: true
+            persistentSelection: true
+            color: NuTokens.textPrimary
+            selectedTextColor: NuTokens.textInverse
+            selectionColor: NuTokens.lineStrong
+            font.pixelSize: NuTokens.fontBody
+            wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+            textFormat: TextEdit.PlainText
+        }
+    }
+
+    NuDialog {
+        id: quickClonePromptDialog
+        dialogWidth: 760
+        acceptText: qsTr("Use Quick Clone")
+        cancelText: qsTr("Keep normal sync")
+        property alias text: quickClonePromptText.text
+        beforeAccept: function() {
+            NuService.acceptQuickClonePrompt()
+            return true
+        }
+        onRejected: NuService.declineQuickClonePrompt()
+
+        TextEdit {
+            id: quickClonePromptText
+            Layout.fillWidth: true
+            Layout.preferredWidth: Math.max(1, quickClonePromptDialog.availableWidth)
+            width: Math.max(1, quickClonePromptDialog.availableWidth)
+            Layout.preferredHeight: Math.min(Math.max(contentHeight + NuTokens.spaceSm, 220), Math.max(240, root.height - 300))
             readOnly: true
             selectByMouse: true
             persistentSelection: true

@@ -338,18 +338,18 @@ timer can make normal TCP sync appear dominant even when UDP has higher raw thro
 ## Quick Clone / DCOL Is Separate
 
 Do not merge Quick Clone, the user-facing name for Direct Copy Over LAN (DCOL),
-into Fast Sync or LAN Fast Copy. Quick Clone/DCOL is a different operating mode:
-stop ordinary network sync, copy a trusted peer's validated chain snapshot over
-the LAN, then restart and optionally verify. It is closer to a local
-bootstrap/snapshot clone than to normal P2P block transport.
+into Fast Sync. Quick Clone/DCOL is a different operating mode: stop ordinary
+network sync, copy a trusted peer's validated chain snapshot over the LAN, then
+restart and optionally verify. It is closer to a local bootstrap/snapshot clone
+than to normal P2P block transport.
 
 The safe design boundary is:
 
 - Fast Sync: transport-only, online, one Core-selected block at a time, always
   submitted through normal validation.
-- LAN Fast Copy: online LAN block-transfer mode, sequential block heights from a
-  LAN Nu source, UDP chunk checksums, ordinary P2P paused on the receiver, and
-  each block still submitted through Core acceptance.
+- Quick Clone preflight/scaffolding: trusted-LAN discovery, candidate tracking,
+  and guarded public block-copy plumbing that can still submit blocks through
+  Core acceptance while the real snapshot workflow is being built.
 - Quick Clone/DCOL: explicit advanced/offline-style workflow, normal P2P paused
   or backend stopped, validated chain/index state copied from selected LAN
   hosts, visible trust warning, and a post-copy verification/reindex option.
@@ -359,11 +359,11 @@ but it should not be presented as a normal full-node sync path. It intentionally
 trusts another local machine's existing blockchain database state, so the UI must
 say that clearly and leave normal validated sync as the default.
 
-### LAN Fast Copy (Validated)
+### Quick Clone Preflight (Validated Scaffolding)
 
-Nu 26.6.4s added a guarded LAN block-copy path. Nu 26.6.4t names that path
-`LAN Fast Copy` so it is not confused with Quick Clone/DCOL. It is intentionally
-narrower than a full chainstate snapshot:
+Nu 26.6.4s added a guarded LAN block-copy path, and Nu 26.6.4u moves the
+visible wording to `Quick Clone` while preserving the safety boundary. This
+validated scaffolding is intentionally narrower than a full chainstate snapshot:
 
 - It uses only private/local LAN targets discovered by Nu LAN beacons or UDP
   probes.
@@ -372,9 +372,10 @@ narrower than a full chainstate snapshot:
   asking Core to reserve a normal P2P in-flight block.
 - The same UDP chunk caps, checksums, source-address replies, and payload bounds
   used by Fast Sync remain in force.
-- The receiver still submits each assembled block through Core acceptance. This
-  means it is safer than replacing `chainstate`, but it does not bypass
-  validation and therefore does not deliver the intended Quick Clone speedup.
+- The receiver still submits each assembled block through Core acceptance until
+  a manifest-backed snapshot source is available. This is safer than replacing
+  `chainstate`, but it does not bypass validation and therefore does not deliver
+  the intended Quick Clone speedup.
 - Wallets, private keys, passphrases, configs, peers, and ban files are never
   copied.
 
@@ -411,6 +412,12 @@ copy completion status, and a post-copy verification/reindex choice. It must run
 with the backend stopped before any `blocks`, `chainstate`, or `indexes` folders
 are moved into place.
 
+Nu 26.6.4u adds the Settings > Connectivity Quick Clone card, missing-chain
+prompt cycle, and Core `verifychain` validation button. It does **not** permit
+unsafe live `chainstate` copying; final snapshot installation remains blocked
+until immutable source exports and receiver-side manifest verification are in
+place.
+
 ## Diagnostics
 
 Diagnostics exposes:
@@ -424,7 +431,7 @@ Diagnostics exposes:
   and retransmit/checksum count.
 - Current TCP/UDP decision summary.
 - Current UDP probe datagram/chunk size.
-- LAN Fast Copy armed/copy/caught-up status.
+- Quick Clone armed/copy/caught-up status.
 - Per-peer observed transfer method: `TCP`, `UDP`, or `TCP+UDP`, shown only
   after that method has transferred accepted data with that peer.
 - Per-peer Fast Sync state: `No`, `Off`, `Advertised`, `Probe sent`, `No reply`,

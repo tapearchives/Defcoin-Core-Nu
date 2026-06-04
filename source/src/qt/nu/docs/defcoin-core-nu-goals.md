@@ -106,20 +106,20 @@ For Defcoin, that means the app should invite users to do things:
    decade about maintainable tooling, active nodes, visible mining, and usable
    public data.
 
-8. Keep Fast Sync, LAN Fast Copy, and Quick Clone/DCOL distinct.
+8. Keep Fast Sync and Quick Clone/DCOL distinct.
 
    Fast Sync is a transport optimization for normal Core-selected block
-   download and validation. LAN Fast Copy is an online trusted-LAN transfer path
-   that pauses ordinary P2P on the receiver and copies block bodies from LAN Nu
-   peers through the checksum-protected UDP chunk path while still submitting
-   blocks to Core. Quick Clone is the human-friendly name for Direct Copy Over
-   LAN (DCOL): a trusted snapshot-style mode for a user who intentionally chooses
-   to seed local chain state from machines they control and bypass historical
-   validation. DCOL must never copy wallets, keys, settings, peers, or ban
-   files. It must move only chain/index state, use explicit manifests and hashes
-   before replacing local chain data, require backend shutdown or a coherent
-   source snapshot, and leave normal Core validation and repair paths available
-   after import.
+   download and validation. Quick Clone is the human-friendly name for Direct
+   Copy Over LAN (DCOL): a trusted snapshot-style mode for a user who
+   intentionally chooses to seed local chain state from machines they control
+   and bypass historical validation. DCOL must never copy wallets, keys,
+   settings, peers, address books, RPC cookies, or ban files. It must move only
+   chain/index state, use explicit manifests and hashes before replacing local
+   chain data, require backend shutdown or a coherent source snapshot, and leave
+   normal Core validation and repair paths available after import. While the
+   snapshot exporter is being built, any validated LAN block-copy scaffolding
+   must continue feeding blocks through Core acceptance instead of pretending it
+   is a validation-bypass clone.
 
 ## Explore Experience Goals
 

@@ -159,19 +159,83 @@ ColumnLayout {
                             onToggled: NuService.lanFastSyncEnabled = checked
                         }
 
-                        NuCheckBox {
-                            text: "LAN Fast Copy from trusted peers"
-                            checked: NuService.lanQuickCloneEnabled
-                            helpText: "Advanced. This is the online validated LAN block-transfer mode: Nu looks only for Defcoin Core Nu peers on the local network, pauses ordinary P2P network sync while copying, requests checksum-protected block data from a LAN machine you trust, and still passes received blocks through Core acceptance. This is not Quick Clone/DCOL. Quick Clone/DCOL is the future trusted chain snapshot workflow that bypasses validation by copying verified chain state, and it must never copy wallets, keys, settings, peers, or ban files."
-                            onToggled: NuService.lanQuickCloneEnabled = checked
-                        }
-
-                        NuSelectableText {
+                        Rectangle {
                             Layout.fillWidth: true
-                            text: NuService.lanQuickCloneStatus
-                            color: NuTokens.textSecondary
-                            font.pixelSize: NuTokens.fontSmall
-                            wrapMode: Text.WordWrap
+                            implicitHeight: quickCloneCard.implicitHeight + NuTokens.spaceMd * 2
+                            radius: NuTokens.radiusMedium
+                            color: NuTokens.backgroundBase
+                            border.color: NuTokens.lineSubtle
+                            border.width: 1
+
+                            ColumnLayout {
+                                id: quickCloneCard
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: NuTokens.spaceMd
+                                spacing: NuTokens.spaceSm
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: "Quick Clone"
+                                    color: NuTokens.textPrimary
+                                    font.pixelSize: NuTokens.fontBody
+                                    font.weight: Font.DemiBold
+                                }
+
+                                NuSelectableText {
+                                    Layout.fillWidth: true
+                                    text: "Trusted LAN blockchain clone helper. Technical name: DCOL / Direct Copy Over LAN. Quick Clone copies public chain data only and never copies wallet files, private keys, passphrases, configuration, peers, bans, or RPC cookies."
+                                    color: NuTokens.textSecondary
+                                    font.pixelSize: NuTokens.fontSmall
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                NuCheckBox {
+                                    text: "Allow Quick Clone from trusted LAN nodes"
+                                    checked: NuService.lanQuickCloneEnabled
+                                    helpText: "Advanced. Use only with Defcoin Core Nu nodes you own and trust on the same LAN. Normal validation-based sync remains the default; DCOL snapshot replacement is gated by manifests and hash checks before any public chain folders are swapped."
+                                    onToggled: NuService.lanQuickCloneEnabled = checked
+                                }
+
+                                NuCheckBox {
+                                    text: "Automatically validate blocks after Quick Clone"
+                                    checked: NuService.quickCloneAutoValidateAfter
+                                    helpText: "Runs Core's online verifychain path after a Quick Clone when available. This can slow the wallet while it runs, but it gives a post-copy integrity check without copying any wallet data."
+                                    onToggled: NuService.quickCloneAutoValidateAfter = checked
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: NuTokens.spaceSm
+
+                                    NuActionButton {
+                                        text: "Sync using Quick Clone now"
+                                        Layout.preferredWidth: 230
+                                        primary: true
+                                        helpText: "Arm trusted-LAN Quick Clone discovery manually. Use this only when you trust the LAN source node."
+                                        onClicked: NuService.syncUsingQuickCloneNow()
+                                    }
+
+                                    NuActionButton {
+                                        text: "Validate existing blockchain"
+                                        Layout.preferredWidth: 230
+                                        enabled: !NuService.quickCloneValidationRunning
+                                        helpText: "Run Core's verifychain RPC over the existing public blockchain data. This does not reindex and does not touch wallet files."
+                                        onClicked: NuService.validateExistingBlockchain()
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+                                }
+
+                                NuSelectableText {
+                                    Layout.fillWidth: true
+                                    text: NuService.lanQuickCloneStatus + "\n" + NuService.quickCloneValidationStatus
+                                    color: NuTokens.textSecondary
+                                    font.pixelSize: NuTokens.fontSmall
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
                         }
 
                         NuCheckBox {

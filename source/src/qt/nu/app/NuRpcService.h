@@ -99,6 +99,9 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString lanFastSyncStatus READ lanFastSyncStatus NOTIFY stateChanged)
     Q_PROPERTY(bool lanQuickCloneEnabled READ lanQuickCloneEnabled WRITE setLanQuickCloneEnabled NOTIFY settingsChanged)
     Q_PROPERTY(QString lanQuickCloneStatus READ lanQuickCloneStatus NOTIFY stateChanged)
+    Q_PROPERTY(bool quickCloneAutoValidateAfter READ quickCloneAutoValidateAfter WRITE setQuickCloneAutoValidateAfter NOTIFY settingsChanged)
+    Q_PROPERTY(QString quickCloneValidationStatus READ quickCloneValidationStatus NOTIFY stateChanged)
+    Q_PROPERTY(bool quickCloneValidationRunning READ quickCloneValidationRunning NOTIFY stateChanged)
     Q_PROPERTY(bool advancedToolsVisible READ advancedToolsVisible WRITE setAdvancedToolsVisible NOTIFY settingsChanged)
     Q_PROPERTY(bool upnpConnectionsEnabled READ upnpConnectionsEnabled WRITE setUpnpConnectionsEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool showLanNodeDiscoveryNotice READ showLanNodeDiscoveryNotice NOTIFY settingsChanged)
@@ -278,6 +281,9 @@ public:
     QString lanFastSyncStatus() const { return m_lan_fast_sync_status; }
     bool lanQuickCloneEnabled() const { return m_lan_quick_clone_enabled; }
     QString lanQuickCloneStatus() const { return m_lan_quick_clone_status; }
+    bool quickCloneAutoValidateAfter() const { return m_quick_clone_auto_validate_after; }
+    QString quickCloneValidationStatus() const { return m_quick_clone_validation_status; }
+    bool quickCloneValidationRunning() const { return m_quick_clone_validation_running; }
     bool advancedToolsVisible() const { return m_advanced_tools_visible; }
     bool upnpConnectionsEnabled() const { return m_upnp_connections_enabled; }
     bool showLanNodeDiscoveryNotice() const { return !m_lan_node_discovery_notice_acknowledged && !m_lan_node_discovery_enabled; }
@@ -415,6 +421,10 @@ public:
     Q_INVOKABLE void setNetworkActive(bool active);
     Q_INVOKABLE void scheduleWitnessBlockRepair(int start_height);
     Q_INVOKABLE void repairWitnessBlockDataNow(int start_height, bool fix_missing_witness = true);
+    Q_INVOKABLE void syncUsingQuickCloneNow();
+    Q_INVOKABLE void acceptQuickClonePrompt();
+    Q_INVOKABLE void declineQuickClonePrompt();
+    Q_INVOKABLE void validateExistingBlockchain();
     Q_INVOKABLE void pingPeers();
     Q_INVOKABLE void refreshPeer(const QString& node_id);
     Q_INVOKABLE void banPeer(const QString& node_id);
@@ -558,6 +568,7 @@ public Q_SLOTS:
     void setLanNodeDiscoveryEnabled(bool enabled);
     void setLanFastSyncEnabled(bool enabled);
     void setLanQuickCloneEnabled(bool enabled);
+    void setQuickCloneAutoValidateAfter(bool enabled);
     void setAdvancedToolsVisible(bool enabled);
     void setUpnpConnectionsEnabled(bool enabled);
     void setAutomaticUpdateChecksEnabled(bool enabled);
@@ -586,6 +597,7 @@ Q_SIGNALS:
     void tableSettingsChanged();
     void updateStatusChanged();
     void userMessage(const QString& title, const QString& message);
+    void quickClonePromptRequested(const QString& title, const QString& message);
     void transactionDetailsReady(const QString& title, const QString& html);
     void explorerWindowRequested(const QString& title, const QString& html);
     void explorerChanged();
@@ -679,6 +691,10 @@ private:
     void recordUdpFastSyncPeerMiss(const QString& host, const QString& reason = QString());
     bool sendUdpFastSyncProbe(const QString& host, int node_id);
     void lanQuickCloneTick();
+    void evaluateQuickClonePrompt();
+    bool quickCloneMissingChainThresholdReached() const;
+    bool hasQuickCloneLanCandidate() const;
+    QString quickClonePromptText() const;
     QString selectLanQuickCloneTargetHost(int* node_id, int* peer_tip) const;
     QString selectLanQuickCloneProbeHost(int* node_id) const;
     void sendLanFastSyncBlockRequest(int height, const QString& host, int node_id, const QString& expected_hash);
@@ -1008,6 +1024,7 @@ private:
     QSet<QString> m_lan_discovery_addnode_pending;
     QSet<QString> m_lan_discovery_addnode_inflight;
     QSet<QString> m_lan_quick_clone_candidate_hosts;
+    QSet<QString> m_quick_clone_snapshot_candidate_hosts;
     QSet<QString> m_udp_fast_sync_peer_hosts;
     QSet<QString> m_udp_fast_sync_attempted_peer_hosts;
     QSet<QString> m_udp_fast_sync_available_peer_hosts;
@@ -1071,11 +1088,18 @@ private:
     bool m_advanced_tools_visible = false;
     bool m_lan_fast_sync_enabled = true;
     bool m_lan_quick_clone_enabled = false;
+    bool m_quick_clone_auto_validate_after = false;
+    bool m_quick_clone_validation_running = false;
+    bool m_quick_clone_missing_cycle_active = false;
+    bool m_quick_clone_prompt_declined_for_cycle = false;
+    bool m_quick_clone_prompt_shown_for_cycle = false;
+    bool m_quick_clone_auto_validate_ran_this_session = false;
+    QString m_quick_clone_validation_status = QStringLiteral("Blockchain validation idle.");
     bool m_lan_quick_clone_paused_network = false;
     QUdpSocket* m_lan_fast_sync_socket = nullptr;
     QTimer* m_lan_fast_sync_timer = nullptr;
     QString m_lan_fast_sync_status = QStringLiteral("UDP fast sync idle.");
-    QString m_lan_quick_clone_status = QStringLiteral("LAN Fast Copy off.");
+    QString m_lan_quick_clone_status = QStringLiteral("Quick Clone off.");
     QString m_lan_fast_sync_request_id;
     QString m_lan_fast_sync_block_hash;
     QString m_lan_fast_sync_block_checksum;
