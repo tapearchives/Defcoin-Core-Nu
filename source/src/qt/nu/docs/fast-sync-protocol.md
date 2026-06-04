@@ -25,6 +25,16 @@ rule is simpler: Core selects and reserves a block for a connected peer, then
 UDP may carry the block bytes for that exact reservation. If Core cannot reserve
 a block for that peer, no UDP block request is sent.
 
+Starting with the 26.6.4p line, Core can also offer a short UDP transport claim
+window during normal block scheduling. When Core selects a block from a connected
+peer that advertises `NODE_DEFCOIN_FASTSYNC`, it may mark that exact block
+in-flight and hold TCP `getdata` briefly so Nu's UDP helper can claim it. If UDP
+does not claim or deliver the block before the deadline, Core releases the
+reservation and normal TCP fallback resumes. Core still fills the rest of the
+selected download window normally, so the UDP claim path does not starve ordinary
+TCP progress. This keeps Fast Sync in the lower block-scheduler path instead of
+making the GUI race against TCP.
+
 The public dc903 server implementation is a responder-only sidecar
 (`defcoin-fast-syncd`) that talks to the local `defcoind` over RPC. The sidecar
 does not replace Core P2P, does not mine, and does not validate blocks on behalf
@@ -164,6 +174,25 @@ until Core's ordinary peer state says it has a downloadable block. This keeps
 UDP as a transport helper only: Core chooses and tracks the block exactly as it
 does for normal TCP sync, and UDP merely moves the bytes for that reservation.
 
+Core's UDP claim window is intentionally short:
+
+- Unclaimed reservation window: 4 seconds.
+- Claimed transfer window: 30 seconds.
+- Unclaimed fallback backoff: 30 seconds before Core offers that peer another
+  UDP-first block.
+
+Those windows prevent a blocked GUI, firewall prompt, or broken UDP route from
+stalling IBD. They also keep older Defcoin Core peers unaffected because only
+peers advertising `NODE_DEFCOIN_FASTSYNC` receive the UDP transport window.
+
+During IBD a node can already have many block bodies on disk while the active
+chain is still validating through them. In that case Core may not need network
+bytes for the next thousands of heights. The reservation helper scans ahead in
+bounded windows, skips block bodies already present or already in flight, and
+only uses UDP once it finds a missing block body that Core can tie to the same
+connected peer. The UI should report this as local validation progress, not as a
+UDP packet failure.
+
 If Core reports that no block is currently downloadable from that peer, Nu does
 not send the UDP request and leaves normal TCP sync to continue normally. This
 reservation is a local coordination step, not a consensus or wire-protocol
@@ -301,6 +330,27 @@ selected Nu peer. It immediately starts the next UDP probe after a
 receiver-confirmed success instead of waiting for the periodic timer. The timer
 is only a safety/maintenance cadence. This is important on LANs because a slow
 timer can make normal TCP sync appear dominant even when UDP has higher raw throughput.
+
+## Trusted LAN Snapshot Copy Is Separate
+
+Do not merge a future "Trust LAN Blockchain" feature into Fast Sync. That idea
+is a different operating mode: stop ordinary network sync, copy a trusted peer's
+block/chainstate snapshot over the LAN, then restart and optionally verify. It is
+closer to a local bootstrap/snapshot clone than to normal P2P block transport.
+
+The safe design boundary is:
+
+- Fast Sync: transport-only, online, one Core-selected block at a time, always
+  submitted through normal validation.
+- Trusted LAN Blockchain Copy: explicit advanced/offline-style workflow, normal
+  P2P paused, data copied from selected LAN hosts, visible trust warning,
+  restart required or backend stopped while files are replaced, and a post-copy
+  verification/reindex option.
+
+The snapshot approach can be useful for trusted machines owned by the same user,
+but it should not be presented as a normal full-node sync path. It intentionally
+trusts another local machine's existing blockchain database state, so the UI must
+say that clearly and leave normal validated sync as the default.
 
 ## Diagnostics
 
