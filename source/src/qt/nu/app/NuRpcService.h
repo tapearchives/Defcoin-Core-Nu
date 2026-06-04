@@ -1075,7 +1075,7 @@ private:
     QUdpSocket* m_lan_fast_sync_socket = nullptr;
     QTimer* m_lan_fast_sync_timer = nullptr;
     QString m_lan_fast_sync_status = QStringLiteral("UDP fast sync idle.");
-    QString m_lan_quick_clone_status = QStringLiteral("Quick Clone off.");
+    QString m_lan_quick_clone_status = QStringLiteral("LAN Fast Copy off.");
     QString m_lan_fast_sync_request_id;
     QString m_lan_fast_sync_block_hash;
     QString m_lan_fast_sync_block_checksum;

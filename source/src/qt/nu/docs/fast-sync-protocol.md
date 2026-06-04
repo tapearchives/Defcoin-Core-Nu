@@ -335,31 +335,35 @@ receiver-confirmed success instead of waiting for the periodic timer. The timer
 is only a safety/maintenance cadence. This is important on LANs because a slow
 timer can make normal TCP sync appear dominant even when UDP has higher raw throughput.
 
-## Trusted LAN Snapshot Copy Is Separate
+## Quick Clone / DCOL Is Separate
 
-Do not merge a future "Trust LAN Blockchain" feature into Fast Sync. That idea
-is a different operating mode: stop ordinary network sync, copy a trusted peer's
-block/chainstate snapshot over the LAN, then restart and optionally verify. It is
-closer to a local bootstrap/snapshot clone than to normal P2P block transport.
+Do not merge Quick Clone, the user-facing name for Direct Copy Over LAN (DCOL),
+into Fast Sync or LAN Fast Copy. Quick Clone/DCOL is a different operating mode:
+stop ordinary network sync, copy a trusted peer's validated chain snapshot over
+the LAN, then restart and optionally verify. It is closer to a local
+bootstrap/snapshot clone than to normal P2P block transport.
 
 The safe design boundary is:
 
 - Fast Sync: transport-only, online, one Core-selected block at a time, always
   submitted through normal validation.
-- Trusted LAN Blockchain Copy: explicit advanced/offline-style workflow, normal
-  P2P paused, data copied from selected LAN hosts, visible trust warning,
-  restart required or backend stopped while files are replaced, and a post-copy
-  verification/reindex option.
+- LAN Fast Copy: online LAN block-transfer mode, sequential block heights from a
+  LAN Nu source, UDP chunk checksums, ordinary P2P paused on the receiver, and
+  each block still submitted through Core acceptance.
+- Quick Clone/DCOL: explicit advanced/offline-style workflow, normal P2P paused
+  or backend stopped, validated chain/index state copied from selected LAN
+  hosts, visible trust warning, and a post-copy verification/reindex option.
 
 The snapshot approach can be useful for trusted machines owned by the same user,
 but it should not be presented as a normal full-node sync path. It intentionally
 trusts another local machine's existing blockchain database state, so the UI must
 say that clearly and leave normal validated sync as the default.
 
-### Quick Clone (LAN) First Pass
+### LAN Fast Copy (Validated)
 
-Nu 26.6.4s adds a guarded Quick Clone checkbox as the first implementation step.
-It is intentionally narrower than a full chainstate snapshot:
+Nu 26.6.4s added a guarded LAN block-copy path. Nu 26.6.4t names that path
+`LAN Fast Copy` so it is not confused with Quick Clone/DCOL. It is intentionally
+narrower than a full chainstate snapshot:
 
 - It uses only private/local LAN targets discovered by Nu LAN beacons or UDP
   probes.
@@ -369,12 +373,39 @@ It is intentionally narrower than a full chainstate snapshot:
 - The same UDP chunk caps, checksums, source-address replies, and payload bounds
   used by Fast Sync remain in force.
 - The receiver still submits each assembled block through Core acceptance. This
-  means it is safer than replacing `chainstate`, but it is not yet the final
-  "skip validation by trusting my LAN machine" snapshot workflow.
+  means it is safer than replacing `chainstate`, but it does not bypass
+  validation and therefore does not deliver the intended Quick Clone speedup.
 - Wallets, private keys, passphrases, configs, peers, and ban files are never
   copied.
 
-The later full DCOL snapshot mode must add a manifest before replacing files:
+### Quick Clone / DCOL Requirements
+
+Quick Clone is the human-friendly name for DCOL. Its purpose is validation
+bypass from a machine the user already trusts. That cannot be achieved by
+streaming block bodies into `submitblock`; Core still has to validate and build
+the UTXO set. The correct artifact is a coherent chain-state snapshot:
+
+- Copy only public chain state: `blocks`, `chainstate`, and optional `indexes`.
+- Never copy wallets, keys, passphrases, configs, peers, ban files, or RPC
+  cookies.
+- Stop the receiver backend before replacing any chain directories.
+- Use a manifest before replacement: source identity, source height, best block
+  hash, file list, byte sizes, per-file hashes, and completion status.
+- The source must either be stopped, paused in a snapshot-safe state, or export
+  a coherent temporary snapshot. Copying LevelDB chainstate while it is changing
+  is not acceptable.
+- The receiver can assemble file chunks or blockfile ranges out of order in a
+  cache and commit them only after manifest verification. A missing earliest
+  range should be re-requested; repeated failure should drop that source and
+  retry from another matching source.
+- Multiple LAN sources are allowed only when they advertise the same source
+  height and best block hash and can prove the same per-file hashes for the
+  ranges they serve.
+- Offer post-copy choices: trust and start, verify best-block/header identity,
+  or reindex/reindex-chainstate if the user wants Core to rebuild confidence
+  locally.
+
+The full DCOL snapshot mode must add a manifest before replacing files:
 source identity, source height, best block hash, file list, byte sizes, hashes,
 copy completion status, and a post-copy verification/reindex choice. It must run
 with the backend stopped before any `blocks`, `chainstate`, or `indexes` folders
@@ -393,7 +424,7 @@ Diagnostics exposes:
   and retransmit/checksum count.
 - Current TCP/UDP decision summary.
 - Current UDP probe datagram/chunk size.
-- Quick Clone (LAN) armed/copy/caught-up status.
+- LAN Fast Copy armed/copy/caught-up status.
 - Per-peer observed transfer method: `TCP`, `UDP`, or `TCP+UDP`, shown only
   after that method has transferred accepted data with that peer.
 - Per-peer Fast Sync state: `No`, `Off`, `Advertised`, `Probe sent`, `No reply`,

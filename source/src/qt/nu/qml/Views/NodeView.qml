@@ -418,6 +418,8 @@ ColumnLayout {
             columnMaximums: [230, 1400]
             fitColumnsToViewport: true
             wrapBodyText: true
+            maxWrappedBodyLines: 3
+            compact: true
             autoFitOnRowsChanged: true
             alwaysShowHorizontalScrollBar: false
             restoreSavedColumnWidths: false

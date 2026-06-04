@@ -4,7 +4,7 @@ Defcoin Core Nu `26.6.4s` is a catch-up release note over the last documented
 `26.6.4a` release note. It records the user-facing and backend changes now
 present in the current Tahoe Nu build line.
 
-## Fast Sync And Quick Clone
+## Fast Sync And LAN Block Copy
 
 - Routes UDP Fast Sync through Core's normal block scheduling path so UDP is a
   transport choice for a Core-selected block, not a second independent block
@@ -16,13 +16,12 @@ present in the current Tahoe Nu build line.
   advancement from receiver-confirmed UDP accepted blocks.
 - Adds concise protocol-efficiency status text with TCP/UDP block-byte rates,
   accepted-block counts, failures, probe status, and favor ratio.
-- Adds guarded `Quick Clone (LAN)` as the first Direct Copy Over LAN step. This
-  is not raw file copying and not the future full trusted snapshot mode. It
-  uses LAN-discovered Nu peers, pauses ordinary P2P sync while active, requests
-  sequential block heights from one selected LAN source over the existing UDP
-  chunk transport, and submits each assembled block through Core acceptance.
-- Keeps wallet data out of Quick Clone. Wallets, private keys, passphrases,
-  configs, peers, and ban files are never copied.
+- Adds a guarded trusted-LAN block-copy path that uses LAN-discovered Nu peers,
+  pauses ordinary P2P sync while active, requests sequential block heights from
+  one selected LAN source over the existing UDP chunk transport, and submits
+  each assembled block through Core acceptance.
+- Keeps wallet data out of the LAN copy path. Wallets, private keys,
+  passphrases, configs, peers, and ban files are never copied.
 - Documents that the later full DCOL snapshot/chainstate clone remains a
   separate future workflow requiring backend shutdown, manifests, hashes, and a
   post-copy verification or reindex option.
@@ -77,5 +76,5 @@ present in the current Tahoe Nu build line.
 - Adds an install script for local `pre-commit` setup.
 - Applies Ruff cleanup to the Fast Sync sidecar and macOS bundle repair helper.
 - Updates Fast Sync protocol documentation, Nu goals, and the functionality map
-  to describe service-bit negotiation, Core-routed UDP transport, Quick Clone,
-  and the future DCOL boundary.
+  to describe service-bit negotiation, Core-routed UDP transport, LAN block
+  copy, and the future DCOL boundary.

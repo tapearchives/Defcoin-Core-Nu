@@ -35,6 +35,7 @@ Rectangle {
     property bool alwaysShowHorizontalScrollBar: false
     property bool fitColumnsToViewport: false
     property bool wrapBodyText: false
+    property int maxWrappedBodyLines: 4
     property int rowRenderLimit: 0
     property int widthMeasurementRowLimit: 1500
     property int defaultSortColumn: -1
@@ -483,9 +484,27 @@ Rectangle {
         return compact ? 8 : 14
     }
 
-    function rowHeight() {
+    function baseRowHeight() {
         const base = Math.max(compact ? 24 : 30, Math.ceil(cellFontSize() * 1.75) + (compact ? 4 : 8))
-        return wrapBodyText ? Math.max(base, Math.ceil(cellFontSize() * 4.4)) : base
+        return base
+    }
+
+    function rowHeight(row) {
+        const base = baseRowHeight()
+        if (!wrapBodyText || row === undefined || row === null || columnWidths.length === 0) return base
+
+        let lines = 1
+        for (let c = 0; c < columns.length; ++c) {
+            if (isActionColumn(c) || columnType(c) === "swatch" || columnType(c) === "lan") continue
+            const cellWidth = Number(columnWidths[c] || columnMin(c))
+            const iconPad = cellHasLanIcon(row, c) ? (compact ? 30 : 34) : 0
+            const available = Math.max(28, cellWidth - textPadding() * 2 - iconPad)
+            const wanted = Math.max(1, Math.ceil(roughTextWidth(valueAt(row, c), c) / available))
+            lines = Math.max(lines, Math.min(Math.max(1, maxWrappedBodyLines), wanted))
+        }
+
+        if (lines <= 1) return base
+        return Math.max(base, Math.ceil(cellFontSize() * (1.35 * lines)) + (compact ? 8 : 12))
     }
 
     function headerNeedsExtraLine(index) {
@@ -617,10 +636,15 @@ Rectangle {
 
     function rowAtY(y) {
         const headerHeight = root.headerHeight()
-        const rowHeight = root.rowHeight()
         if (y < headerHeight) return -1
-        const row = Math.floor((y - headerHeight) / rowHeight)
-        return Math.max(0, Math.min(root.renderedRowCount() - 1, row))
+        const rows = root.sortedRows()
+        let offset = headerHeight
+        for (let i = 0; i < rows.length; ++i) {
+            const height = root.rowHeight(rows[i])
+            if (y >= offset && y < offset + height) return i
+            offset += height
+        }
+        return Math.max(0, Math.min(root.renderedRowCount() - 1, rows.length - 1))
     }
 
     function totalWidth() {
@@ -1246,7 +1270,7 @@ Rectangle {
                         required property int index
                         required property var modelData
                         width: scroll.contentWidth
-                        height: root.rowHeight()
+                        height: root.rowHeight(bodyRow.modelData)
 
                         Repeater {
                             model: root.shuttingDown ? 0 : root.columns.length

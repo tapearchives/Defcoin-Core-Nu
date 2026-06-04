@@ -160,9 +160,9 @@ ColumnLayout {
                         }
 
                         NuCheckBox {
-                            text: "Quick Clone blocks from trusted LAN peers"
+                            text: "LAN Fast Copy from trusted peers"
                             checked: NuService.lanQuickCloneEnabled
-                            helpText: "Advanced. When enabled, Nu looks only for Defcoin Core Nu peers on the local network, pauses ordinary P2P network sync while copying, and requests checksum-protected block data from a LAN machine you trust. This first safe mode still passes received blocks through Core acceptance and never copies wallets, keys, settings, peers, or ban files."
+                            helpText: "Advanced. This is the online validated LAN block-transfer mode: Nu looks only for Defcoin Core Nu peers on the local network, pauses ordinary P2P network sync while copying, requests checksum-protected block data from a LAN machine you trust, and still passes received blocks through Core acceptance. This is not Quick Clone/DCOL. Quick Clone/DCOL is the future trusted chain snapshot workflow that bypasses validation by copying verified chain state, and it must never copy wallets, keys, settings, peers, or ban files."
                             onToggled: NuService.lanQuickCloneEnabled = checked
                         }
 

@@ -106,20 +106,20 @@ For Defcoin, that means the app should invite users to do things:
    decade about maintainable tooling, active nodes, visible mining, and usable
    public data.
 
-8. Keep Fast Sync and future trusted copy modes distinct.
+8. Keep Fast Sync, LAN Fast Copy, and Quick Clone/DCOL distinct.
 
    Fast Sync is a transport optimization for normal Core-selected block
-   download and validation. Direct Copy Over LAN (DCOL) is a future
-   snapshot-style trusted-LAN copy mode for a user who intentionally chooses to
-   seed local chain state from machines they control. DCOL must never copy
-   wallets, keys, settings, peers, or ban files. It must move only chain/index
-   state, use explicit manifests and hashes before replacing local chain data,
-   and leave normal Core validation and repair paths available after import.
-   Nu 26.6.4s starts with a safer Quick Clone checkbox that pauses ordinary P2P
-   sync and copies LAN blocks through the existing checksum-protected UDP chunk
-   path while still submitting blocks to Core. Treat full chainstate snapshot
-   replacement as a later DCOL phase that requires backend shutdown, manifests,
-   and post-copy verification choices.
+   download and validation. LAN Fast Copy is an online trusted-LAN transfer path
+   that pauses ordinary P2P on the receiver and copies block bodies from LAN Nu
+   peers through the checksum-protected UDP chunk path while still submitting
+   blocks to Core. Quick Clone is the human-friendly name for Direct Copy Over
+   LAN (DCOL): a trusted snapshot-style mode for a user who intentionally chooses
+   to seed local chain state from machines they control and bypass historical
+   validation. DCOL must never copy wallets, keys, settings, peers, or ban
+   files. It must move only chain/index state, use explicit manifests and hashes
+   before replacing local chain data, require backend shutdown or a coherent
+   source snapshot, and leave normal Core validation and repair paths available
+   after import.
 
 ## Explore Experience Goals
 
