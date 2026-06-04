@@ -11,6 +11,27 @@ ColumnLayout {
     spacing: NuTokens.spaceLg
     property var currentRequest: ({})
 
+    function currentDisplayAddress() {
+        var selected = root.currentRequest.address || ""
+        return selected.length > 0 ? selected : NuService.receiveAddress
+    }
+
+    function currentDisplayQrSource() {
+        var selected = root.currentRequest.qrSource || ""
+        return selected.length > 0 ? selected : NuService.receiveQrSource
+    }
+
+    function requestForAddress(address) {
+        var wanted = String(address || "")
+        for (var i = 0; i < NuService.receiveRequests.length; ++i) {
+            var row = NuService.receiveRequests[i]
+            var meta = row && row.meta ? row.meta : ({})
+            if (String(meta.address || "") === wanted)
+                return meta
+        }
+        return ({})
+    }
+
     function openRequestDetails(row) {
         currentRequest = row && row.meta ? row.meta : ({})
         requestDetailsDialog.open()
@@ -20,34 +41,35 @@ ColumnLayout {
         Layout.fillWidth: true
         title: "Receive"
         detail: "Create payment requests with a real address and QR payload."
+        dense: true
     }
 
     NuPanel {
         Layout.fillWidth: true
-        implicitHeight: 320
+        implicitHeight: 284
 
         RowLayout {
             anchors.fill: parent
-            spacing: NuTokens.spaceXl
+            spacing: NuTokens.spaceLg
 
             Rectangle {
-                Layout.preferredWidth: 240
-                Layout.preferredHeight: 240
+                Layout.preferredWidth: 216
+                Layout.preferredHeight: 216
                 color: "#ffffff"
                 border.color: NuTokens.lineStrong
                 radius: NuTokens.radiusSmall
                 Image {
                     anchors.centerIn: parent
-                    width: 216
-                    height: 216
-                    visible: NuService.receiveQrSource.length > 0
-                    source: NuService.receiveQrSource
+                    width: 194
+                    height: 194
+                    visible: root.currentDisplayQrSource().length > 0
+                    source: root.currentDisplayQrSource()
                     fillMode: Image.PreserveAspectFit
                 }
                 Label {
                     anchors.centerIn: parent
                     width: parent.width - 36
-                    visible: NuService.receiveQrSource.length === 0
+                    visible: root.currentDisplayQrSource().length === 0
                     text: "QR appears after address generation"
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
@@ -61,8 +83,8 @@ ColumnLayout {
                 Label { text: "Payment address"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
                 NuCopyField {
                     Layout.fillWidth: true
-                    value: NuService.receiveAddress.length > 0 ? NuService.receiveAddress : "Generate a request to create a receiving address."
-                    copyEnabled: NuService.receiveAddress.length > 0
+                    value: root.currentDisplayAddress().length > 0 ? root.currentDisplayAddress() : "Generate a request to create a receiving address."
+                    copyEnabled: root.currentDisplayAddress().length > 0
                     onCopyRequested: (value) => NuService.copyText(value)
                 }
                 Label {
@@ -121,9 +143,16 @@ ColumnLayout {
         columnMinimums: [44, 150, 140, 260, 130]
         columnMaximums: [44, 180, 360, 620, 180]
         rowSelectionEnabled: true
+        plainClickSelectsRows: true
         rowKeyMetaField: "address"
         rows: NuService.receiveRequests
         emptyText: "Requested payments will appear here."
+        onRowSelectionChanged: (keys) => {
+            if (keys.length === 1)
+                root.currentRequest = root.requestForAddress(keys[0])
+            else if (keys.length === 0)
+                root.currentRequest = ({})
+        }
         onRowActivated: (row) => root.openRequestDetails(row)
     }
 
@@ -149,7 +178,11 @@ ColumnLayout {
             NuTextField { id: messageField; Layout.fillWidth: true; placeholderText: "Optional message" }
         }
 
-        onAccepted: NuService.requestNewAddress(labelField.text, amountField.text, messageField.text)
+        onAccepted: {
+            root.currentRequest = ({})
+            receiveRequestsTable.clearRowSelection()
+            NuService.requestNewAddress(labelField.text, amountField.text, messageField.text)
+        }
     }
 
     NuDialog {
@@ -217,7 +250,9 @@ ColumnLayout {
                               : NuService.explorerUrlForAddress(root.currentRequest.address || "")
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontSmall
-                        elide: Text.ElideMiddle
+                        wrapMode: Text.WrapAnywhere
+                        maximumLineCount: 3
+                        elide: Text.ElideRight
                     }
                 }
             }

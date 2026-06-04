@@ -81,6 +81,10 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QStringList logLines READ logLines NOTIFY logChanged)
     Q_PROPERTY(QVariantList logLineNumbers READ logLineNumbers NOTIFY logChanged)
     Q_PROPERTY(QString consoleOutput READ consoleOutput NOTIFY consoleChanged)
+    Q_PROPERTY(QString paperWalletAddress READ paperWalletAddress NOTIFY walletChanged)
+    Q_PROPERTY(QString paperWalletWif READ paperWalletWif NOTIFY walletChanged)
+    Q_PROPERTY(QString paperWalletStatus READ paperWalletStatus NOTIFY walletChanged)
+    Q_PROPERTY(bool paperWalletReady READ paperWalletReady NOTIFY walletChanged)
     Q_PROPERTY(bool feeEstimateAvailable READ feeEstimateAvailable NOTIFY feeEstimateChanged)
     Q_PROPERTY(QString feeEstimateStatus READ feeEstimateStatus NOTIFY feeEstimateChanged)
     Q_PROPERTY(bool psbtLoaded READ psbtLoaded NOTIFY psbtChanged)
@@ -254,6 +258,10 @@ public:
     QStringList logLines() const { return m_log_lines; }
     QVariantList logLineNumbers() const { return m_log_line_numbers; }
     QString consoleOutput() const { return m_console_output; }
+    QString paperWalletAddress() const { return m_paper_wallet_address; }
+    QString paperWalletWif() const { return m_paper_wallet_wif; }
+    QString paperWalletStatus() const { return m_paper_wallet_status; }
+    bool paperWalletReady() const { return !m_paper_wallet_address.isEmpty() && !m_paper_wallet_wif.isEmpty(); }
     bool feeEstimateAvailable() const { return m_fee_estimate_available; }
     QString feeEstimateStatus() const { return m_fee_estimate_status; }
     bool psbtLoaded() const { return !m_current_psbt.isEmpty(); }
@@ -409,6 +417,10 @@ public:
     Q_INVOKABLE void unbanPeer(const QString& address);
     Q_INVOKABLE void refreshBannedPeers();
     Q_INVOKABLE void runRpcCommand(const QString& method, const QString& params_json, bool wallet_scoped);
+    Q_INVOKABLE void runRpcConsoleCommand(const QString& command_text, const QString& wallet_name);
+    Q_INVOKABLE void clearConsoleOutput();
+    Q_INVOKABLE void generatePaperWallet(bool import_public_address = false, const QString& label = QString());
+    Q_INVOKABLE void importWatchOnlyAddress(const QString& address, const QString& label, bool rescan = false, int start_height = -1);
     Q_INVOKABLE QString walletDisplayName(const QString& name) const;
     Q_INVOKABLE void copyText(const QString& text);
     Q_INVOKABLE void copySensitiveTextAfterWarning(const QString& text);
@@ -995,6 +1007,7 @@ private:
     QHash<QString, qint64> m_udp_fast_sync_last_request_ms_by_host;
     QHash<QString, qint64> m_udp_fast_sync_last_probe_ms_by_host;
     QHash<QString, QString> m_udp_fast_sync_probe_ids_by_host;
+    QHash<QString, QString> m_udp_fast_sync_probe_hosts_by_id;
     QHash<QString, int> m_udp_fast_sync_probe_failures_by_host;
     QHash<QString, int> m_udp_fast_sync_failure_reason_counts;
     QHash<QString, qint64> m_udp_fast_sync_last_diagnostic_ms_by_reason;
@@ -1034,7 +1047,10 @@ private:
     bool m_debug_log_collecting_continuation = false;
     bool m_launch_diagnostics_section_started = false;
     bool m_backend_log_section_started = false;
-    QString m_console_output = QStringLiteral("Enter an RPC method and JSON parameter array, then run the command.");
+    QString m_console_output = QStringLiteral("Welcome to the Defcoin Core Nu RPC console.\nUse the command line below for standard Core commands, for example getblockchaininfo or listtransactions \"*\" 5.\nJSON parameter arrays are still accepted after the method name when needed.\n\nWARNING: Do not paste commands from strangers into this console.");
+    QString m_paper_wallet_address;
+    QString m_paper_wallet_wif;
+    QString m_paper_wallet_status = QStringLiteral("No paper wallet generated in this session.");
     bool m_fee_estimate_available = false;
     QString m_fee_estimate_status = QStringLiteral("Fee estimate hydrates after RPC connects.");
     QString m_current_psbt;
@@ -1083,6 +1099,7 @@ private:
     int m_fast_sync_window_size = 2;
     qint64 m_fast_sync_udp_cooldown_until_ms = 0;
     qint64 m_fast_sync_last_probe_ms = 0;
+    qint64 m_fast_sync_last_udp_attempt_ms = 0;
     QString m_fast_sync_decision_summary = QStringLiteral("Fast sync selector waiting for peer samples; normal TCP sync and UDP will be sampled when available.");
     int m_fast_sync_last_udp_accepted_height = -1;
     int m_fast_sync_udp_datagram_index = 0;

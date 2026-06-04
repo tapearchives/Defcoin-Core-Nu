@@ -55,11 +55,6 @@ QString productName()
     return kExploreApp ? QStringLiteral("Defcoin Core Nu Explore") : QStringLiteral("Defcoin Core Nu");
 }
 
-QString productExecutableName()
-{
-    return kExploreApp ? QStringLiteral("DefcoinCoreExplore") : QStringLiteral("DefcoinCoreNu");
-}
-
 QString productBundleIdentifier()
 {
     return kExploreApp ? QStringLiteral("org.defcoincore.DefcoinCoreNuExplore") : QStringLiteral("org.defcoincore.DefcoinCoreNu");
@@ -281,44 +276,6 @@ QString nuDefaultDataDir()
 #endif
 }
 
-bool anotherGuiProcessIsRunning()
-{
-#if defined(Q_OS_UNIX)
-    const qint64 current_pid = QCoreApplication::applicationPid();
-    QProcess pgrep;
-    pgrep.start(QStringLiteral("/usr/bin/pgrep"), {QStringLiteral("-x"), productExecutableName()});
-    if (!pgrep.waitForFinished(1000)) {
-        pgrep.kill();
-        pgrep.waitForFinished(250);
-        return false;
-    }
-    const QList<QByteArray> lines = pgrep.readAllStandardOutput().split('\n');
-    for (const QByteArray& line : lines) {
-        bool ok = false;
-        const qint64 pid = QString::fromLocal8Bit(line).trimmed().toLongLong(&ok);
-        if (ok && pid > 0 && pid != current_pid) return true;
-    }
-#if defined(Q_OS_MACOS)
-    QProcess ps;
-    ps.start(QStringLiteral("/bin/ps"), {QStringLiteral("-axo"), QStringLiteral("pid=,comm=")});
-    if (!ps.waitForFinished(1000)) {
-        ps.kill();
-        ps.waitForFinished(250);
-        return false;
-    }
-    const QList<QByteArray> ps_lines = ps.readAllStandardOutput().split('\n');
-    for (const QByteArray& line : ps_lines) {
-        const QString text = QString::fromLocal8Bit(line).trimmed();
-        if (!text.contains(productExecutableName())) continue;
-        const int space = text.indexOf(QLatin1Char(' '));
-        bool ok = false;
-        const qint64 pid = text.left(space > 0 ? space : text.size()).trimmed().toLongLong(&ok);
-        if (ok && pid > 0 && pid != current_pid) return true;
-    }
-#endif
-#endif
-    return false;
-}
 }
 
 int main(int argc, char* argv[])
@@ -362,15 +319,10 @@ int main(int argc, char* argv[])
     if (!smokeTest && !allowMultiple) {
         const QString dataDir = nuDefaultDataDir();
         QDir().mkpath(dataDir);
-        if (anotherGuiProcessIsRunning()) {
-            QMessageBox::warning(nullptr,
-                                 QStringLiteral("%1 is already open").arg(productName()),
-                                 QStringLiteral("Another %1 window appears to be running. Close the other window before opening this build. This prevents two frontends from writing the same local cache or competing for actions.").arg(productName()));
-            return 2;
-        }
         singleInstanceLock = std::make_unique<QLockFile>(QDir(dataDir).filePath(kExploreApp ? QStringLiteral("defcoin-core-nu-explore-gui.lock") : QStringLiteral("defcoin-core-nu-gui.lock")));
         singleInstanceLock->setStaleLockTime(30000);
-        if (!singleInstanceLock->tryLock(100)) {
+        if (!singleInstanceLock->tryLock(100) &&
+            !(singleInstanceLock->removeStaleLockFile() && singleInstanceLock->tryLock(100))) {
             QMessageBox::warning(nullptr,
                                  QStringLiteral("%1 is already open").arg(productName()),
                                  QStringLiteral("Another %1 window is already using this data directory:\n\n%2\n\nClose the other window before opening this build.").arg(productName(), dataDir));
@@ -439,20 +391,6 @@ int main(int argc, char* argv[])
     platform.setTrayIcon(appIcon);
     qmlRegisterSingletonInstance("Defcoin.Nu", 1, 0, "NuService", &service);
     qmlRegisterSingletonInstance("Defcoin.Nu", 1, 0, "NuPlatform", &platform);
-
-    bool duplicateGuiWarningShown = false;
-    if (!smokeTest && !allowMultiple) {
-        auto* duplicateGuiTimer = new QTimer(&app);
-        duplicateGuiTimer->setInterval(10000);
-        QObject::connect(duplicateGuiTimer, &QTimer::timeout, &app, [&duplicateGuiWarningShown] {
-            if (duplicateGuiWarningShown || !anotherGuiProcessIsRunning()) return;
-            duplicateGuiWarningShown = true;
-            QMessageBox::warning(nullptr,
-                                 QStringLiteral("Another %1 window is open").arg(productName()),
-                                 QStringLiteral("Another %1 window is now running. Close one window before doing local cache or wallet work.").arg(productName()));
-        });
-        duplicateGuiTimer->start();
-    }
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("NuBuildVersion"), QStringLiteral(DEFCOIN_NU_VERSION));

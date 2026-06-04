@@ -25,8 +25,9 @@ Item {
         case "activity": return 3
         case "wallet": return 4
         case "mining": return 5
-        case "node": return 6
-        case "settings": return 7
+        case "rpc": return 6
+        case "node": return 7
+        case "settings": return 8
         default: return 0
         }
     }
@@ -83,6 +84,7 @@ Item {
                         onRestoreRecoveryWalletRequested: root.restoreRecoveryWalletRequested()
                     }
                     MiningView {}
+                    RpcConsoleView {}
                     NodeView {
                         initialTab: root.nodeInitialTab
                         initialPeerView: root.peerInitialView

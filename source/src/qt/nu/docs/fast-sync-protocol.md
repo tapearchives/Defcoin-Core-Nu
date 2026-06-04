@@ -25,7 +25,7 @@ rule is simpler: Core selects and reserves a block for a connected peer, then
 UDP may carry the block bytes for that exact reservation. If Core cannot reserve
 a block for that peer, no UDP block request is sent.
 
-Starting with the 26.6.4p line, Core can also offer a short UDP transport claim
+Starting with the 26.6.4q line, Core can also offer a short UDP transport claim
 window during normal block scheduling. When Core selects a block from a connected
 peer that advertises `NODE_DEFCOIN_FASTSYNC`, it may mark that exact block
 in-flight and hold TCP `getdata` briefly so Nu's UDP helper can claim it. If UDP

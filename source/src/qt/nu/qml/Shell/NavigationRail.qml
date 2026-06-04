@@ -16,7 +16,7 @@ Rectangle {
     signal aboutRequested
 
     function isAdvancedRoute(route) {
-        return route === "mining" || route === "node" || route === "settings"
+        return route === "mining" || route === "rpc" || route === "node" || route === "settings"
     }
 
     function navigationItems() {
@@ -62,10 +62,16 @@ Rectangle {
                     help: "Configure and monitor a local scrypt miner executable."
                 },
                 {
-                    route: "node",
-                    label: "Diagnostics",
+                    route: "rpc",
+                    label: "RPC Console",
                     icon: "../../assets/icons/node.svg",
-                    help: "Node status, peers, traffic, log, and console access."
+                    help: "Run advanced node and wallet RPC commands through the local backend."
+                },
+                {
+                    route: "node",
+                    label: "Metrics",
+                    icon: "../../assets/icons/network.svg",
+                    help: "Traffic, sync status, peer details, and network health."
                 },
                 {
                     route: "settings",
@@ -243,8 +249,8 @@ Rectangle {
 
             ToolTip.visible: advancedMouse.containsMouse
             ToolTip.text: NuService.advancedToolsVisible
-                          ? "Hide Mining, Diagnostics, and Settings from the left menu."
-                          : "Show Mining, Diagnostics, and Settings."
+                          ? "Hide Mining, RPC Console, Metrics, and Settings from the left menu."
+                          : "Show Mining, RPC Console, Metrics, and Settings."
             ToolTip.delay: NuTokens.tooltipDelay
             ToolTip.timeout: NuTokens.tooltipTimeout
 
@@ -266,7 +272,7 @@ Rectangle {
                 text: "Advanced tools"
                 inverse: true
                 checked: NuService.advancedToolsVisible
-                helpText: "Show or hide Mining, Diagnostics, and Settings in the main menu."
+                helpText: "Show or hide Mining, RPC Console, Metrics, and Settings in the main menu."
                 onToggled: {
                     NuService.advancedToolsVisible = checked
                     if (!checked && root.isAdvancedRoute(root.currentRoute))

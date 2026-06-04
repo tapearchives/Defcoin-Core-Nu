@@ -182,11 +182,9 @@ ColumnLayout {
     }
 
     function tabToStack(tabIndex) {
-        if (tabIndex === 1) return 3 // Log
-        if (tabIndex === 2) return 4 // Console
-        if (tabIndex === 3) return 2 // Traffic
-        if (tabIndex === 4) return 1 // Peers
-        return 0 // Status
+        if (tabIndex === 1) return 0 // Status
+        if (tabIndex === 2) return 1 // Peers
+        return 2 // Traffic
     }
 
     function logVerbosityName(level) {
@@ -384,29 +382,19 @@ ColumnLayout {
 
     Component.onCompleted: root.refreshLogFilterPresets()
 
-    Shortcut {
-        sequences: [StandardKey.Find]
-        onActivated: {
-            tabs.currentIndex = 1
-            logFindField.forceActiveFocus()
-            logFindField.selectAll()
-        }
-    }
-
     NuPageHeader {
         Layout.fillWidth: true
-        title: "Diagnostics"
-        detail: "Node status, peers, traffic, log, and console."
+        title: "Metrics"
+        detail: "Traffic, sync status, peer details, and network health."
+        dense: true
     }
 
     NuTabBar {
         id: tabs
         Layout.fillWidth: true
         currentIndex: root.initialTab
-        NuTabButton { text: "Status" }
-        NuTabButton { text: "Log" }
-        NuTabButton { text: "Console" }
         NuTabButton { text: "Traffic" }
+        NuTabButton { text: "Status" }
         NuTabButton { text: "Peers" }
     }
 

@@ -344,7 +344,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Label {
             Layout.fillWidth: true
-            text: "Review every payment before broadcast. Advanced coin selection is available in Diagnostics > Console through the backend RPC command set."
+            text: "Review every payment before broadcast. Advanced coin selection is available in RPC Console through the backend RPC command set."
             color: NuTokens.textSecondary
             font.pixelSize: NuTokens.fontSmall
             wrapMode: Text.WordWrap

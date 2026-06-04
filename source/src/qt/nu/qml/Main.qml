@@ -177,6 +177,11 @@ ApplicationWindow {
         frame.currentRoute = "node"
     }
 
+    function openRpcConsole() {
+        NuService.advancedToolsVisible = true
+        frame.currentRoute = "rpc"
+    }
+
     function basicAboutText() {
         return "Defcoin Core Nu v" + root.buildVersion + " - " + root.releaseCodeName + ". New Qt Quick interface build. Backend derives from Litecoin Core v0.21.5.5 with Defcoin consensus and network parameters. Verify recipients, amounts, and backups carefully before use. © 2014-2026 The Defcoin Core developers. © 2011-2026 The Litecoin Core developers. © 2009-2021 The Bitcoin Core developers."
     }
@@ -209,7 +214,7 @@ ApplicationWindow {
              + "</ul>"
              + "<h2>What went into Nu</h2>"
              + "<ul>"
-             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, Diagnostics, and Settings. Explorer and Forensics analysis now live in the separate Defcoin Core Nu Explore app so Nu can stay wallet-first.</li>"
+             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, RPC Console, Metrics, and Settings. Explorer and Forensics analysis now live in the separate Defcoin Core Nu Explore app so Nu can stay wallet-first.</li>"
              + "<li>Visual system, copy, and interaction patterns are guided by Nothing-style restraint and Bitcoin Design Community wallet usability patterns.</li>"
              + "<li>Bundled backend autostart, RPC connection handling, launch diagnostics, and current-launch log viewing.</li>"
              + "<li><b>Enable LAN node discovery</b> is off by default. When enabled, macOS may ask for Local Network access so Nu can find Defcoin nodes on the same LAN, which can help another local wallet copy blockchain data faster. The permission does not grant access to wallet keys, passphrases, or private wallet data.</li>"
@@ -219,7 +224,7 @@ ApplicationWindow {
              + "<li>Peer pollution filtering now happens at both the peer and address-relay layers: non-Defcoin-prefixed peers are disconnected before their address tables are accepted, and unvalidated relayed mainnet addresses are only stored when they advertise Defcoin service ports.</li>"
              + "<li>The address filter is endpoint-specific, not IP-wide. If the same host runs Litecoin Core on one port and Defcoin Core on another, Nu keeps the Defcoin endpoint eligible and can replace older same-IP non-Defcoin ports in addrman. Defcoin nodes on non-standard ports can still communicate and be retained after completing an actual Defcoin handshake.</li>"
              + "<li>Peer inspection with simple and detailed views, including actual per-peer magic bytes where reported by the backend.</li>"
-             + "<li>Network diagnostics now include difficulty, 120-block network hashrate, chain-tip counts, sync progress, and top P2P message types where the backend reports them. [Thanks to packetloss404 / Ian S. Walmsley's v1.0.2 build.]</li>"
+             + "<li>Network metrics now include difficulty, 120-block network hashrate, chain-tip counts, sync progress, and top P2P message types where the backend reports them. [Thanks to packetloss404 / Ian S. Walmsley's v1.0.2 build.]</li>"
              + "<li>Defcoin Core Nu Explore carries the Explorer and Forensics surfaces from Nu, including irregular OP_RETURN scans, Holder Atlas analytics, movements, contacts, relationship graphs, and index controls. Nu can hand address and transaction inspections to Explore when the internal explorer mode is selected.</li>"
              + "<li>BIP39 recovery phrase creation and restore workflows for Nu/Core HD wallets, plus an advanced preview-gated external derivation scan with Defcoin WIF compatibility options.</li>"
              + "<li>Local mining setup can select an external cpuminer-compatible executable, build scrypt stratum arguments, and monitor miner output without bundling miner binaries into the wallet app.</li>"
@@ -229,7 +234,7 @@ ApplicationWindow {
              + "<ul>"
              + "<li>Nu keeps the Defcoin chain and wallet data directory shared, but replaces the classic Qt wallet surface with a new Qt Quick shell.</li>"
              + "<li>Nu includes explicit peer filtering and magic-byte migration controls intended to reduce Litecoin-family peer pollution.</li>"
-             + "<li>Nu adds clearer diagnostics for backend startup, RPC readiness, network state, peers, logs, and traffic.</li>"
+             + "<li>Nu adds clearer metrics for backend startup, RPC readiness, network state, peers, logs, and traffic.</li>"
              + "<li>Nu runs a bundled <code>defcoind</code> backend as a managed child process, instead of keeping node, wallet, and UI work inside one classic Qt wallet process.</li>"
              + "<li>Nu's newer part is the desktop interface and packaging model; the chain rules, wallet data directory, and Litecoin-derived backend remain the Defcoin Core compatibility baseline.</li>"
              + "</ul>"
@@ -313,7 +318,7 @@ ApplicationWindow {
             "activity": "Transactions",
             "wallet": "Wallet",
             "mining": "Mining",
-            "diagnostics": "Diagnostics",
+            "diagnostics": "Metrics",
             "settings": "Settings",
             "psbt": "Partially signed transactions"
         }
@@ -429,12 +434,27 @@ ApplicationWindow {
             NuMenuItem {
                 text: qsTr("Mining")
                 shortcut: Qt.platform.os === "osx" ? "Meta+6" : "Ctrl+6"
+                visible: NuService.advancedToolsVisible
+                implicitHeight: visible ? Math.max(contentItem.implicitHeight + 14, 34) : 0
                 onTriggered: {
                     NuService.advancedToolsVisible = true
                     frame.currentRoute = "mining"
                 }
             }
-            NuMenuItem { text: qsTr("Diagnostics"); shortcut: Qt.platform.os === "osx" ? "Meta+7" : "Ctrl+7"; onTriggered: root.openNode() }
+            NuMenuItem {
+                text: qsTr("RPC Console")
+                shortcut: Qt.platform.os === "osx" ? "Meta+7" : "Ctrl+7"
+                visible: NuService.advancedToolsVisible
+                implicitHeight: visible ? Math.max(contentItem.implicitHeight + 14, 34) : 0
+                onTriggered: root.openRpcConsole()
+            }
+            NuMenuItem {
+                text: qsTr("Metrics")
+                shortcut: Qt.platform.os === "osx" ? "Meta+8" : "Ctrl+8"
+                visible: NuService.advancedToolsVisible
+                implicitHeight: visible ? Math.max(contentItem.implicitHeight + 14, 34) : 0
+                onTriggered: root.openNode()
+            }
         }
 
         Menu {
@@ -960,7 +980,7 @@ ApplicationWindow {
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("Hide this window while sync continues. The mast and Diagnostics > Status keep updating.")
+                text: qsTr("Hide this window while sync continues. The mast and Metrics > Status keep updating.")
                 color: NuTokens.textSecondary
                 font.pixelSize: NuTokens.fontSmall
                 wrapMode: Text.WordWrap

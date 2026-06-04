@@ -136,6 +136,7 @@ constexpr int FAST_SYNC_PROTOCOL_MAX_WINDOW = 32;
 constexpr int FAST_SYNC_PROTOCOL_PROBE_INTERVAL_MS = 30000;
 constexpr int FAST_SYNC_PROTOCOL_MIN_UDP_PROBES = 4;
 constexpr int FAST_SYNC_PROTOCOL_TCP_SAMPLE_CAP_PER_UDP = 3;
+constexpr int FAST_SYNC_PROTOCOL_UDP_KEEPALIVE_MS = 5000;
 constexpr double FAST_SYNC_PROTOCOL_EWMA_ALPHA = 0.35;
 constexpr double FAST_SYNC_PROTOCOL_EXPLORATION_C = 0.35;
 constexpr int AUTO_DBCACHE_MIN_MIB = 450;
@@ -2124,6 +2125,7 @@ QStringList splitConsolePasteCommands(const QString& text, QString* error)
         if (error) *error = split_error;
         return {};
     }
+    if (tokens.isEmpty()) return {normalized};
     if (tokens.size() <= 3 || tokens.first().compare(QStringLiteral("addnode"), Qt::CaseInsensitive) != 0) {
         return {normalized};
     }
@@ -4132,13 +4134,17 @@ void NuRpcService::refreshNode()
         m_peer_rows_detailed = detailed_rows;
         m_peers = detailed_rows;
         m_peer_count = detailed_rows.size();
+        const bool udp_peer_set_changed = m_udp_fast_sync_peer_hosts != udp_fast_sync_peer_hosts;
         m_udp_fast_sync_peer_hosts = udp_fast_sync_peer_hosts;
         m_udp_fast_sync_peer_node_ids_by_host = udp_fast_sync_peer_node_ids_by_host;
         m_udp_fast_sync_peer_inflight_counts_by_host = udp_fast_sync_peer_inflight_counts_by_host;
         m_peer_host_by_node_id = peer_host_by_node_id;
         m_peer_addr_by_node_id = peer_addr_by_node_id;
         m_peer_inbound_by_node_id = peer_inbound_by_node_id;
-        resetFastSyncProtocolWindow();
+        if (udp_peer_set_changed ||
+            (m_fast_sync_tcp_quota_remaining <= 0 && m_fast_sync_udp_quota_remaining <= 0)) {
+            resetFastSyncProtocolWindow();
+        }
         m_metric_peer_messages_sent = orderedMessageTypeStats(sent_message_bytes);
         m_metric_peer_messages_received = orderedMessageTypeStats(received_message_bytes);
         rebuildNodeMetrics();
@@ -4364,7 +4370,6 @@ QVariantMap NuRpcService::receiveRequestRow(const QVariantMap& meta) const
 {
     const QString label = meta.value(QStringLiteral("label")).toString().trimmed();
     return tableRow({
-        QString(),
         QString(),
         meta.value(QStringLiteral("date")).toString(),
         label.isEmpty() ? QStringLiteral("Request") : label,
@@ -4782,10 +4787,11 @@ QString NuRpcService::syncTransportSpeedSummary() const
     };
 
     QStringList parts;
-    parts.push_back(QStringLiteral("combined %1").arg(volume_rate(combined_total, combined_seconds)));
-    parts.push_back(QStringLiteral("Core advances %1").arg(m_fast_sync_tcp_successes));
-    parts.push_back(QStringLiteral("UDP blocks %1").arg(m_lan_fast_sync_blocks_received));
-    parts.push_back(QStringLiteral("UDP failures %1").arg(m_fast_sync_udp_failures));
+    parts.push_back(QStringLiteral("Combined %1").arg(volume_rate(combined_total, combined_seconds)));
+    parts.push_back(QStringLiteral("TCP/Core %1").arg(volume_rate(tcp_total, tcp_seconds)));
+    parts.push_back(QStringLiteral("UDP %1").arg(volume_rate(udp_total, udp_seconds)));
+    parts.push_back(QStringLiteral("Blocks TCP %1 / UDP %2").arg(m_fast_sync_tcp_successes).arg(m_lan_fast_sync_blocks_received));
+    parts.push_back(QStringLiteral("UDP fail %1").arg(m_fast_sync_udp_failures));
     return parts.join(QStringLiteral(" | "));
 }
 
@@ -4799,9 +4805,9 @@ QString NuRpcService::coreSyncPathSummary() const
                    QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1))
         : QStringLiteral("-");
     const QString ewma = m_fast_sync_tcp_ewma_blocks_per_second > 0.0
-        ? QStringLiteral("%1 chain advances/s recent").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
-        : QStringLiteral("recent waiting for Core chain advances");
-    return QStringLiteral("%1 | Core network total %2 (in %3, out %4) | chain advances %5 | %6 | samples %7 ok/%8 fail | block data handled by Core")
+        ? QStringLiteral("%1 adv/s recent").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
+        : QStringLiteral("recent waiting");
+    return QStringLiteral("%1 | total %2 (in %3, out %4) | advances %5 | %6 | samples %7 ok/%8 fail")
         .arg(avg,
              formatBytes(total),
              formatBytes(m_sync_tcp_bytes_received),
@@ -4833,7 +4839,7 @@ QString NuRpcService::fastSyncUdpSummary() const
               .arg(QString::number(udp_samples),
                    QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES),
                    QString::number(udp_warmup_percent));
-    return QStringLiteral("%1 | total %2 (in %3, out %4) | packets %5 in/%6 out | blocks %7 | %8 | samples %9 ok/%10 fail | retransmit/checksum %11")
+    return QStringLiteral("%1 | total %2 (in %3, out %4) | packets %5/%6 | blocks %7 | %8 | samples %9 ok/%10 fail | retransmit/checksum %11")
         .arg(avg,
              formatBytes(total),
              formatBytes(m_lan_fast_sync_udp_bytes_received),
@@ -4980,7 +4986,9 @@ void NuRpcService::recordFastSyncTransportSuccess(FastSyncTransport transport, i
     } else {
         m_fast_sync_tcp_successes += blocks;
     }
-    resetFastSyncProtocolWindow();
+    if (m_fast_sync_tcp_quota_remaining <= 0 && m_fast_sync_udp_quota_remaining <= 0) {
+        resetFastSyncProtocolWindow();
+    }
 }
 
 void NuRpcService::recordFastSyncTransportFailure(FastSyncTransport transport)
@@ -4999,7 +5007,9 @@ void NuRpcService::recordFastSyncTransportFailure(FastSyncTransport transport)
         ++m_fast_sync_tcp_failures;
         m_fast_sync_tcp_ewma_blocks_per_second *= 0.5;
     }
-    resetFastSyncProtocolWindow();
+    if (m_fast_sync_tcp_quota_remaining <= 0 && m_fast_sync_udp_quota_remaining <= 0) {
+        resetFastSyncProtocolWindow();
+    }
 }
 
 void NuRpcService::recordFastSyncUdpSuccess(int height, qint64 latency_ms)
@@ -5101,6 +5111,19 @@ bool NuRpcService::shouldAttemptUdpFastSync()
     if (m_fast_sync_tcp_quota_remaining <= 0 && m_fast_sync_udp_quota_remaining <= 0) {
         resetFastSyncProtocolWindow();
     }
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const bool udp_cooling = now < m_fast_sync_udp_cooldown_until_ms;
+    const bool force_probe = (now - m_fast_sync_last_probe_ms) >= FAST_SYNC_PROTOCOL_PROBE_INTERVAL_MS;
+    if (udp_cooling && !force_probe) {
+        m_fast_sync_udp_quota_remaining = 0;
+    }
+    const bool udp_due = (!udp_cooling || force_probe) &&
+        !m_udp_fast_sync_peer_hosts.isEmpty() &&
+        (m_fast_sync_last_udp_attempt_ms <= 0 ||
+         now - m_fast_sync_last_udp_attempt_ms >= FAST_SYNC_PROTOCOL_UDP_KEEPALIVE_MS);
+    if (udp_due) {
+        m_fast_sync_udp_quota_remaining = std::max(1, m_fast_sync_udp_quota_remaining);
+    }
     if (m_fast_sync_udp_quota_remaining > 0) {
         --m_fast_sync_udp_quota_remaining;
         return true;
@@ -5146,7 +5169,11 @@ bool NuRpcService::hasPrivateUdpFastSyncTarget() const
 {
     for (const QString& host : m_udp_fast_sync_peer_hosts) {
         QHostAddress address;
-        if (address.setAddress(host) && isPrivateOrLocalFastSyncAddress(address)) return true;
+        if (address.setAddress(host) &&
+            address.protocol() == QAbstractSocket::IPv4Protocol &&
+            isPrivateOrLocalFastSyncAddress(address)) {
+            return true;
+        }
     }
     return false;
 }
@@ -5202,6 +5229,24 @@ void NuRpcService::lanFastSyncTick()
     processQueuedLanDiscoveryAddNodes();
     if (!m_syncing || m_header_height <= 0 || m_block_height >= m_header_height) {
         if (!m_lan_fast_sync_request_in_flight && !m_lan_fast_sync_submit_in_flight && !m_lan_fast_sync_reserve_in_flight) {
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+            QStringList expired_probe_hosts;
+            for (auto it = m_udp_fast_sync_probe_ids_by_host.constBegin(); it != m_udp_fast_sync_probe_ids_by_host.constEnd(); ++it) {
+                const QString host = it.key();
+                const qint64 sent_ms = m_udp_fast_sync_last_probe_ms_by_host.value(host, 0);
+                if (sent_ms > 0 && now - sent_ms > LAN_FAST_SYNC_PROBE_TIMEOUT_MS) {
+                    expired_probe_hosts.push_back(host);
+                }
+            }
+            for (const QString& host : expired_probe_hosts) {
+                recordUdpFastSyncPeerMiss(host, QStringLiteral("UDP probe timed out"));
+            }
+            m_fast_sync_current_datagram_bytes = currentFastSyncDatagramSize();
+            int probe_node_id = -1;
+            const QString probe_host = selectUdpFastSyncTargetHost(&probe_node_id);
+            if (!probe_host.isEmpty() && probe_node_id >= 0 && !isUdpFastSyncHostVerified(probe_host)) {
+                if (sendUdpFastSyncProbe(probe_host, probe_node_id)) return;
+            }
             m_lan_fast_sync_status = QStringLiteral("UDP fast sync idle; normal TCP sync is up to date.");
             rebuildNodeMetrics();
             Q_EMIT stateChanged();
@@ -5269,7 +5314,10 @@ void NuRpcService::recordUdpFastSyncPeerReply(const QString& host)
     m_udp_fast_sync_available_peer_hosts.insert(host);
     m_udp_fast_sync_failed_peer_hosts.remove(host);
     m_udp_fast_sync_probe_failures_by_host.remove(host);
-    m_udp_fast_sync_probe_ids_by_host.remove(host);
+    const QString probe_id = m_udp_fast_sync_probe_ids_by_host.take(host);
+    if (!probe_id.isEmpty()) {
+        m_udp_fast_sync_probe_hosts_by_id.remove(probe_id);
+    }
     m_lan_fast_sync_last_failure_detail.clear();
 }
 
@@ -5279,7 +5327,10 @@ void NuRpcService::recordUdpFastSyncPeerMiss(const QString& host, const QString&
     if (!isUdpFastSyncHostVerified(host)) {
         m_udp_fast_sync_failed_peer_hosts.insert(host);
     }
-    m_udp_fast_sync_probe_ids_by_host.remove(host);
+    const QString probe_id = m_udp_fast_sync_probe_ids_by_host.take(host);
+    if (!probe_id.isEmpty()) {
+        m_udp_fast_sync_probe_hosts_by_id.remove(probe_id);
+    }
     m_udp_fast_sync_probe_failures_by_host.insert(host, m_udp_fast_sync_probe_failures_by_host.value(host, 0) + 1);
     m_udp_fast_sync_last_probe_ms_by_host.insert(host, QDateTime::currentMSecsSinceEpoch());
     if (!reason.isEmpty()) {
@@ -5296,7 +5347,6 @@ bool NuRpcService::sendUdpFastSyncProbe(const QString& host, int node_id)
         recordUdpFastSyncPeerMiss(host, QStringLiteral("invalid UDP probe target address"));
         return false;
     }
-
     const QString probe_id = QUuid::createUuid().toString(QUuid::Id128);
     const int max_datagram = isPrivateOrLocalFastSyncAddress(peer_address)
         ? qMin(currentFastSyncDatagramSize(), LAN_FAST_SYNC_MAX_DATAGRAM_BYTES)
@@ -5320,16 +5370,22 @@ bool NuRpcService::sendUdpFastSyncProbe(const QString& host, int node_id)
     }
     const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, peer_address, LAN_FAST_SYNC_PORT);
     if (written <= 0) {
-        recordUdpFastSyncPeerMiss(host, QStringLiteral("UDP probe send failed"));
+        recordUdpFastSyncPeerMiss(host, QStringLiteral("UDP probe send failed: %1").arg(m_lan_fast_sync_socket->errorString()));
         recordFastSyncUdpFailure();
         return false;
     }
 
+    m_fast_sync_last_udp_attempt_ms = QDateTime::currentMSecsSinceEpoch();
+    const QString previous_probe_id = m_udp_fast_sync_probe_ids_by_host.value(host);
+    if (!previous_probe_id.isEmpty()) {
+        m_udp_fast_sync_probe_hosts_by_id.remove(previous_probe_id);
+    }
     m_udp_fast_sync_probe_ids_by_host.insert(host, probe_id);
+    m_udp_fast_sync_probe_hosts_by_id.insert(probe_id, host);
     m_udp_fast_sync_last_probe_ms_by_host.insert(host, QDateTime::currentMSecsSinceEpoch());
     m_udp_fast_sync_attempted_peer_hosts.insert(host);
     recordLanFastSyncUdpTraffic(written, 0);
-    recordFastSyncUdpDiagnostic(QStringLiteral("sent UDP Fast Sync probe"),
+    recordFastSyncUdpDiagnostic(QStringLiteral("sent UDP Fast Sync probe %1").arg(probe_id.left(8)),
         QStringLiteral("peer %1 host %2 id %3").arg(node_id).arg(host, probe_id.left(8)));
     m_lan_fast_sync_status = QStringLiteral("UDP fast sync probing peer %1 on %2 before block requests.")
         .arg(node_id)
@@ -5366,9 +5422,6 @@ QString NuRpcService::selectUdpFastSyncTargetHost(int* node_id) const
         if (m_udp_fast_sync_available_peer_hosts.contains(host)) score += 50;
         if (isPrivateOrLocalFastSyncAddress(address)) score += 25;
         score -= qMin(48, m_udp_fast_sync_peer_inflight_counts_by_host.value(host, 0) * 3);
-        // The desktop helper currently owns one UDP socket. Prefer IPv4 until
-        // a peer has proven UDP reachability so an unwriteable IPv6 target does
-        // not starve otherwise usable IPv4 fast-sync peers.
         if (address.protocol() == QAbstractSocket::IPv4Protocol) score += 10;
         if (!isUdpFastSyncHostVerified(host)) {
             score -= isPrivateOrLocalFastSyncAddress(address) ? 20 : 45;
@@ -5459,6 +5512,7 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
             .arg(m_lan_fast_sync_socket ? m_lan_fast_sync_socket->errorString() : QStringLiteral("socket unavailable")));
         return;
     }
+    m_fast_sync_last_udp_attempt_ms = QDateTime::currentMSecsSinceEpoch();
     recordLanFastSyncUdpTraffic(written, 0);
     const QString key = normalizedFastSyncHost(peer_address);
     m_udp_fast_sync_attempted_peer_hosts.insert(key);
@@ -5526,10 +5580,17 @@ void NuRpcService::requestLanFastSyncBlock()
         const QString hash = obj.value(QStringLiteral("hash")).toString();
         const int height = obj.value(QStringLiteral("height")).toInt(-1);
         if (!success || hash.size() != 64 || height <= 0) {
-            recordFastSyncUdpDiagnostic(QStringLiteral("Core reservation rejected"),
-                QStringLiteral("peer %1: %2").arg(node_id).arg(reason));
-            m_lan_fast_sync_status = QStringLiteral("UDP fast sync did not reserve a Core-selected block (%1); normal TCP fallback remains active.")
-                .arg(reason);
+            const QString detail = QStringLiteral("block %1 peer %2: %3").arg(height).arg(node_id).arg(reason);
+            recordFastSyncUdpDiagnostic(QStringLiteral("Core reservation deferred"), detail);
+            if (reason == QLatin1String("peer-not-connected")) {
+                m_udp_fast_sync_peer_node_ids_by_host.remove(host);
+                m_lan_fast_sync_status = QStringLiteral("Fast Sync peer reconnected; refreshing peer state before retrying UDP.");
+                QTimer::singleShot(0, this, &NuRpcService::refreshNode);
+                QTimer::singleShot(1500, this, &NuRpcService::lanFastSyncTick);
+            } else {
+                m_lan_fast_sync_status = QStringLiteral("UDP Fast Sync is waiting on Core scheduling (%1); normal TCP sync remains active.")
+                    .arg(reason);
+            }
             rebuildNodeMetrics();
             Q_EMIT stateChanged();
             return;
@@ -5571,11 +5632,6 @@ void NuRpcService::handleLanFastSyncDatagrams()
             }
             continue;
         }
-        if (!isUdpFastSyncAllowedPeer(sender)) {
-            recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync datagram from non-peer"),
-                udpFastSyncEndpointText(sender, datagram.senderPort()));
-            continue;
-        }
         QJsonObject header;
         QByteArray payload;
         if (!parseLanFastSyncDatagram(data, &header, &payload)) {
@@ -5598,10 +5654,24 @@ void NuRpcService::handleLanFastSyncDatagrams()
         if (type == QLatin1String("probe")) {
             handleLanFastSyncProbe(header, sender, datagram.senderPort());
         } else if (type == QLatin1String("probe-ack")) {
+            recordFastSyncUdpDiagnostic(
+                QStringLiteral("received UDP Fast Sync probe acknowledgement %1")
+                    .arg(header.value(QStringLiteral("id")).toString().left(8)),
+                udpFastSyncEndpointText(sender, datagram.senderPort()));
             handleLanFastSyncProbeAck(header, sender, datagram.senderPort());
         } else if (type == QLatin1String("request-block")) {
+            if (!isUdpFastSyncAllowedPeer(sender)) {
+                recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync block request from non-peer"),
+                    udpFastSyncEndpointText(sender, datagram.senderPort()));
+                continue;
+            }
             handleLanFastSyncRequest(header, sender, datagram.senderPort());
         } else if (type == QLatin1String("block-chunk")) {
+            if (!isUdpFastSyncAllowedPeer(sender)) {
+                recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync block chunk from non-peer"),
+                    udpFastSyncEndpointText(sender, datagram.senderPort()));
+                continue;
+            }
             handleLanFastSyncChunk(header, payload, sender);
         } else {
             recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync datagram with unknown type"),
@@ -5616,10 +5686,7 @@ void NuRpcService::handleLanFastSyncDatagrams()
 void NuRpcService::handleLanFastSyncProbe(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port)
 {
     if (!m_rpc_connected || !m_lan_fast_sync_enabled) return;
-    if (!isUdpFastSyncAllowedPeer(sender)) {
-        recordFastSyncUdpDiagnostic(QStringLiteral("ignored UDP probe from non-peer"), udpFastSyncEndpointText(sender, sender_port));
-        return;
-    }
+    const bool peer_confirmed = isUdpFastSyncAllowedPeer(sender);
     const QString request_id = header.value(QStringLiteral("id")).toString();
     static const QRegularExpression request_id_re(QStringLiteral(R"(^[0-9a-f]{32}$)"), QRegularExpression::CaseInsensitiveOption);
     if (!request_id_re.match(request_id).hasMatch()) {
@@ -5652,6 +5719,7 @@ void NuRpcService::handleLanFastSyncProbe(const QJsonObject& header, const QHost
     ack.insert(QStringLiteral("max_datagram"), peer_max_datagram);
     ack.insert(QStringLiteral("chunk_bytes"), peer_chunk_bytes);
     ack.insert(QStringLiteral("observed_sender_port"), int(sender_port));
+    ack.insert(QStringLiteral("peer_confirmed"), peer_confirmed);
     const QByteArray datagram = lanFastSyncDatagram(ack, QByteArray(), LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES);
     if (datagram.isEmpty()) {
         recordFastSyncUdpDiagnostic(QStringLiteral("could not build UDP probe acknowledgement"), udpFastSyncEndpointText(sender, reply_port));
@@ -5664,9 +5732,11 @@ void NuRpcService::handleLanFastSyncProbe(const QJsonObject& header, const QHost
         return;
     }
     recordLanFastSyncUdpTraffic(written, 0);
-    recordFastSyncUdpDiagnostic(QStringLiteral("sent UDP Fast Sync probe acknowledgement"),
+    recordFastSyncUdpDiagnostic(QStringLiteral("sent UDP Fast Sync probe acknowledgement %1").arg(request_id.left(8)),
         QStringLiteral("%1 id %2").arg(udpFastSyncEndpointText(sender, reply_port), request_id.left(8)));
-    recordUdpFastSyncPeerReply(normalizedFastSyncHost(sender));
+    if (peer_confirmed) {
+        recordUdpFastSyncPeerReply(normalizedFastSyncHost(sender));
+    }
 }
 
 void NuRpcService::handleLanFastSyncProbeAck(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port)
@@ -5675,7 +5745,11 @@ void NuRpcService::handleLanFastSyncProbeAck(const QJsonObject& header, const QH
     const QString sender_key = normalizedFastSyncHost(sender);
     if (sender_key.isEmpty()) return;
     const QString request_id = header.value(QStringLiteral("id")).toString();
-    if (m_udp_fast_sync_probe_ids_by_host.value(sender_key) != request_id) {
+    QString verified_host = m_udp_fast_sync_probe_hosts_by_id.value(request_id);
+    if (verified_host.isEmpty() && m_udp_fast_sync_probe_ids_by_host.value(sender_key) == request_id) {
+        verified_host = sender_key;
+    }
+    if (verified_host.isEmpty()) {
         recordFastSyncUdpDiagnostic(QStringLiteral("ignored UDP probe acknowledgement with mismatched transaction id"),
             QStringLiteral("%1; expected=%2 got=%3")
                 .arg(udpFastSyncEndpointText(sender, sender_port),
@@ -5683,14 +5757,27 @@ void NuRpcService::handleLanFastSyncProbeAck(const QJsonObject& header, const QH
                      request_id.left(8)));
         return;
     }
-    recordUdpFastSyncPeerReply(sender_key);
+    const int verified_node_id = m_udp_fast_sync_peer_node_ids_by_host.value(verified_host, -1);
+    recordUdpFastSyncPeerReply(verified_host);
+    if (sender_key != verified_host) {
+        m_udp_fast_sync_peer_hosts.insert(sender_key);
+        m_udp_fast_sync_available_peer_hosts.insert(sender_key);
+        m_udp_fast_sync_failed_peer_hosts.remove(sender_key);
+        m_udp_fast_sync_probe_failures_by_host.remove(sender_key);
+        if (verified_node_id >= 0) {
+            m_udp_fast_sync_peer_node_ids_by_host.insert(sender_key, verified_node_id);
+        }
+        recordFastSyncUdpDiagnostic(QStringLiteral("accepted UDP probe acknowledgement from peer return-path alias"),
+            QStringLiteral("reserved host %1 ack source %2 id %3")
+                .arg(verified_host, udpFastSyncEndpointText(sender, sender_port), request_id.left(8)));
+    }
     const int peer_max_datagram = header.value(QStringLiteral("max_datagram")).toInt(LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES);
     if (peer_max_datagram >= LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES &&
         peer_max_datagram < currentFastSyncDatagramSize()) {
         tuneFastSyncDatagramAfterFailure();
     }
     m_lan_fast_sync_status = QStringLiteral("UDP fast sync verified peer %1; block requests may use UDP without another probe.")
-        .arg(sender_key);
+        .arg(verified_host);
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
     QTimer::singleShot(0, this, &NuRpcService::lanFastSyncTick);
@@ -6733,7 +6820,10 @@ void NuRpcService::refreshPeer(const QString& node_id)
         m_udp_fast_sync_current_target_hosts.remove(host_key);
         m_udp_fast_sync_last_request_ms_by_host.remove(host_key);
         m_udp_fast_sync_last_probe_ms_by_host.remove(host_key);
-        m_udp_fast_sync_probe_ids_by_host.remove(host_key);
+        const QString probe_id = m_udp_fast_sync_probe_ids_by_host.take(host_key);
+        if (!probe_id.isEmpty()) {
+            m_udp_fast_sync_probe_hosts_by_id.remove(probe_id);
+        }
         m_udp_fast_sync_probe_failures_by_host.remove(host_key);
         m_udp_fast_sync_peer_node_ids_by_host.remove(host_key);
         m_udp_fast_sync_peer_inflight_counts_by_host.remove(host_key);
@@ -6949,6 +7039,249 @@ void NuRpcService::runRpcCommand(const QString& method, const QString& params_js
     (*run_next)(0);
 }
 
+void NuRpcService::runRpcConsoleCommand(const QString& command_text, const QString& wallet_name)
+{
+    QString clean_command = command_text.trimmed();
+    constexpr int max_console_command_chars = 32768;
+    if (clean_command.size() > max_console_command_chars) {
+        m_console_output += QStringLiteral("\n\n! [large paste omitted]\nConsole input is too large. Keep command input under %1 characters.")
+            .arg(QString::number(max_console_command_chars));
+        Q_EMIT consoleChanged();
+        return;
+    }
+
+    QString batch_error;
+    const QStringList command_texts = splitConsolePasteCommands(clean_command, &batch_error);
+    if (!batch_error.isEmpty()) {
+        m_console_output += QStringLiteral("\n\n> %1\n! %2")
+            .arg(singleLineLimited(clean_command, 120), batch_error);
+        Q_EMIT consoleChanged();
+        return;
+    }
+
+    auto parsed_commands = std::make_shared<QVector<ParsedConsoleCommand>>();
+    parsed_commands->reserve(command_texts.size());
+    for (const QString& command : command_texts) {
+        QString method = command.trimmed();
+        QString params_json;
+        const int first_space = method.indexOf(QRegularExpression(QStringLiteral("\\s")));
+        if (first_space > 0) {
+            const QString maybe_params = method.mid(first_space + 1).trimmed();
+            if (maybe_params.startsWith(QLatin1Char('['))) {
+                params_json = maybe_params;
+                method = method.left(first_space).trimmed();
+            }
+        }
+
+        ParsedConsoleCommand parsed;
+        QString parse_error;
+        if (!parseConsoleCommandForRpc(method, params_json, &parsed, &parse_error)) {
+            m_console_output += QStringLiteral("\n\n> %1\n! %2")
+                .arg(singleLineLimited(command, 120), parse_error);
+            Q_EMIT consoleChanged();
+            return;
+        }
+        parsed_commands->push_back(parsed);
+    }
+
+    if (parsed_commands->isEmpty()) {
+        m_console_output += QStringLiteral("\n\n> \n! Enter an RPC command.");
+        Q_EMIT consoleChanged();
+        return;
+    }
+
+    const QString wallet = wallet_name.trimmed();
+    const bool wallet_scoped = !wallet.isEmpty() && wallet != QLatin1String("__node__");
+    const QString target_label = wallet_scoped ? walletDisplayName(wallet) : QStringLiteral("Node");
+
+    if (parsed_commands->size() > 1) {
+        if (m_console_output.startsWith(QStringLiteral("Welcome to the Defcoin Core Nu RPC console."))) {
+            m_console_output.clear();
+        }
+        m_console_output += QStringLiteral("%1%2  > [pasted batch]\n%3  < Running %4 RPC commands against %5.")
+            .arg(m_console_output.isEmpty() ? QString() : QStringLiteral("\n\n"),
+                 QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")),
+                 QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")),
+                 QString::number(parsed_commands->size()),
+                 target_label);
+        Q_EMIT consoleChanged();
+    }
+
+    auto run_next = std::make_shared<std::function<void(int)>>();
+    *run_next = [this, parsed_commands, wallet_scoped, wallet, target_label, run_next](int index) {
+        if (index >= parsed_commands->size()) return;
+        const ParsedConsoleCommand command = parsed_commands->at(index);
+        const auto callback = [this, command, run_next, index](const QJsonValue& result, const QString& error) {
+            QString rendered;
+            const QString icon = error.isEmpty() ? QStringLiteral("<") : QStringLiteral("!");
+            if (!error.isEmpty()) {
+                rendered = QStringLiteral("%1 failed:\n%2").arg(command.method, error);
+            } else {
+                QJsonDocument out_doc;
+                if (result.isObject()) {
+                    out_doc = QJsonDocument(result.toObject());
+                } else if (result.isArray()) {
+                    out_doc = QJsonDocument(result.toArray());
+                }
+                if (!out_doc.isNull()) {
+                    rendered = QString::fromUtf8(out_doc.toJson(QJsonDocument::Indented));
+                } else if (result.isString()) {
+                    rendered = result.toString();
+                } else if (result.isBool()) {
+                    rendered = result.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+                } else if (result.isDouble()) {
+                    rendered = QString::number(result.toDouble(), 'f', 8);
+                } else if (result.isNull()) {
+                    rendered = QStringLiteral("null");
+                } else {
+                    rendered = QStringLiteral("(empty result)");
+                }
+            }
+            if (m_console_output.startsWith(QStringLiteral("Welcome to the Defcoin Core Nu RPC console."))) {
+                m_console_output.clear();
+            }
+            const QString now = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
+            m_console_output += QStringLiteral("%1%2  > %3\n%4  %5 %6")
+                .arg(m_console_output.isEmpty() ? QString() : QStringLiteral("\n\n"),
+                     now,
+                     command.prompt,
+                     now,
+                     icon,
+                     rendered.trimmed());
+            constexpr int max_console_chars = 120000;
+            if (m_console_output.size() > max_console_chars) {
+                m_console_output = m_console_output.right(max_console_chars);
+            }
+            Q_EMIT consoleChanged();
+            (*run_next)(index + 1);
+        };
+
+        if (wallet_scoped) {
+            rpcCallForWallet(command.method, command.params, wallet, callback);
+        } else {
+            rpcCall(command.method, command.params, false, callback);
+        }
+    };
+    (*run_next)(0);
+}
+
+void NuRpcService::clearConsoleOutput()
+{
+    m_console_output = QStringLiteral("Welcome to the Defcoin Core Nu RPC console.\nUse the command line below for standard Core commands, for example getblockchaininfo or listtransactions \"*\" 5.\nJSON parameter arrays are still accepted after the method name when needed.\n\nWARNING: Do not paste commands from strangers into this console.");
+    Q_EMIT consoleChanged();
+}
+
+void NuRpcService::generatePaperWallet(bool import_public_address, const QString& label)
+{
+    if (!m_rpc_connected) {
+        Q_EMIT userMessage(QStringLiteral("Paper wallet not generated"),
+                           QStringLiteral("Connect to the local backend before generating a paper wallet."));
+        return;
+    }
+
+    QByteArray secret(32, char(0));
+    do {
+        for (int i = 0; i < secret.size(); ++i) {
+            secret[i] = char(QRandomGenerator::system()->generate() & 0xff);
+        }
+    } while (!isValidSecp256k1Secret(secret));
+
+    QByteArray wif_payload;
+    wif_payload.append(char(DEFCOIN_CURRENT_WIF_PREFIX));
+    wif_payload.append(secret);
+    wif_payload.append(char(1)); // compressed key marker
+    const QString wif = encodeBase58Check(wif_payload);
+    secret.fill(0);
+    wif_payload.fill(0);
+
+    m_paper_wallet_address.clear();
+    m_paper_wallet_wif = wif;
+    m_paper_wallet_status = QStringLiteral("Generated private key; deriving Defcoin address through Core descriptor code.");
+    Q_EMIT walletChanged();
+
+    const QString descriptor = QStringLiteral("pkh(%1)").arg(wif);
+    rpcCall(QStringLiteral("getdescriptorinfo"), {descriptor}, false, [this, wif, import_public_address, label](const QJsonValue& descriptor_result, const QString& descriptor_error) {
+        if (!descriptor_error.isEmpty()) {
+            m_paper_wallet_status = QStringLiteral("Paper wallet address derivation failed: %1").arg(descriptor_error);
+            Q_EMIT walletChanged();
+            Q_EMIT userMessage(QStringLiteral("Paper wallet address not derived"), m_paper_wallet_status);
+            return;
+        }
+        const QString checked_descriptor = descriptor_result.toObject().value(QStringLiteral("descriptor")).toString();
+        if (checked_descriptor.isEmpty()) {
+            m_paper_wallet_status = QStringLiteral("Paper wallet address derivation failed: Core returned no descriptor.");
+            Q_EMIT walletChanged();
+            Q_EMIT userMessage(QStringLiteral("Paper wallet address not derived"), m_paper_wallet_status);
+            return;
+        }
+        rpcCall(QStringLiteral("deriveaddresses"), {checked_descriptor}, false, [this, wif, import_public_address, label](const QJsonValue& result, const QString& error) {
+            if (!error.isEmpty() || !result.isArray() || result.toArray().isEmpty()) {
+                m_paper_wallet_status = QStringLiteral("Paper wallet address derivation failed: %1")
+                    .arg(error.isEmpty() ? QStringLiteral("Core returned no address.") : error);
+                Q_EMIT walletChanged();
+                Q_EMIT userMessage(QStringLiteral("Paper wallet address not derived"), m_paper_wallet_status);
+                return;
+            }
+            const QString address = result.toArray().at(0).toString().trimmed();
+            if (!isLikelyBase58AddressText(address)) {
+                m_paper_wallet_status = QStringLiteral("Paper wallet address derivation failed: Core returned an unexpected address.");
+                Q_EMIT walletChanged();
+                Q_EMIT userMessage(QStringLiteral("Paper wallet address not derived"), m_paper_wallet_status);
+                return;
+            }
+            m_paper_wallet_wif = wif;
+            m_paper_wallet_address = address;
+            m_paper_wallet_status = QStringLiteral("Paper wallet generated. Print or record the private key offline; Nu has not imported the private key.");
+            Q_EMIT walletChanged();
+            if (import_public_address) {
+                importWatchOnlyAddress(address,
+                                       label.trimmed().isEmpty() ? QStringLiteral("Paper wallet public address") : label,
+                                       false,
+                                       -1);
+            }
+        });
+    });
+}
+
+void NuRpcService::importWatchOnlyAddress(const QString& address, const QString& label, bool rescan, int start_height)
+{
+    const QString clean_address = address.trimmed();
+    if (!m_wallet_selected) {
+        Q_EMIT userMessage(QStringLiteral("Watch-only address not imported"),
+                           QStringLiteral("Select or load a wallet before importing a watch-only address."));
+        return;
+    }
+    if (!isLikelyBase58AddressText(clean_address)) {
+        Q_EMIT userMessage(QStringLiteral("Watch-only address not imported"),
+                           QStringLiteral("Enter a valid Defcoin Base58 address."));
+        return;
+    }
+    const QString clean_label = label.trimmed().isEmpty() ? QStringLiteral("Watch-only") : label.trimmed();
+    rpcCall(QStringLiteral("importaddress"), {clean_address, clean_label, false}, true, [this, clean_address, clean_label, rescan, start_height](const QJsonValue&, const QString& import_error) {
+        if (!import_error.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Watch-only address not imported"), import_error);
+            return;
+        }
+        setAddressLabel(clean_address, clean_label);
+        refreshWalletStats();
+        if (!rescan) {
+            Q_EMIT userMessage(QStringLiteral("Watch-only address imported"),
+                               QStringLiteral("The public address was imported without a blockchain rescan. It cannot spend funds."));
+            return;
+        }
+        const int bounded_start = start_height >= 0 ? start_height : 0;
+        rpcCall(QStringLiteral("rescanblockchain"), {bounded_start}, true, [this](const QJsonValue&, const QString& rescan_error) {
+            if (!rescan_error.isEmpty()) {
+                Q_EMIT userMessage(QStringLiteral("Watch-only address imported"), QStringLiteral("Import succeeded, but rescan failed: %1").arg(rescan_error));
+                return;
+            }
+            refreshWalletStats();
+            Q_EMIT userMessage(QStringLiteral("Watch-only address imported"),
+                               QStringLiteral("The public address was imported and the wallet rescan was requested. It cannot spend funds."));
+        });
+    });
+}
+
 void NuRpcService::rebuildNodeMetrics()
 {
     const QString sync_value = QStringLiteral("%1% | %2 | %3")
@@ -6958,10 +7291,12 @@ void NuRpcService::rebuildNodeMetrics()
     m_node_metrics = {
         metricRow(QStringLiteral("Syncing"), sync_value,
                   QStringLiteral("Blockchain sync progress, current sync state, and only the transport methods that have actually carried sync traffic during this Nu session.")),
+        metricRow(QStringLiteral("Traffic"), m_metric_traffic,
+                  QStringLiteral("Total backend P2P network traffic reported by getnettotals, independent of the sync-only speed rows.")),
         metricRow(QStringLiteral("Syncing avg speeds"), syncTransportSpeedSummary(),
                   QStringLiteral("Combined session-average sync throughput. UDP timing includes failed attempts and cooldown/retry time so failed probes reduce the average instead of being ignored.")),
-        metricRow(QStringLiteral("Core sync path"), coreSyncPathSummary(),
-                  QStringLiteral("Core-managed sync and validation observed while Nu is syncing. Chain advances here are active-chain height increases not attributed to UDP fast sync; they can include validation of locally available block data and are not proof that TCP downloaded those blocks.")),
+        metricRow(QStringLiteral("Fast Sync TCP"), coreSyncPathSummary(),
+                  QStringLiteral("Core-managed TCP sync and validation observed while Nu is syncing. Chain advances here are active-chain height increases not attributed to UDP fast sync; they can include validation of locally available block data and are not proof that TCP downloaded those blocks.")),
         metricRow(QStringLiteral("Fast Sync UDP"), fastSyncUdpSummary(),
                   QStringLiteral("UDP fast-sync totals for this Nu session. Average speed includes elapsed time from failed UDP attempts, checksum failures, timeouts, and retries so the protocol comparison is not inflated by ignoring failures.")),
         metricRow(QStringLiteral("Fast-sync favor"), syncTransportDecisionSummary(),
@@ -6992,9 +7327,7 @@ void NuRpcService::rebuildNodeMetrics()
         metricRow(QStringLiteral("Top sent P2P messages"), m_metric_peer_messages_sent,
                   QStringLiteral("Largest P2P message categories sent to peers, aggregated from getpeerinfo byte counters.")),
         metricRow(QStringLiteral("Top rec'd P2P messages"), m_metric_peer_messages_received,
-                  QStringLiteral("Largest P2P message categories received from peers, aggregated from getpeerinfo byte counters.")),
-        metricRow(QStringLiteral("Traffic"), m_metric_traffic,
-                  QStringLiteral("Total backend P2P network traffic reported by getnettotals, independent of the sync-only speed row."))
+                  QStringLiteral("Largest P2P message categories received from peers, aggregated from getpeerinfo byte counters."))
     };
 }
 

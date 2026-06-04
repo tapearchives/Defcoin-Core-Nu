@@ -106,6 +106,16 @@ For Defcoin, that means the app should invite users to do things:
    decade about maintainable tooling, active nodes, visible mining, and usable
    public data.
 
+8. Keep Fast Sync and future trusted copy modes distinct.
+
+   Fast Sync is a transport optimization for normal Core-selected block
+   download and validation. Direct Copy Over LAN (DCOL) is a future
+   snapshot-style trusted-LAN copy mode for a user who intentionally chooses to
+   seed local chain state from machines they control. DCOL must never copy
+   wallets, keys, settings, peers, or ban files. It must move only chain/index
+   state, use explicit manifests and hashes before replacing local chain data,
+   and leave normal Core validation and repair paths available after import.
+
 ## Explore Experience Goals
 
 - The first screen should feel like an explorer command center, not a marketing

@@ -10,6 +10,7 @@ RowLayout {
 
     property string title: ""
     property string detail: ""
+    property bool dense: false
     readonly property bool compact: width > 0 && width < 900
 
     ColumnLayout {
@@ -20,7 +21,7 @@ RowLayout {
             Layout.fillWidth: true
             text: root.title
             color: NuTokens.textPrimary
-            font.pixelSize: root.compact ? NuTokens.fontBodyLarge : NuTokens.fontTitle
+            font.pixelSize: root.dense ? NuTokens.fontBodyLarge : (root.compact ? NuTokens.fontBodyLarge : NuTokens.fontTitle)
             font.weight: Font.DemiBold
             wrapMode: Text.Wrap
             maximumLineCount: 2
@@ -33,7 +34,7 @@ RowLayout {
             font.pixelSize: NuTokens.fontSmall
             visible: root.detail.length > 0
             wrapMode: Text.WordWrap
-            maximumLineCount: root.compact ? 3 : 2
+            maximumLineCount: root.dense ? 1 : (root.compact ? 3 : 2)
             elide: Text.ElideRight
             Layout.fillWidth: true
         }

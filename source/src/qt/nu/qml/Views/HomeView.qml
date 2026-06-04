@@ -59,6 +59,7 @@ ColumnLayout {
         Layout.fillWidth: true
         title: "Home"
         detail: ""
+        dense: true
     }
 
     Rectangle {
@@ -92,11 +93,11 @@ ColumnLayout {
 
     NuPanel {
         Layout.fillWidth: true
-        implicitHeight: NuService.availableWallets.length > 0 ? 226 : 180
+        implicitHeight: NuService.availableWallets.length > 0 ? 188 : 154
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: NuTokens.spaceMd
+            spacing: NuTokens.spaceSm
 
             RowLayout {
                 Layout.fillWidth: true
@@ -136,7 +137,7 @@ ColumnLayout {
             Label {
                 text: NuService.totalBalance
                 color: NuTokens.textPrimary
-                font.pixelSize: NuTokens.fontHero
+                font.pixelSize: NuTokens.fontTitle
                 font.weight: Font.DemiBold
             }
             RowLayout {
