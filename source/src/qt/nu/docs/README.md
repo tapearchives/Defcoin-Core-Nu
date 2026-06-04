@@ -48,6 +48,10 @@ wallet keys, signing, validation, and networking out of QML.
 See `build-and-installer-runbook.md` for the current local build, staging,
 installer, cleanup, and verification procedure.
 
+See `cross-build-change-log.md` for the internal Tahoe-to-Lion/Catalina/Windows
+change ledger. Update it for every build that changes behavior, packaging,
+backend interfaces, or porting assumptions.
+
 See `initial-launch-crash-prevention.md` for the confirmed recent launch-crash
 causes, smoke gates, and triage order for new app bundles.
 
