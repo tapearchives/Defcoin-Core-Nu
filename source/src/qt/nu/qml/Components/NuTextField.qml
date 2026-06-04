@@ -35,5 +35,7 @@ Basic.TextField {
         border.color: root.activeFocus ? NuTokens.accentSky : (root.hovered ? NuTokens.lineStrong : NuTokens.lineSubtle)
         border.width: root.activeFocus ? 2 : 1
         radius: NuTokens.radiusSmall
+        Behavior on color { ColorAnimation { duration: NuTokens.motionFast } }
+        Behavior on border.color { ColorAnimation { duration: NuTokens.motionFast } }
     }
 }

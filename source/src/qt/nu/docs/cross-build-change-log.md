@@ -53,6 +53,94 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4w - 2026-06-04 - Shared QML interaction polish
+
+Big picture:
+- Broad UI polish pass over shared QML controls rather than per-screen
+  redesign. The goal is better perceived quality everywhere with low behavioral
+  risk.
+- Buttons, nav items, tabs, combo boxes, text fields, and metric rows now have
+  smoother hover/focus/press feedback.
+- Combo box arrow clicks and keyboard activation are more reliable, which helps
+  Wallet selector, Send address book, Mining pool picker, and other drop-downs.
+- Metric rows now have a subtle hover surface, improving discoverability of
+  dense status/tooltips without taking more vertical space.
+
+Porting priority:
+- Lion Intel: port these shared QML component changes unless Qt 5.5/5.6 lacks a
+  specific animation or handler. If so, keep the visual intent and simplify the
+  animation, not the layout.
+- Catalina UTM: port directly if the QML shell matches Tahoe.
+- Windows: port directly; this also improves keyboard and drop-down behavior on
+  Windows builds.
+- Server: no server changes.
+
+Changed behavior:
+- `NuActionButton` and `NuNavButton` press with a very small scale animation and
+  animate focus/hover colors.
+- `NuActionButton` adds a restrained bottom activity line on hover/focus/press.
+- `NuComboBox` supports Return/Enter/Space popup toggling and the indicator area
+  opens the drop-down reliably.
+- `NuTabButton` gets rounded tabs, animated hover/focus colors, and a selected
+  bottom rule.
+- `NuTextField` animates focus/hover borders.
+- `NuMetricRow` is now a small hoverable rectangle with tighter internal spacing.
+
+Changed files and important details:
+- `source/src/clientversion.h`: visible release label is `26.6.4w`.
+- `source/src/qt/nu/app/CMakeLists.txt`: app bundle release label is
+  `26.6.4w`.
+- `source/src/qt/nu/qml/Theme/Tokens.qml`: adds `motionFast` and
+  `motionNormal` constants for shared animations.
+- `source/src/qt/nu/qml/Components/NuActionButton.qml`: hover/focus/press
+  motion and bottom affordance.
+- `source/src/qt/nu/qml/Components/NuComboBox.qml`: keyboard popup toggle,
+  animated chevron, and click target on the indicator.
+- `source/src/qt/nu/qml/Components/NuMetricRow.qml`: hover surface and tighter
+  row layout.
+- `source/src/qt/nu/qml/Components/NuNavButton.qml`: press motion and animated
+  hover/focus colors.
+- `source/src/qt/nu/qml/Components/NuTabButton.qml`: rounded/animated tab
+  treatment and selected rule.
+- `source/src/qt/nu/qml/Components/NuTextField.qml`: animated focus/hover
+  border.
+
+Compatibility notes:
+- No backend, RPC, wallet, or protocol behavior changed.
+- If any older Qt target has trouble with grouped-property color animations,
+  remove only that animation line; the static states should remain identical.
+
+Build/package notes:
+- Rebuild both `DefcoinCoreNu` and `DefcoinCoreExplore` because shared QML assets
+  changed.
+
+Verification performed:
+- `qmllint -I source/src/qt/nu/qml -I build/nu-qml-arm64-26.6.4v/qml
+  source/src/qt/nu/qml/Components/NuActionButton.qml
+  source/src/qt/nu/qml/Components/NuComboBox.qml
+  source/src/qt/nu/qml/Components/NuMetricRow.qml
+  source/src/qt/nu/qml/Components/NuNavButton.qml
+  source/src/qt/nu/qml/Components/NuTabButton.qml
+  source/src/qt/nu/qml/Components/NuTextField.qml
+  source/src/qt/nu/qml/Views/HomeView.qml source/src/qt/nu/qml/Main.qml`
+  exited successfully. Existing context-property import/unqualified warnings
+  remain, but no new syntax or shadowing error was reported for this pass.
+- `git diff --check` passed.
+- `cmake -S source/src/qt/nu/app -B build/nu-qml-arm64-26.6.4w -G Ninja
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+  -DQt6_DIR=/opt/homebrew/lib/cmake/Qt6
+  -DDEFCOIN_NU_RELEASE_NAME=26.6.4w` completed.
+- `cmake --build build/nu-qml-arm64-26.6.4w --target DefcoinCoreNu
+  DefcoinCoreExplore -j 8` completed.
+- Both app bundles report `CFBundleShortVersionString` and `CFBundleVersion` as
+  `26.6.4w`.
+- Copied Apple Silicon apps to
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.4w-20260604/`.
+
+Risks / follow-up:
+- Visual smoke test should click the Wallet selector, Mining pool picker, Send
+  address book selector, tabs, and Advanced tools toggle.
+
 ### 26.6.4v - 2026-06-04 - Quick Clone warning and streaming scheduler contract
 
 Big picture:

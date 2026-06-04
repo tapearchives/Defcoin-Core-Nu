@@ -39,6 +39,10 @@ Basic.ComboBox {
     onHoveredChanged: if (!hovered) suppressToolTip = false
     onActiveFocusChanged: if (!activeFocus) suppressToolTip = false
 
+    Keys.onReturnPressed: popup.visible ? popup.close() : popup.open()
+    Keys.onEnterPressed: popup.visible ? popup.close() : popup.open()
+    Keys.onSpacePressed: popup.visible ? popup.close() : popup.open()
+
     contentItem: TextInput {
         text: root.editable ? root.editText : root.formattedText(root.currentText)
         color: NuTokens.textPrimary
@@ -75,6 +79,8 @@ Basic.ComboBox {
             anchors.centerIn: parent
             width: 19
             height: 19
+            rotation: root.popup.visible ? 180 : 0
+            Behavior on rotation { NumberAnimation { duration: NuTokens.motionNormal; easing.type: Easing.OutCubic } }
 
             onPaint: {
                 var ctx = getContext("2d")
@@ -100,6 +106,16 @@ Basic.ComboBox {
                 function onVisibleChanged() { arrowCanvas.requestPaint() }
             }
         }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.forceActiveFocus()
+                root.popup.open()
+            }
+        }
     }
 
     background: Rectangle {
@@ -107,6 +123,8 @@ Basic.ComboBox {
         border.color: root.activeFocus || root.popup.visible ? NuTokens.accentSky : (root.hovered ? NuTokens.lineStrong : NuTokens.lineSubtle)
         border.width: root.activeFocus ? 2 : 1
         radius: NuTokens.radiusSmall
+        Behavior on color { ColorAnimation { duration: NuTokens.motionFast } }
+        Behavior on border.color { ColorAnimation { duration: NuTokens.motionFast } }
     }
 
     delegate: Item {

@@ -21,6 +21,12 @@ Basic.Button {
     property bool danger: false
     property string helpText: ""
     property bool suppressToolTip: false
+    readonly property bool hasInteractiveHighlight: hovered || activeFocus || pressed
+
+    scale: pressed ? 0.985 : 1.0
+    opacity: enabled ? 1.0 : 0.62
+    Behavior on scale { NumberAnimation { duration: NuTokens.motionFast; easing.type: Easing.OutCubic } }
+    Behavior on opacity { NumberAnimation { duration: NuTokens.motionFast; easing.type: Easing.OutCubic } }
 
     function surfaceColor() {
         if (!root.enabled) return NuTokens.backgroundBase
@@ -83,5 +89,19 @@ Basic.Button {
         color: root.surfaceColor()
         border.color: root.outlineColor()
         border.width: root.activeFocus ? 2 : 1
+
+        Behavior on color { ColorAnimation { duration: NuTokens.motionFast } }
+        Behavior on border.color { ColorAnimation { duration: NuTokens.motionFast } }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 2
+            radius: 1
+            opacity: root.hasInteractiveHighlight && root.enabled ? 1.0 : 0.0
+            color: root.primary || root.danger ? NuTokens.accentSky : NuTokens.lineStrong
+            Behavior on opacity { NumberAnimation { duration: NuTokens.motionFast; easing.type: Easing.OutCubic } }
+        }
     }
 }

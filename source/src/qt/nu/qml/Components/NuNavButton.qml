@@ -22,6 +22,9 @@ Basic.Button {
     property string helpText: ""
     property bool suppressToolTip: false
 
+    scale: pressed ? 0.988 : 1.0
+    Behavior on scale { NumberAnimation { duration: NuTokens.motionFast; easing.type: Easing.OutCubic } }
+
     Accessible.role: Accessible.Button
     Accessible.name: text
     Accessible.description: helpText
@@ -51,10 +54,12 @@ Basic.Button {
         Image {
             Layout.preferredWidth: 26
             Layout.preferredHeight: 26
+            Layout.alignment: Qt.AlignVCenter
             source: root.iconSource
             visible: root.iconSource.length > 0
             fillMode: Image.PreserveAspectFit
             opacity: root.enabled ? (root.selected ? 1.0 : 0.88) : 0.42
+            Behavior on opacity { NumberAnimation { duration: NuTokens.motionFast } }
         }
 
         Text {
@@ -80,6 +85,8 @@ Basic.Button {
                       ? NuTokens.accentSky
                       : (root.selected ? NuTokens.panelBase : Qt.rgba(1, 1, 1, 0.16))
         border.width: root.activeFocus ? 2 : 1
+        Behavior on color { ColorAnimation { duration: NuTokens.motionFast } }
+        Behavior on border.color { ColorAnimation { duration: NuTokens.motionFast } }
 
         Rectangle {
             width: 3
