@@ -113,6 +113,12 @@ Compatibility notes:
 Build/package notes:
 - Rebuild both `DefcoinCoreNu` and `DefcoinCoreExplore` because shared QML assets
   changed.
+- On macOS, do not copy the app immediately after building only the executable
+  targets. The runnable bundles are produced by `DefcoinCoreNuResources` and
+  `DefcoinCoreExploreResources` or by building the default `ALL` target. Copying
+  after only `DefcoinCoreNu`/`DefcoinCoreExplore` leaves a binary-only `.app`
+  with no `Contents/Resources/nu` payload, which shows a logo-less splash and
+  then exits when QML cannot load.
 
 Verification performed:
 - `qmllint -I source/src/qt/nu/qml -I build/nu-qml-arm64-26.6.4v/qml
@@ -132,8 +138,17 @@ Verification performed:
   -DDEFCOIN_NU_RELEASE_NAME=26.6.4w` completed.
 - `cmake --build build/nu-qml-arm64-26.6.4w --target DefcoinCoreNu
   DefcoinCoreExplore -j 8` completed.
+- `cmake --build build/nu-qml-arm64-26.6.4w --target DefcoinCoreNuResources
+  DefcoinCoreExploreResources -j 8` completed and deployed QML/assets, bundled
+  backend tools, Qt frameworks/plugins/QML imports, and ad-hoc signing.
 - Both app bundles report `CFBundleShortVersionString` and `CFBundleVersion` as
   `26.6.4w`.
+- Verified the repaired bundle contains
+  `Contents/Resources/nu/assets/brand/defcoin-nu-coin-stack-hires.png`,
+  `Contents/Resources/nu/qml/Main.qml`, and
+  `Contents/Resources/nu/bin/defcoind`.
+- `codesign --verify --deep --strict` passed for both repaired app bundles.
+- The repaired distribution `Defcoin Core Nu.app` passed `--smoke-test`.
 - Copied Apple Silicon apps to
   `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.4w-20260604/`.
 

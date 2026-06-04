@@ -24,3 +24,9 @@ This is a QML/interface-only polish release. It does not change wallet storage,
 private key handling, RPC parsing, block validation, Fast Sync negotiation, or
 Quick Clone/DCOL protocol behavior.
 
+## Packaging Note
+
+The Apple Silicon app bundles were republished after the full resource bundle
+target was run. The repaired apps include the splash/logo assets, QML payload,
+bundled backend tools, and Qt runtime files; the earlier binary-only copy could
+show a logo-less splash and exit immediately.
