@@ -2675,11 +2675,7 @@ bool NuRpcService::ensureBackendStarted()
             : QStringLiteral("Defcoin backend -version preflight: %1").arg(output.section(QLatin1Char('\n'), 0, 0)));
     }
 
-    const bool fast_sync_needs_lan_peer_reachability = m_lan_fast_sync_enabled;
-    const bool effective_lan_node_discovery_enabled = m_lan_node_discovery_enabled || fast_sync_needs_lan_peer_reachability;
-    if (fast_sync_needs_lan_peer_reachability && !m_lan_node_discovery_enabled) {
-        appendLaunchDiagnostic(QStringLiteral("UDP fast sync is enabled, so backend launch enables LAN discovery/listening for peer negotiation."));
-    }
+    const bool effective_lan_node_discovery_enabled = m_lan_node_discovery_enabled;
 
     const bool listen_for_peers =
 #if defined(Q_OS_MACOS)
@@ -3503,7 +3499,7 @@ void NuRpcService::schedulePeerNameLookups(const QString& host)
 void NuRpcService::scheduleLanPeerNameLookups(const QString& host)
 {
     if (m_stopping_helper_processes) return;
-    if (!m_lan_node_discovery_enabled && !m_lan_fast_sync_enabled) return;
+    if (!m_lan_node_discovery_enabled) return;
     const QString key = normalizedPeerHost(host);
     const bool has_local_dns_hint = !lanAliasFromDnsName(m_peer_dns_name_by_host.value(key)).isEmpty();
     const bool on_local_subnet = isOnLocalInterfaceSubnet(host);
@@ -4554,9 +4550,7 @@ bool NuRpcService::isLocalInterfaceAddress(const QHostAddress& address) const
 
 void NuRpcService::sendLanDiscoveryAnnouncement()
 {
-    if (!m_lan_fast_sync_socket || !m_lan_fast_sync_enabled) return;
-    const bool lan_announce_enabled = m_lan_node_discovery_enabled || m_lan_fast_sync_enabled;
-    if (!lan_announce_enabled) return;
+    if (!m_lan_fast_sync_socket || !m_lan_fast_sync_enabled || !m_lan_node_discovery_enabled) return;
 
     QSettings settings;
     if (m_lan_discovery_node_id.isEmpty()) {
@@ -4772,6 +4766,9 @@ QString NuRpcService::syncTransportSpeedSummary() const
     const qint64 tcp_total = m_sync_tcp_bytes_received + m_sync_tcp_bytes_sent;
     const qint64 udp_total = m_lan_fast_sync_udp_bytes_received + m_lan_fast_sync_udp_bytes_sent;
     const qint64 combined_total = tcp_total + udp_total;
+    const int udp_blocks = m_lan_fast_sync_blocks_received;
+    const int core_blocks = m_fast_sync_tcp_successes;
+    const int block_total = udp_blocks + core_blocks;
     const double tcp_seconds = tcp_total > 0 ? qMax(1.0, m_sync_tcp_active_seconds) : 0.0;
     const double udp_seconds = udp_total > 0
         ? (m_lan_fast_sync_udp_first_activity_ms > 0 && m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms
@@ -4785,13 +4782,24 @@ QString NuRpcService::syncTransportSpeedSummary() const
         const qint64 average_rate = static_cast<qint64>(std::llround(bytes / qMax(1.0, seconds)));
         return QStringLiteral("%1/s avg (%2)").arg(formatBytes(average_rate), formatBytes(bytes));
     };
+    auto percent_text = [](int part, int total) {
+        if (total <= 0) return QStringLiteral("-");
+        const double percent = (100.0 * static_cast<double>(part)) / static_cast<double>(total);
+        return QStringLiteral("%1%").arg(QString::number(percent, 'f', percent >= 10.0 ? 0 : 1));
+    };
 
     QStringList parts;
-    parts.push_back(QStringLiteral("Combined %1").arg(volume_rate(combined_total, combined_seconds)));
-    parts.push_back(QStringLiteral("TCP/Core %1").arg(volume_rate(tcp_total, tcp_seconds)));
-    parts.push_back(QStringLiteral("UDP %1").arg(volume_rate(udp_total, udp_seconds)));
-    parts.push_back(QStringLiteral("Blocks TCP %1 / UDP %2").arg(m_fast_sync_tcp_successes).arg(m_lan_fast_sync_blocks_received));
-    parts.push_back(QStringLiteral("UDP fail %1").arg(m_fast_sync_udp_failures));
+    parts.push_back(QStringLiteral("Blocks: UDP %1/%2 (%3), Core/TCP %4/%2 (%5)")
+                        .arg(udp_blocks)
+                        .arg(block_total)
+                        .arg(percent_text(udp_blocks, block_total))
+                        .arg(core_blocks)
+                        .arg(percent_text(core_blocks, block_total)));
+    parts.push_back(QStringLiteral("Avg data: all %1, TCP/Core %2, UDP %3")
+                        .arg(volume_rate(combined_total, combined_seconds),
+                             volume_rate(tcp_total, tcp_seconds),
+                             volume_rate(udp_total, udp_seconds)));
+    parts.push_back(QStringLiteral("UDP failures %1").arg(m_fast_sync_udp_failures));
     return parts.join(QStringLiteral(" | "));
 }
 
@@ -4799,22 +4807,27 @@ QString NuRpcService::coreSyncPathSummary() const
 {
     const qint64 total = m_sync_tcp_bytes_received + m_sync_tcp_bytes_sent;
     const double seconds = total > 0 ? qMax(1.0, m_sync_tcp_active_seconds) : 0.0;
+    const int udp_blocks = m_lan_fast_sync_blocks_received;
+    const int core_blocks = m_fast_sync_tcp_successes;
+    const int block_total = udp_blocks + core_blocks;
+    const double share = block_total > 0 ? (100.0 * static_cast<double>(core_blocks)) / static_cast<double>(block_total) : -1.0;
     const QString avg = total > 0
-        ? QStringLiteral("%1/s avg over %2s")
+        ? QStringLiteral("%1/s data avg over %2s")
               .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
                    QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1))
         : QStringLiteral("-");
     const QString ewma = m_fast_sync_tcp_ewma_blocks_per_second > 0.0
-        ? QStringLiteral("%1 adv/s recent").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
+        ? QStringLiteral("%1 blk/s recent").arg(QString::number(m_fast_sync_tcp_ewma_blocks_per_second, 'f', m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
         : QStringLiteral("recent waiting");
-    return QStringLiteral("%1 | total %2 (in %3, out %4) | advances %5 | %6 | samples %7 ok/%8 fail")
-        .arg(avg,
+    return QStringLiteral("Core/TCP path %1/%2 blocks%3 | %4 | %5 | data %6 (in %7, out %8) | fail %9")
+        .arg(QString::number(core_blocks),
+             QString::number(block_total),
+             share >= 0.0 ? QStringLiteral(" (%1%)").arg(QString::number(share, 'f', share >= 10.0 ? 0 : 1)) : QString(),
+             avg,
+             ewma,
              formatBytes(total),
              formatBytes(m_sync_tcp_bytes_received),
              formatBytes(m_sync_tcp_bytes_sent),
-             QString::number(m_fast_sync_tcp_successes),
-             ewma,
-             QString::number(m_fast_sync_tcp_successes),
              QString::number(m_fast_sync_tcp_failures));
 }
 
@@ -4825,11 +4838,15 @@ QString NuRpcService::fastSyncUdpSummary() const
         ? std::clamp((udp_samples * 100) / FAST_SYNC_PROTOCOL_MIN_UDP_PROBES, 0, 100)
         : 100;
     const qint64 total = m_lan_fast_sync_udp_bytes_received + m_lan_fast_sync_udp_bytes_sent;
+    const int udp_blocks = m_lan_fast_sync_blocks_received;
+    const int core_blocks = m_fast_sync_tcp_successes;
+    const int block_total = udp_blocks + core_blocks;
+    const double share = block_total > 0 ? (100.0 * static_cast<double>(udp_blocks)) / static_cast<double>(block_total) : -1.0;
     const double seconds = (m_lan_fast_sync_udp_first_activity_ms > 0 && m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms)
         ? qMax(1.0, double(m_lan_fast_sync_udp_last_activity_ms - m_lan_fast_sync_udp_first_activity_ms) / 1000.0)
         : (total > 0 || m_fast_sync_udp_failures > 0 ? 1.0 : 0.0);
     const QString avg = total > 0
-        ? QStringLiteral("%1/s avg over %2s")
+        ? QStringLiteral("%1/s data avg over %2s")
               .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
                    QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1))
         : QStringLiteral("-");
@@ -4839,16 +4856,17 @@ QString NuRpcService::fastSyncUdpSummary() const
               .arg(QString::number(udp_samples),
                    QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES),
                    QString::number(udp_warmup_percent));
-    return QStringLiteral("%1 | total %2 (in %3, out %4) | packets %5/%6 | blocks %7 | %8 | samples %9 ok/%10 fail | retransmit/checksum %11")
-        .arg(avg,
+    return QStringLiteral("UDP %1/%2 blocks%3 | %4 | %5 | data %6 (in %7, out %8) | packets %9/%10 | fail %11 | retransmit/checksum %12")
+        .arg(QString::number(udp_blocks),
+             QString::number(block_total),
+             share >= 0.0 ? QStringLiteral(" (%1%)").arg(QString::number(share, 'f', share >= 10.0 ? 0 : 1)) : QString(),
+             avg,
+             ewma,
              formatBytes(total),
              formatBytes(m_lan_fast_sync_udp_bytes_received),
              formatBytes(m_lan_fast_sync_udp_bytes_sent),
              QString::number(m_lan_fast_sync_udp_packets_received),
              QString::number(m_lan_fast_sync_udp_packets_sent),
-             QString::number(m_lan_fast_sync_blocks_received),
-             ewma,
-             QString::number(m_fast_sync_udp_successes),
              QString::number(m_fast_sync_udp_failures),
              QString::number(m_lan_fast_sync_retransmit_errors));
 }

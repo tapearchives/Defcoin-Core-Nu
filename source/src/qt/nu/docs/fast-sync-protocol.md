@@ -25,7 +25,7 @@ rule is simpler: Core selects and reserves a block for a connected peer, then
 UDP may carry the block bytes for that exact reservation. If Core cannot reserve
 a block for that peer, no UDP block request is sent.
 
-Starting with the 26.6.4q line, Core can also offer a short UDP transport claim
+Starting with the 26.6.4r line, Core can also offer a short UDP transport claim
 window during normal block scheduling. When Core selects a block from a connected
 peer that advertises `NODE_DEFCOIN_FASTSYNC`, it may mark that exact block
 in-flight and hold TCP `getdata` briefly so Nu's UDP helper can claim it. If UDP
@@ -83,6 +83,10 @@ discovery, local workstation-name lookup, and inbound UDP reachability on a LAN.
 They must not globally disable Fast Sync. Public/internet Fast Sync remains
 eligible as long as UDP Fast Sync is enabled, the peer advertises
 `NODE_DEFCOIN_FASTSYNC`, and Nu receives a valid UDP response.
+
+UDP Fast Sync capability must not implicitly enable LAN broadcast discovery.
+The explicit LAN node discovery setting is the only UI preference that starts
+LAN broadcast announcements and LAN workstation-name probing.
 
 Nu tracks three separate states:
 

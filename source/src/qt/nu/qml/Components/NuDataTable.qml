@@ -33,6 +33,8 @@ Rectangle {
     property bool autoFitOnRowsChanged: false
     property bool autoFitOnFontChanged: false
     property bool alwaysShowHorizontalScrollBar: false
+    property bool fitColumnsToViewport: false
+    property bool wrapBodyText: false
     property int rowRenderLimit: 0
     property int widthMeasurementRowLimit: 1500
     property int defaultSortColumn: -1
@@ -482,7 +484,8 @@ Rectangle {
     }
 
     function rowHeight() {
-        return Math.max(compact ? 24 : 30, Math.ceil(cellFontSize() * 1.75) + (compact ? 4 : 8))
+        const base = Math.max(compact ? 24 : 30, Math.ceil(cellFontSize() * 1.75) + (compact ? 4 : 8))
+        return wrapBodyText ? Math.max(base, Math.ceil(cellFontSize() * 4.4)) : base
     }
 
     function headerNeedsExtraLine(index) {
@@ -539,7 +542,7 @@ Rectangle {
                                                               availableForMetrics,
                                                               root.cellFontSize(),
                                                               root.compact)
-        if (suggested && suggested.length === columns.length) return suggested
+        if (suggested && suggested.length === columns.length) return fitWidthsToViewport(suggested)
 
         let out = defaultWidths()
         for (let c = 0; c < columns.length; ++c) {
@@ -550,6 +553,31 @@ Rectangle {
             }
             const hardMax = isActionColumn(c) ? columnMax(c) : Math.max(columnMax(c), wanted)
             out[c] = Math.max(columnMin(c), Math.min(hardMax, Math.ceil(wanted)))
+        }
+        return fitWidthsToViewport(out)
+    }
+
+    function fitWidthsToViewport(widths) {
+        if (!fitColumnsToViewport) return widths
+        const margins = compact ? NuTokens.spaceSm * 2 : NuTokens.spaceLg * 2
+        const available = Math.max(320, root.width - margins)
+        let sum = 0
+        let minSum = 0
+        let mins = []
+        for (let i = 0; i < widths.length; ++i) {
+            const minWidth = columnMin(i)
+            mins.push(minWidth)
+            sum += Number(widths[i])
+            minSum += minWidth
+        }
+        if (sum <= available) return widths
+        const shrinkable = Math.max(1, sum - minSum)
+        const targetOverage = Math.max(0, sum - available)
+        let out = []
+        for (let j = 0; j < widths.length; ++j) {
+            const width = Number(widths[j])
+            const share = Math.max(0, width - mins[j]) / shrinkable
+            out.push(Math.max(mins[j], Math.floor(width - targetOverage * share)))
         }
         return out
     }
@@ -1351,7 +1379,7 @@ Rectangle {
                                     font.underline: root.explorerLinkUrl(bodyRow.modelData, bodyCell.index).length > 0
                                     verticalAlignment: Text.AlignVCenter
                                     horizontalAlignment: root.cellHorizontalAlignment(bodyRow.modelData, bodyCell.index)
-                                    wrapMode: TextEdit.NoWrap
+                                    wrapMode: root.wrapBodyText ? TextEdit.WordWrap : TextEdit.NoWrap
                                     clip: true
                                 }
 

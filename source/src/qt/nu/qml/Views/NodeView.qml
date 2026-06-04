@@ -416,6 +416,8 @@ ColumnLayout {
             columnWeights: [0.72, 3.6]
             columnMinimums: [172, 360]
             columnMaximums: [230, 1400]
+            fitColumnsToViewport: true
+            wrapBodyText: true
             autoFitOnRowsChanged: true
             alwaysShowHorizontalScrollBar: false
             restoreSavedColumnWidths: false
