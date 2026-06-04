@@ -406,6 +406,52 @@ the UTXO set. The correct artifact is a coherent chain-state snapshot:
   or reindex/reindex-chainstate if the user wants Core to rebuild confidence
   locally.
 
+### Quick Clone Streaming Checksum And Request Scheduler
+
+Quick Clone should optimize for LAN speed and avoid turning the clone back into
+normal validation. The receiver must verify transport integrity, but it should
+not perform expensive script, Merkle, or per-transaction validation during the
+copy. Users who want that can run `Validate existing blockchain` afterward.
+
+The checksum rule is streaming-only:
+
+- The source updates the checksum while reading bytes for a chunk or file range.
+- The receiver updates the same checksum while writing those bytes into staging.
+- The receiver does not scan the same bytes a second time merely to decide
+  whether the copy is usable.
+- Use one fast checksum family for the clone path; do not add a paranoid mode to
+  the UI. CRC32C, CRC64, or XXH3-style checksums are acceptable implementation
+  choices as long as the chosen function is deterministic across all supported
+  platforms and can be updated incrementally as bytes stream.
+- File size, streaming checksum, source manifest id, source height, selected
+  checkpoint hashes, and final best block hash are the clone integrity boundary.
+
+The receiver controls scheduling. Sources should not push arbitrary data without
+receiver credit:
+
+- Build a source set from LAN nodes advertising compatible Quick Clone manifests.
+- Use all sources only through the shortest common matching height. If one source
+  has a longer compatible chain, use all sources through the common height, then
+  continue with the highest source for the remaining tail.
+- Seed each source with two requested ranges or block/file chunks.
+- As soon as a range arrives and its streaming checksum passes, request one more
+  range from that same source. This keeps every healthy sender busy without
+  letting any sender flood the receiver.
+- If a range times out, fails checksum, or stalls, request that exact range from
+  another compatible source and mark the first source down for that range.
+- If the old source later starts sending a range that has already been completed
+  from another source, send a best-effort cancel message and ignore any stale
+  payload for that request id.
+- Cancellation is advisory. The receiver must remain correct even if a source
+  ignores cancel and continues to send stale chunks.
+- Partial staged data may be retained as cache, but it must never be installed as
+  live chain state. Only a complete, manifest-matching staged snapshot may be
+  atomically moved into place while the receiver backend is stopped.
+
+The normal Fast Sync `request-block` flow is intentionally separate. Fast Sync
+can continue to use its Core-reserved block path and validation through
+`submitblock`; Quick Clone/DCOL uses the staged snapshot scheduler above.
+
 The full DCOL snapshot mode must add a manifest before replacing files:
 source identity, source height, best block hash, file list, byte sizes, hashes,
 copy completion status, and a post-copy verification/reindex choice. It must run

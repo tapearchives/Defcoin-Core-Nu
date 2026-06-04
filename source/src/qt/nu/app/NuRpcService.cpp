@@ -7568,8 +7568,8 @@ QString NuRpcService::quickClonePromptText() const
     }
     return QStringLiteral(
         "One or more Defcoin Core Nu nodes were detected on this LAN while this wallet is more than 5% behind.\n\n"
-        "Quick Clone is for machines you own and trust on the same local network. It copies public blockchain data only; it never copies wallets, private keys, passphrases, configuration, peers, bans, or RPC cookies.\n\n"
-        "Normal sync remains the safest default. Quick Clone may be faster, but it trusts the LAN source's already-validated chain snapshot and should only be used with your own nodes.\n\n"
+        "Quick Clone is for machines you own and trust on the same local network. It copies public blockchain data only; it never copies wallets, private keys, passphrases, configuration, peers, bans, address books, or RPC cookies.\n\n"
+        "Normal sync remains the safest default. Quick Clone may be faster, but it trusts the LAN source's already-validated chain snapshot and should only be used with your own nodes. A partial clone is not usable chain state; Nu must finish the staged copy, verify the source manifest and streaming checksums, briefly stop the receiver backend for the final folder swap, then restart and confirm the expected best block hash.\n\n"
         "Current progress: block %1 of %2 headers (%3 blocks missing). Normal sync estimate: %4.\n\n"
         "Yes enables Quick Clone discovery and trusted-LAN copy scaffolding. No keeps normal sync and will not ask again during this missing-chain cycle.")
         .arg(m_block_height)
@@ -7611,7 +7611,7 @@ void NuRpcService::syncUsingQuickCloneNow()
         ? QStringLiteral("A LAN node is advertising a manifest-ready snapshot candidate.")
         : QStringLiteral("No manifest-ready Quick Clone snapshot is currently advertised, so Nu will only arm discovery and safe public-chain copy scaffolding.");
     Q_EMIT userMessage(QStringLiteral("Quick Clone armed"),
-                       QStringLiteral("Quick Clone discovery is armed for trusted LAN nodes. %1 Nu copies only public blockchain data and never copies wallet files, keys, configuration, peers, bans, address books, or RPC cookies. Snapshot replacement remains gated by manifest verification; normal Core validation remains available afterward from Validate existing blockchain.")
+                       QStringLiteral("Quick Clone discovery is armed for trusted LAN nodes. %1 Nu copies only public blockchain data and never copies wallet files, keys, configuration, peers, bans, address books, or RPC cookies. Partial clones stay in staging and are not usable chain state. Snapshot replacement remains gated by manifest and streaming-checksum verification; normal Core validation remains available afterward from Validate existing blockchain.")
                            .arg(snapshot_note));
 }
 

@@ -53,6 +53,81 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4v - 2026-06-04 - Quick Clone warning and streaming scheduler contract
+
+Big picture:
+- Quick Clone now has a warning before the manual `Sync using Quick Clone now`
+  action arms the feature. The automatic missing-chain prompt already warned
+  users; the manual path now carries the same trust/partial-copy warning.
+- The authoritative Fast Sync/DCOL spec now defines the Quick Clone receiver
+  scheduler: receiver-controlled, two ranges in flight per source at startup,
+  replenish only after streaming checksum success, retry timed-out ranges from
+  another compatible source, and send best-effort cancel messages for stale
+  requests.
+- The checksum direction is intentionally speed-first: no paranoid UI mode.
+  Quick Clone should use one deterministic streaming checksum family and update
+  it while bytes are already being read/written.
+- This build still does not install copied chainstate. It defines the contract
+  and UI warning while preserving the manifest gate added in 26.6.4u.
+
+Porting priority:
+- Lion Intel: port the manual Quick Clone warning dialog and the documentation
+  contract. Do not add a second competing clone implementation.
+- Catalina UTM: port the warning dialog if the QML Settings surface exists.
+- Windows: port the warning dialog; Windows wording can mention firewall if a
+  later build adds a platform-specific prompt.
+- Server: update docs only. The server should not advertise Quick Clone snapshot
+  availability until it can create immutable manifests.
+
+Changed behavior:
+- Clicking `Sync using Quick Clone now` opens a selectable warning first.
+- The warning states that Quick Clone is trusted-LAN only, copies public
+  blockchain data only, partial copies are not usable chain state, and final
+  install requires staged-copy verification and a backend restart/swap.
+- Automatic Quick Clone prompt text also says partial clones are not usable and
+  snapshot replacement is gated by manifest plus streaming-checksum checks.
+
+Changed files and important details:
+- `source/src/clientversion.h`: visible release label is `26.6.4v`.
+- `source/src/qt/nu/app/CMakeLists.txt`: app bundle release label is
+  `26.6.4v`.
+- `source/src/qt/nu/qml/Views/SettingsView.qml`: manual Quick Clone button now
+  opens `quickCloneStartDialog`; accept calls `NuService.syncUsingQuickCloneNow`.
+- `source/src/qt/nu/app/NuRpcService.cpp`: automatic prompt and user message
+  include partial-copy and streaming-checksum warnings.
+- `source/src/qt/nu/docs/fast-sync-protocol.md`: adds the receiver scheduler
+  and streaming checksum contract.
+
+Compatibility notes:
+- Existing Fast Sync packet transport remains unchanged in this pass.
+- The active snapshot mover remains blocked until immutable source manifests and
+  receiver staging/install code exist.
+
+Build/package notes:
+- Rebuild both `DefcoinCoreNu` and `DefcoinCoreExplore` because the shared
+  service and QML Settings surface changed.
+
+Verification performed:
+- `git diff --check` passed.
+- `qmllint -I source/src/qt/nu/qml -I build/nu-qml-arm64-26.6.4v/qml
+  source/src/qt/nu/qml/Views/SettingsView.qml source/src/qt/nu/qml/Main.qml`
+  completed with the existing context-property warnings and no syntax errors.
+- `cmake -S source/src/qt/nu/app -B build/nu-qml-arm64-26.6.4v -G Ninja
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+  -DQt6_DIR=/opt/homebrew/lib/cmake/Qt6 -DDEFCOIN_NU_RELEASE_NAME=26.6.4v`
+  configured successfully.
+- `cmake --build build/nu-qml-arm64-26.6.4v --target DefcoinCoreNu
+  DefcoinCoreExplore -j 8` passed.
+- `plutil -p build/nu-qml-arm64-26.6.4v/DefcoinCoreNu.app/Contents/Info.plist`
+  and the matching Explore bundle both reported `CFBundleShortVersionString`
+  and `CFBundleVersion` as `26.6.4v`.
+- Copied both apps to
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.4v-20260604/`.
+
+Risks / follow-up:
+- Implement the actual staged snapshot transfer only after source manifests,
+  range checksums, cancel messages, and atomic receiver swap are present.
+
 ### 26.6.4u - 2026-06-04 - Quick Clone menu surface and validation guardrails
 
 Big picture:

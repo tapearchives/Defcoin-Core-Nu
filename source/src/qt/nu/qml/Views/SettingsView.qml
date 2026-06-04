@@ -213,8 +213,8 @@ ColumnLayout {
                                         text: "Sync using Quick Clone now"
                                         Layout.preferredWidth: 230
                                         primary: true
-                                        helpText: "Arm trusted-LAN Quick Clone discovery manually. Use this only when you trust the LAN source node."
-                                        onClicked: NuService.syncUsingQuickCloneNow()
+                                        helpText: "Open the trusted-LAN Quick Clone warning and arm discovery only after confirmation. Use this only when you trust the LAN source node."
+                                        onClicked: quickCloneStartDialog.open()
                                     }
 
                                     NuActionButton {
@@ -488,6 +488,38 @@ ColumnLayout {
 
                 Item { Layout.fillHeight: true }
             }
+        }
+    }
+
+    NuDialog {
+        id: quickCloneStartDialog
+        title: "Use Quick Clone"
+        dialogWidth: 760
+        acceptText: "Start Quick Clone"
+        cancelText: "Keep normal sync"
+        beforeAccept: function() {
+            NuService.syncUsingQuickCloneNow()
+            return true
+        }
+
+        TextEdit {
+            Layout.fillWidth: true
+            Layout.preferredWidth: Math.max(1, quickCloneStartDialog.availableWidth)
+            width: Math.max(1, quickCloneStartDialog.availableWidth)
+            Layout.preferredHeight: Math.min(Math.max(contentHeight + NuTokens.spaceSm, 250), Math.max(260, root.height - 260))
+            readOnly: true
+            selectByMouse: true
+            persistentSelection: true
+            color: NuTokens.textPrimary
+            selectedTextColor: NuTokens.textInverse
+            selectionColor: NuTokens.lineStrong
+            font.pixelSize: NuTokens.fontBody
+            wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+            textFormat: TextEdit.PlainText
+            text: "Quick Clone is for Defcoin Core Nu nodes you own and trust on the same LAN.\n\n"
+                + "It is designed to copy public blockchain data faster by trusting another local node's already-validated blockchain. It never copies wallet files, private keys, passphrases, configuration, peers, bans, address books, or RPC cookies.\n\n"
+                + "A partial clone is not usable chain state. Nu must finish the staged copy, verify the source manifest and streaming checksums, briefly stop the receiver backend for the final folder swap, then restart and confirm the expected best block hash.\n\n"
+                + "Normal validated sync remains the safest default. Use Quick Clone only when you control the sending node and understand that validation is being deferred unless you run Validate existing blockchain afterward."
         }
     }
 }
