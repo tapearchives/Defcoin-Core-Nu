@@ -160,6 +160,21 @@ ColumnLayout {
                         }
 
                         NuCheckBox {
+                            text: "Quick Clone blocks from trusted LAN peers"
+                            checked: NuService.lanQuickCloneEnabled
+                            helpText: "Advanced. When enabled, Nu looks only for Defcoin Core Nu peers on the local network, pauses ordinary P2P network sync while copying, and requests checksum-protected block data from a LAN machine you trust. This first safe mode still passes received blocks through Core acceptance and never copies wallets, keys, settings, peers, or ban files."
+                            onToggled: NuService.lanQuickCloneEnabled = checked
+                        }
+
+                        NuSelectableText {
+                            Layout.fillWidth: true
+                            text: NuService.lanQuickCloneStatus
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WordWrap
+                        }
+
+                        NuCheckBox {
                             text: "Enable UPnP port mapping"
                             checked: NuService.upnpConnectionsEnabled
                             helpText: "Off by default. UPnP asks a compatible router to open Defcoin's peer port for inbound connections. Leave it off on restricted, shared, or untrusted networks."

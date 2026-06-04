@@ -97,6 +97,8 @@ class NuRpcService final : public QObject
     Q_PROPERTY(bool lanNodeDiscoveryEnabled READ lanNodeDiscoveryEnabled WRITE setLanNodeDiscoveryEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool lanFastSyncEnabled READ lanFastSyncEnabled WRITE setLanFastSyncEnabled NOTIFY settingsChanged)
     Q_PROPERTY(QString lanFastSyncStatus READ lanFastSyncStatus NOTIFY stateChanged)
+    Q_PROPERTY(bool lanQuickCloneEnabled READ lanQuickCloneEnabled WRITE setLanQuickCloneEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(QString lanQuickCloneStatus READ lanQuickCloneStatus NOTIFY stateChanged)
     Q_PROPERTY(bool advancedToolsVisible READ advancedToolsVisible WRITE setAdvancedToolsVisible NOTIFY settingsChanged)
     Q_PROPERTY(bool upnpConnectionsEnabled READ upnpConnectionsEnabled WRITE setUpnpConnectionsEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool showLanNodeDiscoveryNotice READ showLanNodeDiscoveryNotice NOTIFY settingsChanged)
@@ -274,6 +276,8 @@ public:
     bool lanNodeDiscoveryEnabled() const { return m_lan_node_discovery_enabled; }
     bool lanFastSyncEnabled() const { return m_lan_fast_sync_enabled; }
     QString lanFastSyncStatus() const { return m_lan_fast_sync_status; }
+    bool lanQuickCloneEnabled() const { return m_lan_quick_clone_enabled; }
+    QString lanQuickCloneStatus() const { return m_lan_quick_clone_status; }
     bool advancedToolsVisible() const { return m_advanced_tools_visible; }
     bool upnpConnectionsEnabled() const { return m_upnp_connections_enabled; }
     bool showLanNodeDiscoveryNotice() const { return !m_lan_node_discovery_notice_acknowledged && !m_lan_node_discovery_enabled; }
@@ -553,6 +557,7 @@ public Q_SLOTS:
     void setDisallowLanNodeDiscovery(bool enabled);
     void setLanNodeDiscoveryEnabled(bool enabled);
     void setLanFastSyncEnabled(bool enabled);
+    void setLanQuickCloneEnabled(bool enabled);
     void setAdvancedToolsVisible(bool enabled);
     void setUpnpConnectionsEnabled(bool enabled);
     void setAutomaticUpdateChecksEnabled(bool enabled);
@@ -673,6 +678,9 @@ private:
     void recordUdpFastSyncPeerReply(const QString& host);
     void recordUdpFastSyncPeerMiss(const QString& host, const QString& reason = QString());
     bool sendUdpFastSyncProbe(const QString& host, int node_id);
+    void lanQuickCloneTick();
+    QString selectLanQuickCloneTargetHost(int* node_id, int* peer_tip) const;
+    QString selectLanQuickCloneProbeHost(int* node_id) const;
     void sendLanFastSyncBlockRequest(int height, const QString& host, int node_id, const QString& expected_hash);
     void releaseLanFastSyncReservation();
     void handleLanFastSyncProbe(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
@@ -681,6 +689,7 @@ private:
     void handleLanFastSyncChunk(const QJsonObject& header, const QByteArray& payload, const QHostAddress& sender);
     void resetLanFastSyncTransfer(const QString& status);
     bool isUdpFastSyncAllowedPeer(const QHostAddress& address) const;
+    bool isLanQuickCloneAllowedPeer(const QHostAddress& address) const;
     bool hasPrivateUdpFastSyncTarget() const;
     int currentFastSyncDatagramSize() const;
     int currentFastSyncChunkSize() const;
@@ -998,6 +1007,7 @@ private:
     QSet<QString> m_lan_discovery_added_endpoints;
     QSet<QString> m_lan_discovery_addnode_pending;
     QSet<QString> m_lan_discovery_addnode_inflight;
+    QSet<QString> m_lan_quick_clone_candidate_hosts;
     QSet<QString> m_udp_fast_sync_peer_hosts;
     QSet<QString> m_udp_fast_sync_attempted_peer_hosts;
     QSet<QString> m_udp_fast_sync_available_peer_hosts;
@@ -1013,6 +1023,7 @@ private:
     QHash<QString, qint64> m_udp_fast_sync_last_diagnostic_ms_by_reason;
     QHash<QString, int> m_udp_fast_sync_suppressed_diagnostic_count_by_reason;
     QHash<QString, int> m_udp_fast_sync_peer_node_ids_by_host;
+    QHash<QString, int> m_udp_fast_sync_peer_tips_by_host;
     QHash<QString, int> m_udp_fast_sync_peer_inflight_counts_by_host;
     int m_address_book_refresh_generation = 0;
     QVariantList m_address_book;
@@ -1059,9 +1070,12 @@ private:
     bool m_only_defcoin_user_agents = true;
     bool m_advanced_tools_visible = false;
     bool m_lan_fast_sync_enabled = true;
+    bool m_lan_quick_clone_enabled = false;
+    bool m_lan_quick_clone_paused_network = false;
     QUdpSocket* m_lan_fast_sync_socket = nullptr;
     QTimer* m_lan_fast_sync_timer = nullptr;
     QString m_lan_fast_sync_status = QStringLiteral("UDP fast sync idle.");
+    QString m_lan_quick_clone_status = QStringLiteral("Quick Clone off.");
     QString m_lan_fast_sync_request_id;
     QString m_lan_fast_sync_block_hash;
     QString m_lan_fast_sync_block_checksum;

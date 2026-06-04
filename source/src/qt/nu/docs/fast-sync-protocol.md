@@ -356,6 +356,30 @@ but it should not be presented as a normal full-node sync path. It intentionally
 trusts another local machine's existing blockchain database state, so the UI must
 say that clearly and leave normal validated sync as the default.
 
+### Quick Clone (LAN) First Pass
+
+Nu 26.6.4s adds a guarded Quick Clone checkbox as the first implementation step.
+It is intentionally narrower than a full chainstate snapshot:
+
+- It uses only private/local LAN targets discovered by Nu LAN beacons or UDP
+  probes.
+- The receiver pauses ordinary P2P network sync while the copy is active.
+- The request path asks a LAN Nu source for sequential block heights instead of
+  asking Core to reserve a normal P2P in-flight block.
+- The same UDP chunk caps, checksums, source-address replies, and payload bounds
+  used by Fast Sync remain in force.
+- The receiver still submits each assembled block through Core acceptance. This
+  means it is safer than replacing `chainstate`, but it is not yet the final
+  "skip validation by trusting my LAN machine" snapshot workflow.
+- Wallets, private keys, passphrases, configs, peers, and ban files are never
+  copied.
+
+The later full DCOL snapshot mode must add a manifest before replacing files:
+source identity, source height, best block hash, file list, byte sizes, hashes,
+copy completion status, and a post-copy verification/reindex choice. It must run
+with the backend stopped before any `blocks`, `chainstate`, or `indexes` folders
+are moved into place.
+
 ## Diagnostics
 
 Diagnostics exposes:
@@ -369,6 +393,7 @@ Diagnostics exposes:
   and retransmit/checksum count.
 - Current TCP/UDP decision summary.
 - Current UDP probe datagram/chunk size.
+- Quick Clone (LAN) armed/copy/caught-up status.
 - Per-peer observed transfer method: `TCP`, `UDP`, or `TCP+UDP`, shown only
   after that method has transferred accepted data with that peer.
 - Per-peer Fast Sync state: `No`, `Off`, `Advertised`, `Probe sent`, `No reply`,

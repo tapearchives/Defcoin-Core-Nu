@@ -1,4 +1,4 @@
-# Defcoin Core Nu 26.6.4r Functionality Map
+# Defcoin Core Nu 26.6.4s Functionality Map
 
 This map is the release checklist for preserving useful Litecoin Core wallet
 capabilities while reorganizing them into the Nu interface. Nu does not copy
@@ -20,7 +20,7 @@ review history, manage wallets, measure the node, and configure the app.
 | Forensics | Message Scan, Witness Repair, and Contacts | Blockchain oddities, maintenance checks, and local address clusters are readable without exposing raw RPC or requiring manual block scans. |
 | RPC Console | Litecoin-style single-line RPC console with wallet selector | Advanced command execution is available without crowding Metrics. |
 | Metrics | Traffic graph, status rows, and peers | Node transparency is preserved while keeping it out of the main wallet path. |
-| Settings | Network controls, display behavior, update checks, and background-close behavior | App preferences stay together; wallet operations live in Wallet. Node metrics stay in Metrics. |
+| Settings | Network controls, Quick Clone (LAN), display behavior, update checks, and background-close behavior | App preferences stay together; wallet operations live in Wallet. Node metrics stay in Metrics. Quick Clone is explicit, trusted-LAN-only, pauses ordinary P2P sync while copying, and never copies wallet material. |
 
 ## Litecoin Core Feature Mapping
 

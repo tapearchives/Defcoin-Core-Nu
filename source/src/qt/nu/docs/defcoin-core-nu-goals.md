@@ -115,6 +115,11 @@ For Defcoin, that means the app should invite users to do things:
    wallets, keys, settings, peers, or ban files. It must move only chain/index
    state, use explicit manifests and hashes before replacing local chain data,
    and leave normal Core validation and repair paths available after import.
+   Nu 26.6.4s starts with a safer Quick Clone checkbox that pauses ordinary P2P
+   sync and copies LAN blocks through the existing checksum-protected UDP chunk
+   path while still submitting blocks to Core. Treat full chainstate snapshot
+   replacement as a later DCOL phase that requires backend shutdown, manifests,
+   and post-copy verification choices.
 
 ## Explore Experience Goals
 
