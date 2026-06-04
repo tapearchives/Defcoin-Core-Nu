@@ -5189,6 +5189,7 @@ void NuRpcService::resetLanFastSyncTransfer(const QString& status)
     m_lan_fast_sync_chunks.clear();
     m_lan_fast_sync_assembled_bytes = 0;
     m_lan_fast_sync_request_id.clear();
+    m_lan_fast_sync_current_host.clear();
     m_lan_fast_sync_block_hash.clear();
     m_lan_fast_sync_block_checksum.clear();
     m_lan_fast_sync_current_height = -1;
@@ -5300,11 +5301,19 @@ void NuRpcService::lanQuickCloneTick()
     if (m_lan_fast_sync_submit_in_flight) return;
     if (m_lan_fast_sync_request_in_flight) {
         if (m_lan_fast_sync_request_ms > 0 && now - m_lan_fast_sync_request_ms > LAN_FAST_SYNC_REQUEST_TIMEOUT_MS) {
+            const int offline_height = m_lan_fast_sync_current_height;
+            const QString offline_host = m_lan_fast_sync_current_host;
             ++m_lan_fast_sync_retransmit_errors;
             recordFastSyncUdpFailure();
             tuneFastSyncDatagramAfterFailure();
-            resetLanFastSyncTransfer(QStringLiteral("Quick Clone retrying after missing LAN chunks for block %1.")
-                .arg(m_lan_fast_sync_current_height));
+            acknowledgeLanQuickCloneSourceOffline(
+                offline_host,
+                offline_height,
+                QStringLiteral("LAN source stopped answering"));
+            const QString source_text = offline_host.isEmpty() ? QStringLiteral("current LAN source") : offline_host;
+            resetLanFastSyncTransfer(QStringLiteral("Quick Clone marked %1 offline after missing chunks for block %2; trying another trusted LAN source if available.")
+                .arg(source_text)
+                .arg(offline_height));
         } else {
             return;
         }
@@ -5494,6 +5503,39 @@ void NuRpcService::recordUdpFastSyncPeerMiss(const QString& host, const QString&
         m_lan_fast_sync_last_failure_detail = QStringLiteral("%1 for %2").arg(reason, host);
         recordFastSyncUdpDiagnostic(reason, host);
     }
+}
+
+void NuRpcService::acknowledgeLanQuickCloneSourceOffline(const QString& host, int height, const QString& reason)
+{
+    const QString clean_host = host.trimmed();
+    if (clean_host.isEmpty()) return;
+
+    m_lan_quick_clone_candidate_hosts.remove(clean_host);
+    m_quick_clone_snapshot_candidate_hosts.remove(clean_host);
+    m_udp_fast_sync_available_peer_hosts.remove(clean_host);
+    m_udp_fast_sync_used_peer_hosts.remove(clean_host);
+    m_udp_fast_sync_current_target_hosts.remove(clean_host);
+    m_udp_fast_sync_failed_peer_hosts.insert(clean_host);
+    m_udp_fast_sync_peer_inflight_counts_by_host.remove(clean_host);
+    m_udp_fast_sync_last_request_ms_by_host.remove(clean_host);
+
+    const QString probe_id = m_udp_fast_sync_probe_ids_by_host.take(clean_host);
+    if (!probe_id.isEmpty()) {
+        m_udp_fast_sync_probe_hosts_by_id.remove(probe_id);
+    }
+
+    m_udp_fast_sync_probe_failures_by_host.insert(
+        clean_host,
+        qMax(1, m_udp_fast_sync_probe_failures_by_host.value(clean_host, 0) + 1));
+    m_udp_fast_sync_last_probe_ms_by_host.insert(clean_host, QDateTime::currentMSecsSinceEpoch());
+
+    const QString detail = reason.trimmed().isEmpty()
+        ? QStringLiteral("LAN source stopped answering")
+        : reason.trimmed();
+    m_lan_fast_sync_last_failure_detail = height > 0
+        ? QStringLiteral("%1 for %2 near block %3").arg(detail, clean_host).arg(height)
+        : QStringLiteral("%1 for %2").arg(detail, clean_host);
+    recordFastSyncUdpDiagnostic(QStringLiteral("Quick Clone source offline"), m_lan_fast_sync_last_failure_detail);
 }
 
 bool NuRpcService::sendUdpFastSyncProbe(const QString& host, int node_id)
@@ -5694,6 +5736,10 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
     m_lan_fast_sync_chunks.clear();
     m_lan_fast_sync_assembled_bytes = 0;
     m_lan_fast_sync_request_id = QUuid::createUuid().toString(QUuid::Id128);
+    m_lan_fast_sync_current_host = normalizedFastSyncHost(peer_address);
+    if (m_lan_fast_sync_current_host.isEmpty()) {
+        m_lan_fast_sync_current_host = host.trimmed();
+    }
     m_lan_fast_sync_current_height = height;
     m_lan_fast_sync_expected_chunks = 0;
     m_lan_fast_sync_expected_size = 0;
@@ -5729,6 +5775,12 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
             !m_udp_fast_sync_available_peer_hosts.contains(key) &&
             !m_udp_fast_sync_used_peer_hosts.contains(key)) {
             m_udp_fast_sync_failed_peer_hosts.insert(key);
+        }
+        if (clone_mode) {
+            acknowledgeLanQuickCloneSourceOffline(
+                key.isEmpty() ? host : key,
+                height,
+                QStringLiteral("LAN source send failed: %1").arg(m_lan_fast_sync_socket ? m_lan_fast_sync_socket->errorString() : QStringLiteral("socket unavailable")));
         }
         ++m_lan_fast_sync_retransmit_errors;
         recordFastSyncUdpFailure();

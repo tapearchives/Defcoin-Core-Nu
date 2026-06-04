@@ -689,6 +689,7 @@ private:
     bool isUdpFastSyncHostVerified(const QString& host) const;
     void recordUdpFastSyncPeerReply(const QString& host);
     void recordUdpFastSyncPeerMiss(const QString& host, const QString& reason = QString());
+    void acknowledgeLanQuickCloneSourceOffline(const QString& host, int height, const QString& reason);
     bool sendUdpFastSyncProbe(const QString& host, int node_id);
     void lanQuickCloneTick();
     void evaluateQuickClonePrompt();
@@ -1101,6 +1102,7 @@ private:
     QString m_lan_fast_sync_status = QStringLiteral("UDP fast sync idle.");
     QString m_lan_quick_clone_status = QStringLiteral("Quick Clone off.");
     QString m_lan_fast_sync_request_id;
+    QString m_lan_fast_sync_current_host;
     QString m_lan_fast_sync_block_hash;
     QString m_lan_fast_sync_block_checksum;
     QHash<int, QByteArray> m_lan_fast_sync_chunks;

@@ -335,6 +335,45 @@ Rectangle {
         return false
     }
 
+    function selectedDataRowKeys() {
+        let sorted = sortedRows()
+        let valid = []
+        for (let i = 0; i < sorted.length; ++i) {
+            const key = rowKey(sorted[i])
+            if (key.length > 0 && valid.indexOf(key) < 0) valid.push(key)
+        }
+
+        let keys = []
+        function appendKey(key) {
+            const clean = String(key === undefined || key === null ? "" : key).trim()
+            if (clean.length === 0) return
+            if (valid.indexOf(clean) < 0) return
+            if (keys.indexOf(clean) < 0) keys.push(clean)
+        }
+
+        if (rowSelectionEnabled) {
+            for (let i = 0; i < selectedRowKeys.length; ++i) appendKey(selectedRowKeys[i])
+        }
+        if (keys.length > 0 || !hasSelection) return keys
+
+        function appendRow(rowIndex) {
+            if (rowIndex < 0 || rowIndex >= sorted.length) return
+            appendKey(rowKey(sorted[rowIndex]))
+        }
+
+        if (hasRangeSelection) {
+            const start = Math.max(0, Math.min(selectionStartRow, selectionEndRow))
+            const end = Math.min(sorted.length - 1, Math.max(selectionStartRow, selectionEndRow))
+            for (let row = start; row <= end; ++row) appendRow(row)
+        } else {
+            for (let i = 0; i < selectedCellKeys.length; ++i) {
+                const parts = String(selectedCellKeys[i]).split(":")
+                if (parts.length > 0) appendRow(Number(parts[0]))
+            }
+        }
+        return keys
+    }
+
     function isRowSelected(row) {
         if (!rowSelectionEnabled) return false
         const key = rowKey(row)

@@ -53,6 +53,75 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4x - 2026-06-04 - Peer row actions and Quick Clone offline source acknowledgement
+
+Big picture:
+- Fix a Metrics > Peers interaction bug where `Retest FastSync` could report
+  "Select one peer row first" even when the user had visually selected one row.
+- Make Quick Clone receiver state honest when a trusted LAN source disappears:
+  a source that times out or cannot receive the UDP request is marked offline
+  and removed from active verified source sets until it reappears through a
+  later beacon/probe.
+
+Porting priority:
+- Lion Intel: port this directly. The user hit the row-selection failure on the
+  Tahoe UI, and the same table/action pattern exists in Lion.
+- Catalina UTM: port the QML row-key helper and Peer button validation if the
+  same QML table is present.
+- Windows: port directly so setup/portable builds keep the same peer-action
+  behavior.
+- Server: no UI port needed. Server Quick Clone/Fast Sync code should use the
+  same offline-source demotion if/when it runs receiver-side Quick Clone logic.
+
+Changed behavior:
+- `Retest FastSync` and `Ban peer` now call the backend only with one numeric
+  node id resolved from the current table rows. Stale or non-row selections no
+  longer pass through as invalid ids.
+- `NuDataTable.selectedDataRowKeys()` returns selected row keys from real
+  current rows and falls back from a selected cell/range to its data row.
+- Quick Clone stores the current source host per in-flight request. On timeout
+  or send failure, the receiver removes that host from Quick Clone candidate,
+  snapshot candidate, UDP available, UDP used, and current target sets, records a
+  diagnostic, and reports that the source was marked offline.
+
+Changed files and important details:
+- `source/src/qt/nu/qml/Components/NuDataTable.qml`: added
+  `selectedDataRowKeys()` helper. It filters row keys against the current sorted
+  rows to avoid stale selection keys.
+- `source/src/qt/nu/qml/Views/NodeView.qml`: Peer actions now use
+  `selectedSinglePeerRowId()` instead of `selectedPeerNodeIds[0]`.
+- `source/src/qt/nu/app/NuRpcService.h/.cpp`: added
+  `m_lan_fast_sync_current_host` and
+  `acknowledgeLanQuickCloneSourceOffline(...)`; Quick Clone timeouts and send
+  failures now demote the exact source host.
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  visible release label is `26.6.4x`.
+- `source/src/qt/nu/docs/release-notes-26.6.4x.md`: user-facing release notes.
+
+Compatibility notes:
+- The Quick Clone change does not alter UDP packet format, service bits, Core
+  validation, or wallet data. It is receiver-side source bookkeeping.
+- A source can be admitted again when it later sends a beacon/probe response.
+
+Build/package notes:
+- Build with `-DDEFCOIN_NU_RELEASE_NAME=26.6.4x`.
+- Run resource bundle targets before copying distribution apps; otherwise the
+  app can launch with missing splash/QML resources.
+
+Verification performed:
+- `qmllint -I source/src/qt/nu/qml -I build/nu-qml-arm64-26.6.4w/DefcoinCoreNu.app/Contents/Resources/qml source/src/qt/nu/qml/Components/NuDataTable.qml source/src/qt/nu/qml/Views/NodeView.qml` exited 0; it still reports the known local `Defcoin.Nu` import warning.
+- `git diff --check` passed.
+- `cmake -S source/src/qt/nu/app -B build/nu-qml-arm64-26.6.4x -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DQt6_DIR=/opt/homebrew/lib/cmake/Qt6 -DDEFCOIN_NU_RELEASE_NAME=26.6.4x` configured successfully.
+- `cmake --build build/nu-qml-arm64-26.6.4x --target DefcoinCoreNu DefcoinCoreExplore -j 8` passed.
+- `cmake --build build/nu-qml-arm64-26.6.4x --target DefcoinCoreNuResources DefcoinCoreExploreResources -j 8` passed and codesigned both bundles.
+- `codesign --verify --deep --strict` passed for both build and distribution apps.
+- Distribution `Defcoin Core Nu.app/Contents/MacOS/DefcoinCoreNu --smoke-test` exited 0.
+
+Risks / follow-up:
+- If a LAN source is temporarily overloaded rather than offline, this build
+  still demotes it after the timeout. That is intentional for the current
+  trusted-LAN copy flow because another source should be tried promptly.
+
 ### 26.6.4w - 2026-06-04 - Shared QML interaction polish
 
 Big picture:

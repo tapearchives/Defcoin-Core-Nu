@@ -140,6 +140,25 @@ ColumnLayout {
         return rows
     }
 
+    function selectedPeerRowIds() {
+        const source = peersTable ? peersTable.selectedDataRowKeys() : root.selectedPeerNodeIds
+        let ids = []
+        for (let i = 0; source && i < source.length; ++i) {
+            const clean = String(source[i] === undefined || source[i] === null ? "" : source[i]).trim()
+            if (/^[0-9]+$/.test(clean) && ids.indexOf(clean) < 0) ids.push(clean)
+        }
+        return ids
+    }
+
+    function selectedSinglePeerRowId() {
+        const ids = selectedPeerRowIds()
+        return ids.length === 1 ? ids[0] : ""
+    }
+
+    function hasSinglePeerRowSelection() {
+        return selectedSinglePeerRowId().length > 0
+    }
+
     function applyPeerSortForCurrentView() {
         if (!peersTable) return
         const viewKey = peerViewToggle.currentIndex === 0 ? root.peerSimpleSortKey : root.peerDetailedSortKey
@@ -459,17 +478,17 @@ ColumnLayout {
                 NuActionButton {
                     text: "Retest FastSync"
                     Layout.preferredWidth: 136
-                    enabled: root.selectedPeerNodeIds.length === 1
+                    enabled: root.hasSinglePeerRowSelection()
                     helpText: "Clear this peer's cached UDP Fast Sync state, reconnect, and test Fast Sync negotiation again."
-                    onClicked: NuService.refreshPeer(root.selectedPeerNodeIds[0])
+                    onClicked: NuService.refreshPeer(root.selectedSinglePeerRowId())
                 }
 
                 NuActionButton {
                     text: "Ban peer"
                     Layout.preferredWidth: 104
-                    enabled: root.selectedPeerNodeIds.length === 1
+                    enabled: root.hasSinglePeerRowSelection()
                     helpText: "Add the selected peer address to Core's ban list and disconnect it."
-                    onClicked: NuService.banPeer(root.selectedPeerNodeIds[0])
+                    onClicked: NuService.banPeer(root.selectedSinglePeerRowId())
                 }
             }
 
