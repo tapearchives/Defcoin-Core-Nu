@@ -53,6 +53,71 @@ Risks / follow-up:
 
 ## Entries
 
+### server-fast-sync-20260604 - 2026-06-04 - dc903 responder parity with current Fast Sync probes
+
+Big picture:
+- The public dc903 Fast Sync responder was updated to match the current Nu
+  requester wire behavior. Current wallets probe first; a server that only
+  accepts old `request-block` packets will stay stuck at `Advertised` or
+  `Probe sent`.
+- This is a server-side deployment plus protocol-doc update, not a new desktop
+  version bump.
+
+Porting priority:
+- Lion Intel: ensure the Lion requester expects `probe -> probe-ack` before
+  block requests and continues using service bit 29, not User-Agent text, for
+  capability.
+- Catalina UTM: same as Lion if Fast Sync is present there.
+- Windows: same requester behavior as Tahoe; do not special-case server peers.
+- Server: deploy `source/src/qt/nu/tools/defcoin_fast_syncd.py` when the
+  requester protocol changes; do not leave the server on an older responder.
+
+Changed behavior:
+- The server sidecar now answers `probe` packets with `probe-ack`.
+- Server authorization is based on connected Core TCP peers advertising
+  `NODE_DEFCOIN_FASTSYNC` in `getpeerinfo.services`; User-Agent is diagnostics
+  only.
+- The sidecar remains responder-only. It does not request blocks from clients,
+  does not bypass validation for clients, and does not change legacy v1.0.x TCP
+  behavior.
+
+Changed files and important details:
+- `source/src/qt/nu/docs/fast-sync-protocol.md`: added a server feature parity
+  section and deployment checks requiring loopback probe and block request
+  verification.
+- `/usr/local/sbin/defcoin-fast-syncd` on dc903: replaced with the current
+  Tahoe Nu script. Remote backup:
+  `/usr/local/sbin/defcoin-fast-syncd.bak-20260604-122130`.
+- `/Volumes/TB5_4TB/d/litecoincore/Defcoin Core Nu/local-dev-notes/SERVER_CHANGELOG.md`:
+  local operational server changelog updated.
+- `/Volumes/TB5_4TB/server_backups/dc903_dfc_2026-04-15/REMOTE_FINDINGS_2026-04-15.txt`:
+  live server evidence trail updated.
+
+Compatibility notes:
+- Public server requests are capped to internet-safe datagram sizing unless the
+  requester is private/local.
+- Older Defcoin Core peers do not advertise bit 29 and are therefore never
+  placed in the UDP allowlist.
+
+Verification performed:
+- `python3 -m py_compile source/src/qt/nu/tools/defcoin_fast_syncd.py` passed.
+- Remote service restart passed; `defcoind`, `p2pool-defcoin`, and
+  `defcoin-fast-syncd` were active.
+- `ss -lunp` showed UDP listeners on `0.0.0.0:10334` and `[::]:10334`.
+- Remote loopback probe returned `probe-ack`, then block 1 with matching chunk
+  and whole-block SHA-256 checksums.
+- Public Tahoe probe to `defcoin.dc903.org:10334` returned `probe-ack`, then
+  block 1 with matching checksums.
+- TCP communication checks succeeded for Core P2P `10332`, P2Pool `1337`, and
+  `https://defcoin.dc903.org/pool`.
+
+Risks / follow-up:
+- A real wallet should still be observed accepting at least one server-sourced
+  UDP block during IBD before calling public Fast Sync fully proven.
+- The server backend still reports `/DefcoinCoreNu:26.6.1/`; that does not
+  block the responder sidecar, but a future server-core upgrade should keep the
+  Fast Sync service bit and RPC behavior aligned with Tahoe.
+
 ### 26.6.4t - 2026-06-04 - LAN Fast Copy naming, Metrics row density, macOS bundle metadata
 
 Big picture:
@@ -173,4 +238,3 @@ Risks / follow-up:
   table uses unusual icons or custom delegates, verify row picking and scrolling.
 - If future Homebrew Qt changes its deployment target again, rerun the plist and
   `vtool` checks rather than hard-coding assumptions.
-

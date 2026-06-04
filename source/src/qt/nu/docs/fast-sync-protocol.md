@@ -441,6 +441,35 @@ Diagnostics exposes:
 UDP averages include time spent in failed attempts, timeouts, checksum failures,
 and retries so UDP cannot look artificially faster by ignoring failed work.
 
+## Server Feature Parity
+
+The public server must track the same Fast Sync wire behavior as the current Nu
+requester. A server that only answers old `request-block` packets but ignores
+`probe` is not compatible with current wallets; those wallets will remain in
+`Advertised` or `Probe sent` state and never promote the server to verified UDP
+reachability.
+
+The dc903 responder must provide:
+
+- `probe` -> `probe-ack` negotiation with echoed request id, responder tip,
+  negotiated `max_datagram`, negotiated `chunk_bytes`, responder UDP port, and
+  observed sender port.
+- `request-block` -> `block-chunk` responses using the exact datagram source
+  tuple from `recvfrom`, never an advertised reply address that could be abused
+  for reflection.
+- Service-bit allowlisting from Core RPC `getpeerinfo.services`; the User-Agent
+  is useful diagnostics only and must not authorize Fast Sync.
+- Loopback allowance for local administrator tests unless explicitly disabled.
+- Internet datagram clamp to `1472` bytes and private/local clamp to `16640`
+  bytes, both still subject to header, payload, chunk, block-size, and
+  rate-limit caps.
+- The same protocol prefix, capability string, version, JSON header limit,
+  payload-size check, SHA-256 chunk checksum, and SHA-256 whole-block checksum
+  used by the desktop helper.
+- Responder-only behavior. The server sidecar does not select blocks, does not
+  request from clients, and does not alter normal Core P2P behavior for legacy
+  Defcoin v1.0.x wallets.
+
 ## Server Deployment
 
 The server implementation is `source/src/qt/nu/tools/defcoin_fast_syncd.py`
@@ -455,7 +484,10 @@ Deployment rules:
 3. Start `defcoin-fast-syncd` after `defcoind.service`.
 4. Confirm `ss -lunp` shows UDP `10334`.
 5. Confirm `defcoin-fast-syncd` logs `require_nu_peer=True`.
-6. Confirm a Nu wallet receives at least one validated block over UDP before
+6. Confirm loopback `probe` returns `probe-ack`.
+7. Confirm loopback `request-block` returns chunk data and the full-block
+   checksum matches the payload.
+8. Confirm a Nu wallet receives at least one validated block over UDP before
    treating the server as deployed.
 
 The server can serve larger datagrams to private/local requesters, but internet
