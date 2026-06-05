@@ -53,6 +53,61 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4z - 2026-06-04 - LAN UDP requests without clone_mode
+
+Big picture:
+- Live Tahoe `26.6.4y` testing showed one remaining failure after the old app
+  was replaced: Lion retried UDP after its quiet period and Tahoe still logged
+  `dropped UDP Fast Sync block request from non-peer - 192.168.0.189:10334`.
+- The y fix was too narrow because it only admitted trusted-LAN requests when
+  the packet had `clone_mode=true`. Lion's request path can issue LAN block
+  requests without that flag.
+
+Porting priority:
+- Lion Intel: port directly. The same gate must be used when Lion receives LAN
+  UDP requests or chunks.
+- Catalina UTM: port directly if Fast Sync is enabled.
+- Windows: port directly.
+- Server: port equivalent behavior if the server serves LAN/private UDP block
+  requests with this transport layer.
+
+Changed behavior:
+- Private/LAN UDP `request-block` datagrams now reach the guarded serving
+  handler even if the packet is not marked `clone_mode`.
+- Private/LAN UDP `block-chunk` datagrams now reach the guarded chunk handler;
+  the handler still validates request id, height, checksums, and expected hash
+  before accepting data.
+- Public internet peers still need the normal Fast Sync peer verification before
+  request/chunk packets are accepted.
+
+Changed files and important details:
+- `source/src/qt/nu/app/NuRpcService.cpp`: expanded only the UDP dispatcher and
+  handler pre-gates for private/LAN senders. Packet format is unchanged.
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  visible release label is `26.6.4z`.
+- `source/src/qt/nu/docs/release-notes-26.6.4z.md`: user-facing notes.
+
+Compatibility notes:
+- Older Defcoin Core peers are unaffected because they do not use the Nu UDP
+  transport. Normal TCP/Core sync remains unchanged.
+- The LAN exception only serves public block data and still goes through the
+  existing chunk/request validation path.
+
+Build/package notes:
+- Build/package only `DefcoinCoreNuResources` for Nu. Explore remains separate.
+
+Verification performed:
+- `git diff --check` passed.
+- Tahoe arm64 app configured and built with Qt 6 and `DEFCOIN_NU_RELEASE_NAME=26.6.4z`.
+- Backend tools rebuilt from the same source tree; bundled `defcoind` and
+  `defcoin-cli` report `v26.6.4z`.
+- Built app passed `codesign --verify --deep --strict`.
+
+Risks / follow-up:
+- Retest with Lion after its 300-second UDP quiet period or after restarting
+  Lion. Success criteria: no new `non-peer` drop on Tahoe and Lion logs accepted
+  UDP blocks/chunks rather than Quick Clone timeouts.
+
 ### 26.6.4y - 2026-06-04 - LAN UDP request dispatcher and provisional peer fix
 
 Big picture:

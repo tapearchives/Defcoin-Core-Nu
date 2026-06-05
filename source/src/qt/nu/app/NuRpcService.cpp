@@ -5951,14 +5951,16 @@ void NuRpcService::handleLanFastSyncDatagrams()
             handleLanFastSyncProbeAck(header, sender, datagram.senderPort());
         } else if (type == QLatin1String("request-block")) {
             const bool clone_request = header.value(QStringLiteral("clone_mode")).toBool(false);
-            if (!isUdpFastSyncAllowedPeer(sender) && !(clone_request && isLanQuickCloneAllowedPeer(sender))) {
+            const bool lan_request = isPrivateOrLocalFastSyncAddress(sender);
+            if (!isUdpFastSyncAllowedPeer(sender) && !lan_request && !(clone_request && isLanQuickCloneAllowedPeer(sender))) {
                 recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync block request from non-peer"),
                     udpFastSyncEndpointText(sender, datagram.senderPort()));
                 continue;
             }
             handleLanFastSyncRequest(header, sender, datagram.senderPort());
         } else if (type == QLatin1String("block-chunk")) {
-            if (!isUdpFastSyncAllowedPeer(sender) && !(m_lan_quick_clone_enabled && isLanQuickCloneAllowedPeer(sender))) {
+            const bool lan_chunk = isPrivateOrLocalFastSyncAddress(sender);
+            if (!isUdpFastSyncAllowedPeer(sender) && !lan_chunk && !(m_lan_quick_clone_enabled && isLanQuickCloneAllowedPeer(sender))) {
                 recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync block chunk from non-peer"),
                     udpFastSyncEndpointText(sender, datagram.senderPort()));
                 continue;
@@ -6101,7 +6103,7 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
 {
     if (!m_rpc_connected || !m_lan_fast_sync_enabled) return;
     const bool clone_request = header.value(QStringLiteral("clone_mode")).toBool(false);
-    if (!isUdpFastSyncAllowedPeer(sender) && !(clone_request && isLanQuickCloneAllowedPeer(sender))) return;
+    if (!isUdpFastSyncAllowedPeer(sender) && !isPrivateOrLocalFastSyncAddress(sender) && !(clone_request && isLanQuickCloneAllowedPeer(sender))) return;
     const QString request_id = header.value(QStringLiteral("id")).toString();
     static const QRegularExpression request_id_re(QStringLiteral(R"(^[0-9a-f]{32}$)"), QRegularExpression::CaseInsensitiveOption);
     if (!request_id_re.match(request_id).hasMatch()) return;
@@ -6188,7 +6190,7 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
 void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByteArray& payload, const QHostAddress& sender)
 {
     if (!m_lan_fast_sync_request_in_flight || m_lan_fast_sync_submit_in_flight) return;
-    if (!isUdpFastSyncAllowedPeer(sender) && !(m_lan_quick_clone_enabled && isLanQuickCloneAllowedPeer(sender))) return;
+    if (!isUdpFastSyncAllowedPeer(sender) && !isPrivateOrLocalFastSyncAddress(sender) && !(m_lan_quick_clone_enabled && isLanQuickCloneAllowedPeer(sender))) return;
     const QString sender_key = normalizedFastSyncHost(sender);
     if (header.value(QStringLiteral("id")).toString() != m_lan_fast_sync_request_id) return;
     const int height = header.value(QStringLiteral("height")).toInt(-1);
