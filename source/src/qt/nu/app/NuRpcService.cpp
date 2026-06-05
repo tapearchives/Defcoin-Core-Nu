@@ -5950,14 +5950,15 @@ void NuRpcService::handleLanFastSyncDatagrams()
                 udpFastSyncEndpointText(sender, datagram.senderPort()));
             handleLanFastSyncProbeAck(header, sender, datagram.senderPort());
         } else if (type == QLatin1String("request-block")) {
-            if (!isUdpFastSyncAllowedPeer(sender)) {
+            const bool clone_request = header.value(QStringLiteral("clone_mode")).toBool(false);
+            if (!isUdpFastSyncAllowedPeer(sender) && !(clone_request && isLanQuickCloneAllowedPeer(sender))) {
                 recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync block request from non-peer"),
                     udpFastSyncEndpointText(sender, datagram.senderPort()));
                 continue;
             }
             handleLanFastSyncRequest(header, sender, datagram.senderPort());
         } else if (type == QLatin1String("block-chunk")) {
-            if (!isUdpFastSyncAllowedPeer(sender)) {
+            if (!isUdpFastSyncAllowedPeer(sender) && !(m_lan_quick_clone_enabled && isLanQuickCloneAllowedPeer(sender))) {
                 recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync block chunk from non-peer"),
                     udpFastSyncEndpointText(sender, datagram.senderPort()));
                 continue;
@@ -5976,13 +5977,31 @@ void NuRpcService::handleLanFastSyncDatagrams()
 void NuRpcService::handleLanFastSyncProbe(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port)
 {
     if (!m_rpc_connected || !m_lan_fast_sync_enabled) return;
-    const bool peer_confirmed = isUdpFastSyncAllowedPeer(sender);
+    bool peer_confirmed = isUdpFastSyncAllowedPeer(sender);
+    const QString sender_key = normalizedFastSyncHost(sender);
     const QString request_id = header.value(QStringLiteral("id")).toString();
     static const QRegularExpression request_id_re(QStringLiteral(R"(^[0-9a-f]{32}$)"), QRegularExpression::CaseInsensitiveOption);
     if (!request_id_re.match(request_id).hasMatch()) {
         recordFastSyncUdpDiagnostic(QStringLiteral("ignored UDP probe with invalid transaction id"),
             QStringLiteral("%1; id-len=%2").arg(udpFastSyncEndpointText(sender, sender_port)).arg(request_id.size()));
         return;
+    }
+    if (!peer_confirmed && !sender_key.isEmpty() && isPrivateOrLocalFastSyncAddress(sender)) {
+        const int sender_node_id = header.value(QStringLiteral("node_id")).toInt(-1);
+        const int sender_tip = header.value(QStringLiteral("tip")).toInt(-1);
+        m_udp_fast_sync_peer_hosts.insert(sender_key);
+        m_udp_fast_sync_available_peer_hosts.insert(sender_key);
+        m_udp_fast_sync_failed_peer_hosts.remove(sender_key);
+        m_udp_fast_sync_probe_failures_by_host.remove(sender_key);
+        if (sender_node_id >= 0) {
+            m_udp_fast_sync_peer_node_ids_by_host.insert(sender_key, sender_node_id);
+        }
+        if (sender_tip >= 0) {
+            m_udp_fast_sync_peer_tips_by_host.insert(sender_key, sender_tip);
+        }
+        peer_confirmed = true;
+        recordFastSyncUdpDiagnostic(QStringLiteral("accepted LAN UDP Fast Sync probe as provisional peer"),
+            QStringLiteral("%1 id %2").arg(udpFastSyncEndpointText(sender, sender_port), request_id.left(8)));
     }
     const int advertised_reply_port = header.value(QStringLiteral("port")).toInt(sender_port);
     const quint16 reply_port = sender_port > 0 ? sender_port : quint16(advertised_reply_port);
@@ -6025,7 +6044,6 @@ void NuRpcService::handleLanFastSyncProbe(const QJsonObject& header, const QHost
     recordFastSyncUdpDiagnostic(QStringLiteral("sent UDP Fast Sync probe acknowledgement %1").arg(request_id.left(8)),
         QStringLiteral("%1 id %2").arg(udpFastSyncEndpointText(sender, reply_port), request_id.left(8)));
     if (peer_confirmed) {
-        const QString sender_key = normalizedFastSyncHost(sender);
         recordUdpFastSyncPeerReply(sender_key);
         const int sender_tip = header.value(QStringLiteral("tip")).toInt(-1);
         if (sender_tip >= 0) m_udp_fast_sync_peer_tips_by_host.insert(sender_key, sender_tip);

@@ -53,6 +53,74 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4y - 2026-06-04 - LAN UDP request dispatcher and provisional peer fix
+
+Big picture:
+- Live Tahoe/Lion test showed UDP was reaching Tahoe, but Tahoe logged repeated
+  `dropped UDP Fast Sync block request from non-peer - 192.168.0.189:10334`.
+- This was a source-side protocol gate problem, not a firewall/LAN permission
+  problem. Tahoe answered Lion probes, then rejected Lion's follow-up block
+  requests before the serving handler ran.
+- Quick Clone had the same structural bug: the deeper handler allowed trusted
+  LAN clone requests, but the outer dispatcher dropped them first.
+
+Porting priority:
+- Lion Intel: port directly. Lion needs the same dispatcher fix for receiving
+  Quick Clone chunks and the same provisional-LAN peer behavior when it acts as
+  a source.
+- Catalina UTM: port directly if Fast Sync/Quick Clone is enabled there.
+- Windows: port directly.
+- Server: port the dispatcher/provisional-peer behavior if the server has this
+  QML/Nu UDP transport layer or equivalent request handling.
+
+Changed behavior:
+- `request-block` dispatch now allows a packet through when it is either from a
+  normal Fast Sync peer or is a `clone_mode` request from a trusted private/LAN
+  Quick Clone source.
+- `block-chunk` dispatch now allows trusted-LAN Quick Clone chunks through to
+  the chunk handler instead of dropping them early.
+- `handleLanFastSyncProbe()` now treats a valid private/LAN Fast Sync probe as a
+  provisional LAN Fast Sync peer before sending the probe ack. The ack's
+  `peer_confirmed` flag now matches the source's willingness to serve the next
+  block request.
+
+Changed files and important details:
+- `source/src/qt/nu/app/NuRpcService.cpp`: changed only the UDP dispatcher and
+  probe acknowledgement path. Packet format is unchanged.
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  visible release label is `26.6.4y`.
+- `source/src/qt/nu/docs/release-notes-26.6.4y.md`: user-facing notes.
+
+Compatibility notes:
+- This remains compatible with older Defcoin Core peers because the UDP path is
+  only used after Defcoin Nu Fast Sync probing. Normal TCP/Core block sync is
+  untouched.
+- Provisional admission is limited to private/LAN addresses and public block
+  serving; it does not expose wallet data.
+
+Build/package notes:
+- Build/package only `DefcoinCoreNuResources` for Nu. Explore is separate and
+  should not be copied into the Nu distribution folder.
+
+Verification performed:
+- `cmake -S source/src/qt/nu/app -B build/nu-qml-arm64-26.6.4y ...`
+  completed successfully for arm64 Release.
+- `cmake --build build/nu-qml-arm64-26.6.4y --target DefcoinCoreNu -j 8`
+  completed successfully.
+- `cmake --build build/nu-qml-arm64-26.6.4y --target DefcoinCoreNuResources -j 8`
+  completed successfully and bundled only Nu resources.
+- `codesign --verify --deep --strict build/nu-qml-arm64-26.6.4y/DefcoinCoreNu.app`
+  passed.
+- Copied only `Defcoin Core Nu.app` into
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.4y-20260604/`.
+- Distribution bundle `codesign --verify --deep --strict` passed.
+- Distribution bundle smoke test exited with status 0.
+
+Risks / follow-up:
+- Retest with Tahoe serving Lion. Success criteria: Tahoe logs chunk serving or
+  no longer logs `non-peer`, and Lion logs accepted UDP blocks/chunks instead of
+  Quick Clone timeouts.
+
 ### 26.6.4x packaging correction - 2026-06-04 - Explore is separate from Nu distribution
 
 Big picture:
