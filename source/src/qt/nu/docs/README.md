@@ -1,6 +1,6 @@
 # Defcoin Core Nu UI Implementation
 
-This directory contains the developer reference for Defcoin Core Nu 26.6.4z.
+This directory contains the developer reference for Defcoin Core Nu 26.6.4ad.
 Nu is a Qt Quick interface that talks to the Defcoin Core backend through a
 small JSON-RPC service layer.
 
@@ -63,3 +63,6 @@ Bitcoin Core QML.
 
 See `fast-sync-protocol.md` for the authoritative Fast Sync protocol,
 packet-size, diagnostics, and server deployment reference.
+
+See `quick-clone-status-language.md` for the reviewable Quick Clone status text
+taxonomy used by the Settings and Metrics surfaces.

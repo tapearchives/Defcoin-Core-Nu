@@ -53,6 +53,248 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4ad - 2026-06-04 - Quick Clone uses Core block reservation
+
+Big picture:
+- Lion could show that a UDP block arrived but Core already had it. That is
+  possible when the GUI schedules a block from stale height state while Core's
+  normal sync accepts the same height through TCP, or when late UDP chunks
+  arrive after Core has already advanced.
+- The root issue was that normal UDP Fast Sync already used
+  `reservefastsyncblock reserve-next`, but the Quick Clone scaffolding path was
+  still directly requesting `m_block_height + 1`.
+- Quick Clone now uses the same Core reservation boundary as Fast Sync. UDP is
+  again only a transport for a block Core selected from a connected peer.
+
+Porting priority:
+- Lion Intel: port directly to `src/qt/nu/legacy-osx107/main.cpp` after the
+  current Lion build thread is clear. This is the fix for Lion's
+  `already had it` UDP message.
+- Catalina UTM: port if its Quick Clone/LAN copy path guesses the next height.
+- Windows: port if it shares the QML/Qt Quick Clone path.
+- Server: requester-side behavior should match this if the server can request
+  Fast Sync blocks; responder-only behavior is unchanged.
+
+Changed behavior:
+- `lanQuickCloneTick()` now requires a Core peer id, asks Core to reserve the
+  next missing block, and requests that reserved height/hash over UDP.
+- Quick Clone no longer issues multiple `reservefastsyncblock` calls at once.
+- Duplicate Quick Clone submit results are treated as stale/skipped work and
+  are not counted as Quick Clone progress.
+- Ordinary TCP sync remains active unless a future real snapshot install stage
+  explicitly pauses it.
+
+Changed files and important details:
+- `source/src/qt/nu/app/NuRpcService.cpp`: Quick Clone scheduling now mirrors
+  the lower-level Fast Sync reservation path instead of guessing a height.
+- `source/src/qt/nu/docs/quick-clone-status-language.md`: added reservation and
+  stale-skip status phrases.
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  visible release label is `26.6.4ad`.
+- `source/src/qt/nu/docs/release-notes-26.6.4ad.md`: user-facing notes.
+
+Compatibility notes:
+- Consensus, wallet storage, service bits, packet format, checksums, and Core
+  block validation are unchanged.
+- Older TCP-only peers and v1.0.x peers are unaffected.
+
+Build/package notes:
+- Build/package only Defcoin Core Nu for this entry. Explore/ExpFor remains its
+  own app and release cycle.
+
+Verification performed:
+- Tahoe backend build succeeded with:
+  `make -C source/src defcoind defcoin-cli defcoin-tx defcoin-wallet -j8`.
+- Tahoe Qt bundle build succeeded with:
+  `cmake --build build/nu-qml-arm64-26.6.4ad --target DefcoinCoreNu -j 8`
+  and `DefcoinCoreNuResources`.
+- Staged app verifies as a macOS app at
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.4ad-20260604/Defcoin Core Nu.app`.
+- Bundled `defcoind --version` and `defcoin-cli --version` both report
+  `v26.6.4ad`.
+- Launch smoke test succeeded after closing `26.6.4ac`: frontend/backend ran
+  from the `26.6.4ad` app, RPC `getnetworkinfo` reported subversion
+  `/DefcoinCoreNu:26.6.4ad/`, `DEFCOIN_FASTSYNC`, and `networkactive=true`;
+  RPC `getblockchaininfo` reported main chain at matching blocks/headers.
+- Lion port/test remains blocked until the separate Lion build thread is clear.
+
+Risks / follow-up:
+- After Lion is clear, port `26.6.4ac` and `26.6.4ad` together. Success
+  criteria: Lion's UDP status progresses from Core reservation to accepted
+  non-duplicate blocks, or gives a clear Core scheduling reason; it should not
+  repeatedly request blocks it already has.
+
+### 26.6.4ac - 2026-06-04 - Quick Clone no longer parks Core P2P while probing
+
+Big picture:
+- Live Tahoe/Lion rebuild testing found that the Quick Clone scaffolding path
+  could pause Core networking before a real snapshot/install stage existed.
+- On Lion this produced `networkactive=false`, zero peers, and no useful Fast
+  Sync reservations after the public chain folders were removed for a clean
+  rebuild test.
+- Quick Clone should only isolate ordinary networking during a future final
+  snapshot install/swap. While it is listening, probing, or requesting
+  Core-accepted block data, Core P2P must remain active so normal peer
+  selection and Fast Sync reservation can work.
+
+Porting priority:
+- Lion Intel: port directly to `src/qt/nu/legacy-osx107/main.cpp`, but do not
+  touch the Lion host while another build thread is active there.
+- Catalina UTM: port the same behavior if Quick Clone/LAN copy scaffolding can
+  pause network activity before install.
+- Windows: port if the Windows build uses the same Quick Clone tick path.
+- Server: not required unless the server UI/controller has equivalent Quick
+  Clone scaffolding. Fast Sync service-bit and UDP responder behavior are
+  unchanged.
+
+Changed behavior:
+- Quick Clone no longer calls `setNetworkActive(false)` simply because a trusted
+  LAN source exists.
+- If Quick Clone detects it had previously paused Core networking, it now
+  resumes Core P2P and reports that it is listening on LAN.
+- The active receive status now says `Quick Clone receiving blockchain over LAN:
+  requesting block <height> from <host>.`
+
+Changed files and important details:
+- `source/src/qt/nu/app/NuRpcService.cpp`: `lanQuickCloneTick()` now resumes a
+  stale paused-network state instead of entering it during ordinary
+  listen/probe/request work.
+- `source/src/qt/nu/docs/quick-clone-status-language.md`: reviewable status
+  taxonomy grouped by waiting/listening, supplying, and receiving.
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  visible release label is `26.6.4ac`.
+- `source/src/qt/nu/docs/release-notes-26.6.4ac.md`: user-facing notes.
+
+Compatibility notes:
+- Consensus, wallet storage, service bits, packet format, checksums, and Core
+  block validation are unchanged.
+- Older TCP-only peers and v1.0.x peers are unaffected.
+
+Build/package notes:
+- Build/package only Defcoin Core Nu for this entry. Explore/ExpFor remains its
+  own app and release cycle.
+
+Verification performed:
+- Tahoe backend built with `make -C source/src defcoind defcoin-cli defcoin-tx
+  defcoin-wallet -j8`.
+- Tahoe Qt app built with CMake/Ninja into
+  `build/nu-qml-arm64-26.6.4ac`; `DefcoinCoreNuResources` bundled the backend
+  tools and verified the app bundle.
+- Staged app:
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.4ac-20260604/Defcoin Core Nu.app`.
+- Bundle verification passed: `codesign --verify --deep --strict`.
+- Bundled backend and CLI reported `v26.6.4ac`; Info.plist reported
+  `CFBundleShortVersionString=26.6.4ac`; Spotlight kind reported
+  `Application`.
+- Old local Tahoe Nu frontend/backend were stopped before relaunching the new
+  build. Relaunch smoke test showed one frontend, one bundled backend,
+  `networkactive=true`, and `localservicesnames` includes `DEFCOIN_FASTSYNC`.
+- Lion port/test is intentionally paused until the separate Lion build thread is
+  clear.
+
+Risks / follow-up:
+- After Lion is clear, port the matching legacy fix and retest from a clean
+  public-chain rebuild. Success criteria: Lion keeps Core networking active,
+  sees Tahoe as a peer, and UDP accepted block counts increase instead of
+  staying at advertised/checking.
+
+### 26.6.4ab - 2026-06-04 - UDP receiver already-has-block cleanup
+
+Big picture:
+- Live Tahoe/Lion testing moved past the earlier non-peer gate: Tahoe accepted
+  Lion's LAN UDP Fast Sync probe and served chunks.
+- The next failure was on the receiver side. Lion could log an accepted or
+  already-known LAN block, then keep the same UDP transfer marked in-flight and
+  later time out. In the Lion legacy code this happened when Core already had
+  the requested height while late UDP chunks were still being processed.
+- This build makes that state explicit: if Core already has the requested
+  height while chunks arrive, the UDP attempt is completed without counting it
+  as a packet failure, the reservation is released, and the next tick can choose
+  the next missing block/source.
+
+Porting priority:
+- Lion Intel: port directly to `src/qt/nu/legacy-osx107/main.cpp`. This is the
+  receiver-side fix needed after the `26.6.4aa` mapped-LAN sender fix.
+- Catalina UTM: port the same guard in its receiver chunk handler if present.
+- Windows: port if the Windows build uses this Qt UDP helper path.
+
+Changed behavior:
+- UDP Fast Sync no longer leaves a request in-flight after Core has already
+  advanced to the chunk's block height.
+- Quick Clone no longer treats that already-have state as an offline source or
+  missing-chunk timeout.
+- No consensus, wallet, service-bit, packet-format, checksum, or block
+  validation behavior changes.
+
+Changed files and important details:
+- `source/src/qt/nu/app/NuRpcService.cpp`: `handleLanFastSyncChunk()` now
+  resets the transfer when `height <= m_block_height` after the request id and
+  expected height match.
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  visible release label is `26.6.4ab`.
+- `source/src/qt/nu/docs/release-notes-26.6.4ab.md`: user-facing notes.
+
+Verification performed:
+- Pending Tahoe build/test in this entry.
+- Port and live-test on Lion before calling Fast Sync fixed.
+
+Risks / follow-up:
+- Retest with Lion after the equivalent legacy patch. Success criteria: Lion
+  shows accepted UDP block count increasing without immediately timing out or
+  demoting Tahoe as an offline source.
+
+### 26.6.4aa - 2026-06-04 - IPv4-mapped UDP LAN sender fix
+
+Big picture:
+- Live Tahoe `26.6.4z` testing proved UDP packets from Lion reached Tahoe, but
+  Tahoe still logged `dropped UDP Fast Sync block request from non-peer` for
+  `192.168.0.189:10334`.
+- The reason was not firewall or service-bit negotiation. Tahoe's UDP socket is
+  IPv6-capable, and Qt can surface an IPv4 UDP sender as an IPv4-mapped address.
+  `normalizedFastSyncHost()` already handled this, but the private/LAN helper
+  only checked `address.protocol()` and therefore missed `192.168.0.189` when it
+  arrived through that mapped form.
+
+Porting priority:
+- Lion Intel: port directly. This is required for Lion and Tahoe to recognize
+  each other as private/LAN UDP senders across mixed IPv4/IPv6 socket paths.
+- Catalina UTM and Windows: port directly if their UDP socket can receive mapped
+  IPv4 addresses.
+- Server: port only if its Fast Sync UDP listener uses the same Qt helper path.
+
+Changed behavior:
+- `isInvalidLanDiscoveryAddress()` now checks `toIPv4Address(&ok)` before
+  relying on `address.protocol()`, so IPv4-mapped addresses are filtered with
+  the same invalid/broadcast/multicast rules as normal IPv4.
+- `isPrivateOrLocalFastSyncAddress()` now checks `toIPv4Address(&ok)` before
+  relying on `address.protocol()`, so private IPv4 ranges are accepted even when
+  the UDP socket reports the sender through an IPv6 wrapper.
+- Public internet behavior is unchanged.
+
+Changed files and important details:
+- `source/src/qt/nu/app/NuRpcService.cpp`: helper-only fix. Packet format,
+  service bits, request ids, chunk checksums, and Core block validation are
+  unchanged.
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  visible release label is `26.6.4aa`.
+- `source/src/qt/nu/docs/release-notes-26.6.4aa.md`: user-facing notes.
+
+Compatibility notes:
+- Older TCP-only peers are unaffected.
+- The fix only changes whether a private/LAN UDP sender is recognized as LAN;
+  it does not admit public UDP block requests.
+
+Build/package notes:
+- Build/package only `DefcoinCoreNuResources` for Nu. Explore remains separate.
+
+Verification performed:
+- Pending Tahoe build/test in this entry.
+
+Risks / follow-up:
+- Retest Lion after restarting or after the UDP quiet period expires. Success
+  criteria: Tahoe no longer logs `non-peer` drops for `192.168.0.189` and Lion
+  receives accepted UDP chunks or logs a later-stage serving/validation error.
+
 ### 26.6.4z - 2026-06-04 - LAN UDP requests without clone_mode
 
 Big picture:
