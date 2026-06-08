@@ -16,10 +16,35 @@ settings.
 EOF
 }
 
-LOG_PATHS=(
-  "${HOME}/Library/Application Support/Defcoin/console.log"
-  "${HOME}/Library/Application Support/Defcoin/debug.log"
-)
+LOG_PATHS=()
+
+add_default_logs_for_datadir() {
+  local datadir=$1
+  [[ -n "$datadir" ]] || return 0
+  LOG_PATHS+=("$datadir/console.log")
+  LOG_PATHS+=("$datadir/debug.log")
+}
+
+add_default_logs_for_datadir "${DEFCOIN_DATADIR:-}"
+add_default_logs_for_datadir "${HOME}/Library/Application Support/Defcoin"
+add_default_logs_for_datadir "/Volumes/TB5_4TB/d/Library/Application Support/Defcoin"
+
+# Keep the list deterministic while avoiding duplicate paths when DEFCOIN_DATADIR
+# points at one of the normal locations.
+declare -a LOG_PATHS_DEDUPED=()
+for log_path in "${LOG_PATHS[@]}"; do
+  seen=0
+  if ((${#LOG_PATHS_DEDUPED[@]} > 0)); then
+    for existing in "${LOG_PATHS_DEDUPED[@]}"; do
+      if [[ "$existing" == "$log_path" ]]; then
+        seen=1
+        break
+      fi
+    done
+  fi
+  [[ "$seen" -eq 1 ]] || LOG_PATHS_DEDUPED+=("$log_path")
+done
+LOG_PATHS=("${LOG_PATHS_DEDUPED[@]}")
 TIMEOUT_SECONDS=35
 QUIET=0
 

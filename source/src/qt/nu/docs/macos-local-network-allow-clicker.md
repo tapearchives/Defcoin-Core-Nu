@@ -81,6 +81,25 @@ open -n "/path/to/Defcoin Core Nu.app"
 source/src/qt/nu/tools/macos_click_lan_allow.sh --timeout 60
 ```
 
+For Tahoe Fast Sync or Quick Clone testing this is a hard gate. If a newly
+built Tahoe app shows the macOS Local Network prompt and the prompt is not
+accepted, any LAN UDP result from that run must be treated as invalid. That run
+only proves macOS privacy blocked the transport; it does not prove the UDP Fast
+Sync or Quick Clone protocol failed.
+
 For protocol-level checks, this pairs with
 `source/src/qt/nu/tools/udp_lan_permission_gate.sh`: the gate watches Defcoin
 logs for UDP activity, while this helper handles the macOS consent dialog.
+
+On the Tahoe Mac mini the active Defcoin datadir is commonly:
+
+```sh
+/Volumes/TB5_4TB/d/Library/Application Support/Defcoin
+```
+
+The UDP gate watches that path as well as the default home-library datadir. If a
+test uses another datadir, pass it explicitly:
+
+```sh
+DEFCOIN_DATADIR="/path/to/datadir" source/src/qt/nu/tools/udp_lan_permission_gate.sh --timeout 60
+```
