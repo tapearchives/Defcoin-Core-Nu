@@ -169,6 +169,7 @@ bool GetNodeStateStats(NodeId nodeid, CNodeStateStats &stats);
 bool ReserveFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, int height, uint256& hash_out, std::string& reason);
 bool ReserveNextFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, uint256& hash_out, int& height_out, std::string& reason);
 bool ReleaseFastSyncBlockInFlight(NodeId nodeid, const uint256& hash);
+bool SetFastSyncPeerTransportVerified(NodeId nodeid, bool verified, std::string& reason);
 
 /** Relay transaction to every node */
 void RelayTransaction(const uint256& txid, const uint256& wtxid, const CConnman& connman) EXCLUSIVE_LOCKS_REQUIRED(cs_main);

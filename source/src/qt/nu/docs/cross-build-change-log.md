@@ -53,6 +53,652 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4be - 2026-06-08 - Lion iMac source refresh and peer Methods parity
+
+Big picture:
+- The latest UTM Lion working tree was copied to the physical Lion iMac so the
+  iMac build no longer lags the UTM test source. Tahoe and Lion were then
+  checked for Fast Sync/Quick Clone invariant parity. The low-level backend
+  transport logic remains aligned: UDP is only a transport for Core-selected
+  block reservations, and blocks still submit through Core validation.
+- Lion's peer table transport column now uses the same visible label as Tahoe:
+  `Methods`. The data remains the observed transport method string, such as
+  `P2P TCP`, `UDP FS`, or `P2P TCP + UDP FS`.
+
+Porting priority:
+- Lion Intel: already ported into the local Lion source and must be copied to
+  the physical iMac before building.
+- Catalina UTM: UI wording parity only if Catalina has the legacy peers table.
+- Windows: UI wording parity only if its peers table still says Observed
+  Traffic for the transport-method column.
+- Server: no code change; server Fast Sync logic should already match the
+  reservation RPC and service-bit behavior.
+
+Changed behavior:
+- Tahoe visible version becomes `26.6.4be`.
+- Lion visible version becomes `26.6.4be-Lion-alpha`.
+- Lion Metrics > Peers simple and detailed tables rename the transport column
+  from `Observed Traffic` to `Methods`, matching Tahoe.
+
+Changed files and important details:
+- Tahoe `src/clientversion.h`: `DEFCOIN_RELEASE_VERSION_STR` to `26.6.4be`.
+- Tahoe `src/qt/nu/app/CMakeLists.txt`: `DEFCOIN_NU_RELEASE_NAME` to
+  `26.6.4be`.
+- Lion `src/clientversion.h`: `DEFCOIN_RELEASE_VERSION_STR` to
+  `26.6.4be-Lion-alpha`.
+- Lion `src/qt/nu/legacy-osx107/DefcoinCoreNuLegacy.pro`: compile define to
+  `26.6.4be-Lion-alpha`.
+- Lion `src/qt/nu/legacy-osx107/main.cpp`: fallback version string and peers
+  table column labels updated.
+
+Compatibility notes:
+- This build does not change the UDP wire format, service bit 29, block
+  reservation RPCs, or Quick Clone request semantics.
+- The physical iMac's current Bonjour-resolved address was
+  `Library-Archives-Cataloging-iMac.local` / `192.168.0.189`; the old
+  `192.168.2.19` address was not reachable during this port.
+
+Verification performed:
+- `rg` invariant scan confirmed Tahoe and Lion both contain the debug sync
+  switches, Quick Clone, UDP Fast Sync capability string, service-bit label,
+  and `reservefastsyncblock` path.
+- `cmp` confirmed `src/net_processing.h`, `src/protocol.cpp`,
+  `src/protocol.h`, and `src/rpc/net.cpp` match between Tahoe and Lion; the
+  `src/net_processing.cpp` Fast Sync differences were line-number drift only in
+  the targeted reservation-symbol diff.
+
+Risks / follow-up:
+- The Lion working tree metadata on UTM/iMac still points at the Mac Mini
+  worktree gitdir and is invalid on those hosts. Build from source works, but
+  git status on the remote Lion machines is not authoritative until that
+  worktree metadata is repaired.
+- Live UDP/Quick Clone testing still requires launching current Tahoe and Lion
+  builds and ensuring Tahoe's macOS Local Network permission prompt is accepted
+  for each fresh Tahoe build.
+
+### 26.6.4bb - 2026-06-06 - Fast Sync early-header automatic scheduling
+
+Big picture:
+- Live Tahoe/Lion testing proved the 26.6.4ba low-level explicit reservation
+  fallback works: `reservefastsyncblock reserve <peer> 1` returned `reserved`
+  while Lion had only the first few thousand headers. The automatic
+  `reserve-next` path was still too conservative because a partially synced
+  `pindexBestKnownBlock` below `nMinimumChainWork` made it return
+  `headers-below-minimum-chain-work`. This build allows automatic Fast Sync to
+  reserve the next active-chain block from the local header chain during early
+  header sync, while still submitting received data through Core validation.
+
+Porting priority:
+- Lion Intel/UTM: required. Tahoe and Lion must use identical reservation logic
+  or they will disagree about when UDP can start during clean bootstrap.
+- Catalina UTM: required if Fast Sync is tested there.
+- Windows: required for parity before Windows UDP testing.
+- Server: required after local Tahoe/Lion accepted-UDP-block tests pass.
+
+Changed behavior:
+- `reservefastsyncblock reserve-next` no longer waits for the peer's
+  best-known block chain work to reach minimum chain work if UDP transport is
+  verified and the local header chain already has the next needed header.
+- Explicit reservation behavior from 26.6.4ba is unchanged.
+- The block still goes through `MarkBlockAsInFlight` and normal block
+  acceptance; this does not bypass consensus validation.
+
+Changed files and important details:
+- `src/net_processing.cpp`: in `ReserveNextFastSyncBlockInFlight()`, compute
+  `next_height` before the minimum-chain-work gate and switch to the
+  `FastSyncHeaderFallbackIndex()` path when the peer's known header chain is
+  below minimum work. Keep this exact logic in Tahoe, Lion, server, and Windows.
+- Tahoe version metadata: bumped to `26.6.4bb`.
+- Lion version metadata: bumped to `26.6.4bb-Lion-alpha`.
+
+Verification performed:
+- Pre-patch UTM Lion 26.6.4ba saw Tahoe 26.6.4ba as peer 2 with
+  `DEFCOIN_FASTSYNC`, but `reserve-next` returned
+  `headers-below-minimum-chain-work`.
+- The same session showed `reserve 2 1` returned `reserved`, proving the lower
+  block reservation path can work during early header sync.
+- Build/test verification pending; update after Tahoe/Lion 26.6.4bb packaging
+  and isolated UDP retest.
+
+Risks / follow-up:
+- This intentionally starts UDP earlier than Core's normal block-download
+  minimum-chain-work gate. The payload is still validated by Core, but watch
+  logs for wasted early reservations if a peer's starting height is misleading.
+
+### 26.6.4ba - 2026-06-06 - Fast Sync early-header reservation fallback
+
+Big picture:
+- UDP Fast Sync was reaching service-bit negotiation and UDP probe/ack, but
+  Lion could not reserve even block 1 from Tahoe because Core had not populated
+  that peer's `pindexBestKnownBlock` yet. This build keeps UDP as a transport
+  only, but allows verified Fast Sync peers to reserve locally-known early
+  headers when the peer's VERSION `startingheight` proves it should have that
+  height. Blocks are still submitted through normal Core validation.
+
+Porting priority:
+- Lion Intel/UTM: required. The same `src/net_processing.cpp` fallback must be
+  present or Lion will remain stuck at `peer-best-block-unknown` against Tahoe.
+- Catalina UTM: required if it uses the same Fast Sync reservation RPC.
+- Windows: required for parity before Windows Fast Sync testing.
+- Server: required after Tahoe/Lion prove accepted UDP blocks locally; server
+  should advertise bit 29 and use the same requester/responder reservation
+  semantics.
+
+Changed behavior:
+- `reservefastsyncblock reserve` and `reserve-next` no longer fail solely
+  because `pindexBestKnownBlock` is unset for a verified Fast Sync peer.
+- Fallback is conservative: it requires UDP transport verification,
+  `nStartingHeight >= requested height`, a locally known validated header at
+  that height, and normal `MarkBlockAsInFlight` plus later `submitblock`
+  validation. It does not trust UDP payloads or bypass consensus.
+
+Changed files and important details:
+- `src/net_processing.cpp`: added `FastSyncHeaderFallbackIndex()` and fallback
+  branches in `ReserveFastSyncBlockInFlight()` and
+  `ReserveNextFastSyncBlockInFlight()`. Keep this backend code identical across
+  Tahoe/Lion/server where possible.
+- Tahoe version metadata: bumped to `26.6.4ba`.
+- Lion version metadata: bumped to `26.6.4ba-Lion-alpha`.
+
+Compatibility notes:
+- Legacy 1.0.0 peers are unaffected because they do not advertise the Defcoin
+  Fast Sync service bit and cannot pass UDP transport verification.
+- This remains compatible with normal TCP/Core sync; if UDP fails, Core can keep
+  syncing by its normal path unless disabled for testing.
+
+Verification performed:
+- Pre-patch live test showed Lion peer id 11 for Tahoe with
+  `servicesnames` including `DEFCOIN_FASTSYNC`, but `synced_headers=-1` and
+  `reservefastsyncblock reserve-next 11` returned
+  `peer-best-block-unknown`.
+- Build/test verification pending in this entry; update after packaging and
+  Tahoe/Lion UDP retest.
+
+Risks / follow-up:
+- If headers are still too slow on Lion, inspect why header chain state is not
+  persisted or why header download is throttled. Do not mistake header latency
+  for UDP failure.
+
+### 26.6.4az - 2026-06-06 - Trustworthy UDP failure accounting and Tahoe LAN prompt automation
+
+Big picture:
+- This build fixes two problems that were poisoning Fast Sync test results:
+  Tahoe's Local Network Allow helper could accidentally match Codex chat text
+  through whole-screen OCR, and UDP Metrics collapsed probe misses, request
+  timeouts, checksum failures, buffer failures, and submit failures into one
+  vague failure count. Future Fast Sync tests should treat any run before a
+  confirmed Tahoe Allow click as invalid.
+
+Porting priority:
+- Lion Intel/UTM: required. Port the separated UDP status counters and wording
+  so Lion reports the same evidence as Tahoe during Tahoe-to-Lion testing.
+- Catalina UTM: required if it shows Fast Sync Metrics or runs the same
+  requester-side transport logic.
+- Windows: port the Metrics wording/counter split if Windows exposes the same
+  Fast Sync rows.
+- Server: after Tahoe/Lion prove UDP block transfer works, update server code to
+  the same Fast Sync requester/responder behavior. Server does not need the
+  macOS Allow helper.
+
+Changed behavior:
+- Metrics now separates UDP probe misses from real block payload failures.
+- Fast Sync UDP details split payload failures into timeout/checksum/buffer/
+  submit categories, plus request/probe send failures.
+- The macOS Local Network Allow helper is Accessibility-first by default. It no
+  longer uses whole-screen OCR unless `--ocr-fallback` is explicitly supplied.
+  This prevents false positives caused by the prompt wording appearing in Codex
+  or another visible document.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.h/.cpp`: added reason buckets for UDP failure
+  accounting; updated status text to show probe misses and block failure kinds.
+- `src/qt/nu/tools/macos_click_lan_allow.swift`: defaults to native
+  Accessibility prompt search; OCR fallback must now be explicitly requested.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: Tahoe visible build
+  label bumped to `26.6.4az`.
+- Lion equivalent: `src/qt/nu/legacy-osx107/main.cpp`,
+  `src/qt/nu/legacy-osx107/DefcoinCoreNuLegacy.pro`, and
+  `src/clientversion.h` use `26.6.4az-Lion-alpha`.
+
+Compatibility notes:
+- Consensus and block acceptance are unchanged. This is accounting, status, and
+  test automation reliability work.
+- When testing Tahoe UDP, launch the current Tahoe build and run the Allow
+  helper after the OS prompt appears or with a long retry window. Do not infer
+  UDP failure from a blocked Local Network prompt.
+
+Build/package notes:
+- Build only Defcoin Core Nu. Defcoin Core Explore remains a separate app and
+  distribution cycle.
+
+Verification performed:
+- `git diff --check -- src/qt/nu/app/NuRpcService.cpp src/qt/nu/app/NuRpcService.h src/qt/nu/tools/macos_click_lan_allow.swift` passed in Tahoe source.
+- `git diff --check -- src/qt/nu/legacy-osx107/main.cpp` passed in Lion source.
+- The updated Tahoe Allow helper returns `contextFound:false` and
+  `No native Local Network Allow prompt was found` on a screen where only Codex
+  contains prompt wording.
+
+Risks / follow-up:
+- Rebuild Tahoe and Lion, test UDP-only Fast Sync after the Tahoe Allow prompt
+  is confirmed, then install matching Fast Sync behavior on the server only if
+  live UDP block transfer succeeds.
+
+### 26.6.4ay - 2026-06-05 - Header-gated UDP scheduling diagnostics
+
+Big picture:
+- Fresh Tahoe-to-UTM Lion testing was restarted with current builds and the
+  macOS LAN prompt allowed. The key observation changed: Tahoe acknowledged the
+  Lion UDP probe, so UDP reachability was proven, but Lion was still rebuilding
+  headers from block zero and Core could not yet schedule a downloadable block.
+  That is a header/scheduler gate, not a UDP packet failure.
+
+Porting priority:
+- Lion Intel/UTM: required. Port the same backend reservation reasons, status
+  formatter, startup error normalization, and bounded Bonjour lookup helper.
+- Catalina UTM: required if Catalina shares the same Nu service and LAN
+  workstation-name helper.
+- Windows: port the reservation/status wording if Windows uses this frontend.
+  The Bonjour helper fix is macOS-only.
+- Server: no responder change from this entry. Server requester-side Fast Sync
+  should report the same scheduling reasons if it calls `reserve-next`.
+
+Changed behavior:
+- `reservefastsyncblock reserve-next` now returns specific early-gate reasons
+  before falling through to the generic downloader search: `peer-best-block-unknown`,
+  `peer-chain-not-ahead`, or `headers-below-minimum-chain-work`.
+- Fast Sync and Quick Clone use one shared status formatter for Core scheduling
+  waits. In UDP-only test mode it says Core TCP block copy is off instead of
+  claiming normal TCP sync remains active.
+- The startup RPC batch path normalizes transient backend transport errors to
+  "Starting Defcoin backend..." instead of surfacing raw `Connection refused`.
+- The macOS Bonjour/SMB LAN workstation lookup no longer pipes an infinite
+  `dns-sd -B` browser through a shell. It samples for a bounded interval and
+  kills the child process so peer refreshes do not leak helper processes.
+
+Changed files and important details:
+- `source/src/net_processing.cpp`: added explicit prechecks in
+  `ReserveNextFastSyncBlockInFlight()` after `ProcessBlockAvailability()`.
+- `source/src/qt/nu/app/NuRpcService.cpp`: added
+  `coreSchedulingWaitStatus()` and wired it into both Fast Sync and Quick
+  Clone reservation callbacks; expanded diagnostic detail with header/local
+  block counts; bounded the Bonjour helper; normalized batch RPC transport
+  startup errors.
+- `source/src/qt/nu/app/NuRpcService.h`: declares the new formatter.
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  build metadata bumped to `26.6.4ay`.
+
+Compatibility notes:
+- This does not change consensus or block validation.
+- UDP remains a transport for a Core-selected block reservation. If headers are
+  still below minimum chainwork, no UDP block request should be sent yet.
+- Treat this as a correction to prior testing assumptions: an allowed UDP probe
+  does not mean Core is ready to request block bodies while headers are still
+  catching up from zero.
+
+Build/package notes:
+- Tahoe build target: `26.6.4ay`.
+- Lion build target: `26.6.4ay-Lion-alpha`.
+
+Verification performed:
+- Live UTM screen check: Lion was at block 0 with headers advancing and no OK
+  modal blocking the app.
+- Live logs/RPC: Lion probe reached Tahoe and Tahoe sent UDP probe ACK;
+  `reservefastsyncblock transport-verified` succeeded for the Tahoe peer.
+- Live RPC: `reservefastsyncblock reserve-next` returned no schedulable block
+  while headers were still building, matching the new diagnostic path.
+
+Risks / follow-up:
+- After Lion headers reach a schedulable state, retest actual accepted UDP block
+  delivery with current Tahoe and Lion builds only.
+- If block delivery still fails after scheduling opens, inspect request/chunk
+  logs rather than revisiting LAN permission as the first assumption.
+
+### 26.6.4ar - 2026-06-05 - ACK-proven UDP peers and honest sync percent
+
+Big picture:
+- Tahoe-to-UTM Lion testing showed two separate issues. The sync dialog could
+  display `Progress 100%` while `blocks < headers` because the backend rounded
+  `verificationprogress` to an integer. Separately, UDP Fast Sync target
+  selection could reject peers that looked public before sending the safe UDP
+  probe, even though UTM can expose a same-machine/LAN peer as a globally routed
+  IPv6 endpoint.
+
+Porting priority:
+- Lion Intel: required. The selector and datagram-size changes were already
+  applied to `legacy-osx107/main.cpp`.
+- Catalina UTM: required if it shares the Lion legacy frontend.
+- Windows: port the selector concept if Windows uses this frontend logic.
+- Server: no frontend sync-dialog change. Requester-side Fast Sync code should
+  not reject safe probes before ACK.
+
+Changed behavior:
+- Sync progress is capped below `100%` while blocks are still behind headers.
+  The dialog should only clear through the existing not-syncing path when Core
+  reports the chain is actually caught up.
+- UDP selectors may choose a public-looking peer for a safe-sized probe.
+- Once a peer ACKs a UDP Fast Sync probe, it is treated as a proven target for
+  larger datagram sizing. The serving peer still caps based on what it sees and
+  block chunks remain checksum-protected.
+
+Changed files and important details:
+- `source/src/qt/nu/app/NuRpcService.cpp`: sync progress integer capping;
+  added `isPrivateLocalOrProvenUdpFastSyncTarget()`; selector scoring and
+  datagram sizing now include ACK-proven peers.
+- `source/src/qt/nu/app/NuRpcService.h`: declares the new helper.
+- `source/src/qt/nu/legacy-osx107/main.cpp`: equivalent selector and
+  datagram-size changes for Lion.
+- Version metadata bumped to `26.6.4ar`; Lion label is
+  `26.6.4ar-Lion-alpha`.
+
+Compatibility notes:
+- This does not bypass Core validation or normal peer selection.
+- The safe probe remains small; larger chunks happen only after UDP ACK and the
+  serving side's cap logic.
+
+Verification performed:
+- Pending rebuild and Tahoe/Lion live test.
+
+Risks / follow-up:
+- If UDP still fails after ACK, inspect request/chunk logs on the serving side
+  for the normalized sender host and reply port.
+
+### 26.6.4ao - 2026-06-05 - TCP-off launch mode forces UDP selector
+
+Big picture:
+- The `--debug-disable-core-tcp-sync` launch switch already reached the backend
+  as `-defcoindisablecoretcpblocks=1`, but the frontend Fast Sync selector still
+  spent quota on the normal Core/TCP path. That made isolated UDP testing noisy
+  because the UI could keep waiting for a TCP block-body path that was
+  intentionally disabled.
+
+Porting priority:
+- Lion Intel: required. Port the same selector behavior so UTM/iMac Lion tests
+  use the same UDP-only debug mode as Tahoe.
+- Catalina UTM: port if Catalina uses the same Nu Fast Sync selector.
+- Windows: port if Windows exposes the same debug launch switch.
+- Server: no change unless the server has a requester-side test mode that
+  intentionally disables TCP block-body fetches.
+
+Changed behavior:
+- `--debug-disable-core-tcp-sync` and
+  `DEFCOIN_NU_DEBUG_DISABLE_CORE_TCP_SYNC=1` still leave peers, headers, and
+  service-bit negotiation active.
+- In that mode only, frontend Fast Sync allocates zero Core/TCP quota and uses
+  UDP probes/reservations whenever eligible peers are present and UDP is not in
+  cooldown.
+- The legacy `--debug-disable-core-sync` alias remains accepted but is treated
+  as TCP-block-copy-only for this test path.
+
+Changed files and important details:
+- `source/src/qt/nu/app/NuRpcService.cpp`: `resetFastSyncProtocolWindow()` and
+  `shouldAttemptUdpFastSync()` now special-case
+  `m_debug_disable_core_sync`.
+- `source/src/qt/nu/legacy-osx107/main.cpp`: same logic using
+  `m_debugDisableCoreSync`.
+- `source/src/clientversion.h` and app build metadata bumped to `26.6.4ao`;
+  Lion uses `26.6.4ao-Lion-alpha`.
+
+Compatibility notes:
+- Normal launches are unchanged. This is a debug/test launch behavior only.
+- Full Core network shutdown is still only appropriate for Quick Clone/DCOL
+  tests, not Fast Sync transport isolation.
+
+Verification performed:
+- Pending rebuild and Tahoe/Lion live UDP test.
+
+Risks / follow-up:
+- If Lion remains in header-building state, UDP requests may still defer until
+  Core's peer/header state can reserve a specific block. That is expected and
+  should be logged as reservation deferral, not as UDP packet failure.
+
+### 26.6.4ak - 2026-06-05 - Fast Sync frontend timing parity
+
+Big picture:
+- After the backend reservation parity fix in `26.6.4aj`, the Tahoe and Lion
+  frontend Fast Sync constants were compared. The lower-level reservation and
+  service-bit behavior matched, but Lion still used older probe/timer timings.
+- Lion now uses Tahoe's 500 ms Fast Sync timer and 2500 ms UDP probe timeout so
+  both builds probe, expire, and retry with the same expectations.
+- Tahoe was bumped to the same suffix so package labels stay aligned even
+  though the timing code change itself is Lion-side.
+
+Porting priority:
+- Lion Intel: ported in this pass.
+- Catalina UTM: align any legacy frontend constants to Tahoe's 500 ms tick and
+  2500 ms UDP probe timeout.
+- Windows: no code change unless the Windows frontend carries divergent timing
+  constants.
+- Server: no change from this frontend timing entry.
+
+Changed behavior:
+- Lion no longer waits 6 seconds before declaring a UDP probe expired. It now
+  uses Tahoe's 2.5 second probe timeout and 500 ms tick.
+
+Changed files and important details:
+- Tahoe `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: version bump
+  to `26.6.4ak`.
+- Lion `src/clientversion.h`, `src/qt/nu/legacy-osx107/DefcoinCoreNuLegacy.pro`,
+  `src/qt/nu/legacy-osx107/Info.plist`, and
+  `src/qt/nu/legacy-osx107/main.cpp`: version bump to
+  `26.6.4ak-Lion-alpha`.
+- Lion `src/qt/nu/legacy-osx107/main.cpp`: `LAN_FAST_SYNC_TIMER_INTERVAL_MS`
+  changed from 750 to 500; `LAN_FAST_SYNC_PROBE_TIMEOUT_MS` changed from 6000
+  to 2500.
+
+Verification performed:
+- Backend reservation function diff between Tahoe and Lion returned clean.
+- Live UTM/Tahoe UDP probe test succeeded in the UTM-to-Tahoe direction.
+- Synthetic UTM Quick Clone-style `request-block` received a Tahoe
+  `block-chunk` response with height/hash/checksum metadata.
+
+Risks / follow-up:
+- UTM Lion is NATed at `10.0.2.15`; Tahoe cannot initiate UDP directly to the
+  guest listener without bridged networking or forwarding. Receiver-initiated
+  UTM-to-Tahoe UDP works.
+
+### 26.6.4aj - 2026-06-05 - Fast Sync reservation parity audit
+
+Big picture:
+- Tahoe and Lion were audited for Fast Sync and Quick Clone receiver/listener
+  behavior. The intended shared rule is now explicit: Core selects and reserves
+  the peer/block; UDP is only the transport used to deliver that one reserved
+  block; `submitblock` remains the normal Core acceptance path.
+- Lion still had an older header-chain fallback inside
+  `ReserveFastSyncBlockInFlight()` / `ReserveNextFastSyncBlockInFlight()`. That
+  fallback could reserve a block Tahoe would refuse, making the two builds
+  expect different behavior during LAN tests.
+- Tahoe now treats `submitblock` result `inconclusive` the same way Lion does:
+  as a delivered block sample handed to Core during IBD, not as a UDP transport
+  failure.
+
+Porting priority:
+- Lion Intel: ported in this pass. Keep the backend reservation functions
+  byte-for-byte aligned with Tahoe after this entry.
+- Catalina UTM: remove any header-chain fallback or guessed-height reservation
+  path if present; accept `inconclusive` as a non-error submit result.
+- Windows: accept `inconclusive` in the QML/Qt UDP submit callback if the
+  Windows UI uses `NuRpcService.cpp`.
+- Server: requester-side Fast Sync must use Core-selected reservations only.
+  Responder-only services are unaffected.
+
+Changed behavior:
+- Fast Sync receiver:
+  - probes service-bit peers over UDP;
+  - marks transport verified only after a valid probe acknowledgement;
+  - calls `reservefastsyncblock reserve-next <nodeid>`;
+  - requests only the returned height/hash over UDP;
+  - validates chunk and block checksums;
+  - submits the assembled raw block through Core.
+- Fast Sync listener:
+  - advertises `NODE_DEFCOIN_FASTSYNC` only when launched with
+    `-defcoinfastsync=1`;
+  - answers valid probes and block requests on UDP 10334;
+  - serves chunks only for heights it already has locally.
+- Quick Clone receiver:
+  - is a trusted-LAN/manual/session request layered on the same UDP transport;
+  - uses LAN candidates only;
+  - still submits every received block through Core in this build;
+  - does not use snapshot replacement yet.
+- Quick Clone listener:
+  - keeps advertising LAN availability through beacons/discovery;
+  - serves the same checksum-protected UDP block chunks as Fast Sync.
+
+Changed files and important details:
+- Tahoe `source/src/qt/nu/app/NuRpcService.cpp`: `submitblock` handling now
+  accepts `inconclusive` alongside empty/null and `duplicate`.
+- Lion `src/net_processing.cpp`: removed `nFastSyncReserveScanHeight`, removed
+  fallback helper functions, and matched Tahoe's Core-selected reservation
+  functions.
+- Tahoe and Lion version metadata bumped to `26.6.4aj` /
+  `26.6.4aj-Lion-alpha`.
+
+Compatibility notes:
+- Older Defcoin Core 1.0.x peers are unaffected. They do not advertise bit 29
+  and continue normal TCP block sync.
+- If a peer has not reached usable Core peer state yet, the expected reason is
+  now `peer-best-block-unknown` or another Core scheduler reason on both
+  platforms, not a platform-specific fallback reservation.
+
+Verification performed:
+- `diff` of Tahoe vs Lion `ReserveFastSyncBlockInFlight()` through
+  `ReleaseFastSyncBlockInFlight()` returned no differences after the patch.
+- `rg` found no remaining Lion fallback symbols:
+  `FastSyncFallback`, `nFastSyncReserveScanHeight`, `header-chain fallback`,
+  or `local-block-data-scan`.
+
+Risks / follow-up:
+- This simplifies behavior but may wait for Core peer state instead of forcing
+  a UDP request earlier. That is intentional: it keeps UDP from bypassing Core's
+  scheduler.
+
+### 26.6.4ai - 2026-06-05 - Metrics sync-method labeling cleanup
+
+Big picture:
+- Metrics > Status now names the three sync paths by what they actually do:
+  `Core Sync (TCP)`, `Fast Sync (UDP)`, and `Quick Clone (LAN UDP)`.
+- The old visible label `Fast Sync TCP` was misleading because that row was
+  backed by Core's normal P2P/validation path, not by a TCP version of Fast
+  Sync.
+
+Porting priority:
+- Lion Intel: ported in this pass; keep the same labels in the legacy
+  `populateDiagnosticsStatus()` rows.
+- Catalina UTM: port the same Status labels if it has the Nu metrics page.
+- Windows: port the same Status labels if its QML Status table is built from
+  `NuRpcService::rebuildNodeMetrics()`.
+- Server: no server behavior change; this is UI/telemetry wording only.
+
+Changed behavior:
+- `Sync overview` shows combined sync throughput.
+- `Core Sync (TCP)` shows Core's normal TCP P2P/validation path.
+- `Fast Sync (UDP)` and its decision/probe rows are grouped together.
+- `Quick Clone (LAN UDP)` rows are grouped together.
+- Status rows with one visible line should no longer reserve unnecessary
+  two-line height.
+
+Changed files and important details:
+- `source/src/qt/nu/app/NuRpcService.cpp`: renamed node metric rows and kept
+  the explanatory nuance in hover text instead of adding a noisy note row.
+- `source/src/qt/nu/qml/Views/NodeView.qml`: narrowed the metric column a bit
+  and capped Status row wrapping to two lines so the table stays compact.
+- `source/src/qt/nu/legacy-osx107/main.cpp`: applied matching Lion row labels,
+  removed the separate `Fast Sync TCP note`, shortened UDP sample text, and
+  tightened single-line row heights after `resizeRowsToContents()`.
+- `source/src/clientversion.h` and `source/src/qt/nu/app/CMakeLists.txt`:
+  visible Tahoe version is `26.6.4ai`.
+- Lion source version/plist files: visible Lion version is
+  `26.6.4ai-Lion-alpha`.
+
+Compatibility notes:
+- This does not change Fast Sync or Quick Clone networking. It only prevents
+  the UI from implying that Fast Sync has a TCP mode.
+
+Verification performed:
+- Pending build/smoke in this thread. Grep should show no remaining visible
+  `Fast Sync TCP` Status labels after this entry.
+
+Risks / follow-up:
+- If long runtime status values still wrap unexpectedly, shorten the value text
+  first; avoid adding more explanatory prose to Metrics rows.
+
+### 26.6.4ae - 2026-06-04 - Quick Clone command-line test hook and Lion parity
+
+Big picture:
+- Tahoe and Lion now share the same Quick Clone/Fast Sync reservation boundary:
+  UDP is only a transport for a block Core has reserved from normal peer state.
+- A temporary but intentional test hook was added so Codex can launch a build
+  and force Quick Clone initiation without walking through the UI. This exists
+  to make Tahoe/Lion LAN testing reproducible.
+- Lion's apparent "lost sync progress" after relaunch was checked before
+  deleting any chain data. The persisted best block did not roll back; the UI
+  appeared to lose percent progress because the header target changed after
+  relaunch while the absolute block height was still persisted.
+
+Porting priority:
+- Lion Intel: already ported in the Lion workspace as `26.6.4ae-Lion-alpha`;
+  keep the same command-line trigger and Core reservation behavior.
+- Catalina UTM: port the command-line trigger if it needs automated Quick Clone
+  testing. Keep architecture-specific build flags separate.
+- Windows: port only if Windows needs automated Quick Clone launch tests.
+- Server: no GUI trigger needed. Requester-side server Fast Sync should still
+  use Core-selected/reserved blocks, not guessed heights.
+
+Changed behavior:
+- Launching Nu with `--quick-clone-now`, or with
+  `DEFCOIN_NU_QUICK_CLONE_NOW=1`, schedules `syncUsingQuickCloneNow()` shortly
+  after startup.
+- Lion Quick Clone now calls `reservefastsyncblock reserve-next` with a
+  `lan-fast-copy-reserve` context before sending a UDP block request.
+- Duplicate Quick Clone submit results are treated as stale work and do not
+  count as progress.
+- Added a local test helper that watches Nu logs for UDP evidence and alerts
+  with `beep`/`say` if the launch test appears blocked by macOS Local Network
+  permission.
+
+Changed files and important details:
+- `source/src/qt/nu/app/main.cpp`: Tahoe command-line Quick Clone trigger.
+- `source/src/clientversion.h`, `source/src/qt/nu/app/CMakeLists.txt`,
+  `source/src/qt/nu/docs/README.md`,
+  `source/src/qt/nu/docs/functionality-map.md`: visible release label
+  `26.6.4ae`.
+- `source/src/qt/nu/tools/udp_lan_permission_gate.sh`: Tahoe-side test helper
+  for the first UDP LAN blocker check. This is not a product feature and does
+  not change firewall/TCC state.
+- Lion equivalent files:
+  `src/qt/nu/legacy-osx107/main.cpp`, `src/clientversion.h`,
+  `src/qt/nu/legacy-osx107/DefcoinCoreNuLegacy.pro`, and
+  `src/qt/nu/legacy-osx107/Info.plist`.
+
+Compatibility notes:
+- Consensus, wallet storage, service bits, packet format, checksums, and Core
+  block validation are unchanged.
+- Older TCP-only peers and v1.0.x peers are unaffected.
+
+Build/package notes:
+- Build/package only Defcoin Core Nu for this entry. Explore/ExpFor remains its
+  own app and release cycle.
+- Before live tests, close any previous Nu app/backend instance on both Tahoe
+  and Lion. The GUI/backend are not designed to run multiple versions against
+  the same datadir.
+
+Verification performed:
+- Tahoe backend/tools built and report `v26.6.4ae`.
+- Tahoe Qt bundle built and staged at
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.4ae-20260604/Defcoin Core Nu.app`.
+- Staged Tahoe app passed deep codesign verification; bundled `defcoind`,
+  `defcoin-cli`, and `Info.plist` all report `26.6.4ae`; Spotlight kind is
+  `Application`.
+- Lion pre-build persistence check showed the backend reloaded the same
+  persisted absolute height (`15781`) after relaunch; no blockchain rollback was
+  observed.
+
+Risks / follow-up:
+- Live Tahoe/Lion UDP testing must first confirm macOS Local Network permission
+  is not blocking UDP. If UDP probes cannot pass, alert locally before trying to
+  diagnose protocol behavior.
+- After Lion package is complete, launch Tahoe and Lion with the new test hook
+  and verify real UDP block acceptance plus Quick Clone reservation behavior.
+
 ### 26.6.4ad - 2026-06-04 - Quick Clone uses Core block reservation
 
 Big picture:
@@ -992,3 +1638,92 @@ Risks / follow-up:
   table uses unusual icons or custom delegates, verify row picking and scrolling.
 - If future Homebrew Qt changes its deployment target again, rerun the plist and
   `vtool` checks rather than hard-coding assumptions.
+
+## 26.6.4ak - 2026-06-05 - Fast Sync reservation parity audit
+
+Scope:
+- Tahoe and Lion now use the same lower-level Fast Sync reservation rule:
+  UDP is only a transport option after Core has selected a peer/block through
+  normal peer state.
+- The old Lion-only header-chain/local-block fallback scheduler was removed.
+
+Protocol behavior:
+- `reservefastsyncblock transport-verified <nodeid>` only marks UDP transport
+  as proven for that peer.
+- `reservefastsyncblock reserve-next <nodeid>` now relies on
+  `ProcessBlockAvailability()`, `pindexBestKnownBlock`, and
+  `FindNextBlocksToDownload()`.
+- If Core has no eligible block, the call reports a Core-derived reason such as
+  `peer-best-block-unknown`, `waiting-for-block-window`, or
+  `no-downloadable-block`.
+- `submitblock` result `inconclusive` is treated as validation-still-running,
+  not a hard UDP transfer failure.
+
+Cross-build note:
+- Port the backend reservation function as a unit. Do not re-add independent
+  Fast Sync height scanning on Lion or Catalina.
+
+## 26.6.4al - 2026-06-05 - Fast Sync self-address guard
+
+Scope:
+- Added a self-address exclusion to Fast Sync candidate collection.
+- This prevents a NATed test VM from making the host see an inbound peer as the
+  host's own LAN IP and then probing itself over UDP.
+
+Protocol behavior:
+- The node may still answer valid UDP probe/request packets arriving from LAN
+  peers.
+- The node no longer adds its own interface address to the outbound UDP Fast
+  Sync / Quick Clone candidate set.
+
+Verification:
+- Tahoe and Lion backend reservation function bodies diff clean.
+- Both builds advertise service bit 29 / `DEFCOIN_FASTSYNC`.
+- Lion UTM successfully received a `probe-ack` and a `block-chunk` from Tahoe
+  using the framed `DFCLAN1` UDP packet format.
+
+## 26.6.4ao - 2026-06-05 - TCP-off launch mode for UDP testing
+
+Scope:
+- Added `--debug-disable-core-tcp-sync` and
+  `DEFCOIN_NU_DEBUG_DISABLE_CORE_TCP_SYNC=1`.
+- The switch disables Core TCP block-body fetches only. Header sync, peer
+  negotiation, service-bit discovery, and Core reservation logic remain active.
+- Superseded by 26.6.4aq: `--debug-disable-core-sync` is no longer treated as
+  the TCP-only test alias. Use `--debug-disable-core-tcp-sync` for UDP Fast Sync
+  isolation.
+
+Cross-build note:
+- Use this mode to isolate UDP Fast Sync. Total Core sync shutdown is for
+  Quick Clone/DCOL tests only.
+
+## 26.6.4ap - 2026-06-05 - UDP-only selector in TCP-off test mode
+
+Scope:
+- When Core TCP block copy is disabled by debug launch switch, Tahoe and Lion
+  now force UDP quota whenever at least one Fast Sync peer is visible.
+- Removed the selector-side update of the global probe timestamp before a probe
+  is actually sent in this debug mode.
+- Added throttled `UDP target selection empty` diagnostics with peer, verified,
+  used, failed, and debug-mode counts.
+
+Cross-build note:
+- If a legacy build sees service bit 29 but sends no UDP probe, compare its
+  selector and target-selection logic against this release before touching the
+  backend reservation RPC.
+
+## 26.6.4aq - 2026-06-05 - Split Core TCP-off from Core P2P-off
+
+Scope:
+- `--debug-disable-core-tcp-sync` now disables only Core TCP block-body fetching.
+- `--debug-disable-core-sync` now disables Core P2P sync and is reserved for
+  Quick Clone/DCOL isolation tests.
+- Tahoe and Lion both pass `-defcoindisablecoretcpblocks=1` when either switch
+  is active, but only the full Core Sync switch passes `-networkactive=0`.
+
+Cross-build note:
+- UDP Fast Sync tests should use
+  `--debug-disable-core-tcp-sync --debug-disable-quick-clone`.
+- In that mode, backend launch args must include `-networkactive=1` so peer
+  negotiation, header sync, service bit 29, and Core reservation state remain
+  alive while TCP block bodies are suppressed.

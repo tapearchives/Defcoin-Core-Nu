@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the Boost version used by the Apple Silicon Defcoin Core GUI port.
 
+export LC_ALL=C
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"

@@ -1,6 +1,6 @@
 # Defcoin Core Nu UI Implementation
 
-This directory contains the developer reference for Defcoin Core Nu 26.6.4ad.
+This directory contains the developer reference for Defcoin Core Nu 26.6.4af.
 Nu is a Qt Quick interface that talks to the Defcoin Core backend through a
 small JSON-RPC service layer.
 
@@ -66,3 +66,7 @@ packet-size, diagnostics, and server deployment reference.
 
 See `quick-clone-status-language.md` for the reviewable Quick Clone status text
 taxonomy used by the Settings and Metrics surfaces.
+
+See `macos-local-network-allow-clicker.md` for the test-only helper that
+screenshots macOS Local Network prompts, finds the `Allow` button with Vision
+OCR, and clicks it for automated LAN tests.

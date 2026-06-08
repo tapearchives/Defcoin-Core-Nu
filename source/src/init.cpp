@@ -482,6 +482,8 @@ void SetupServerArgs(NodeContext& node)
     argsman.AddArg("-acceptlegacymagic", strprintf("Temporarily accept legacy Litecoin-compatible Defcoin P2P message-start bytes during the Defcoin magic migration (default: %u)", DEFAULT_ACCEPT_LEGACY_MAGIC), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
     argsman.AddArg("-allowlannodediscovery", strprintf("Allow learning local/private LAN peer addresses from peer address relay (default: %u). Manually configured and inbound LAN peers are not blocked by this setting.", DEFAULT_ALLOW_LAN_NODE_DISCOVERY), ArgsManager::ALLOW_BOOL, OptionsCategory::CONNECTION);
     argsman.AddArg("-defcoinfastsync", "Advertise Defcoin Nu UDP Fast Sync service capability. This should only be enabled by a frontend or service that is actually listening on the Fast Sync UDP port.", ArgsManager::ALLOW_BOOL | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-defcoindisablecoretcpblocks", "Debug-only Nu mode: keep P2P peers, headers, and Core block scheduling active but do not request block bodies through Core's normal TCP getdata downloader. Used to isolate UDP Fast Sync transport.", ArgsManager::ALLOW_BOOL | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-defcoindisablecoreblocksync", "Legacy debug alias for -defcoindisablecoretcpblocks. This does not disable header sync or peer negotiation.", ArgsManager::ALLOW_BOOL | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-timeout=<n>", strprintf("Specify connection timeout in milliseconds (minimum: 1, default: %d)", DEFAULT_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify p2p connection timeout in seconds. This option determines the amount of time a peer may be inactive before the connection to it is dropped. (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -889,7 +891,7 @@ void InitParameterInteraction(ArgsManager& args)
 void InitLogging(const ArgsManager& args)
 {
     // MWEB: Initialize MWEB Logger
-    LoggerAPI::Initialize([](const std::string& logstr) { LogPrintf("%s",logstr.c_str()); });
+    LoggerAPI::Initialize([](const std::string& logstr) { LogPrintf("%s\n", logstr.c_str()); });
 
     LogInstance().m_print_to_file = !args.IsArgNegated("-debuglogfile");
     LogInstance().m_file_path = AbsPathForConfigVal(args.GetArg("-debuglogfile", DEFAULT_DEBUGLOGFILE));

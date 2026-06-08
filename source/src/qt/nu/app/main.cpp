@@ -314,6 +314,20 @@ int main(int argc, char* argv[])
         return 0;
     }
     const bool allowMultiple = arguments.contains(QStringLiteral("--allow-multiple"));
+    const bool quickCloneNow = arguments.contains(QStringLiteral("--quick-clone-now")) ||
+        !qEnvironmentVariableIsEmpty("DEFCOIN_NU_QUICK_CLONE_NOW");
+    if (arguments.contains(QStringLiteral("--debug-disable-core-tcp-sync"))) {
+        qputenv("DEFCOIN_NU_DEBUG_DISABLE_CORE_TCP_SYNC", "1");
+    }
+    if (arguments.contains(QStringLiteral("--debug-disable-core-sync"))) {
+        qputenv("DEFCOIN_NU_DEBUG_DISABLE_CORE_SYNC", "1");
+    }
+    if (arguments.contains(QStringLiteral("--debug-disable-fast-sync"))) {
+        qputenv("DEFCOIN_NU_DEBUG_DISABLE_FAST_SYNC", "1");
+    }
+    if (arguments.contains(QStringLiteral("--debug-disable-quick-clone"))) {
+        qputenv("DEFCOIN_NU_DEBUG_DISABLE_QUICK_CLONE", "1");
+    }
 
     std::unique_ptr<QLockFile> singleInstanceLock;
     if (!smokeTest && !allowMultiple) {
@@ -515,6 +529,12 @@ int main(int argc, char* argv[])
             QTimer::singleShot(650, splash, &QSplashScreen::close);
             QTimer::singleShot(900, splash, &QObject::deleteLater);
         }
+    }
+
+    if (!kExploreApp && quickCloneNow) {
+        QTimer::singleShot(2500, &service, [&service] {
+            service.syncUsingQuickCloneNow();
+        });
     }
 
     if (!rootWindow) {

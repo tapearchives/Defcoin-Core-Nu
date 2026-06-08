@@ -1105,9 +1105,9 @@ static RPCHelpMan reservefastsyncblock()
         "not as independent reasons to request the same block twice. It does not change consensus rules and\n"
         "older Defcoin Core peers continue to use normal TCP block sync.\n",
         {
-            {"action", RPCArg::Type::STR, RPCArg::Optional::NO, "\"reserve\", \"reserve-next\", or \"release\""},
+            {"action", RPCArg::Type::STR, RPCArg::Optional::NO, "\"reserve\", \"reserve-next\", \"release\", \"transport-verified\", or \"transport-unverified\""},
             {"nodeid", RPCArg::Type::NUM, RPCArg::Optional::NO, "Connected peer id from getpeerinfo"},
-            {"height_or_hash", RPCArg::Type::STR, RPCArg::Optional::OMITTED_NAMED_ARG, "Block height for reserve, block hash for release; omit for reserve-next"},
+            {"height_or_hash", RPCArg::Type::STR, RPCArg::Optional::OMITTED_NAMED_ARG, "Block height for reserve, block hash for release; omit for reserve-next and transport actions"},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
@@ -1122,6 +1122,7 @@ static RPCHelpMan reservefastsyncblock()
             HelpExampleCli("reservefastsyncblock", "\"reserve\" 1 903169")
     + HelpExampleCli("reservefastsyncblock", "\"reserve-next\" 1")
     + HelpExampleCli("reservefastsyncblock", "\"release\" 1 \"0000000000000000000000000000000000000000000000000000000000000000\"")
+    + HelpExampleCli("reservefastsyncblock", "\"transport-verified\" 1")
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
@@ -1188,8 +1189,16 @@ static RPCHelpMan reservefastsyncblock()
         obj.pushKV("reason", released ? "released" : "not-in-flight");
         return obj;
     }
+    if (action == "transport-verified" || action == "transport-unverified") {
+        std::string reason;
+        const bool verified = action == "transport-verified";
+        const bool updated = SetFastSyncPeerTransportVerified(nodeid, verified, reason);
+        obj.pushKV("success", updated);
+        obj.pushKV("reason", reason);
+        return obj;
+    }
 
-    throw JSONRPCError(RPC_INVALID_PARAMETER, "Unknown action; expected \"reserve\", \"reserve-next\", or \"release\"");
+    throw JSONRPCError(RPC_INVALID_PARAMETER, "Unknown action; expected \"reserve\", \"reserve-next\", \"release\", \"transport-verified\", or \"transport-unverified\"");
 },
     };
 }

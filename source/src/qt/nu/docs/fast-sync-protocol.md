@@ -25,6 +25,14 @@ rule is simpler: Core selects and reserves a block for a connected peer, then
 UDP may carry the block bytes for that exact reservation. If Core cannot reserve
 a block for that peer, no UDP block request is sent.
 
+During initial block download, a receiver may spend time building headers before
+Core can schedule block-body download from a specific peer. In that state UDP
+can already be reachable and probe-verified, but `reservefastsyncblock
+reserve-next` must still return a scheduling reason such as
+`peer-best-block-unknown`, `peer-chain-not-ahead`, or
+`headers-below-minimum-chain-work`. Those reasons are not UDP packet failures;
+they mean Core has not yet opened a validated block reservation for that peer.
+
 Starting with the 26.6.4r line, Core can also offer a short UDP transport claim
 window during normal block scheduling. When Core selects a block from a connected
 peer that advertises `NODE_DEFCOIN_FASTSYNC`, it may mark that exact block

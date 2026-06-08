@@ -432,12 +432,12 @@ ColumnLayout {
                 "Current value. Recent hashrate is estimated from getnetworkhashps over 120 blocks; difficulty comes from current chain state and can change at retarget boundaries."
             ]
             columnTypes: ["text", "text"]
-            columnWeights: [0.72, 3.6]
+            columnWeights: [0.62, 3.9]
             columnMinimums: [172, 360]
-            columnMaximums: [230, 1400]
+            columnMaximums: [224, 1400]
             fitColumnsToViewport: true
             wrapBodyText: true
-            maxWrappedBodyLines: 3
+            maxWrappedBodyLines: 2
             compact: true
             autoFitOnRowsChanged: true
             alwaysShowHorizontalScrollBar: false

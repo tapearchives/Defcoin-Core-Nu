@@ -685,8 +685,10 @@ private:
     void lanFastSyncTick();
     void requestLanFastSyncBlock();
     QString selectUdpFastSyncTargetHost(int* node_id) const;
+    bool isPrivateLocalOrProvenUdpFastSyncTarget(const QString& host) const;
     bool isUdpFastSyncProbeAllowed(const QString& host, qint64 now) const;
     bool isUdpFastSyncHostVerified(const QString& host) const;
+    void setUdpFastSyncPeerTransportVerified(const QString& host, bool verified);
     void recordUdpFastSyncPeerReply(const QString& host);
     void recordUdpFastSyncPeerMiss(const QString& host, const QString& reason = QString());
     void acknowledgeLanQuickCloneSourceOffline(const QString& host, int height, const QString& reason);
@@ -700,6 +702,15 @@ private:
     QString selectLanQuickCloneProbeHost(int* node_id) const;
     void sendLanFastSyncBlockRequest(int height, const QString& host, int node_id, const QString& expected_hash);
     void releaseLanFastSyncReservation();
+    void releaseLanFastSyncReservationFor(int node_id, const QString& hash);
+    void releaseAllLanFastSyncReservations();
+    void expireLanFastSyncTransfers(qint64 now);
+    void submitNextLanFastSyncReadyBlock();
+    void refreshLanFastSyncCurrentTargetHosts();
+    void updateLanFastSyncRequestState();
+    bool canStartMoreLanFastSyncTransfers() const;
+    qint64 lanFastSyncBufferedBytes() const;
+    int lanFastSyncLocalInflightCount(const QString& host) const;
     void handleLanFastSyncProbe(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
     void handleLanFastSyncProbeAck(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
     void handleLanFastSyncRequest(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
@@ -719,6 +730,7 @@ private:
     QString fastSyncUdpSummary() const;
     QString syncTransportDecisionSummary() const;
     QString syncTransportProbeSummary() const;
+    QString coreSchedulingWaitStatus(const QString& feature, const QString& reason) const;
     void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes);
     QString udpFastSyncEndpointText(const QHostAddress& address, quint16 port = 0) const;
     void recordFastSyncUdpDiagnostic(const QString& reason, const QString& detail = QString());
@@ -726,10 +738,18 @@ private:
         TcpCore,
         UdpFastSync
     };
+    enum class FastSyncUdpFailureKind {
+        ProbeSend,
+        RequestSend,
+        RequestTimeout,
+        Checksum,
+        Buffer,
+        Submit
+    };
     void recordFastSyncTransportSuccess(FastSyncTransport transport, int blocks, int height, double seconds);
     void recordFastSyncTransportFailure(FastSyncTransport transport);
     void recordFastSyncUdpSuccess(int height, qint64 latency_ms);
-    void recordFastSyncUdpFailure();
+    void recordFastSyncUdpFailure(FastSyncUdpFailureKind kind);
     void recordCoreSyncPathProgress(int blocks, double seconds);
     bool shouldAttemptUdpFastSync();
     void resetFastSyncProtocolWindow();
@@ -1024,6 +1044,28 @@ private:
     QSet<QString> m_lan_discovery_added_endpoints;
     QSet<QString> m_lan_discovery_addnode_pending;
     QSet<QString> m_lan_discovery_addnode_inflight;
+    struct LanFastSyncTransfer {
+        QString request_id;
+        QString host;
+        QString expected_hash;
+        QString block_hash;
+        QString block_checksum;
+        QHash<int, QByteArray> chunks;
+        int node_id = -1;
+        int height = -1;
+        int expected_chunks = 0;
+        int expected_size = 0;
+        int assembled_bytes = 0;
+        qint64 request_ms = 0;
+    };
+    struct LanFastSyncReadyBlock {
+        QByteArray block;
+        QString host;
+        QString hash;
+        int node_id = -1;
+        int height = -1;
+        qint64 request_ms = 0;
+    };
     QSet<QString> m_lan_quick_clone_candidate_hosts;
     QSet<QString> m_quick_clone_snapshot_candidate_hosts;
     QSet<QString> m_udp_fast_sync_peer_hosts;
@@ -1076,6 +1118,9 @@ private:
     bool m_debug_log_collecting_continuation = false;
     bool m_launch_diagnostics_section_started = false;
     bool m_backend_log_section_started = false;
+    qint64 m_chain_progress_last_diagnostic_ms = 0;
+    int m_chain_progress_last_diagnostic_headers = -1;
+    int m_chain_progress_last_diagnostic_blocks = -1;
     QString m_console_output = QStringLiteral("Welcome to the Defcoin Core Nu RPC console.\nUse the command line below for standard Core commands, for example getblockchaininfo or listtransactions \"*\" 5.\nJSON parameter arrays are still accepted after the method name when needed.\n\nWARNING: Do not paste commands from strangers into this console.");
     QString m_paper_wallet_address;
     QString m_paper_wallet_wif;
@@ -1089,6 +1134,10 @@ private:
     bool m_advanced_tools_visible = false;
     bool m_lan_fast_sync_enabled = true;
     bool m_lan_quick_clone_enabled = false;
+    bool m_debug_disable_core_tcp_sync = false;
+    bool m_debug_disable_core_sync = false;
+    bool m_debug_disable_fast_sync = false;
+    bool m_debug_disable_quick_clone = false;
     bool m_quick_clone_auto_validate_after = false;
     bool m_quick_clone_validation_running = false;
     bool m_quick_clone_missing_cycle_active = false;
@@ -1128,10 +1177,21 @@ private:
     bool m_lan_fast_sync_request_in_flight = false;
     bool m_lan_fast_sync_reserve_in_flight = false;
     bool m_lan_fast_sync_submit_in_flight = false;
+    QHash<QString, LanFastSyncTransfer> m_lan_fast_sync_transfers_by_id;
+    QHash<int, LanFastSyncReadyBlock> m_lan_fast_sync_ready_blocks_by_height;
+    qint64 m_lan_quick_clone_reservation_backoff_until_ms = 0;
+    qint64 m_lan_quick_clone_last_reservation_status_ms = 0;
+    QString m_lan_quick_clone_last_reservation_reason;
     int m_fast_sync_tcp_successes = 0;
     int m_fast_sync_udp_successes = 0;
     int m_fast_sync_tcp_failures = 0;
     int m_fast_sync_udp_failures = 0;
+    int m_fast_sync_udp_probe_send_failures = 0;
+    int m_fast_sync_udp_request_send_failures = 0;
+    int m_fast_sync_udp_request_timeouts = 0;
+    int m_fast_sync_udp_checksum_failures = 0;
+    int m_fast_sync_udp_buffer_failures = 0;
+    int m_fast_sync_udp_submit_failures = 0;
     double m_fast_sync_tcp_ewma_blocks_per_second = 0.0;
     double m_fast_sync_udp_ewma_blocks_per_second = 0.0;
     int m_fast_sync_tcp_quota_remaining = 1;

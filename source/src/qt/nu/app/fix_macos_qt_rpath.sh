@@ -1,4 +1,5 @@
-#!/usr/bin/env sh
+#!/bin/sh
+export LC_ALL=C
 set -eu
 
 qt_root="$1"
