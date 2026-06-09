@@ -10,6 +10,9 @@ fi
 APP="$1"
 FRAMEWORKS_DIR="$APP/Contents/Frameworks"
 BACKEND_BIN_DIR="$APP/Contents/Resources/nu/bin"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+DEFAULT_BACKEND_BIN_DIR="$REPO_ROOT/src"
 
 if [ ! -d "$APP/Contents" ]; then
   echo "app bundle not found: $APP" >&2
@@ -17,7 +20,18 @@ if [ ! -d "$APP/Contents" ]; then
 fi
 
 if [ ! -d "$BACKEND_BIN_DIR" ]; then
-  exit 0
+  SOURCE_BIN_DIR="${DEFCOIN_NU_BACKEND_BIN_DIR:-$DEFAULT_BACKEND_BIN_DIR}"
+  if [ -x "$SOURCE_BIN_DIR/defcoind" ] && [ -x "$SOURCE_BIN_DIR/defcoin-cli" ]; then
+    mkdir -p "$BACKEND_BIN_DIR"
+    for tool in defcoind defcoin-cli defcoin-tx defcoin-wallet; do
+      if [ -x "$SOURCE_BIN_DIR/$tool" ]; then
+        cp -p "$SOURCE_BIN_DIR/$tool" "$BACKEND_BIN_DIR/$tool"
+        chmod u+w "$BACKEND_BIN_DIR/$tool"
+      fi
+    done
+  else
+    exit 0
+  fi
 fi
 
 mkdir -p "$FRAMEWORKS_DIR"
@@ -25,6 +39,7 @@ mkdir -p "$FRAMEWORKS_DIR"
 is_bundle_dependency() {
   local dep="$1"
   case "$dep" in
+    *.framework/*) return 1 ;;
     /opt/homebrew/*|/opt/local/*|/usr/local/*) return 0 ;;
     *) return 1 ;;
   esac
@@ -100,20 +115,6 @@ for backend in "$BACKEND_BIN_DIR"/*; do
     rewrite_image_dependencies "$backend" "backend"
   fi
 done
-
-while IFS= read -r -d '' candidate; do
-  if ! is_macho_file "$candidate"; then
-    continue
-  fi
-  case "$candidate" in
-    "$FRAMEWORKS_DIR"/*)
-      rewrite_image_dependencies "$candidate" "framework"
-      ;;
-    *)
-      rewrite_image_dependencies "$candidate" "backend"
-      ;;
-  esac
-done < <(find "$APP/Contents" -type f -print0)
 
 index=0
 while [ "$index" -lt "${#queue[@]}" ]; do

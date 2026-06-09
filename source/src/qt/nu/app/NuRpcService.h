@@ -689,6 +689,7 @@ private:
     bool isUdpFastSyncProbeAllowed(const QString& host, qint64 now) const;
     bool isUdpFastSyncHostVerified(const QString& host) const;
     void setUdpFastSyncPeerTransportVerified(const QString& host, bool verified);
+    void clearUdpFastSyncTransportVerification(const QString& host);
     void recordUdpFastSyncPeerReply(const QString& host);
     void recordUdpFastSyncPeerMiss(const QString& host, const QString& reason = QString());
     void acknowledgeLanQuickCloneSourceOffline(const QString& host, int height, const QString& reason);
@@ -709,6 +710,7 @@ private:
     void refreshLanFastSyncCurrentTargetHosts();
     void updateLanFastSyncRequestState();
     bool canStartMoreLanFastSyncTransfers() const;
+    bool hasLanFastSyncPendingHeight(int height) const;
     qint64 lanFastSyncBufferedBytes() const;
     int lanFastSyncLocalInflightCount(const QString& host) const;
     void handleLanFastSyncProbe(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
@@ -1177,6 +1179,8 @@ private:
     bool m_lan_fast_sync_request_in_flight = false;
     bool m_lan_fast_sync_reserve_in_flight = false;
     bool m_lan_fast_sync_submit_in_flight = false;
+    int m_lan_fast_sync_submitting_height = -1;
+    QSet<int> m_lan_fast_sync_counted_heights;
     QHash<QString, LanFastSyncTransfer> m_lan_fast_sync_transfers_by_id;
     QHash<int, LanFastSyncReadyBlock> m_lan_fast_sync_ready_blocks_by_height;
     qint64 m_lan_quick_clone_reservation_backoff_until_ms = 0;

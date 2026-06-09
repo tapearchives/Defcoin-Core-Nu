@@ -307,6 +307,15 @@ int main(int argc, char* argv[])
     const QString deployedQmlRoot = QDir(appDir).filePath("qml");
 #endif
     const QStringList arguments = app.arguments();
+    const bool allowDebugEnvironment = arguments.contains(QStringLiteral("--debug-use-env")) ||
+        !qEnvironmentVariableIsEmpty("DEFCOIN_NU_ALLOW_DEBUG_ENV");
+    if (!allowDebugEnvironment) {
+        qunsetenv("DEFCOIN_NU_DEBUG_DISABLE_CORE_TCP_SYNC");
+        qunsetenv("DEFCOIN_NU_DEBUG_DISABLE_CORE_SYNC");
+        qunsetenv("DEFCOIN_NU_DEBUG_DISABLE_FAST_SYNC");
+        qunsetenv("DEFCOIN_NU_DEBUG_DISABLE_QUICK_CLONE");
+        qunsetenv("DEFCOIN_NU_QUICK_CLONE_NOW");
+    }
     const bool buildSmokeTest = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_SMOKE_TEST");
     const bool smokeTest = arguments.contains(QStringLiteral("--smoke-test")) ||
         buildSmokeTest;

@@ -53,6 +53,82 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4bi - 2026-06-08 - Debug environment guard and clean UDP proof
+
+Big picture:
+- Prior Fast Sync and Quick Clone tests were contaminated by hidden macOS
+  launchd environment variables. The physical Lion iMac still had
+  `DEFCOIN_NU_DEBUG_DISABLE_QUICK_CLONE=1`, so launches that were intended to
+  test Quick Clone silently disabled it.
+- This build makes command-line debug switches the normal test path and ignores
+  inherited debug disable variables unless explicitly allowed. That prevents
+  stale launchd/session state from changing sync behavior without being visible
+  in the launch command.
+- With current Tahoe and Lion builds, a reset Lion chain, and Core TCP block
+  downloads disabled on Lion, UDP Fast Sync accepted blocks through Core
+  validation. After clearing the stale Quick Clone disable flag, Quick Clone
+  also accepted LAN blocks through Core validation.
+
+Porting priority:
+- Lion Intel: required and already ported to the physical iMac source. Add the
+  same startup guard in legacy `main.cpp`.
+- Catalina UTM: required if it uses the same debug launch switches.
+- Windows: required if the Windows launcher or app honors
+  `DEFCOIN_NU_DEBUG_DISABLE_*` variables.
+- Server: no UI port. Server-side Fast Sync code is unchanged, but test scripts
+  should avoid persistent debug environment variables.
+
+Changed behavior:
+- Tahoe visible version becomes `26.6.4bi`.
+- Lion visible version becomes `26.6.4bi-Lion-alpha`.
+- `DEFCOIN_NU_DEBUG_DISABLE_CORE_TCP_SYNC`,
+  `DEFCOIN_NU_DEBUG_DISABLE_CORE_SYNC`,
+  `DEFCOIN_NU_DEBUG_DISABLE_FAST_SYNC`,
+  `DEFCOIN_NU_DEBUG_DISABLE_QUICK_CLONE`, and
+  `DEFCOIN_NU_QUICK_CLONE_NOW` are cleared at GUI startup unless
+  `--debug-use-env` or `DEFCOIN_NU_ALLOW_DEBUG_ENV=1` is present.
+- Explicit command-line switches still work and are used for repeatable tests:
+  `--debug-disable-core-tcp-sync`, `--debug-disable-core-sync`,
+  `--debug-disable-fast-sync`, `--debug-disable-quick-clone`, and
+  `--quick-clone-now`.
+
+Changed files and important details:
+- `source/src/qt/nu/app/main.cpp`: Tahoe startup now sanitizes inherited debug
+  environment before translating command-line switches into process-local debug
+  environment values for `NuRpcService`.
+- `source/src/qt/nu/legacy-osx107/main.cpp`: Lion legacy startup mirrors the
+  same behavior.
+- `source/src/clientversion.h`,
+  `source/src/qt/nu/app/CMakeLists.txt`,
+  `source/src/qt/nu/legacy-osx107/Info.plist`, and
+  `source/src/qt/nu/legacy-osx107/DefcoinCoreNuLegacy.pro`: version labels
+  updated.
+
+Compatibility notes:
+- This does not change the UDP wire format, service bit, Core reservation RPC,
+  validation behavior, wallet files, or datadir layout.
+- Quick Clone remains the validated LAN block-copy scaffolding in this build;
+  the validation-bypass DCOL snapshot installer remains future work.
+
+Verification performed:
+- Tahoe `26.6.4bh` was relaunched from the exact staged app path and the LAN
+  Allow clicker was run. No prompt was present; backend advertised
+  `DEFCOIN_FASTSYNC`.
+- Lion chain folders `blocks`, `chainstate`, and `indexes` were deleted while
+  preserving `wallets/wallet.dat`.
+- Lion launched with `--debug-disable-core-tcp-sync --debug-disable-quick-clone`
+  accepted UDP Fast Sync blocks through Core validation.
+- After clearing `DEFCOIN_NU_DEBUG_DISABLE_QUICK_CLONE` from launchd, Lion
+  launched with `--debug-disable-core-tcp-sync --quick-clone-now` accepted
+  Quick Clone LAN blocks through Core validation.
+
+Risks / follow-up:
+- Add a visible warning if any debug launch switch is active during normal UI
+  use, so future manual tests cannot confuse a disabled path with a failed
+  protocol.
+- Keep Quick Clone and Fast Sync tests isolated first, then re-enable Core TCP
+  competition after the isolated path is proven.
+
 ### 26.6.4be - 2026-06-08 - Lion iMac source refresh and peer Methods parity
 
 Big picture:

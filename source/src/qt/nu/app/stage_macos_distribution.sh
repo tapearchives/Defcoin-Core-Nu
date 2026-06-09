@@ -43,6 +43,11 @@ rm -rf "$DEST_APP" "$DEST_DMG"
 
 ditto "$BUILT_APP" "$DEST_APP"
 chmod -R u+w "$DEST_APP"
+NU_RESOURCE_DIR="$DEST_APP/Contents/Resources/nu"
+mkdir -p "$NU_RESOURCE_DIR"
+rm -rf "$NU_RESOURCE_DIR/qml" "$NU_RESOURCE_DIR/assets"
+ditto "$SCRIPT_DIR/../qml" "$NU_RESOURCE_DIR/qml"
+ditto "$SCRIPT_DIR/../assets" "$NU_RESOURCE_DIR/assets"
 APP_PLIST="$DEST_APP/Contents/Info.plist"
 if [ -f "$APP_PLIST" ]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleName $PRODUCT_NAME" "$APP_PLIST" 2>/dev/null \
