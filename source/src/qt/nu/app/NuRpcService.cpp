@@ -6324,23 +6324,47 @@ QString NuRpcService::selectUdpFastSyncTargetHost(int* node_id) const
     QString best_host;
     int best_score = std::numeric_limits<int>::min();
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    for (const QString& host : std::as_const(m_udp_fast_sync_peer_hosts)) {
+
+    auto is_eligible_host = [this, now](const QString& host, int* peer_node_id_out, QHostAddress* address_out) {
         const int peer_node_id = m_udp_fast_sync_peer_node_ids_by_host.value(host, -1);
-        if (peer_node_id < 0) continue;
+        if (peer_node_id < 0) return false;
         const int peer_tip = m_udp_fast_sync_peer_tips_by_host.value(host, -1);
-        if (peer_tip <= m_block_height) continue;
+        if (peer_tip <= m_block_height) return false;
         if (m_udp_fast_sync_failed_peer_hosts.contains(host) &&
             !m_udp_fast_sync_available_peer_hosts.contains(host) &&
             !m_udp_fast_sync_used_peer_hosts.contains(host) &&
             !isUdpFastSyncProbeAllowed(host, now)) {
-            continue;
+            return false;
         }
         QHostAddress address;
-        if (!address.setAddress(host)) continue;
-        if (!isUdpFastSyncHostVerified(host) && !isUdpFastSyncProbeAllowed(host, now)) continue;
-        const bool local_or_proven = isPrivateLocalOrProvenUdpFastSyncTarget(host);
+        if (!address.setAddress(host)) return false;
+        if (!isUdpFastSyncHostVerified(host) && !isUdpFastSyncProbeAllowed(host, now)) return false;
+        if (peer_node_id_out) *peer_node_id_out = peer_node_id;
+        if (address_out) *address_out = address;
+        return true;
+    };
+
+    bool has_lan_candidate = false;
+    for (const QString& host : std::as_const(m_udp_fast_sync_peer_hosts)) {
+        QHostAddress address;
+        if (!is_eligible_host(host, nullptr, &address)) continue;
+        if (isPrivateOrLocalFastSyncAddress(address) || isOnLocalInterfaceSubnet(host)) {
+            has_lan_candidate = true;
+            break;
+        }
+    }
+
+    for (const QString& host : std::as_const(m_udp_fast_sync_peer_hosts)) {
+        int peer_node_id = -1;
+        QHostAddress address;
+        if (!is_eligible_host(host, &peer_node_id, &address)) continue;
+        const int peer_tip = m_udp_fast_sync_peer_tips_by_host.value(host, -1);
+        const bool lan_candidate = isPrivateOrLocalFastSyncAddress(address) || isOnLocalInterfaceSubnet(host);
+        if (has_lan_candidate && !lan_candidate) continue;
+        const bool local_or_proven = lan_candidate || isUdpFastSyncHostVerified(host);
         const int local_inflight = lanFastSyncLocalInflightCount(host);
         int score = 0;
+        if (lan_candidate) score += 1000;
         if (m_udp_fast_sync_used_peer_hosts.contains(host)) score += 100;
         if (m_udp_fast_sync_available_peer_hosts.contains(host)) score += 50;
         if (local_or_proven) score += 25;

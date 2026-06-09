@@ -53,6 +53,63 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4bk - 2026-06-09 - Prefer LAN Fast Sync sources when available
+
+Big picture:
+- The Lion isolation run proved UDP Fast Sync can accept blocks through Core
+  validation, but the selector could still choose public Fast Sync peers over a
+  verified wired-LAN Tahoe peer because "previously used" public peers scored
+  higher than "private/local" peers. Public UDP timeouts then made LAN UDP look
+  slower than it really was.
+- This build keeps Fast Sync as a transport-only path through Core reservation,
+  but source selection now treats eligible private/local peers as the first
+  choice pool. Public UDP peers compete only when no eligible LAN/private peer
+  can provide the next block.
+
+Porting priority:
+- Lion Intel: required. This exact selector change must be ported before using
+  Lion throughput results to judge LAN UDP performance.
+- Catalina/Windows: required if those builds expose Fast Sync.
+- Server: no change needed for responder-only service, but requester-side server
+  builds should take the same source-selection rule.
+
+Changed behavior:
+- Tahoe visible version becomes `26.6.4bk`.
+- If at least one eligible private/local Fast Sync source is ahead of the local
+  chain, UDP block requests are selected only from that private/local pool.
+- Public Fast Sync peers remain available as fallback when no eligible LAN
+  source exists.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: `selectUdpFastSyncTargetHost()` now first
+  detects eligible LAN/private candidates, then filters the scoring pass to that
+  pool when present. The existing Core reservation and block submission path is
+  unchanged.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: visible build label
+  moved to `26.6.4bk`.
+
+Verification performed:
+- Tahoe backend build passed for `defcoind`, `defcoin-cli`, `defcoin-tx`,
+  and `defcoin-wallet`.
+- Tahoe QML app configured, built, staged, code-signed, and DMG-verified as
+  `26.6.4bk`.
+- Staged app reports `CFBundleShortVersionString=26.6.4bk`; bundled backend
+  reports `Defcoin Core Nu version v26.6.4bk`.
+- Clean Tahoe launch used the LAN-Allow clicker immediately after first run of
+  the new bundle; the clicker reported a successful Accessibility click.
+- `getnetworkinfo` from the bundled backend reports
+  `/DefcoinCoreNu:26.6.4bk/` and service name `DEFCOIN_FASTSYNC`.
+- Tahoe `getpeerinfo` saw the Lion peer at `192.168.0.189` advertising
+  `/DefcoinCoreNu:26.6.4bi-Lion-alpha/` and `DEFCOIN_FASTSYNC`.
+- Tahoe debug log showed a UDP Fast Sync probe acknowledgement sent to the Lion
+  peer after the `26.6.4bk` launch, proving the new Tahoe responder was active
+  and not blocked by macOS LAN permission for this run.
+
+Risks / follow-up:
+- If UDP remains slow after Lion parity, inspect Core reservation pacing and
+  block validation throughput. Raw Ethernet should not be the limiting factor
+  for the tiny early-chain blocks seen in the current Lion rebuild.
+
 ### 26.6.4bj - 2026-06-09 - Fast Sync metrics and verified LAN pacing
 
 Big picture:
