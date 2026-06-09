@@ -77,16 +77,112 @@ derive_build_id() {
   [[ -n "$BUILD_ID" ]] || BUILD_ID="unknown"
 }
 
-kill_existing_nu() {
-  pkill -x DefcoinCoreNu 2>/dev/null || true
-  pkill -x "Defcoin Core Nu" 2>/dev/null || true
+defcoind_pids() {
+  ps -axo pid,args | awk '
+    (index($0,"Resources/nu/bin/defcoind") || index($0,"/defcoind ")) && !index($0,"awk") {
+      print $1
+    }' || true
+}
+
+nu_frontend_pids() {
+  ps -axo pid,args | awk '
+    (index($0,"DefcoinCoreNu.app/Contents/MacOS") || index($0,"Defcoin Core Nu.app/Contents/MacOS")) && !index($0,"awk") {
+      print $1
+    }' || true
+}
+
+request_defcoind_stop() {
+  local pid=$1
+  local command exe cli datadir conf stopped
+  command=$(ps -p "$pid" -o command= 2>/dev/null || true)
+  [[ -n "$command" ]] || return 1
+  stopped=1
+
+  local clis=()
+  if [[ -n "$APP_PATH" && -x "$APP_PATH/Contents/Resources/nu/bin/defcoin-cli" ]]; then
+    clis+=("$APP_PATH/Contents/Resources/nu/bin/defcoin-cli")
+  fi
+  exe=$(printf '%s\n' "$command" | sed -n 's#^\(.*Resources/nu/bin/defcoind\)\( .*\)\{0,1\}$#\1#p' | head -1)
+  if [[ -n "$exe" && -x "$(dirname "$exe")/defcoin-cli" ]]; then
+    clis+=("$(dirname "$exe")/defcoin-cli")
+  fi
+
+  local datadirs=()
+  [[ -n "${DEFCOIN_DATADIR:-}" ]] && datadirs+=("$DEFCOIN_DATADIR")
+  datadirs+=("$HOME/Library/Application Support/Defcoin")
+  datadirs+=("/Volumes/TB5_4TB/d/Library/Application Support/Defcoin")
+
+  for cli in "${clis[@]}"; do
+    [[ -x "$cli" ]] || continue
+    for datadir in "${datadirs[@]}"; do
+      [[ -d "$datadir" ]] || continue
+      while IFS= read -r conf; do
+        [[ -n "$conf" ]] || continue
+        log_event "backend_stop_rpc_requested" "$pid" "started" "cli=$cli datadir=$datadir conf=$conf"
+        if "$cli" -datadir="$datadir" -conf="$conf" stop >/tmp/nu-test-launch-gate-stop-"$pid".log 2>&1; then
+          log_event "backend_stop_rpc_requested" "$pid" "accepted" "$(cat /tmp/nu-test-launch-gate-stop-"$pid".log 2>/dev/null || true)"
+          stopped=0
+          break 3
+        fi
+      done < <(find "$datadir" -maxdepth 1 -type f \( -name 'nu-*-rpc-*.conf' -o -name 'nu-lion-rpc-*.conf' -o -name 'nu-test-rpc.conf' \) -print 2>/dev/null | sort -r)
+    done
+  done
+  return "$stopped"
+}
+
+wait_for_no_defcoind() {
+  local deadline=$((SECONDS + ${1:-240}))
   local pids
-  pids=$(ps -axo pid,args | awk 'index($0,"DefcoinCoreNu.app/Contents/MacOS") || index($0,"Defcoin Core Nu.app/Contents/MacOS") || index($0,"Resources/nu/bin/defcoind") || index($0,"/defcoind ") { if (!index($0,"awk")) print $1 }' || true)
+  while (( SECONDS < deadline )); do
+    pids=$(defcoind_pids)
+    [[ -z "$pids" ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+kill_existing_nu() {
+  local pids
+
+  # Prefer the app's close path first; it asks defcoind to flush wallet,
+  # mempool, peer anchors, block index, and chainstate before exiting.
+  /usr/bin/osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+tell application "Defcoin Core Nu" to quit
+tell application "DefcoinCoreNu" to quit
+APPLESCRIPT
+
+  sleep 2
+  pids=$(defcoind_pids)
+  if [[ -n "$pids" ]]; then
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] || continue
+      request_defcoind_stop "$pid" || true
+    done <<< "$pids"
+  fi
+
+  if wait_for_no_defcoind 240; then
+    log_event "backend_clean_shutdown_wait" "" "clean" "all defcoind processes exited"
+  else
+    pids=$(defcoind_pids)
+    log_event "backend_clean_shutdown_wait" "" "timeout" "$pids"
+    if [[ -n "$pids" ]]; then
+      kill $pids 2>/dev/null || true
+      sleep 30
+    fi
+    pids=$(defcoind_pids)
+    if [[ -n "$pids" ]]; then
+      log_event "backend_forced_kill" "" "forced" "$pids"
+      kill -9 $pids 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+
+  pids=$(nu_frontend_pids)
   if [[ -n "$pids" ]]; then
     kill $pids 2>/dev/null || true
     sleep 2
   fi
-  pids=$(ps -axo pid,args | awk 'index($0,"DefcoinCoreNu.app/Contents/MacOS") || index($0,"Defcoin Core Nu.app/Contents/MacOS") || index($0,"Resources/nu/bin/defcoind") || index($0,"/defcoind ") { if (!index($0,"awk")) print $1 }' || true)
+  pids=$(nu_frontend_pids)
   if [[ -n "$pids" ]]; then
     kill -9 $pids 2>/dev/null || true
     sleep 1

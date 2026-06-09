@@ -14,6 +14,12 @@ Internal Fast Sync recovery build for Tahoe and Lion.
   source accounting.
 - Added the `nu_lion_remote_health_gate.sh` test helper so Lion crash dialogs
   and process state are checked and logged before interpreting sync tests.
+- Hardened the Tahoe test launch gate so `--kill-existing` performs a clean
+  app/backend shutdown and waits for `defcoind` to flush chainstate before any
+  forced termination.
+- Added `nu_lion_remote_safe_stop.sh` for physical Lion testing. This prevents
+  ad hoc process kills from making the next Lion launch appear to restart from
+  block 0.
 
 ## Verification Notes
 - The live stall that triggered this build showed Lion accepting UDP through
@@ -26,3 +32,6 @@ Internal Fast Sync recovery build for Tahoe and Lion.
   blocks from Tahoe. That proves UDP transport and Core acceptance are working
   in isolation; throughput is still not representative while Lion is rebuilding
   headers and saturating CPU.
+- Lion logs showed that an interrupted shutdown can lose the latest in-memory
+  chainstate/block-index progress. Future sync tests must wait for
+  `Shutdown: done` before rebuilding, relaunching, or judging persistence.

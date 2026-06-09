@@ -67,6 +67,11 @@ Big picture:
   Lion accepted sequential UDP Fast Sync blocks from Tahoe. The test is valid
   for "UDP can communicate and Core accepts transported blocks", but not yet for
   throughput because Lion was still building headers and saturating CPU.
+- A separate persistence fault was traced to test/build automation interrupting
+  `defcoind` during shutdown. On the Lion iMac, a clean backend stop can take
+  30-120 seconds while flushing chainstate. If the process is killed before
+  `Shutdown: done`, the next launch may load an empty block index and appear to
+  restart from genesis even though UDP block transfer had been working.
 
 Porting priority:
 - Lion Intel: required operational rule. Run the crash gate before every Lion
@@ -84,6 +89,13 @@ Changed behavior:
   the newest `DefcoinCoreNu*.crash` timestamp, optionally captures a screenshot,
   clears crash reporters, and appends an audit row to
   `local-dev-notes/Defcoin Core Nu/nu_lion_remote_crash_gate_log.csv`.
+- Hardened the Tahoe `nu_test_launch_gate.sh --kill-existing` path so it first
+  asks the app to quit and requests `defcoin-cli stop`, then waits up to four
+  minutes for `defcoind` to exit cleanly before any forced termination. This
+  prevents the launch gate from invalidating block/header persistence tests.
+- Added `src/qt/nu/tools/nu_lion_remote_safe_stop.sh` for the physical Lion
+  iMac. Use it before Lion rebuilds/tests instead of ad hoc `kill`, `pkill`, or
+  `killall` commands.
 - This is test tooling only. It does not alter wallet, blockchain, firewall,
   TCC, or sync data.
 
@@ -91,6 +103,13 @@ Changed files and important details:
 - `src/qt/nu/tools/nu_lion_remote_health_gate.sh`: new physical Lion crash and
   process audit helper. Defaults to `david@192.168.0.189` with
   `$HOME/.ssh/id_rsa_defcoin_intel_mac` and legacy ssh-rsa compatibility.
+- `src/qt/nu/tools/nu_test_launch_gate.sh`: `--kill-existing` now means
+  "cleanly stop the prior app/backend and wait for chainstate flush" rather than
+  immediate process killing. This is important for all UDP/Quick Clone tests.
+- `src/qt/nu/tools/nu_lion_remote_safe_stop.sh`: SSH helper that clears crash
+  reporters, asks the Lion app/backend to stop, runs `defcoin-cli stop` against
+  discovered Lion RPC configs, waits for `defcoind` to disappear, and records
+  the result in the Lion gate CSV.
 
 Verification performed:
 - `nu_lion_remote_health_gate.sh --screenshot /tmp/lion-health-gate.png`
@@ -103,12 +122,20 @@ Verification performed:
 - Lion accepted UDP Fast Sync blocks after the reset marker:
   at least blocks 1-330 were accepted from Tahoe, with two recovered timeouts
   and zero reject/error events in the sampled period.
+- Lion log comparison showed a clean shutdown at 20:04 took about 36 seconds
+  from `Shutdown: In progress...` to `Shutdown: done`. Later test/build stops
+  at 21:59 and 22:37 had `Shutdown: In progress...` and no matching
+  `Shutdown: done`, after which the next launch loaded
+  `CBlockFileInfo(blocks=0, size=0...)`. That makes hard-killing the backend a
+  confirmed test contaminant.
 
 Risks / follow-up:
 - Throughput is still not representative while Lion is rebuilding headers
   (`Synchronizing blockheaders` was only about 45.77% during the sample) and CPU
   was fully saturated. For benchmark numbers, either let headers finish first or
   use a chain-reset method that preserves a valid header index.
+- Do not delete or reset chain data to explain a "starts from zero" symptom
+  until the previous stop has been proven to reach `Shutdown: done`.
 
 ### 26.6.4bz - 2026-06-09 - UDP Fast Sync timeout recovery and dual-stack peer TODO
 
