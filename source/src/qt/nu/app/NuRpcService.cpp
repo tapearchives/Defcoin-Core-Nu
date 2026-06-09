@@ -590,11 +590,14 @@ QVariantMap tableRow(std::initializer_list<QVariant> cells, const QVariantMap& m
     return out;
 }
 
-QVariantMap metricRow(const QString& metric, const QString& value, const QString& tooltip)
+QVariantMap metricRow(const QString& metric, const QString& value, const QString& tooltip, bool detail = false)
 {
     QVariantList tips;
     tips << tooltip << tooltip;
-    return tableRow({metric, value}, QVariantMap{{QStringLiteral("cellTooltips"), tips}});
+    return tableRow({metric, value}, QVariantMap{
+        {QStringLiteral("cellTooltips"), tips},
+        {QStringLiteral("detail"), detail}
+    });
 }
 
 QString formatDiagnosticBytes(qint64 bytes)
@@ -3962,7 +3965,8 @@ void NuRpcService::refreshNode()
                 && m_fast_sync_last_udp_accepted_height <= m_block_height
                 && m_lan_fast_sync_last_progress_ms > 0
                 && now_ms - m_lan_fast_sync_last_progress_ms < 10000;
-            if (!recent_udp_accept) {
+            const bool core_tcp_blocks_disabled = m_debug_disable_core_tcp_sync || m_debug_disable_core_sync;
+            if (!recent_udp_accept && !core_tcp_blocks_disabled) {
                 recordCoreSyncPathProgress(block_delta, seconds);
             }
         }
@@ -4988,25 +4992,34 @@ QString NuRpcService::syncTransportSpeedSummary() const
         const double percent = (100.0 * static_cast<double>(part)) / static_cast<double>(total);
         return QStringLiteral("%1%").arg(QString::number(percent, 'f', percent >= 10.0 ? 0 : 1));
     };
+    QSet<QString> failed_sources = m_udp_fast_sync_block_failed_peer_hosts;
+    for (const QString& host : m_udp_fast_sync_block_success_peer_hosts) {
+        failed_sources.remove(host);
+    }
+    QSet<QString> attempted_sources = m_udp_fast_sync_block_attempted_peer_hosts;
+    attempted_sources.unite(m_udp_fast_sync_block_success_peer_hosts);
+    attempted_sources.unite(failed_sources);
 
     QStringList parts;
-    parts.push_back(QStringLiteral("Blocks: UDP %1/%2 (%3), Core/TCP %4/%2 (%5)")
+    parts.push_back(QStringLiteral("Blocks UDP %1/%2 (%3), TCP/Core %4/%2 (%5)")
                         .arg(udp_blocks)
                         .arg(block_total)
                         .arg(percent_text(udp_blocks, block_total))
                         .arg(core_blocks)
                         .arg(percent_text(core_blocks, block_total)));
-    parts.push_back(QStringLiteral("Block data: all %1, Core/TCP %2, UDP %3")
+    parts.push_back(QStringLiteral("Rates combined %1, TCP-block %2, UDP %3")
                         .arg(volume_rate(block_transport_total, combined_seconds),
                              volume_rate(core_block_total, core_block_seconds),
                              volume_rate(udp_total, udp_seconds)));
-    parts.push_back(QStringLiteral("Core headers %1").arg(volume_rate(m_sync_core_header_bytes, core_header_seconds)));
-    parts.push_back(QStringLiteral("UDP nodes %1 ok/%2 failed")
-                        .arg(m_udp_fast_sync_used_peer_hosts.size())
-                        .arg(m_udp_fast_sync_block_failed_peer_hosts.size()));
-    parts.push_back(QStringLiteral("UDP failures %1").arg(m_fast_sync_udp_failures));
+    parts.push_back(QStringLiteral("UDP sources %1/%2 ok, %3 failed, served %4")
+                        .arg(m_udp_fast_sync_block_success_peer_hosts.size())
+                        .arg(attempted_sources.size())
+                        .arg(failed_sources.size())
+                        .arg(m_udp_fast_sync_block_served_peer_hosts.size()));
+    parts.push_back(QStringLiteral("UDP fail %1").arg(m_fast_sync_udp_failures));
+    parts.push_back(QStringLiteral("Headers %1").arg(volume_rate(m_sync_core_header_bytes, core_header_seconds)));
     if (tcp_total > 0) {
-        parts.push_back(QStringLiteral("Core total net %1").arg(volume_rate(tcp_total, tcp_seconds)));
+        parts.push_back(QStringLiteral("Core net %1").arg(volume_rate(tcp_total, tcp_seconds)));
     }
     return parts.join(QStringLiteral(" | "));
 }
@@ -5060,6 +5073,13 @@ QString NuRpcService::fastSyncUdpSummary() const
     const int core_blocks = m_fast_sync_tcp_successes;
     const int block_total = udp_blocks + core_blocks;
     const double share = block_total > 0 ? (100.0 * static_cast<double>(udp_blocks)) / static_cast<double>(block_total) : -1.0;
+    QSet<QString> failed_sources = m_udp_fast_sync_block_failed_peer_hosts;
+    for (const QString& host : m_udp_fast_sync_block_success_peer_hosts) {
+        failed_sources.remove(host);
+    }
+    QSet<QString> attempted_sources = m_udp_fast_sync_block_attempted_peer_hosts;
+    attempted_sources.unite(m_udp_fast_sync_block_success_peer_hosts);
+    attempted_sources.unite(failed_sources);
     const double seconds = (m_lan_fast_sync_udp_first_activity_ms > 0 && m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms)
         ? qMax(1.0, double(m_lan_fast_sync_udp_last_activity_ms - m_lan_fast_sync_udp_first_activity_ms) / 1000.0)
         : (total > 0 || m_fast_sync_udp_failures > 0 ? 1.0 : 0.0);
@@ -5074,7 +5094,7 @@ QString NuRpcService::fastSyncUdpSummary() const
               .arg(QString::number(udp_samples),
                    QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES),
                    QString::number(udp_warmup_percent));
-    return QStringLiteral("UDP %1/%2 blocks%3 | %4 | %5 | data %6 (in %7, out %8) | nodes %9 ok/%10 failed | pkts %11/%12 | payload fail T/C/B/S %13/%14/%15/%16 | send fail req/probe %17/%18 | probe miss %19 | retry %20")
+    return QStringLiteral("UDP %1/%2 blocks%3 | %4 | %5 | data %6 (in %7, out %8) | sources %9/%10 ok, %11 failed, served %12 | probe %13/%14 B | pkts %15/%16 | fail timeout/checksum/buffer/submit %17/%18/%19/%20 | send fail req/probe %21/%22 | probe miss %23 | retry %24")
         .arg(QString::number(udp_blocks),
              QString::number(block_total),
              share >= 0.0 ? QStringLiteral(" (%1%)").arg(QString::number(share, 'f', share >= 10.0 ? 0 : 1)) : QString(),
@@ -5083,8 +5103,12 @@ QString NuRpcService::fastSyncUdpSummary() const
              formatBytes(total),
              formatBytes(m_lan_fast_sync_udp_bytes_received),
              formatBytes(m_lan_fast_sync_udp_bytes_sent),
-             QString::number(m_udp_fast_sync_used_peer_hosts.size()),
-             QString::number(m_udp_fast_sync_block_failed_peer_hosts.size()),
+             QString::number(m_udp_fast_sync_block_success_peer_hosts.size()),
+             QString::number(attempted_sources.size()),
+             QString::number(failed_sources.size()),
+             QString::number(m_udp_fast_sync_block_served_peer_hosts.size()),
+             QString::number(currentFastSyncDatagramSize()),
+             QString::number(currentFastSyncChunkSize()),
              QString::number(m_lan_fast_sync_udp_packets_received),
              QString::number(m_lan_fast_sync_udp_packets_sent),
              QString::number(m_fast_sync_udp_request_timeouts),
@@ -5538,6 +5562,17 @@ bool NuRpcService::hasLanFastSyncPendingHeight(int height) const
     return false;
 }
 
+int NuRpcService::nextLanFastSyncWantedHeight() const
+{
+    if (m_header_height <= m_block_height) return -1;
+    int height = m_block_height + 1;
+    const int scan_limit = qMin(m_header_height, height + LAN_FAST_SYNC_MAX_READY_BLOCKS + LAN_FAST_SYNC_MAX_INFLIGHT_BLOCKS + 16);
+    while (height <= scan_limit && hasLanFastSyncPendingHeight(height)) {
+        ++height;
+    }
+    return height <= m_header_height ? height : -1;
+}
+
 void NuRpcService::releaseLanFastSyncReservationFor(int node_id, const QString& hash)
 {
     if (node_id < 0 || hash.isEmpty()) return;
@@ -5571,6 +5606,7 @@ void NuRpcService::expireLanFastSyncTransfers(qint64 now)
     for (const QString& id : std::as_const(expired_ids)) {
         const LanFastSyncTransfer transfer = m_lan_fast_sync_transfers_by_id.take(id);
         if (!transfer.host.isEmpty()) {
+            m_udp_fast_sync_block_attempted_peer_hosts.insert(transfer.host);
             m_udp_fast_sync_block_failed_peer_hosts.insert(transfer.host);
         }
         ++m_lan_fast_sync_retransmit_errors;
@@ -5666,6 +5702,7 @@ void NuRpcService::submitNextLanFastSyncReadyBlock()
         }
         if (ready.height <= 0) {
             if (!ready.host.isEmpty()) {
+                m_udp_fast_sync_block_attempted_peer_hosts.insert(ready.host);
                 m_udp_fast_sync_block_failed_peer_hosts.insert(ready.host);
             }
             recordFastSyncUdpFailure(FastSyncUdpFailureKind::Submit);
@@ -5683,6 +5720,8 @@ void NuRpcService::submitNextLanFastSyncReadyBlock()
             if (count_transport) {
                 if (!ready.host.isEmpty()) {
                     m_udp_fast_sync_used_peer_hosts.insert(ready.host);
+                    m_udp_fast_sync_block_attempted_peer_hosts.insert(ready.host);
+                    m_udp_fast_sync_block_success_peer_hosts.insert(ready.host);
                     m_udp_fast_sync_block_failed_peer_hosts.remove(ready.host);
                 }
                 ++m_lan_fast_sync_blocks_received;
@@ -5727,6 +5766,7 @@ void NuRpcService::submitNextLanFastSyncReadyBlock()
             QTimer::singleShot(0, this, &NuRpcService::refreshNode);
         } else {
             if (!ready.host.isEmpty()) {
+                m_udp_fast_sync_block_attempted_peer_hosts.insert(ready.host);
                 m_udp_fast_sync_block_failed_peer_hosts.insert(ready.host);
             }
             ++m_lan_fast_sync_retransmit_errors;
@@ -5877,7 +5917,7 @@ void NuRpcService::lanQuickCloneTick()
 
     expireLanFastSyncTransfers(now);
     submitNextLanFastSyncReadyBlock();
-    if (m_lan_fast_sync_submit_in_flight || m_lan_fast_sync_reserve_in_flight) return;
+    if (m_lan_fast_sync_reserve_in_flight) return;
     if (!canStartMoreLanFastSyncTransfers()) return;
 
     if (m_lan_quick_clone_reservation_backoff_until_ms > now) {
@@ -6082,7 +6122,7 @@ void NuRpcService::lanFastSyncTick()
         }
         return;
     }
-    if (m_lan_fast_sync_submit_in_flight || m_lan_fast_sync_reserve_in_flight) return;
+    if (m_lan_fast_sync_reserve_in_flight) return;
     if (!canStartMoreLanFastSyncTransfers()) return;
 
     if (!shouldAttemptUdpFastSync()) return;
@@ -6163,6 +6203,10 @@ void NuRpcService::clearUdpFastSyncTransportVerification(const QString& host)
     m_udp_fast_sync_available_peer_hosts.remove(host_key);
     m_udp_fast_sync_used_peer_hosts.remove(host_key);
     m_udp_fast_sync_failed_peer_hosts.remove(host_key);
+    m_udp_fast_sync_block_attempted_peer_hosts.remove(host_key);
+    m_udp_fast_sync_block_success_peer_hosts.remove(host_key);
+    m_udp_fast_sync_block_failed_peer_hosts.remove(host_key);
+    m_udp_fast_sync_block_served_peer_hosts.remove(host_key);
     m_udp_fast_sync_probe_failures_by_host.remove(host_key);
     m_udp_fast_sync_last_probe_ms_by_host.remove(host_key);
     setUdpFastSyncPeerTransportVerified(host_key, false);
@@ -6233,6 +6277,10 @@ void NuRpcService::acknowledgeLanQuickCloneSourceOffline(const QString& host, in
     m_udp_fast_sync_used_peer_hosts.remove(clean_host);
     m_udp_fast_sync_current_target_hosts.remove(clean_host);
     m_udp_fast_sync_failed_peer_hosts.insert(clean_host);
+    m_udp_fast_sync_block_attempted_peer_hosts.insert(clean_host);
+    m_udp_fast_sync_block_success_peer_hosts.remove(clean_host);
+    m_udp_fast_sync_block_failed_peer_hosts.insert(clean_host);
+    m_udp_fast_sync_block_served_peer_hosts.remove(clean_host);
     m_udp_fast_sync_peer_inflight_counts_by_host.remove(clean_host);
     m_udp_fast_sync_last_request_ms_by_host.remove(clean_host);
     setUdpFastSyncPeerTransportVerified(clean_host, false);
@@ -6551,6 +6599,10 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
             !m_udp_fast_sync_used_peer_hosts.contains(key)) {
             m_udp_fast_sync_failed_peer_hosts.insert(key);
         }
+        if (!key.isEmpty()) {
+            m_udp_fast_sync_block_attempted_peer_hosts.insert(key);
+            m_udp_fast_sync_block_failed_peer_hosts.insert(key);
+        }
         if (clone_mode) {
             acknowledgeLanQuickCloneSourceOffline(
                 key.isEmpty() ? host : key,
@@ -6590,6 +6642,9 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
     recordLanFastSyncUdpTraffic(written, 0);
     const QString key = normalizedFastSyncHost(peer_address);
     m_udp_fast_sync_attempted_peer_hosts.insert(key);
+    if (!key.isEmpty()) {
+        m_udp_fast_sync_block_attempted_peer_hosts.insert(key);
+    }
     m_lan_fast_sync_status = clone_mode
         ? QStringLiteral("Quick Clone requesting LAN block %1 from %2 at %3-byte datagrams (%4 active, %5 ready).")
               .arg(height)
@@ -6662,16 +6717,32 @@ void NuRpcService::requestLanFastSyncBlock()
         }
         return;
     }
-    // Reserve through Core first; UDP only carries the block body selected by
-    // the normal downloader and does not create an independent block schedule.
+    const bool direct_lan_reservation = core_tcp_blocks_disabled || isPrivateLocalOrProvenUdpFastSyncTarget(host);
+    const int wanted_height = direct_lan_reservation ? nextLanFastSyncWantedHeight() : -1;
+    if (direct_lan_reservation && wanted_height <= 0) {
+        m_lan_fast_sync_status = QStringLiteral("UDP fast sync waiting for Core to advance before reserving another LAN block. %1").arg(fallback_text);
+        rebuildNodeMetrics();
+        Q_EMIT stateChanged();
+        return;
+    }
+
+    // Reserve through Core first. In normal public mode Core chooses the next
+    // block. On verified LAN or UDP-only tests, ask Core for the next local
+    // missing height so the UDP cache can stay ahead while validation finishes.
     m_lan_fast_sync_reserve_in_flight = true;
-    m_lan_fast_sync_status = QStringLiteral("UDP fast sync asking Core to reserve the next block from peer %1.").arg(node_id);
+    m_lan_fast_sync_status = direct_lan_reservation
+        ? QStringLiteral("UDP fast sync asking Core to reserve LAN block %1 from peer %2.")
+              .arg(wanted_height)
+              .arg(node_id)
+        : QStringLiteral("UDP fast sync asking Core to reserve the next block from peer %1.").arg(node_id);
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
     rpcCall(QStringLiteral("reservefastsyncblock"),
-            {QStringLiteral("reserve-next"), node_id},
+            direct_lan_reservation
+                ? QJsonArray{QStringLiteral("reserve"), node_id, wanted_height}
+                : QJsonArray{QStringLiteral("reserve-next"), node_id},
             false,
-            [this, host, node_id](const QJsonValue& result, const QString& error) {
+            [this, host, node_id, direct_lan_reservation](const QJsonValue& result, const QString& error) {
         m_lan_fast_sync_reserve_in_flight = false;
         const QJsonObject obj = result.toObject();
         const bool success = error.isEmpty() && obj.value(QStringLiteral("success")).toBool(false);
@@ -6699,6 +6770,12 @@ void NuRpcService::requestLanFastSyncBlock()
                 QTimer::singleShot(0, this, &NuRpcService::lanFastSyncTick);
             } else {
                 m_lan_fast_sync_status = coreSchedulingWaitStatus(QStringLiteral("UDP Fast Sync"), reason);
+                if (direct_lan_reservation &&
+                    (reason == QLatin1String("block-already-in-flight") ||
+                     reason == QLatin1String("block-already-have-data") ||
+                     reason == QLatin1String("block-already-in-flight-from-peer"))) {
+                    QTimer::singleShot(250, this, &NuRpcService::lanFastSyncTick);
+                }
             }
             rebuildNodeMetrics();
             Q_EMIT stateChanged();
@@ -7003,6 +7080,7 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
                     m_udp_fast_sync_available_peer_hosts.insert(sender_key);
                     m_udp_fast_sync_failed_peer_hosts.remove(sender_key);
                     m_udp_fast_sync_used_peer_hosts.insert(sender_key);
+                    m_udp_fast_sync_block_served_peer_hosts.insert(sender_key);
                     QTimer::singleShot(0, this, &NuRpcService::refreshNode);
                 }
             }
@@ -7054,6 +7132,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     if (!isHex256(chunk_checksum)) return;
     if (lanFastSyncChecksum(payload) != chunk_checksum) {
         if (!transfer.host.isEmpty()) {
+            m_udp_fast_sync_block_attempted_peer_hosts.insert(transfer.host);
             m_udp_fast_sync_block_failed_peer_hosts.insert(transfer.host);
         }
         ++m_lan_fast_sync_retransmit_errors;
@@ -7077,6 +7156,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     if (transfer.assembled_bytes + payload.size() > qMin(block_size, LAN_FAST_SYNC_MAX_BLOCK_BYTES) ||
         lanFastSyncBufferedBytes() + payload.size() > LAN_FAST_SYNC_MAX_BUFFER_BYTES) {
         if (!transfer.host.isEmpty()) {
+            m_udp_fast_sync_block_attempted_peer_hosts.insert(transfer.host);
             m_udp_fast_sync_block_failed_peer_hosts.insert(transfer.host);
         }
         ++m_lan_fast_sync_retransmit_errors;
@@ -7128,6 +7208,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header, const QByte
     }
     if (block.size() != transfer.expected_size || lanFastSyncChecksum(block) != transfer.block_checksum) {
         if (!transfer.host.isEmpty()) {
+            m_udp_fast_sync_block_attempted_peer_hosts.insert(transfer.host);
             m_udp_fast_sync_block_failed_peer_hosts.insert(transfer.host);
         }
         ++m_lan_fast_sync_retransmit_errors;
@@ -8018,6 +8099,10 @@ void NuRpcService::refreshPeer(const QString& node_id)
         m_udp_fast_sync_attempted_peer_hosts.remove(host_key);
         m_udp_fast_sync_failed_peer_hosts.remove(host_key);
         m_udp_fast_sync_used_peer_hosts.remove(host_key);
+        m_udp_fast_sync_block_attempted_peer_hosts.remove(host_key);
+        m_udp_fast_sync_block_success_peer_hosts.remove(host_key);
+        m_udp_fast_sync_block_failed_peer_hosts.remove(host_key);
+        m_udp_fast_sync_block_served_peer_hosts.remove(host_key);
         m_udp_fast_sync_current_target_hosts.remove(host_key);
         m_udp_fast_sync_last_request_ms_by_host.remove(host_key);
         m_udp_fast_sync_last_probe_ms_by_host.remove(host_key);
@@ -8620,54 +8705,70 @@ void NuRpcService::validateExistingBlockchain()
 
 void NuRpcService::rebuildNodeMetrics()
 {
-    const QString sync_value = QStringLiteral("%1% | %2 | %3")
+    const QString sync_value = QStringLiteral("%1% | %2")
         .arg(m_sync_progress_percent)
-        .arg(m_sync_state)
-        .arg(lanFastSyncMethodSummary());
+        .arg(m_sync_state);
+    const QString data_dir = m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir;
     m_node_metrics = {
         metricRow(QStringLiteral("Syncing"), sync_value,
-                  QStringLiteral("Blockchain sync progress, current sync state, and only the transport methods that have actually carried sync traffic during this Nu session.")),
-        metricRow(QStringLiteral("Traffic"), m_metric_traffic,
-                  QStringLiteral("Total backend P2P network traffic reported by getnettotals, independent of the sync-only speed rows.")),
+                  QStringLiteral("Blockchain sync progress and current sync state. Transport-specific rates are shown in the Core Sync, Fast Sync, and Sync overview rows.")),
         metricRow(QStringLiteral("Sync overview"), syncTransportSpeedSummary(),
                   QStringLiteral("Combined session-average sync throughput. UDP timing includes failed attempts and cooldown/retry time so failed probes reduce the average instead of being ignored.")),
         metricRow(QStringLiteral("Core Sync (TCP)"), coreSyncPathSummary(),
                   QStringLiteral("Normal Core P2P sync and validation path. Chain advances here are active-chain height increases not attributed to UDP fast sync; they can include validation of locally available block data.")),
         metricRow(QStringLiteral("Fast Sync (UDP)"), fastSyncUdpSummary(),
                   QStringLiteral("UDP Fast Sync totals for this Nu session. Average speed includes failed UDP attempts, checksum failures, timeouts, and retries so the protocol comparison is not inflated by ignoring failures.")),
-        metricRow(QStringLiteral("Fast Sync (UDP) decision"), syncTransportDecisionSummary(),
-                  QStringLiteral("Adaptive TCP/UDP block-transfer preference. Nu uses recent accepted-block timing, reliability, and occasional probes so a slower protocol can recover if conditions change.")),
-        metricRow(QStringLiteral("Fast Sync (UDP) probe"), syncTransportProbeSummary(),
-                  QStringLiteral("Fast Sync service-bit candidates, UDP-verified peers, and current datagram/chunk target. Nu probes a peer once per verification window, then reuses verified UDP peers without probing every block.")),
         metricRow(QStringLiteral("Quick Clone (LAN UDP)"), m_lan_quick_clone_status,
                   QStringLiteral("Trusted-LAN public-chain copy status. Quick Clone/DCOL never copies wallets, keys, settings, peers, bans, or RPC cookies; snapshot replacement is gated by manifest verification.")),
-        metricRow(QStringLiteral("Quick Clone (LAN UDP) validation"), m_quick_clone_validation_status,
-                  QStringLiteral("Core verifychain status for validating existing public blockchain data after a Quick Clone or on demand.")),
+        metricRow(QStringLiteral("Traffic"), m_metric_traffic,
+                  QStringLiteral("Total backend P2P network traffic reported by getnettotals, independent of the sync-only speed rows.")),
         metricRow(QStringLiteral("Network active"), m_metric_network_active,
                   QStringLiteral("Whether the backend currently allows peer network activity.")),
         metricRow(QStringLiteral("Connections"), QStringLiteral("Total: %1 | In: %2 | Out: %3")
                   .arg(m_metric_connections, m_metric_inbound, m_metric_outbound),
                   QStringLiteral("Peer connection count using Litecoin/Core convention. In means a remote peer opened the connection into this node; Out means this node opened the connection to a peer.")),
-        metricRow(QStringLiteral("Version"), m_metric_version,
-                  QStringLiteral("Local backend user agent string advertised to peers.")),
         metricRow(QStringLiteral("Blocks"), m_metric_blocks,
                   QStringLiteral("Current fully validated active-chain block height.")),
         metricRow(QStringLiteral("Headers"), m_metric_headers,
                   QStringLiteral("Highest header height known by the backend. Headers can be ahead of fully downloaded blocks during sync.")),
         metricRow(QStringLiteral("Verification"), m_metric_verification,
                   QStringLiteral("Backend verification progress estimate across the active chain.")),
+        metricRow(QStringLiteral("Fast Sync (UDP) decision"), syncTransportDecisionSummary(),
+                  QStringLiteral("Adaptive TCP/UDP block-transfer preference. Nu uses recent accepted-block timing, reliability, and occasional probes so a slower protocol can recover if conditions change."), true),
+        metricRow(QStringLiteral("Fast Sync (UDP) probe"), syncTransportProbeSummary(),
+                  QStringLiteral("Fast Sync service-bit candidates, UDP-verified peers, and current datagram/chunk target. Nu probes a peer once per verification window, then reuses verified UDP peers without probing every block."), true),
+        metricRow(QStringLiteral("Quick Clone (LAN UDP) validation"), m_quick_clone_validation_status,
+                  QStringLiteral("Core verifychain status for validating existing public blockchain data after a Quick Clone or on demand."), true),
+        metricRow(QStringLiteral("Version"), m_metric_version,
+                  QStringLiteral("Local backend user agent string advertised to peers."), true),
         metricRow(QStringLiteral("Difficulty"), m_metric_difficulty,
-                  QStringLiteral("Current active-chain proof-of-work difficulty. It can change at retarget boundaries.")),
+                  QStringLiteral("Current active-chain proof-of-work difficulty. It can change at retarget boundaries."), true),
         metricRow(QStringLiteral("Network hashrate (120 blocks)"), m_metric_network_hashrate,
-                  QStringLiteral("Estimated recent network hashrate from getnetworkhashps over the last 120 blocks.")),
+                  QStringLiteral("Estimated recent network hashrate from getnetworkhashps over the last 120 blocks."), true),
         metricRow(QStringLiteral("Average block time (120 blocks)"), m_metric_average_block_time,
-                  QStringLiteral("Recent active-chain block spacing sampled from RPC block headers, with the Explorer index used as fallback.")),
+                  QStringLiteral("Recent active-chain block spacing sampled from RPC block headers, with the Explorer index used as fallback."), true),
         metricRow(QStringLiteral("Chain tips"), m_metric_chain_tips,
-                  QStringLiteral("Summary of active and known stale/header-only chain tips reported by the backend.")),
+                  QStringLiteral("Summary of active and known stale/header-only chain tips reported by the backend."), true),
         metricRow(QStringLiteral("Top sent P2P messages"), m_metric_peer_messages_sent,
-                  QStringLiteral("Largest P2P message categories sent to peers, aggregated from getpeerinfo byte counters.")),
+                  QStringLiteral("Largest P2P message categories sent to peers, aggregated from getpeerinfo byte counters."), true),
         metricRow(QStringLiteral("Top rec'd P2P messages"), m_metric_peer_messages_received,
-                  QStringLiteral("Largest P2P message categories received from peers, aggregated from getpeerinfo byte counters."))
+                  QStringLiteral("Largest P2P message categories received from peers, aggregated from getpeerinfo byte counters."), true),
+        metricRow(QStringLiteral("Backend"), backendBinaryPath().isEmpty() ? QStringLiteral("not bundled") : backendBinaryPath(),
+                  QStringLiteral("Backend defcoind binary Nu will start or manage when local autostart is enabled."), true),
+        metricRow(QStringLiteral("Data directory"), data_dir,
+                  QStringLiteral("Defcoin data directory used for public chain data, wallet files, debug.log, RPC cookie, and node settings."), true),
+        metricRow(QStringLiteral("Debug log"), debugLogPath(),
+                  QStringLiteral("Backend debug.log path."), true),
+        metricRow(QStringLiteral("RPC"), QStringLiteral("%1:%2").arg(m_rpc_host).arg(m_rpc_port),
+                  QStringLiteral("Local RPC endpoint used by Nu to talk to the backend."), true),
+        metricRow(QStringLiteral("Launch defaults"),
+                  QStringLiteral("listen=1, discover=%1, allowlannodediscovery=%2, defcoinfastsync=%3, quickclone=%4, upnp=%5")
+                      .arg((m_lan_node_discovery_enabled || m_lan_fast_sync_enabled || m_upnp_connections_enabled) ? 1 : 0)
+                      .arg((m_lan_node_discovery_enabled || m_lan_fast_sync_enabled) ? 1 : 0)
+                      .arg(m_lan_fast_sync_enabled ? 1 : 0)
+                      .arg(m_lan_quick_clone_enabled ? 1 : 0)
+                      .arg(m_upnp_connections_enabled ? 1 : 0),
+                  QStringLiteral("Nu launch-time networking flags and feature defaults passed into the managed backend."), true)
     };
 }
 

@@ -711,6 +711,7 @@ private:
     void updateLanFastSyncRequestState();
     bool canStartMoreLanFastSyncTransfers() const;
     bool hasLanFastSyncPendingHeight(int height) const;
+    int nextLanFastSyncWantedHeight() const;
     qint64 lanFastSyncBufferedBytes() const;
     int lanFastSyncLocalInflightCount(const QString& host) const;
     void handleLanFastSyncProbe(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
@@ -1075,7 +1076,10 @@ private:
     QSet<QString> m_udp_fast_sync_available_peer_hosts;
     QSet<QString> m_udp_fast_sync_failed_peer_hosts;
     QSet<QString> m_udp_fast_sync_used_peer_hosts;
+    QSet<QString> m_udp_fast_sync_block_attempted_peer_hosts;
+    QSet<QString> m_udp_fast_sync_block_success_peer_hosts;
     QSet<QString> m_udp_fast_sync_block_failed_peer_hosts;
+    QSet<QString> m_udp_fast_sync_block_served_peer_hosts;
     QSet<QString> m_udp_fast_sync_current_target_hosts;
     QHash<QString, qint64> m_udp_fast_sync_last_request_ms_by_host;
     QHash<QString, qint64> m_udp_fast_sync_last_probe_ms_by_host;

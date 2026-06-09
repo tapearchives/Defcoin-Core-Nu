@@ -53,6 +53,120 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4bm - 2026-06-09 - Fast Sync block-source accounting and fair UDP test metrics
+
+Big picture:
+- Earlier Fast Sync status text mixed several different meanings of "UDP used":
+  UDP probe success, serving chunks to another node, and accepting a UDP block
+  through Core. That made the UDP-vs-TCP rate comparison hard to trust.
+- This build separates receiver-side UDP block source accounting from generic
+  transport history and stops isolated UDP tests from counting generic chain
+  advancement as TCP/Core block success when Core TCP block-body sync is
+  disabled.
+- During Lion parity work, stale `dns-sd -B _smb._tcp` workstation-discovery
+  helper processes were found consuming Lion process slots. Lion must use the
+  bounded Bonjour browse snapshot already present in Tahoe, not a live pipe.
+
+Porting priority:
+- Lion Intel: required. Port the new source-accounting sets and status text to
+  `src/qt/nu/legacy-osx107/main.cpp`; keep Qt 5.5-compatible explicit set
+  removal loops. Also port the bounded Bonjour SMB browse script if missing.
+- Catalina UTM: required if Fast Sync metrics are present.
+- Windows: required if Fast Sync metrics are present.
+- Server: requester-side server builds should take the counter split if they
+  display or log Fast Sync requester metrics. Responder-only protocol behavior
+  is unchanged.
+
+Changed behavior:
+- Tahoe visible version becomes `26.6.4bm`.
+- `Sync overview` now reports `UDP sources N/M ok, X failed, served Y`.
+- `Fast Sync (UDP)` now reports accepted UDP block sources, attempted sources,
+  fully failed sources, served peers, and current datagram/chunk probe size.
+- During debug launches with Core TCP block-body sync disabled,
+  `recordCoreSyncPathProgress()` is not called for generic chain advancement.
+  That prevents an isolated UDP test from crediting TCP/Core for local or
+  non-UDP advancement.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.h`: added
+  `m_udp_fast_sync_block_attempted_peer_hosts`,
+  `m_udp_fast_sync_block_success_peer_hosts`, and
+  `m_udp_fast_sync_block_served_peer_hosts`.
+- `src/qt/nu/app/NuRpcService.cpp`: updated success, timeout, checksum, buffer,
+  submit-failure, Quick Clone offline, Retest FastSync, and transport-clear
+  paths to maintain the new sets. The Peers table still uses the broader
+  `m_udp_fast_sync_used_peer_hosts` history so `TCP+UDP` remains available.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: version moved to
+  `26.6.4bm`.
+- `src/qt/nu/docs/release-notes-26.6.4bm.md`: user/developer release note.
+
+Compatibility notes:
+- No wire protocol, service bit, consensus, wallet, or storage format change.
+- This is a metrics/status correction and test-isolation fix.
+
+Build/package notes:
+- Rebuild backend binaries after changing `src/clientversion.h`; otherwise the
+  app and bundled daemon will report different suffixes.
+- Tahoe build should use a fresh or explicitly configured Qt 6 arm64 build dir
+  with the bundled Qt path, as in prior 26.6.4bl notes.
+
+Verification performed:
+- Tahoe QML app target compiled cleanly through `DefcoinCoreNuResources` before
+  staging.
+
+Risks / follow-up:
+- The next test must launch the newest Tahoe bundle only after closing the old
+  Nu process, then click the Tahoe Local Network Allow prompt if macOS shows it.
+- Delete only Lion `blocks`, `chainstate`, and `indexes` for clean-sync tests.
+
+### 26.6.4bl - 2026-06-09 - Fast Sync failed-node accounting cleanup
+
+Big picture:
+- 26.6.4bk added LAN-first Fast Sync source selection and carried the 26.6.4bj
+  node success/failure counters, but one reset path could leave a peer in the
+  UDP failed-node bucket after a user retested or cleared transport
+  verification.
+- This build keeps the protocol unchanged and fixes the visible diagnostic
+  accounting so `UDP nodes N ok/M failed` describes the current test state.
+
+Porting priority:
+- Lion Intel: required. Port the same cleanup to legacy
+  `src/qt/nu/legacy-osx107/main.cpp` so Tahoe and Lion status rows match.
+- Catalina UTM: required if Fast Sync metrics are present.
+- Windows: required if Fast Sync metrics are present.
+- Server: requester-side builds should take the cleanup; responder-only service
+  behavior is unchanged.
+
+Changed behavior:
+- Tahoe visible version becomes `26.6.4bl`.
+- Retest FastSync and UDP verification reset no longer leave stale entries in
+  the failed-node count.
+- Quick Clone offline handling continues to mark the current source as failed
+  until it later succeeds or is explicitly reset.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: `clearUdpFastSyncTransportVerification()`
+  now clears `m_udp_fast_sync_block_failed_peer_hosts`; Quick Clone offline
+  handling inserts into that failed-node set; `refreshPeer()` clears it during
+  manual Retest FastSync.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: visible build label
+  moved to `26.6.4bl`.
+
+Verification performed:
+- Tahoe backend build passed for `defcoind`, `defcoin-cli`, `defcoin-tx`,
+  and `defcoin-wallet`.
+- Tahoe QML app configured in a fresh `build/nu-qml-arm64-26.6.4bl`
+  directory to avoid stale Homebrew Qt cache paths, built
+  `DefcoinCoreNuResources`, staged, code-signed, and DMG-verified.
+- Staged app reports `CFBundleShortVersionString=26.6.4bl`; bundled backend
+  reports `Defcoin Core Nu version v26.6.4bl`.
+- Lion legacy source received the equivalent failed-node reset cleanup and is
+  rebuilding as `26.6.4bl-Lion-alpha`.
+
+Risks / follow-up:
+- Launch Tahoe and Lion current builds together and use the macOS LAN-Allow
+  clicker on Tahoe before treating UDP results as valid.
+
 ### 26.6.4bk - 2026-06-09 - Prefer LAN Fast Sync sources when available
 
 Big picture:
@@ -1935,3 +2049,65 @@ Cross-build note:
 - In that mode, backend launch args must include `-networkactive=1` so peer
   negotiation, header sync, service bit 29, and Core reservation state remain
   alive while TCP block bodies are suppressed.
+
+## 26.6.4bn - 2026-06-09 - UDP Fast Sync LAN pacing and source stats
+
+Scope:
+- Clean Tahoe-to-Lion testing with the current `26.6.4bm` builds and Tahoe's
+  macOS Local Network prompt allowed proved that UDP Fast Sync can deliver
+  accepted blocks while Core TCP block-body fetching is disabled on Lion.
+- The remaining slowness was not raw LAN throughput. Lion accepted UDP blocks
+  through Core validation, but the frontend mostly waited for each
+  `submitblock` call before reserving the next block.
+- Tahoe now computes the next not-yet-pending UDP height and, for verified LAN
+  targets or UDP-only tests, asks Core to reserve that exact height. This keeps
+  the existing UDP ready-block cache useful while validation finishes earlier
+  blocks.
+
+Protocol behavior:
+- Fast Sync remains validation-preserving. It still calls Core
+  `reservefastsyncblock` before sending a UDP request and still submits raw
+  blocks through Core `submitblock`.
+- This is not Quick Clone/DCOL and does not bypass validation.
+- Public/non-LAN mode can still use Core's `reserve-next` path. The direct
+  height reservation is used for private/LAN or explicit UDP-only test cases.
+- Metrics now expose UDP block source counts: successful source hosts, attempted
+  source hosts, failed source hosts, and served source hosts.
+
+Cross-build note:
+- Port `nextLanFastSyncWantedHeight()`, the relaxed submit-in-flight tick gate,
+  and the direct LAN/test reservation call as a unit.
+- On Lion, make the same changes in `src/qt/nu/legacy-osx107/main.cpp`.
+- A correct UDP-only test launch is:
+  `--debug-disable-core-tcp-sync --debug-disable-quick-clone`.
+- A clean test must use the current Tahoe and Lion builds and Tahoe's first-run
+  Local Network prompt must be allowed before interpreting any UDP failure.
+
+## 26.6.4bo - 2026-06-09 - Metrics detail filtering and Peers switch polish
+
+Scope:
+- Replaced the Peers `Simple | Detailed` segmented control with a compact
+  `Details` switch on Tahoe and Lion.
+- Added the same `Details` switch to `Metrics > Status`.
+- Status rows now have an explicit normal-vs-detail classification. The default
+  non-detailed view shows the primary sync/transport/traffic/chain rows; the
+  detailed view adds selector internals, probe status, backend paths, launch
+  defaults, chain tips, and P2P message breakdowns.
+- Removed the full TCP/UDP method summary from the `Syncing` row to avoid
+  duplicating the dedicated Core Sync, Fast Sync, and Sync overview rows.
+
+Lion performance note:
+- The Lion Qt 5.5 Metrics route now refreshes only the visible Metrics tab.
+  Entering Metrics no longer preloads Status, Log, Peers, and banned-peer
+  tables together.
+- Lion `populateDiagnosticsStatus()` now exits when Status is not visible and
+  skips table rebuild/autofit work when the visible row signature has not
+  changed.
+
+Cross-build note:
+- Tahoe implements detail filtering through `meta.detail` on `nodeMetrics` rows.
+- Lion implements the same concept with a local `StatusRow { metric, value,
+  detail }` list before writing the `QTableWidget`.
+- Keep the row order consistent: Syncing, Sync overview, Core Sync (TCP), Fast
+  Sync (UDP), Quick Clone (LAN UDP), Traffic, Network active, Connections,
+  Blocks, Headers, Verification, followed by detail-only rows.

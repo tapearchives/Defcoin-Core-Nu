@@ -26,6 +26,9 @@ ColumnLayout {
     property bool peerSimpleSortAscending: true
     property string peerDetailedSortKey: ""
     property bool peerDetailedSortAscending: true
+    property bool peerDetails: root.initialPeerView === 1
+    property bool statusDetails: false
+    property var statusRows: []
     property var selectedPeerNodeIds: []
     property var selectedBannedPeerKeys: []
     readonly property int trafficMaxChartSeconds: 7 * 24 * 60 * 60
@@ -161,11 +164,27 @@ ColumnLayout {
 
     function applyPeerSortForCurrentView() {
         if (!peersTable) return
-        const viewKey = peerViewToggle.currentIndex === 0 ? root.peerSimpleSortKey : root.peerDetailedSortKey
-        const viewAscending = peerViewToggle.currentIndex === 0 ? root.peerSimpleSortAscending : root.peerDetailedSortAscending
+        const viewKey = root.peerDetails ? root.peerDetailedSortKey : root.peerSimpleSortKey
+        const viewAscending = root.peerDetails ? root.peerDetailedSortAscending : root.peerSimpleSortAscending
         if (viewKey.length > 0 && peersTable.applyExternalSort(viewKey, viewAscending)) return
         if (root.peerSortKey.length > 0 && peersTable.applyExternalSort(root.peerSortKey, root.peerSortAscending)) return
         peersTable.sortColumn = -1
+    }
+
+    function displayedStatusRows() {
+        const source = NuService.nodeMetrics || []
+        if (root.statusDetails) return source
+        let rows = []
+        for (let i = 0; i < source.length; ++i) {
+            const row = source[i]
+            const meta = row && row.meta !== undefined ? row.meta : ({})
+            if (meta.detail !== true) rows.push(row)
+        }
+        return rows
+    }
+
+    function refreshDisplayedStatusRows() {
+        root.statusRows = root.displayedStatusRows()
     }
 
     function durationText(seconds) {
@@ -399,7 +418,17 @@ ColumnLayout {
 
     spacing: NuTokens.spaceLg
 
-    Component.onCompleted: root.refreshLogFilterPresets()
+    onStatusDetailsChanged: root.refreshDisplayedStatusRows()
+
+    Component.onCompleted: {
+        root.refreshLogFilterPresets()
+        root.refreshDisplayedStatusRows()
+    }
+
+    Connections {
+        target: NuService
+        function onNodeMetricsChanged() { root.refreshDisplayedStatusRows() }
+    }
 
     NuPageHeader {
         Layout.fillWidth: true
@@ -422,28 +451,54 @@ ColumnLayout {
         Layout.fillHeight: true
         currentIndex: root.tabToStack(tabs.currentIndex)
 
-        NuDataTable {
-            tableId: "nodeStatusMetrics"
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            columns: ["Metric", "Value"]
-            columnTooltips: [
-                "Status metric reported by the local backend or Nu frontend.",
-                "Current value. Recent hashrate is estimated from getnetworkhashps over 120 blocks; difficulty comes from current chain state and can change at retarget boundaries."
-            ]
-            columnTypes: ["text", "text"]
-            columnWeights: [0.62, 3.9]
-            columnMinimums: [172, 360]
-            columnMaximums: [224, 1400]
-            fitColumnsToViewport: true
-            wrapBodyText: true
-            maxWrappedBodyLines: 2
-            compact: true
-            autoFitOnRowsChanged: true
-            alwaysShowHorizontalScrollBar: false
-            restoreSavedColumnWidths: false
-            rows: NuService.nodeMetrics
-            emptyText: "Node status hydrates here."
+        ColumnLayout {
+            spacing: NuTokens.spaceMd
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: NuTokens.spaceMd
+
+                NuDetailsSwitch {
+                    id: statusDetailsSwitch
+                    checked: root.statusDetails
+                    helpText: "Show lower-frequency backend details, probe internals, paths, and message breakdowns."
+                    onCheckedChanged: root.statusDetails = checked
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.statusDetails
+                          ? "Full sync, network, backend, and diagnostic details."
+                          : "Primary sync health, transport mix, traffic, and chain progress."
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    elide: Text.ElideRight
+                }
+            }
+
+            NuDataTable {
+                tableId: root.statusDetails ? "nodeStatusMetricsDetailed" : "nodeStatusMetricsSimple"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                columns: ["Metric", "Value"]
+                columnTooltips: [
+                    "Status metric reported by the local backend or Nu frontend.",
+                    "Current value. The default view shows the highest-value sync and node health rows; Details adds lower-frequency diagnostics."
+                ]
+                columnTypes: ["text", "text"]
+                columnWeights: [0.58, 4.0]
+                columnMinimums: [176, 380]
+                columnMaximums: [234, 1600]
+                fitColumnsToViewport: true
+                wrapBodyText: true
+                maxWrappedBodyLines: root.statusDetails ? 3 : 2
+                compact: true
+                autoFitOnRowsChanged: true
+                alwaysShowHorizontalScrollBar: false
+                restoreSavedColumnWidths: false
+                rows: root.statusRows
+                emptyText: "Node status hydrates here."
+            }
         }
 
         ColumnLayout {
@@ -453,23 +508,24 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: NuTokens.spaceMd
 
-                NuTabBar {
-                    id: peerViewToggle
-                    Layout.preferredWidth: 224
-                    currentIndex: root.initialPeerView
-                    NuTabButton { text: "Simple" }
-                    NuTabButton { text: "Detailed" }
-                    onCurrentIndexChanged: Qt.callLater(function() {
-                        root.applyPeerSortForCurrentView()
-                        peersTable.forceResetColumnWidths()
-                    })
+                NuDetailsSwitch {
+                    id: peerDetailsSwitch
+                    checked: root.peerDetails
+                    helpText: "Show the full peer protocol table."
+                    onCheckedChanged: {
+                        root.peerDetails = checked
+                        Qt.callLater(function() {
+                            root.applyPeerSortForCurrentView()
+                            peersTable.forceResetColumnWidths()
+                        })
+                    }
                 }
 
                 Label {
                     Layout.fillWidth: true
-                    text: peerViewToggle.currentIndex === 0
-                          ? "Core peer health and traffic."
-                          : "Full protocol fields for network inspection."
+                    text: root.peerDetails
+                          ? "Full protocol fields for network inspection."
+                          : "Core peer health and traffic."
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                     elide: Text.ElideRight
@@ -502,29 +558,29 @@ ColumnLayout {
                 plainClickSelectsRows: true
                 rowKeyMetaField: "nodeId"
                 selectedRowKeys: root.selectedPeerNodeIds
-                alwaysShowHorizontalScrollBar: peerViewToggle.currentIndex === 1
-                tableId: peerViewToggle.currentIndex === 0 ? "nodePeersSimple" : "nodePeersDetailed"
+                alwaysShowHorizontalScrollBar: root.peerDetails
+                tableId: root.peerDetails ? "nodePeersDetailed" : "nodePeersSimple"
                 restoreSavedColumnWidths: false
-                columns: peerViewToggle.currentIndex === 0 ? root.simplePeerColumns : root.detailedPeerColumns
-                columnTooltips: peerViewToggle.currentIndex === 0 ? root.simplePeerTooltips : root.detailedPeerTooltips
-                columnTypes: peerViewToggle.currentIndex === 0 ? root.simplePeerTypes : root.detailedPeerTypes
-                sortColumnKeys: peerViewToggle.currentIndex === 0 ? root.simplePeerSortKeys : root.detailedPeerSortKeys
-                columnSortMetaFields: peerViewToggle.currentIndex === 0 ? [] : root.detailedPeerSortMetaFields
-                columnWeights: peerViewToggle.currentIndex === 0 ? root.simplePeerWeights : root.detailedPeerWeights
-                columnMinimums: peerViewToggle.currentIndex === 0 ? root.simplePeerMinimums : root.detailedPeerMinimums
-                columnMaximums: peerViewToggle.currentIndex === 0 ? root.simplePeerMaximums : root.detailedPeerMaximums
-                rows: peerViewToggle.currentIndex === 0 ? NuService.peerRowsSimple : root.displayedDetailedPeerRows()
+                columns: root.peerDetails ? root.detailedPeerColumns : root.simplePeerColumns
+                columnTooltips: root.peerDetails ? root.detailedPeerTooltips : root.simplePeerTooltips
+                columnTypes: root.peerDetails ? root.detailedPeerTypes : root.simplePeerTypes
+                sortColumnKeys: root.peerDetails ? root.detailedPeerSortKeys : root.simplePeerSortKeys
+                columnSortMetaFields: root.peerDetails ? root.detailedPeerSortMetaFields : []
+                columnWeights: root.peerDetails ? root.detailedPeerWeights : root.simplePeerWeights
+                columnMinimums: root.peerDetails ? root.detailedPeerMinimums : root.simplePeerMinimums
+                columnMaximums: root.peerDetails ? root.detailedPeerMaximums : root.simplePeerMaximums
+                rows: root.peerDetails ? root.displayedDetailedPeerRows() : NuService.peerRowsSimple
                 emptyText: "Peers hydrate here after the tab renders."
                 onRowSelectionChanged: (keys) => root.selectedPeerNodeIds = keys
                 onSortChanged: (column, ascending, key) => {
                     root.peerSortKey = key
                     root.peerSortAscending = ascending
-                    if (peerViewToggle.currentIndex === 0) {
-                        root.peerSimpleSortKey = key
-                        root.peerSimpleSortAscending = ascending
-                    } else {
+                    if (root.peerDetails) {
                         root.peerDetailedSortKey = key
                         root.peerDetailedSortAscending = ascending
+                    } else {
+                        root.peerSimpleSortKey = key
+                        root.peerSimpleSortAscending = ascending
                     }
                 }
 
