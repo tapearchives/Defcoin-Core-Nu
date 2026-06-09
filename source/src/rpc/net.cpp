@@ -1147,7 +1147,7 @@ static RPCHelpMan reservefastsyncblock()
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Peer node id must be non-negative");
     }
     const NodeId nodeid = (NodeId)parsed_nodeid;
-    const std::string height_or_hash = request.params.size() > 2 ? request.params[2].get_str() : "";
+    const std::string height_or_hash = request.params.size() > 2 ? request.params[2].getValStr() : "";
 
     UniValue obj(UniValue::VOBJ);
     if (action == "reserve") {

@@ -4325,6 +4325,18 @@ void NuRpcService::refreshNode()
         m_peer_host_by_node_id = peer_host_by_node_id;
         m_peer_addr_by_node_id = peer_addr_by_node_id;
         m_peer_inbound_by_node_id = peer_inbound_by_node_id;
+        for (auto it = m_udp_fast_sync_core_verified_node_ids.begin(); it != m_udp_fast_sync_core_verified_node_ids.end();) {
+            if (!m_peer_host_by_node_id.contains(*it)) it = m_udp_fast_sync_core_verified_node_ids.erase(it);
+            else ++it;
+        }
+        QSet<QString> verified_udp_hosts = m_udp_fast_sync_available_peer_hosts;
+        verified_udp_hosts.unite(m_udp_fast_sync_used_peer_hosts);
+        for (const QString& host : std::as_const(verified_udp_hosts)) {
+            const int node_id = m_udp_fast_sync_peer_node_ids_by_host.value(host, -1);
+            if (node_id >= 0 && !m_udp_fast_sync_core_verified_node_ids.contains(node_id)) {
+                setUdpFastSyncPeerTransportVerified(host, true);
+            }
+        }
         if (udp_peer_set_changed ||
             (m_fast_sync_tcp_quota_remaining <= 0 && m_fast_sync_udp_quota_remaining <= 0)) {
             resetFastSyncProtocolWindow();
@@ -6185,10 +6197,20 @@ void NuRpcService::setUdpFastSyncPeerTransportVerified(const QString& host, bool
     }
 
     for (int node_id : std::as_const(node_ids)) {
+        if (verified && m_udp_fast_sync_core_verified_node_ids.contains(node_id)) continue;
+        if (!verified) m_udp_fast_sync_core_verified_node_ids.remove(node_id);
         rpcCall(QStringLiteral("reservefastsyncblock"),
                 {verified ? QStringLiteral("transport-verified") : QStringLiteral("transport-unverified"), node_id},
                 false,
-                [](const QJsonValue&, const QString&) {});
+                [this, node_id, verified](const QJsonValue& result, const QString& error) {
+                    const bool success = error.isEmpty() && result.toObject().value(QStringLiteral("success")).toBool(false);
+                    if (!success) return;
+                    if (verified) {
+                        m_udp_fast_sync_core_verified_node_ids.insert(node_id);
+                    } else {
+                        m_udp_fast_sync_core_verified_node_ids.remove(node_id);
+                    }
+                });
     }
 }
 
@@ -6739,7 +6761,7 @@ void NuRpcService::requestLanFastSyncBlock()
     Q_EMIT stateChanged();
     rpcCall(QStringLiteral("reservefastsyncblock"),
             direct_lan_reservation
-                ? QJsonArray{QStringLiteral("reserve"), node_id, wanted_height}
+                ? QJsonArray{QStringLiteral("reserve"), node_id, QString::number(wanted_height)}
                 : QJsonArray{QStringLiteral("reserve-next"), node_id},
             false,
             [this, host, node_id, direct_lan_reservation](const QJsonValue& result, const QString& error) {

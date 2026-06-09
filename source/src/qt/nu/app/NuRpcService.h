@@ -1092,6 +1092,7 @@ private:
     QHash<QString, int> m_udp_fast_sync_peer_node_ids_by_host;
     QHash<QString, int> m_udp_fast_sync_peer_tips_by_host;
     QHash<QString, int> m_udp_fast_sync_peer_inflight_counts_by_host;
+    QSet<int> m_udp_fast_sync_core_verified_node_ids;
     int m_address_book_refresh_generation = 0;
     QVariantList m_address_book;
     QVariantList m_receive_requests;

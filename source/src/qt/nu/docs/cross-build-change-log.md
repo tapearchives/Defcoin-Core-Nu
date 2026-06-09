@@ -53,6 +53,31 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4bq - 2026-06-09 - Fast Sync direct reservation JSON type fix
+
+Big picture:
+- Fast Sync-only testing on Lion with Core TCP block bodies disabled reached
+  Tahoe over UDP, but direct reservation failed with `JSON value is not a string
+  as expected`. The frontend was sending a JSON number for
+  `reservefastsyncblock reserve`'s optional `height_or_hash` argument.
+
+Porting priority:
+- Lion Intel: required. In `src/qt/nu/legacy-osx107/main.cpp`, direct
+  LAN/Fast Sync reservation must pass `QString::number(wantedHeight)`.
+- Catalina UTM and Windows: required if they carry the same frontend
+  direct-reservation path.
+- Server: backend tolerance only; serving does not depend on this UI path.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: direct reserve now sends string height.
+- `src/rpc/net.cpp`: `reservefastsyncblock` reads `height_or_hash` with
+  `getValStr()` so numeric JSON values do not throw before validation.
+- `src/qt/nu/docs/release-notes-26.6.4bq.md`: added release/build note.
+
+Verification:
+- Re-test Lion with `--debug-disable-core-tcp-sync --debug-disable-quick-clone`;
+  accepted UDP Fast Sync blocks must appear instead of the JSON type error.
+
 ### 26.6.4bm - 2026-06-09 - Fast Sync block-source accounting and fair UDP test metrics
 
 Big picture:
@@ -2111,3 +2136,32 @@ Cross-build note:
 - Keep the row order consistent: Syncing, Sync overview, Core Sync (TCP), Fast
   Sync (UDP), Quick Clone (LAN UDP), Traffic, Network active, Connections,
   Blocks, Headers, Verification, followed by detail-only rows.
+
+## 26.6.4bp - 2026-06-09 - UDP transport verification survives peer id churn
+
+Scope:
+- Tahoe-to-Lion testing with current `26.6.4bo` showed that macOS LAN UDP was
+  no longer the immediate blocker: Tahoe received and acknowledged UDP probes
+  from Lion.
+- The failing state was lower level. Lion's Core peer for Tahoe changed from an
+  IPv4 node id to an IPv6 node id after the probe path had verified transport.
+  `reservefastsyncblock reserve-next <nodeid>` then returned
+  `fast-sync-udp-transport-unverified` for the new live node id.
+- A manual `reservefastsyncblock transport-verified <nodeid>` immediately made
+  Core willing to reserve the next block, proving the reservation path was sound
+  and the frontend had failed to re-apply verification to the current node id.
+
+Implementation:
+- Added `m_udp_fast_sync_core_verified_node_ids` to remember live Core node ids
+  that have already accepted `transport-verified`.
+- During `getpeerinfo` refresh, Nu now intersects that cache with live node ids,
+  then re-applies `transport-verified` for any currently connected host that is
+  already in the frontend's UDP-available or UDP-used host sets.
+- `setUdpFastSyncPeerTransportVerified()` updates the cache only after Core
+  reports success, preventing repeated duplicate verification RPCs.
+
+Cross-build note:
+- Port the header member and both `NuRpcService.cpp` changes exactly to Lion.
+- This is required for both UDP Fast Sync and Quick Clone because both rely on
+  Core's per-node `fFastSyncUdpTransportVerified` gate before block
+  reservations.
