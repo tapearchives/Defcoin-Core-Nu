@@ -53,6 +53,51 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4br - 2026-06-09 - Header sync ETA uses block-rate clock text
+
+Big picture:
+- The mast/header needed a clearer completion estimate while syncing. It now
+  shows `ETA HH:MM:SS`, derived first from a smoothed accepted-block rate and
+  only falling back to Core verification-progress deltas while the block-rate
+  sample is still warming.
+- This is a UI/status reporting change only. It does not alter Core block
+  reservation, validation, Fast Sync, or Quick Clone behavior.
+
+Porting priority:
+- Lion Intel: required for UI parity if the current Lion build uses the shared
+  `NuRpcService` status path. If Lion has a legacy status updater, port the same
+  state variables and `HH:MM:SS` formatter there.
+- Catalina UTM and Windows: required for UI parity if built from this shared
+  QML app source.
+- Server: not required. No Fast Sync protocol/server behavior changed.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: `formatSyncEtaSeconds()` now returns
+  fixed-width `HH:MM:SS`; `refreshNode()` maintains
+  `m_sync_average_blocks_per_second` as a 75/25 EWMA of block-height
+  advancement and labels the mast string with `ETA`.
+- `src/qt/nu/app/NuRpcService.h`: adds
+  `m_sync_average_blocks_per_second`.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: visible release
+  label moves to `26.6.4br`.
+- `src/qt/nu/docs/release-notes-26.6.4br.md`: user/developer release note.
+
+Compatibility notes:
+- ETA still shows `calculating` until either an accepted-block-rate sample or a
+  verification-progress delta is available.
+- When up to date, the ETA resets to `00:00:00`.
+
+Verification performed:
+- `git diff --check` passed.
+- `cmake --build build/nu-qml-arm64-26.6.4bq --target DefcoinCoreNu -j4`
+  passed before the version metadata bump; rebuild a fresh `26.6.4br` package
+  before distributing.
+
+Risks / follow-up:
+- Because the active build directory was still named `26.6.4bq`, package builds
+  should use a fresh `build/nu-qml-arm64-26.6.4br` directory to avoid stale
+  CMake cache release labels.
+
 ### 26.6.4bq - 2026-06-09 - Fast Sync direct reservation JSON type fix
 
 Big picture:
