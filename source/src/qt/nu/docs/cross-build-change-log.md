@@ -53,6 +53,273 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4bz - 2026-06-09 - Lion crash gate and clean UDP-only evidence
+
+Big picture:
+- Physical Lion testing must treat any crash dialog as a hard blocker before
+  interpreting Fast Sync results. A visible or hidden Problem Reporter can make
+  the GUI look alive while a prior child helper crash is still on screen.
+- The live Lion crash reports observed in this pass were old child-process
+  reports from 16:54-16:57 CDT. The current Lion frontend/backend remained
+  running after the QProcess/nmap stability patch and no new ReportCrash process
+  appeared during the gated UDP-only run.
+- With Tahoe's Local Network Allow gate rechecked and Lion's crash gate clean,
+  Lion accepted sequential UDP Fast Sync blocks from Tahoe. The test is valid
+  for "UDP can communicate and Core accepts transported blocks", but not yet for
+  throughput because Lion was still building headers and saturating CPU.
+
+Porting priority:
+- Lion Intel: required operational rule. Run the crash gate before every Lion
+  launch/test interpretation and clear crash reporters before checking for LAN
+  permission or UDP status.
+- Catalina UTM: recommended if it has remote GUI/crash dialogs during tests.
+- Windows: no direct script port, but preserve the same launch discipline:
+  crash dialogs first, then network permission, then sync conclusions.
+- Server: no change.
+
+Changed behavior:
+- Added a repeatable local test helper,
+  `src/qt/nu/tools/nu_lion_remote_health_gate.sh`, which SSHes to the physical
+  Lion iMac, records Nu frontend/backend/crash-reporter process state, records
+  the newest `DefcoinCoreNu*.crash` timestamp, optionally captures a screenshot,
+  clears crash reporters, and appends an audit row to
+  `local-dev-notes/Defcoin Core Nu/nu_lion_remote_crash_gate_log.csv`.
+- This is test tooling only. It does not alter wallet, blockchain, firewall,
+  TCC, or sync data.
+
+Changed files and important details:
+- `src/qt/nu/tools/nu_lion_remote_health_gate.sh`: new physical Lion crash and
+  process audit helper. Defaults to `david@192.168.0.189` with
+  `$HOME/.ssh/id_rsa_defcoin_intel_mac` and legacy ssh-rsa compatibility.
+
+Verification performed:
+- `nu_lion_remote_health_gate.sh --screenshot /tmp/lion-health-gate.png`
+  returned `status=clean`; newest crash stayed
+  `2026-06-09 16:57:11 -0500`; current Lion frontend PID `74599` and backend
+  PID `74603` were running.
+- Tahoe `nu_test_launch_gate.sh --recheck` for current `26.6.4bz` PID returned
+  `status=no_prompt_visible`, so Tahoe Local Network permission was not blocking
+  the current UDP run.
+- Lion accepted UDP Fast Sync blocks after the reset marker:
+  at least blocks 1-330 were accepted from Tahoe, with two recovered timeouts
+  and zero reject/error events in the sampled period.
+
+Risks / follow-up:
+- Throughput is still not representative while Lion is rebuilding headers
+  (`Synchronizing blockheaders` was only about 45.77% during the sample) and CPU
+  was fully saturated. For benchmark numbers, either let headers finish first or
+  use a chain-reset method that preserves a valid header index.
+
+### 26.6.4bz - 2026-06-09 - UDP Fast Sync timeout recovery and dual-stack peer TODO
+
+Big picture:
+- Tahoe `26.6.4by` was observed launched in the LAN-only UDP benchmark mode
+  (`--debug-disable-core-tcp-sync --debug-disable-quick-clone
+  --debug-fast-sync-lan-only`). That mode is valid for receiver benchmarking
+  but invalid for a source node that is also expected to finish catching up to
+  the public chain tip.
+- Physical Lion reached block 458 over LAN UDP, then stopped after Tahoe served
+  blocks 459-461. The receiver had active UDP transfers that did not recover
+  quickly enough after chunks were lost or stranded by peer id churn.
+- This build makes timed-out UDP block transfers actively mark that host as
+  needing reprobe/reselection, releases the Core reservation, logs the timeout,
+  and immediately reschedules the Fast Sync tick.
+- Added a future TODO to collapse IPv4+IPv6 entries for the same trusted LAN
+  workstation into one logical UI/source while preserving both transport lanes.
+
+Porting priority:
+- Lion Intel: required. Port the `NuRpcService.cpp` timeout/retry changes before
+  retesting the block-458 stall.
+- Catalina UTM: required if it uses the same QML/Qt Fast Sync frontend.
+- Windows: required before Windows LAN Fast Sync testing.
+- Server: no receiver-side change is required unless the server runs requester
+  logic; serving-only Fast Sync does not need the UI timeout scheduler.
+
+Changed behavior:
+- Expired UDP block requests now call `recordUdpFastSyncPeerMiss(...)`, release
+  their Core reservation, emit a `NU_UDP_FASTSYNC_TIMEOUT` debug line, and queue
+  another scheduler tick.
+- Each sent UDP block request now schedules a guarded post-timeout scheduler tick
+  so a quiet event loop does not leave stale transfers parked forever.
+- Unknown UDP chunks are logged as diagnostics instead of disappearing silently.
+- Source-node testing should launch Tahoe normally when it must catch up to the
+  public chain tip; reserve LAN-only/TCP-off flags for receiver benchmarks.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: receiver timeout recovery, post-request
+  timeout tick, and unknown-chunk diagnostics.
+- `src/qt/nu/docs/fast-sync-protocol.md`: future dual-stack logical-peer cleanup
+  item for IPv4+IPv6 LAN duplicate rows.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: Tahoe label moves to
+  `26.6.4bz`; Lion should use `26.6.4bz-Lion-alpha`.
+- `src/qt/nu/docs/release-notes-26.6.4bz.md`: user/developer note.
+
+Compatibility notes:
+- This does not change the Fast Sync wire format.
+- This does not collapse IPv4+IPv6 peers yet; it only records the future design
+  item so Core's reservation queue remains the current correctness boundary.
+
+Verification performed:
+- Pending rebuild/relaunch. The triggering evidence was Tahoe serving
+  459-461 while Lion remained at 458 with no staged/accepted follow-up.
+
+Risks / follow-up:
+- If Tahoe is launched with `--debug-disable-core-tcp-sync` as a source node, it
+  can still stop near the public tip because it has no higher LAN source.
+- If Lion still stalls after this fix, inspect `NU_UDP_FASTSYNC_TIMEOUT`,
+  `NU_UDP_FASTSYNC_REQUEST`, `NU_UDP_FASTSYNC_STAGED`, and peer disconnect lines
+  together before changing the protocol.
+
+### 26.6.4by - 2026-06-09 - LAN UDP benchmark log and Lion selector parity
+
+Big picture:
+- LAN UDP Fast Sync on the physical Lion iMac is now confirmed to request,
+  receive, stage, and accept blocks from the Tahoe Mac mini with Core TCP block
+  copy and Quick Clone disabled.
+- The previous Lion pause after block 49 was caused by Lion still using the
+  public UDP keepalive cadence for verified LAN peers. Tahoe already used the
+  short LAN request interval.
+- A staged-block debug log use-after-remove corrupted the `chunks=` field on
+  both Tahoe and Lion. It did not corrupt block transfer, but it made benchmark
+  logs untrustworthy.
+
+Porting priority:
+- Lion Intel: required. Port the verified-LAN request interval and the
+  staged-log transfer-field capture before removal.
+- Catalina UTM: required if it shares the legacy Lion frontend path.
+- Windows: inspect for the same staged-log remove/read ordering if the Windows
+  Fast Sync frontend code differs from Tahoe QML.
+- Server: no change for this UI log fix; server Fast Sync serving remains
+  backend/protocol code.
+
+Changed behavior:
+- Verified LAN UDP peers use `LAN_FAST_SYNC_MIN_REQUEST_INTERVAL_MS`.
+- Staged-block logs read `expected_chunks` / `expectedChunks` before removing
+  the transfer from the active-transfer map.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: captures `expected_chunks` before
+  `m_lan_fast_sync_transfers_by_id.remove(request_id)`.
+- Lion `src/qt/nu/legacy-osx107/main.cpp`: mirrors the staged-log fix and uses
+  the short interval for verified LAN UDP peers.
+- Version labels moved to `26.6.4by` / `26.6.4by-Lion-alpha`.
+
+Verification performed:
+- Tahoe launched with
+  `--debug-disable-core-tcp-sync --debug-disable-quick-clone --debug-fast-sync-lan-only`;
+  Local Network prompt clicker returned `not_found` and Tahoe had UDP
+  `*:10334` open.
+- Physical Lion iMac chain folders `blocks`, `chainstate`, and `indexes` were
+  cleared; wallet files were preserved.
+- Lion `26.6.4bx` pre-log-fix run accepted blocks 1-137 over UDP with 0
+  failures and 0 duplicates before this final log fix.
+
+Risks / follow-up:
+- Full-chain elapsed benchmark was not completed in this verification pass.
+- Early-chain payload bytes/sec is not meaningful because those blocks are tiny;
+  use blocks/sec and later larger-block ranges for protocol comparison.
+
+### 26.6.4bu - 2026-06-09 - UDP Fast Sync reservation window
+
+Big picture:
+- Fixes the first LAN UDP-only benchmark bottleneck. UDP block bodies were
+  proven to transfer, but the reservation helper kept asking only for active
+  height + 1 during clean bootstrap/header fallback. That prevented Nu's
+  out-of-order UDP cache from filling and made the benchmark look like a
+  one-block-at-a-time path.
+
+Porting priority:
+- Lion Intel: required. Port the Core reservation window change and the larger
+  legacy Fast Sync cache constants before retesting the Lion chain rebuild.
+- Catalina UTM and Windows: required before publishing matching Fast Sync
+  builds.
+- Server: required for server-side Fast Sync parity, but Quick Clone/DCOL is
+  still not a server feature.
+
+Changed behavior:
+- `reservefastsyncblock reserve-next` now scans a bounded header window and
+  reserves the first missing, not-already-in-flight block in bootstrap fallback
+  mode instead of only trying active height + 1.
+- UDP Fast Sync receiver cache grows to 16 active blocks and 48 ready blocks.
+- Quick Clone/Core reservation status backoff drops from 30 seconds to 5
+  seconds so status and retry behavior no longer appears stuck during debug
+  runs.
+- Visible version label moves to `26.6.4bu`.
+
+Changed files and important details:
+- `src/net_processing.cpp`: `ReserveNextFastSyncBlockInFlight()` now skips
+  already-present/in-flight blocks while scanning ahead; extra UDP transport
+  slots increase from 1 to 4.
+- `src/qt/nu/app/NuRpcService.cpp`: receiver-side in-flight/ready cache limits
+  increased; reservation retry status backoff shortened.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: visible release
+  label moves to `26.6.4bu`.
+- `src/qt/nu/docs/release-notes-26.6.4bu.md`: release note.
+
+Compatibility notes:
+- No consensus changes and no packet format changes.
+- This still uses Core reservation and `submitblock`; UDP remains transport
+  only.
+- Older peers that do not advertise `NODE_DEFCOIN_FASTSYNC` are not selected
+  for UDP Fast Sync.
+
+Verification performed:
+- Pending: rebuild Tahoe and Lion, clear only Lion public chain folders, launch
+  both with `--debug-disable-core-tcp-sync --debug-disable-quick-clone
+  --debug-fast-sync-lan-only`, click Tahoe Local Network Allow if prompted, then
+  verify higher UDP request concurrency and accepted block rate.
+
+Risks / follow-up:
+- If Core validation on Lion is the bottleneck, accepted block rate may still
+  remain low despite faster UDP staging. In that case compare staged/sec versus
+  accepted/sec before tuning packet size.
+
+### 26.6.4bt - 2026-06-09 - UDP Fast Sync proof markers
+
+Big picture:
+- Adds explicit UDP Fast Sync transport markers to `debug.log` so LAN-only
+  benchmark runs can prove request, serving, staging, submission, and accepted
+  block flow. This was added because Lion block height advanced during the
+  UDP-only test, but existing logs only showed probe acknowledgements and did
+  not uniquely prove block-body transport source.
+
+Porting priority:
+- Lion Intel: required for the current LAN UDP-only benchmark. Port the same
+  marker strings in the legacy Fast Sync request/serve/stage/submit paths.
+- Catalina UTM and Windows: recommended for benchmark parity.
+- Server: optional. Server Fast Sync serving can benefit from
+  `NU_UDP_FASTSYNC_SERVE`, but no protocol change is required.
+
+Changed behavior:
+- Adds these unique grep markers:
+  `NU_UDP_FASTSYNC_REQUEST`, `NU_UDP_FASTSYNC_SERVE`,
+  `NU_UDP_FASTSYNC_STAGED`, `NU_UDP_FASTSYNC_ACCEPTED`,
+  `NU_UDP_FASTSYNC_SUBMITTED`, and `NU_UDP_FASTSYNC_DUPLICATE`.
+- Intended isolated benchmark launch remains:
+  `--debug-disable-core-tcp-sync --debug-disable-quick-clone --debug-fast-sync-lan-only`.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: logs request-block sends, source chunk
+  serving, receiver staging, accepted transport counts, inconclusive submits,
+  and duplicate/already-counted results.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: visible release
+  label moves to `26.6.4bt`.
+- `src/qt/nu/docs/release-notes-26.6.4bt.md`: release note.
+
+Compatibility notes:
+- No packet format, service-bit, consensus, or RPC contract changes.
+- Extra log volume is expected during UDP-only benchmark runs.
+
+Verification performed:
+- Pending: rebuild Tahoe and Lion, clear only Lion public chain folders, launch
+  both with the isolated benchmark flags, accept Tahoe Local Network prompt if
+  shown, then grep Lion/Tahoe logs for `NU_UDP_FASTSYNC_*` and
+  `NU_SYNC_BENCHMARK_COMPLETE`.
+
+Risks / follow-up:
+- If the log volume is too high for normal releases, gate the per-block markers
+  behind a debug flag after the LAN benchmark is complete.
+
 ### 26.6.4bs - 2026-06-09 - LAN-only UDP Fast Sync benchmark switch
 
 Big picture:
@@ -2274,3 +2541,53 @@ Cross-build note:
 - This is required for both UDP Fast Sync and Quick Clone because both rely on
   Core's per-node `fFastSyncUdpTransportVerified` gate before block
   reservations.
+
+## 26.6.4bv - 2026-06-09 - Lion UDP scheduler parity
+
+Scope:
+- Tahoe `26.6.4bu` already allowed UDP Fast Sync to keep reserving/requesting
+  future block bodies while Core was validating the current staged block.
+- Physical Lion still had an older `m_lanFastSyncSubmitInFlight` early return
+  in `lanFastSyncTick()`, so it usually kept only one UDP block active and did
+  not fill the in-flight/cache window during validation.
+
+Implementation:
+- Remove the submit-in-flight early return from Lion
+  `src/qt/nu/legacy-osx107/main.cpp::lanFastSyncTick()`.
+- Keep the reserve-in-flight and buffer-cap checks in place. This preserves
+  Core reservation ordering while allowing UDP prefetch to overlap Core
+  validation.
+
+Cross-build note:
+- Tahoe already has this behavior in `NuRpcService::lanFastSyncTick()`.
+- If future branch diffs reintroduce a submit-in-flight return before
+  `requestLanFastSyncBlock()`, UDP-only LAN tests will appear to work but will
+  run far below the intended in-flight window.
+
+## 26.6.4bw - 2026-06-09 - Lion explicit LAN Fast Sync reservations
+
+Scope:
+- Tahoe label moves to `26.6.4bw`.
+- Lion alpha label moves to `26.6.4bw-Lion-alpha`.
+- Lion Fast Sync now matches Tahoe's LAN-only benchmark behavior by asking
+  Core to reserve an explicit missing LAN height when Core TCP block copying is
+  disabled or the target is a LAN/private Fast Sync peer.
+- Public/non-LAN Fast Sync still uses Core's normal `reserve-next` scheduling.
+
+Implementation:
+- Port Tahoe's `hasLanFastSyncPendingHeight()` and
+  `nextLanFastSyncWantedHeight()` helper logic into
+  `src/qt/nu/legacy-osx107/main.cpp`.
+- In Lion `requestLanFastSyncBlock()`, choose `reserve <node> <height>` for
+  LAN/private or Core-TCP-disabled test runs, and keep `reserve-next <node>` for
+  ordinary public mode.
+- Preserve the existing single reserve-RPC guard and buffer caps; this changes
+  the selected height, not Core validation or consensus acceptance.
+
+Test focus:
+- Relaunch Tahoe and Lion with:
+  `--debug-disable-core-tcp-sync --debug-disable-quick-clone --debug-fast-sync-lan-only`.
+- Clear only Lion's public chain folders before the run.
+- Confirm Lion logs `NU_UDP_FASTSYNC_REQUEST`, `NU_UDP_FASTSYNC_STAGED`, and
+  `NU_UDP_FASTSYNC_ACCEPTED`, with active requests rising above the old mostly
+  one-at-a-time pattern.

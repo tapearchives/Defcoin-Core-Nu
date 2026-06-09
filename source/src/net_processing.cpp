@@ -98,7 +98,7 @@ static const unsigned int MAX_GETDATA_SZ = 1000;
 /** Number of blocks that can be requested at any given time from a single peer. */
 static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;
 /** Extra out-of-band UDP Fast Sync reservations allowed above the normal TCP window. */
-static const int MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER = 1;
+static const int MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER = 4;
 /** Time for Nu's UDP Fast Sync helper to claim a Core-selected block before TCP fallback. */
 static constexpr int64_t FAST_SYNC_UDP_CLAIM_WINDOW_US = 4 * 1000000;
 /** Time for a claimed UDP Fast Sync block to be delivered before the reservation is released. */
@@ -1270,9 +1270,30 @@ bool ReserveNextFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, uint25
 
     std::vector<const CBlockIndex*> blocks_to_download;
     if (using_starting_height_fallback) {
-        const CBlockIndex* pindex = FastSyncHeaderFallbackIndex(*state, next_height, reason);
-        if (pindex != nullptr) {
-            blocks_to_download.push_back(pindex);
+        const int peer_tip = state->nStartingHeight;
+        const int header_tip = pindexBestHeader != nullptr ? pindexBestHeader->nHeight : -1;
+        const int max_height = std::min(
+            std::min(peer_tip, header_tip),
+            next_height + MAX_BLOCKS_IN_TRANSIT_PER_PEER + MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER + 32);
+        std::string fallback_reason;
+        for (int height = next_height; height <= max_height; ++height) {
+            fallback_reason.clear();
+            const CBlockIndex* candidate = FastSyncHeaderFallbackIndex(*state, height, fallback_reason);
+            if (candidate == nullptr) {
+                if (reason.empty()) reason = fallback_reason;
+                break;
+            }
+            const uint256 candidate_hash = candidate->GetBlockHash();
+            if ((candidate->nStatus & BLOCK_HAVE_DATA) ||
+                ::ChainActive().Contains(candidate) ||
+                mapBlocksInFlight.count(candidate_hash) != 0) {
+                continue;
+            }
+            blocks_to_download.push_back(candidate);
+            break;
+        }
+        if (blocks_to_download.empty() && reason.empty()) {
+            reason = fallback_reason.empty() ? "no-downloadable-block-in-window" : fallback_reason;
         }
     } else {
         NodeId staller = -1;

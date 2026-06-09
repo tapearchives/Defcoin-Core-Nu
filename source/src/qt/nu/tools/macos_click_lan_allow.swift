@@ -745,6 +745,19 @@ func main() -> Int32 {
         sleepUntilNextAttempt(interval: config.intervalSeconds, deadline: deadline)
     } while Date() < deadline
 
+    if !lastContext {
+        emitJSON([
+            "ok": true,
+            "status": "no_prompt_visible",
+            "attempts": attempts,
+            "elapsedSeconds": Date().timeIntervalSince(started),
+            "contextFound": false,
+            "observedTextCount": lastObservedTextCount,
+            "message": "No Local Network Allow prompt was visible."
+        ])
+        return 0
+    }
+
     emitJSON([
         "ok": false,
         "status": "not_found",

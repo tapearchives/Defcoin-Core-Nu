@@ -460,6 +460,15 @@ The normal Fast Sync `request-block` flow is intentionally separate. Fast Sync
 can continue to use its Core-reserved block path and validation through
 `submitblock`; Quick Clone/DCOL uses the staged snapshot scheduler above.
 
+Future dual-stack cleanup: collapse IPv4 and IPv6 connections from the same
+trusted LAN workstation into one logical Fast Sync / Quick Clone source when
+LAN beacon identity, workstation discovery, or explicit endpoint aliasing proves
+they are the same machine. Keep both addresses available as transport lanes, but
+aggregate source counts, success/failure stats, UI rows where appropriate, and
+per-source scheduling so one physical sender is not over-represented. Do not
+change Core's global block reservation queue; it remains the correctness
+boundary that prevents duplicate block assignment.
+
 The full DCOL snapshot mode must add a manifest before replacing files:
 source identity, source height, best block hash, file list, byte sizes, hashes,
 copy completion status, and a post-copy verification/reindex choice. It must run
