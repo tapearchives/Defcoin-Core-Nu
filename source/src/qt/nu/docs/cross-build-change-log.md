@@ -53,6 +53,92 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4ca - 2026-06-09 - Metrics details parity and compact UDP status
+
+Big picture:
+- Tahoe and Lion should present the same Metrics/Peers affordances. The user
+  noticed Lion lacked the compact Details switches that Tahoe already had, which
+  made the Lion build look stale and raised valid concern that backend parity
+  might also be stale.
+- The simple Status page should answer the first-order operator question:
+  "Is syncing working, and is UDP contributing?" without forcing the user to
+  read packet-level debug counters.
+- Keep packet/probe/checksum details available, but only behind Details.
+
+Porting priority:
+- Lion Intel: required. Port the compact `Details` switches for Status and
+  Peers, the simple/detail row split, the concise UDP summary, and the
+  `dns-sd`/`awk` probe cleanup.
+- Catalina UTM: required for UI parity if it is using the Qt 5 legacy UI.
+- Windows: port the concise UDP summary/detail split if it uses the QML service
+  rows; verify the `Details` switch already exists in QML.
+- Server: no UI work. Backend version identity only if server release labels
+  are being aligned.
+
+Changed behavior:
+- `Fast Sync (UDP)` in simple Status now reports UDP block share, average data
+  rate, recent block rate or warmup progress, peers successful/attempted/failed,
+  sent/received bytes, and failure count.
+- Detailed UDP diagnostics moved into `Fast Sync (UDP) counters`, which is only
+  shown when Details is enabled.
+- Lion `Metrics > Status` and `Metrics > Peers` now use a smaller `Details`
+  toggle instead of the older Simple/Detailed combo-box presentation.
+- Lion Bonjour workstation probes now kill their helper process tree after
+  completion/timeout to avoid leaking `dns-sd`, `awk`, and shell processes.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp` and `.h`: Tahoe QML service split
+  `fastSyncUdpSummary()` into concise simple text plus
+  `fastSyncUdpDetailSummary()` for Details-only counters.
+- `src/clientversion.h`: Tahoe backend public release identity updated to
+  `26.6.4ca` so staged frontend/backend labels agree.
+- `src/qt/nu/tools/nu_lion_remote_safe_stop.sh`: default physical-Lion app path
+  now points to `Nu-26.6.4ca-Lion-alpha-20260609-iMac`, with `NU_LION_APP`
+  override preserved.
+- Lion-only files changed on the physical iMac source tree:
+  `src/qt/nu/legacy-osx107/main.cpp`,
+  `src/qt/nu/legacy-osx107/DefcoinCoreNuLegacy.pro`, and
+  `src/qt/nu/legacy-osx107/Info.plist`.
+- Lion backend release identity patched in the full backend workspace under
+  `/Users/david/_Development/Defcoin Core Nu Lion/Build_Workspaces/.../src`.
+
+Compatibility notes:
+- Do not overwrite Lion backend sources wholesale with Tahoe files. Lion has
+  portability-specific dirty changes. Compare and port the narrow Fast Sync
+  backend logic only.
+- On the old Automake Lion backend tree, avoid
+  `make src/defcoind src/defcoin-cli`: it can run two recursive makes that race
+  on shared objects. Use `make -C src -j2 defcoind defcoin-cli`.
+
+Build/package notes:
+- Tahoe Apple Silicon raw CMake bundle does not contain QML resources until
+  `stage_macos_distribution.sh` runs. Direct raw-app smoke tests will fail with
+  `Main.qml: No such file or directory`; test the staged app instead.
+- Tahoe staged app:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.4ca-20260609/apple-silicon/Defcoin Core Nu.app`.
+- Tahoe staged DMG:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.4ca-20260609/apple-silicon/Defcoin-Core-Nu-v26.6.4ca-macOS-AppleSilicon.dmg`.
+
+Verification performed:
+- Tahoe staged app reports frontend `26.6.4ca`, backend
+  `Defcoin Core Nu version v26.6.4ca`, QML `Main.qml` is present, deep code
+  signing verifies, staged app smoke exits 0, and `hdiutil verify` reports the
+  DMG checksum is valid.
+- Lion frontend build linked warning-free after removing the stale
+  `m_peerViewMode` member.
+- Lion staged app now reports frontend `26.6.4ca-Lion-alpha`, backend
+  `v26.6.4ca-Lion-alpha-433385a-dirty`, and CLI
+  `v26.6.4ca-Lion-alpha-433385a-dirty`. The app signs cleanly, and the replaced
+  backend binaries no longer contain `/opt/local` or `/usr/local` install names.
+
+Risks / follow-up:
+- Backend rebuilds on Tahoe still emit existing Boost/thread-safety and
+  `-fstack-clash-protection` clang warnings. These are not from the new status
+  UI changes, but they remain cleanup candidates.
+- Confirm live Lion UI visually after launching through the crash/Allow gates;
+  do not interpret UDP tests unless Tahoe Local Network Allow has been clicked
+  for that exact build.
+
 ### 26.6.4bz - 2026-06-09 - Lion crash gate and clean UDP-only evidence
 
 Big picture:

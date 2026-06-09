@@ -5159,6 +5159,55 @@ QString NuRpcService::coreSyncPathSummary() const
 QString NuRpcService::fastSyncUdpSummary() const
 {
     const int udp_samples = m_fast_sync_udp_successes + m_fast_sync_udp_failures;
+    const int udp_warmup_percent = FAST_SYNC_PROTOCOL_MIN_UDP_PROBES > 0
+        ? std::clamp((udp_samples * 100) / FAST_SYNC_PROTOCOL_MIN_UDP_PROBES, 0, 100)
+        : 100;
+    const qint64 total = m_lan_fast_sync_udp_bytes_received + m_lan_fast_sync_udp_bytes_sent;
+    const int udp_blocks = m_lan_fast_sync_blocks_received;
+    const int core_blocks = m_fast_sync_tcp_successes;
+    const int block_total = udp_blocks + core_blocks;
+    const double share = block_total > 0 ? (100.0 * static_cast<double>(udp_blocks)) / static_cast<double>(block_total) : -1.0;
+    QSet<QString> failed_sources = m_udp_fast_sync_block_failed_peer_hosts;
+    for (const QString& host : m_udp_fast_sync_block_success_peer_hosts) {
+        failed_sources.remove(host);
+    }
+    QSet<QString> attempted_sources = m_udp_fast_sync_block_attempted_peer_hosts;
+    attempted_sources.unite(m_udp_fast_sync_block_success_peer_hosts);
+    attempted_sources.unite(failed_sources);
+    const double seconds = (m_lan_fast_sync_udp_first_activity_ms > 0 && m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms)
+        ? qMax(1.0, double(m_lan_fast_sync_udp_last_activity_ms - m_lan_fast_sync_udp_first_activity_ms) / 1000.0)
+        : (total > 0 || m_fast_sync_udp_failures > 0 ? 1.0 : 0.0);
+    const QString avg = total > 0
+        ? QStringLiteral("%1/s data avg over %2s")
+              .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
+                   QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1))
+        : QStringLiteral("-");
+    const QString ewma = m_fast_sync_udp_ewma_blocks_per_second > 0.0
+        ? QStringLiteral("%1 blk/s recent").arg(QString::number(m_fast_sync_udp_ewma_blocks_per_second, 'f', m_fast_sync_udp_ewma_blocks_per_second >= 10.0 ? 1 : 2))
+        : QStringLiteral("recent warming %1/%2 (%3%)")
+              .arg(QString::number(udp_samples),
+                   QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES),
+                   QString::number(udp_warmup_percent));
+    const QString share_text = share >= 0.0
+        ? QStringLiteral("%1%").arg(QString::number(share, 'f', share >= 10.0 ? 0 : 1))
+        : QStringLiteral("-");
+    return QStringLiteral("UDP %1/%2 blocks (%3) | %4 | %5 | peers %6/%7 ok, %8 failed | sent %9, rec'd %10 | failures %11")
+        .arg(QString::number(udp_blocks),
+             QString::number(block_total),
+             share_text,
+             avg,
+             ewma,
+             QString::number(m_udp_fast_sync_block_success_peer_hosts.size()),
+             QString::number(attempted_sources.size()),
+             QString::number(failed_sources.size()),
+             formatBytes(m_lan_fast_sync_udp_bytes_sent),
+             formatBytes(m_lan_fast_sync_udp_bytes_received),
+             QString::number(m_fast_sync_udp_failures));
+}
+
+QString NuRpcService::fastSyncUdpDetailSummary() const
+{
+    const int udp_samples = m_fast_sync_udp_successes + m_fast_sync_udp_failures;
     int probe_misses = 0;
     for (auto it = m_udp_fast_sync_probe_failures_by_host.constBegin(); it != m_udp_fast_sync_probe_failures_by_host.constEnd(); ++it) {
         probe_misses += it.value();
@@ -8914,6 +8963,8 @@ void NuRpcService::rebuildNodeMetrics()
                   QStringLiteral("Backend verification progress estimate across the active chain.")),
         metricRow(QStringLiteral("Fast Sync (UDP) decision"), syncTransportDecisionSummary(),
                   QStringLiteral("Adaptive TCP/UDP block-transfer preference. Nu uses recent accepted-block timing, reliability, and occasional probes so a slower protocol can recover if conditions change."), true),
+        metricRow(QStringLiteral("Fast Sync (UDP) counters"), fastSyncUdpDetailSummary(),
+                  QStringLiteral("Detailed UDP packet, probe, source, checksum, timeout, retransmit, and submit counters for diagnosing Fast Sync behavior."), true),
         metricRow(QStringLiteral("Fast Sync (UDP) probe"), syncTransportProbeSummary(),
                   QStringLiteral("Fast Sync service-bit candidates, UDP-verified peers, and current datagram/chunk target. Nu probes a peer once per verification window, then reuses verified UDP peers without probing every block."), true),
         metricRow(QStringLiteral("Quick Clone (LAN UDP) validation"), m_quick_clone_validation_status,

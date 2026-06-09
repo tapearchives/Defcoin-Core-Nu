@@ -731,6 +731,7 @@ private:
     QString syncTransportSpeedSummary() const;
     QString coreSyncPathSummary() const;
     QString fastSyncUdpSummary() const;
+    QString fastSyncUdpDetailSummary() const;
     QString syncTransportDecisionSummary() const;
     QString syncTransportProbeSummary() const;
     QString syncBenchmarkSummary() const;

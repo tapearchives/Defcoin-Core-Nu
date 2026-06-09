@@ -47,7 +47,7 @@ log_event() {
 
 REMOTE_SCRIPT=$(cat <<'REMOTE'
 set -e
-APP="/Users/david/_Distribution_Versions/Defcoin Core Nu/Nu-26.6.4bz-Lion-alpha-20260609-iMac/stage/Defcoin Core Nu.app"
+APP="${NU_LION_APP:-/Users/david/_Distribution_Versions/Defcoin Core Nu/Nu-26.6.4ca-Lion-alpha-20260609-iMac/stage/Defcoin Core Nu.app}"
 DATADIR="$HOME/Library/Application Support/Defcoin"
 CLI="$APP/Contents/Resources/nu/bin/defcoin-cli"
 
