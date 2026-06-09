@@ -314,6 +314,7 @@ int main(int argc, char* argv[])
         qunsetenv("DEFCOIN_NU_DEBUG_DISABLE_CORE_SYNC");
         qunsetenv("DEFCOIN_NU_DEBUG_DISABLE_FAST_SYNC");
         qunsetenv("DEFCOIN_NU_DEBUG_DISABLE_QUICK_CLONE");
+        qunsetenv("DEFCOIN_NU_DEBUG_FAST_SYNC_LAN_ONLY");
         qunsetenv("DEFCOIN_NU_QUICK_CLONE_NOW");
     }
     const bool buildSmokeTest = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_SMOKE_TEST");
@@ -336,6 +337,9 @@ int main(int argc, char* argv[])
     }
     if (arguments.contains(QStringLiteral("--debug-disable-quick-clone"))) {
         qputenv("DEFCOIN_NU_DEBUG_DISABLE_QUICK_CLONE", "1");
+    }
+    if (arguments.contains(QStringLiteral("--debug-fast-sync-lan-only"))) {
+        qputenv("DEFCOIN_NU_DEBUG_FAST_SYNC_LAN_ONLY", "1");
     }
 
     std::unique_ptr<QLockFile> singleInstanceLock;

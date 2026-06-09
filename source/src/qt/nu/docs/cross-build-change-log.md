@@ -53,6 +53,66 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4bs - 2026-06-09 - LAN-only UDP Fast Sync benchmark switch
+
+Big picture:
+- Adds a controlled benchmark mode for testing Lion sync from LAN UDP Fast Sync
+  only. The mode keeps Core peer/header negotiation alive, disables Core TCP
+  block-body fetches when paired with the existing switch, disables Quick Clone
+  when paired with the existing switch, and restricts frontend UDP Fast Sync
+  targets to private/local LAN peers instead of public/server candidates.
+- Adds a session sync benchmark metric and writes unique start/complete lines
+  into `debug.log`, including `NU_SYNC_BENCHMARK_COMPLETE`, elapsed time,
+  block range, UDP/Core block counts, byte totals, failures, and UDP source
+  counts.
+
+Porting priority:
+- Lion Intel: required for the requested LAN UDP-only benchmark. Port the flag
+  handling, `m_debug_fast_sync_lan_only`, target-filtering logic, and sync
+  benchmark fields/functions.
+- Catalina UTM and Windows: useful for parity if those builds need the same
+  benchmark controls.
+- Server: not required. This is a receiver/test harness and UI metric change,
+  not a Fast Sync packet-format or service-bit change.
+
+Changed behavior:
+- New launch flag: `--debug-fast-sync-lan-only`.
+- Intended isolated Fast Sync benchmark launch flags:
+  `--debug-disable-core-tcp-sync --debug-disable-quick-clone --debug-fast-sync-lan-only`.
+- When the LAN-only flag is active, `selectUdpFastSyncTargetHost()` rejects
+  public/server UDP candidates even if they advertise `NODE_DEFCOIN_FASTSYNC`.
+- Metrics > Status now includes `Sync benchmark`.
+- Backend `debug.log` gets:
+  `NU_SYNC_BENCHMARK_START ...` and
+  `NU_SYNC_BENCHMARK_COMPLETE ...`.
+
+Changed files and important details:
+- `src/qt/nu/app/main.cpp`: clears and sets
+  `DEFCOIN_NU_DEBUG_FAST_SYNC_LAN_ONLY` from the new launch flag.
+- `src/qt/nu/app/NuRpcService.h/.cpp`: adds the LAN-only debug state, filters
+  Fast Sync targets, records sync benchmark timing, and surfaces the benchmark
+  metric.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: visible release
+  label moves to `26.6.4bs`.
+- `src/qt/nu/docs/release-notes-26.6.4bs.md`: user/developer release note.
+
+Compatibility notes:
+- Normal launches are unchanged. The LAN-only behavior exists only when the new
+  debug flag is present.
+- This mode is specifically for Fast Sync validation-preserving transport
+  testing. It is not Quick Clone/DCOL and does not bypass Core validation.
+
+Verification performed:
+- Pending in this Tahoe thread: rebuild Tahoe, port Lion, clear only Lion chain
+  folders, launch Tahoe with Local Network permission allowed, launch Lion with
+  the isolated flags, and grep Lion `debug.log` for
+  `NU_SYNC_BENCHMARK_COMPLETE`.
+
+Risks / follow-up:
+- If Lion spends substantial time rebuilding headers before blocks, the
+  benchmark should be interpreted as full wallet sync elapsed time, not pure
+  UDP block-transfer throughput. Use Fast Sync UDP metrics for transport rate.
+
 ### 26.6.4br - 2026-06-09 - Header sync ETA uses block-rate clock text
 
 Big picture:
@@ -89,14 +149,18 @@ Compatibility notes:
 
 Verification performed:
 - `git diff --check` passed.
-- `cmake --build build/nu-qml-arm64-26.6.4bq --target DefcoinCoreNu -j4`
-  passed before the version metadata bump; rebuild a fresh `26.6.4br` package
-  before distributing.
+- `cmake -S src/qt/nu/app -B build/nu-qml-arm64-26.6.4br -G Ninja
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+  -DQt6_DIR=/opt/homebrew/lib/cmake/Qt6
+  -DDEFCOIN_NU_RELEASE_NAME=26.6.4br` configured successfully.
+- `cmake --build build/nu-qml-arm64-26.6.4br --target DefcoinCoreNu -j4`
+  and `DefcoinCoreNuResources` passed.
+- Bundled `defcoind`, `defcoin-cli`, `defcoin-tx`, and `defcoin-wallet`
+  reported `v26.6.4br`.
 
 Risks / follow-up:
-- Because the active build directory was still named `26.6.4bq`, package builds
-  should use a fresh `build/nu-qml-arm64-26.6.4br` directory to avoid stale
-  CMake cache release labels.
+- None for protocol behavior. Package builds should still use a fresh build
+  directory per version to avoid stale CMake cache release labels.
 
 ### 26.6.4bq - 2026-06-09 - Fast Sync direct reservation JSON type fix
 

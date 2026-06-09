@@ -733,6 +733,8 @@ private:
     QString fastSyncUdpSummary() const;
     QString syncTransportDecisionSummary() const;
     QString syncTransportProbeSummary() const;
+    QString syncBenchmarkSummary() const;
+    void updateSyncBenchmarkState(bool syncing, int headers, int blocks_behind, double progress);
     QString coreSchedulingWaitStatus(const QString& feature, const QString& reason) const;
     void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes);
     QString udpFastSyncEndpointText(const QHostAddress& address, quint16 port = 0) const;
@@ -1000,6 +1002,13 @@ private:
     double m_sync_average_blocks_per_second = 0.0;
     int m_sync_last_block_height = -1;
     qint64 m_sync_last_sample_ms = 0;
+    bool m_sync_benchmark_active = false;
+    qint64 m_sync_benchmark_started_ms = 0;
+    qint64 m_sync_benchmark_completed_elapsed_ms = 0;
+    int m_sync_benchmark_start_block = -1;
+    int m_sync_benchmark_start_headers = -1;
+    int m_sync_benchmark_final_block = -1;
+    int m_sync_benchmark_final_headers = -1;
     bool m_wallet_locked = true;
     bool m_wallet_encrypted = false;
     QString m_metric_network_active = QStringLiteral("Hydrating");
@@ -1156,6 +1165,7 @@ private:
     bool m_debug_disable_core_sync = false;
     bool m_debug_disable_fast_sync = false;
     bool m_debug_disable_quick_clone = false;
+    bool m_debug_fast_sync_lan_only = false;
     bool m_quick_clone_auto_validate_after = false;
     bool m_quick_clone_validation_running = false;
     bool m_quick_clone_missing_cycle_active = false;

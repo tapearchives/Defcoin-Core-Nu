@@ -2372,6 +2372,7 @@ NuRpcService::NuRpcService(QObject* parent)
     m_debug_disable_core_sync = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_DEBUG_DISABLE_CORE_SYNC");
     m_debug_disable_fast_sync = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_DEBUG_DISABLE_FAST_SYNC");
     m_debug_disable_quick_clone = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_DEBUG_DISABLE_QUICK_CLONE");
+    m_debug_fast_sync_lan_only = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_DEBUG_FAST_SYNC_LAN_ONLY");
     if (m_debug_disable_fast_sync) {
         m_lan_fast_sync_status = QStringLiteral("UDP fast sync disabled by debug launch switch.");
     }
@@ -2380,12 +2381,13 @@ NuRpcService::NuRpcService(QObject* parent)
         m_lan_quick_clone_status = QStringLiteral("Quick Clone disabled by debug launch switch.");
     }
     appendLaunchDiagnostic(QStringLiteral("Frontend application launched."));
-    if (m_debug_disable_core_tcp_sync || m_debug_disable_core_sync || m_debug_disable_fast_sync || m_debug_disable_quick_clone) {
-        appendLaunchDiagnostic(QStringLiteral("Debug launch switches: Core TCP block copy=%1, Core P2P sync=%2, UDP fast sync=%3, Quick Clone=%4.")
+    if (m_debug_disable_core_tcp_sync || m_debug_disable_core_sync || m_debug_disable_fast_sync || m_debug_disable_quick_clone || m_debug_fast_sync_lan_only) {
+        appendLaunchDiagnostic(QStringLiteral("Debug launch switches: Core TCP block copy=%1, Core P2P sync=%2, UDP fast sync=%3, Quick Clone=%4, Fast Sync target scope=%5.")
             .arg((m_debug_disable_core_tcp_sync || m_debug_disable_core_sync) ? QStringLiteral("disabled") : QStringLiteral("enabled"),
                  m_debug_disable_core_sync ? QStringLiteral("disabled for Quick Clone isolation") : QStringLiteral("enabled"),
                  m_debug_disable_fast_sync ? QStringLiteral("disabled") : QStringLiteral("enabled"),
-                 m_debug_disable_quick_clone ? QStringLiteral("disabled") : QStringLiteral("enabled")));
+                 m_debug_disable_quick_clone ? QStringLiteral("disabled") : QStringLiteral("enabled"),
+                 m_debug_fast_sync_lan_only ? QStringLiteral("LAN/private peers only") : QStringLiteral("all eligible peers")));
     }
     appendLaunchDiagnostic(QStringLiteral("Network preferences: Defcoin-only magic=%1, /Defcoin user-agent filtering=%2, LAN discovery=%3, UPnP=%4.")
         .arg(boolText(m_only_defcoin_magic_bytes),
@@ -3945,6 +3947,7 @@ void NuRpcService::refreshNode()
         const bool syncing = ibd || headers_ahead;
         const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
         const int blocks_behind = std::max(0, headers - m_block_height);
+        updateSyncBenchmarkState(syncing, headers, blocks_behind, progress);
         if (m_chain_progress_last_diagnostic_ms <= 0 ||
             now_ms - m_chain_progress_last_diagnostic_ms >= 30000 ||
             headers < m_chain_progress_last_diagnostic_headers ||
@@ -5041,6 +5044,82 @@ QString NuRpcService::syncTransportSpeedSummary() const
         parts.push_back(QStringLiteral("Core net %1").arg(volume_rate(tcp_total, tcp_seconds)));
     }
     return parts.join(QStringLiteral(" | "));
+}
+
+QString NuRpcService::syncBenchmarkSummary() const
+{
+    if (m_sync_benchmark_active && m_sync_benchmark_started_ms > 0) {
+        const qint64 elapsed_ms = qMax<qint64>(0, QDateTime::currentMSecsSinceEpoch() - m_sync_benchmark_started_ms);
+        return QStringLiteral("running %1 | start block %2 of %3 | now %4 of %5 | UDP %6 blocks, Core/TCP %7")
+            .arg(formatSyncEtaSeconds(elapsed_ms / 1000),
+                 QString::number(m_sync_benchmark_start_block),
+                 QString::number(m_sync_benchmark_start_headers),
+                 QString::number(m_block_height),
+                 QString::number(m_header_height),
+                 QString::number(m_lan_fast_sync_blocks_received),
+                 QString::number(m_fast_sync_tcp_successes));
+    }
+    if (m_sync_benchmark_completed_elapsed_ms > 0) {
+        return QStringLiteral("last completed %1 | block %2 -> %3 of %4 headers | UDP %5 blocks, Core/TCP %6")
+            .arg(formatSyncEtaSeconds(m_sync_benchmark_completed_elapsed_ms / 1000),
+                 QString::number(m_sync_benchmark_start_block),
+                 QString::number(m_sync_benchmark_final_block),
+                 QString::number(m_sync_benchmark_final_headers),
+                 QString::number(m_lan_fast_sync_blocks_received),
+                 QString::number(m_fast_sync_tcp_successes));
+    }
+    return QStringLiteral("waiting for a sync run to start");
+}
+
+void NuRpcService::updateSyncBenchmarkState(bool syncing, int headers, int blocks_behind, double progress)
+{
+    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+    const bool meaningful_sync = syncing && headers > 0 && blocks_behind > 0;
+    if (meaningful_sync && !m_sync_benchmark_active) {
+        m_sync_benchmark_active = true;
+        m_sync_benchmark_started_ms = now_ms;
+        m_sync_benchmark_completed_elapsed_ms = 0;
+        m_sync_benchmark_start_block = m_block_height;
+        m_sync_benchmark_start_headers = headers;
+        m_sync_benchmark_final_block = -1;
+        m_sync_benchmark_final_headers = -1;
+        appendDebugLogLineFromNu(QStringLiteral("NU_SYNC_BENCHMARK_START start_block=%1 start_headers=%2 blocks_behind=%3 progress=%4 udp_lan_only=%5 core_tcp_blocks_disabled=%6 quick_clone_disabled=%7")
+            .arg(m_sync_benchmark_start_block)
+            .arg(m_sync_benchmark_start_headers)
+            .arg(blocks_behind)
+            .arg(QString::number(progress * 100.0, 'f', 4) + QStringLiteral("%"))
+            .arg(m_debug_fast_sync_lan_only ? QStringLiteral("true") : QStringLiteral("false"))
+            .arg((m_debug_disable_core_tcp_sync || m_debug_disable_core_sync) ? QStringLiteral("true") : QStringLiteral("false"))
+            .arg(m_debug_disable_quick_clone ? QStringLiteral("true") : QStringLiteral("false")));
+        return;
+    }
+
+    if (!m_sync_benchmark_active) return;
+    if (m_block_height < m_sync_benchmark_start_block) {
+        m_sync_benchmark_started_ms = now_ms;
+        m_sync_benchmark_start_block = m_block_height;
+        m_sync_benchmark_start_headers = headers;
+        return;
+    }
+    if (!syncing || blocks_behind <= 0 || (headers > 0 && m_block_height >= headers)) {
+        m_sync_benchmark_active = false;
+        m_sync_benchmark_completed_elapsed_ms = qMax<qint64>(0, now_ms - m_sync_benchmark_started_ms);
+        m_sync_benchmark_final_block = m_block_height;
+        m_sync_benchmark_final_headers = headers;
+        appendDebugLogLineFromNu(QStringLiteral("NU_SYNC_BENCHMARK_COMPLETE elapsed=%1 elapsed_seconds=%2 start_block=%3 final_block=%4 final_headers=%5 udp_blocks=%6 core_tcp_blocks=%7 udp_bytes=%8 core_block_bytes=%9 udp_failures=%10 udp_success_sources=%11 udp_failed_sources=%12")
+            .arg(formatSyncEtaSeconds(m_sync_benchmark_completed_elapsed_ms / 1000))
+            .arg(QString::number(m_sync_benchmark_completed_elapsed_ms / 1000.0, 'f', 3))
+            .arg(m_sync_benchmark_start_block)
+            .arg(m_sync_benchmark_final_block)
+            .arg(m_sync_benchmark_final_headers)
+            .arg(m_lan_fast_sync_blocks_received)
+            .arg(m_fast_sync_tcp_successes)
+            .arg(m_lan_fast_sync_udp_bytes_received + m_lan_fast_sync_udp_bytes_sent)
+            .arg(m_sync_core_block_bytes)
+            .arg(m_fast_sync_udp_failures)
+            .arg(m_udp_fast_sync_block_success_peer_hosts.size())
+            .arg(m_udp_fast_sync_block_failed_peer_hosts.size()));
+    }
 }
 
 QString NuRpcService::coreSyncPathSummary() const
@@ -6415,6 +6494,10 @@ QString NuRpcService::selectUdpFastSyncTargetHost(int* node_id) const
         }
         QHostAddress address;
         if (!address.setAddress(host)) return false;
+        if (m_debug_fast_sync_lan_only &&
+            !(isPrivateOrLocalFastSyncAddress(address) || isOnLocalInterfaceSubnet(host))) {
+            return false;
+        }
         if (!isUdpFastSyncHostVerified(host) && !isUdpFastSyncProbeAllowed(host, now)) return false;
         if (peer_node_id_out) *peer_node_id_out = peer_node_id;
         if (address_out) *address_out = address;
@@ -6725,12 +6808,13 @@ void NuRpcService::requestLanFastSyncBlock()
     const QString host = selectUdpFastSyncTargetHost(&node_id);
     if (host.isEmpty() || node_id < 0) {
         recordFastSyncUdpDiagnostic(QStringLiteral("UDP target selection empty"),
-            QStringLiteral("peers=%1 verified=%2 used=%3 failed=%4 debug-tcp-off=%5")
+            QStringLiteral("peers=%1 verified=%2 used=%3 failed=%4 debug-tcp-off=%5 lan-only=%6")
                 .arg(QString::number(m_udp_fast_sync_peer_hosts.size()),
                      QString::number(m_udp_fast_sync_available_peer_hosts.size()),
                      QString::number(m_udp_fast_sync_used_peer_hosts.size()),
                      QString::number(m_udp_fast_sync_failed_peer_hosts.size()),
-                     (m_debug_disable_core_tcp_sync || m_debug_disable_core_sync) ? QStringLiteral("yes") : QStringLiteral("no")));
+                     (m_debug_disable_core_tcp_sync || m_debug_disable_core_sync) ? QStringLiteral("yes") : QStringLiteral("no"),
+                     m_debug_fast_sync_lan_only ? QStringLiteral("yes") : QStringLiteral("no")));
         m_lan_fast_sync_status = QStringLiteral("UDP fast sync has no eligible Nu peer for the next block; %1").arg(fallback_text);
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
@@ -8743,6 +8827,8 @@ void NuRpcService::rebuildNodeMetrics()
                   QStringLiteral("Blockchain sync progress and current sync state. Transport-specific rates are shown in the Core Sync, Fast Sync, and Sync overview rows.")),
         metricRow(QStringLiteral("Sync overview"), syncTransportSpeedSummary(),
                   QStringLiteral("Combined session-average sync throughput. UDP timing includes failed attempts and cooldown/retry time so failed probes reduce the average instead of being ignored.")),
+        metricRow(QStringLiteral("Sync benchmark"), syncBenchmarkSummary(),
+                  QStringLiteral("Elapsed time for the current or most recent blockchain sync run. Completion is also written to debug.log as NU_SYNC_BENCHMARK_COMPLETE.")),
         metricRow(QStringLiteral("Core Sync (TCP)"), coreSyncPathSummary(),
                   QStringLiteral("Normal Core P2P sync and validation path. Chain advances here are active-chain height increases not attributed to UDP fast sync; they can include validation of locally available block data.")),
         metricRow(QStringLiteral("Fast Sync (UDP)"), fastSyncUdpSummary(),
