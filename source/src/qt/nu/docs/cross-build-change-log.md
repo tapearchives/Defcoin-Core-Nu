@@ -53,6 +53,81 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4bj - 2026-06-09 - Fast Sync metrics and verified LAN pacing
+
+Big picture:
+- The Lion/Tahoe clean UDP test showed UDP Fast Sync accepted real blocks, but
+  Metrics made UDP look worse because it compared UDP block-body transfer
+  against Core header traffic from normal P2P. This build separates Core header
+  bytes from Core block-body bytes and reports UDP node success/failure by real
+  accepted blocks.
+- Verified LAN Fast Sync peers no longer wait behind the public-probe
+  keepalive interval before refilling the UDP request window. This is intended
+  to make wired LAN tests reflect request/validation limits rather than an
+  accidental 5-second pacing gate.
+
+Porting priority:
+- Lion Intel: required. Port the same `NuRpcService` changes so the physical
+  iMac reports the same Metrics rows and uses the same verified-LAN pacing.
+- Catalina UTM: required if Catalina builds include the current Fast Sync UI.
+- Windows: required if Windows builds expose the same Metrics rows.
+- Server: no GUI Metrics port. Review only requester-side Fast Sync helper code
+  if the server build includes it; responder behavior is unchanged here.
+
+Changed behavior:
+- Tahoe visible version becomes `26.6.4bj`.
+- Sync overview now reports `Block data` using Core block-body bytes plus UDP
+  block bytes. Core headers are a separate field.
+- Fast Sync UDP now reports `nodes N ok/M failed`; a peer is counted as OK only
+  after a UDP block from that peer is accepted through Core.
+- UDP checksum, timeout, buffer, and submit failures mark the sender as failed
+  until a later accepted UDP block clears it.
+- Verified private/local UDP peers use the LAN request interval instead of the
+  5-second public probe interval when the receiver needs more blocks.
+- UDP receive window increased from 4 to 8 active blocks and ready queue from
+  16 to 24 blocks. The 64 MiB buffer cap remains the hard safety limit.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: Metrics separates `headers`,
+  Core block-body messages, and UDP bytes; verified LAN retry interval is
+  narrowed to actual private/local addresses; UDP peer OK/fail accounting moves
+  from chunk receipt to block acceptance.
+- `src/qt/nu/app/NuRpcService.h`: adds Core message counters and the UDP block
+  failed peer set.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: visible build label
+  moved to `26.6.4bj`.
+
+Compatibility notes:
+- This does not change consensus rules or the backend reservation RPC contract.
+- It intentionally does not claim public internet UDP can refill as fast as LAN
+  peers; public probing stays conservative.
+
+Build/package notes:
+- Nu-only change. Do not copy or rebuild Defcoin Core Explore as part of this
+  build unless the Explore thread explicitly requests it.
+
+Verification performed:
+- Tahoe backend build passed for `defcoind`, `defcoin-cli`, `defcoin-tx`,
+  and `defcoin-wallet`.
+- Tahoe QML app configured, built, staged, code-signed, and DMG-verified as
+  `26.6.4bj`.
+- Staged app reports `CFBundleShortVersionString=26.6.4bj`; bundled backend
+  reports `Defcoin Core Nu version v26.6.4bj`.
+- Clean Tahoe launch used the LAN-Allow clicker immediately after first run of
+  the new bundle; the clicker reported a successful Accessibility click.
+- `getnetworkinfo` from the bundled backend reports
+  `/DefcoinCoreNu:26.6.4bj/` and service name `DEFCOIN_FASTSYNC`.
+- Tahoe `getpeerinfo` saw the Lion peer at `192.168.0.189` advertising
+  `/DefcoinCoreNu:26.6.4bi-Lion-alpha/` and `DEFCOIN_FASTSYNC`.
+- Tahoe debug log showed a UDP Fast Sync probe acknowledgement sent to the Lion
+  peer, proving Tahoe was no longer blocked by the macOS LAN permission prompt
+  for this launch.
+
+Risks / follow-up:
+- If corrected UDP block-body rate is still low, inspect reservation churn,
+  one-at-a-time Core submission, and UI chunk-status churn before changing
+  packet sizes again.
+
 ### 26.6.4bi - 2026-06-08 - Debug environment guard and clean UDP proof
 
 Big picture:

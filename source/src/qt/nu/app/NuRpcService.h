@@ -1075,6 +1075,7 @@ private:
     QSet<QString> m_udp_fast_sync_available_peer_hosts;
     QSet<QString> m_udp_fast_sync_failed_peer_hosts;
     QSet<QString> m_udp_fast_sync_used_peer_hosts;
+    QSet<QString> m_udp_fast_sync_block_failed_peer_hosts;
     QSet<QString> m_udp_fast_sync_current_target_hosts;
     QHash<QString, qint64> m_udp_fast_sync_last_request_ms_by_host;
     QHash<QString, qint64> m_udp_fast_sync_last_probe_ms_by_host;
@@ -1108,6 +1109,15 @@ private:
     qint64 m_sync_tcp_bytes_received = 0;
     qint64 m_sync_tcp_bytes_sent = 0;
     double m_sync_tcp_active_seconds = 0.0;
+    qint64 m_last_core_header_message_bytes = -1;
+    qint64 m_last_core_block_message_bytes = -1;
+    qint64 m_last_core_block_received_message_bytes = -1;
+    qint64 m_last_core_message_sample_ms = 0;
+    qint64 m_sync_core_header_bytes = 0;
+    qint64 m_sync_core_block_bytes = 0;
+    qint64 m_sync_core_block_bytes_received = 0;
+    double m_sync_core_header_active_seconds = 0.0;
+    double m_sync_core_block_active_seconds = 0.0;
     QStringList m_log_lines;
     QVariantList m_log_line_numbers;
     QString m_last_logged_error_message;
