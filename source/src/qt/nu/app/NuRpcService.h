@@ -997,6 +997,7 @@ private:
     QString m_sync_eta = QStringLiteral("Unknown");
     int m_sync_progress_percent = 0;
     double m_sync_last_progress = -1.0;
+    double m_sync_average_blocks_per_second = 0.0;
     int m_sync_last_block_height = -1;
     qint64 m_sync_last_sample_ms = 0;
     bool m_wallet_locked = true;

@@ -1767,14 +1767,14 @@ QString formatMinerHashrateText(const QString& amount, const QString& unit)
 
 QString formatSyncEtaSeconds(qint64 seconds)
 {
-    if (seconds <= 0) return QStringLiteral("<1 min");
-    const qint64 minutes = std::max<qint64>(1, (seconds + 59) / 60);
-    const qint64 days = minutes / (24 * 60);
-    const qint64 hours = (minutes % (24 * 60)) / 60;
-    const qint64 mins = minutes % 60;
-    if (days > 0) return QStringLiteral("%1d %2h %3m").arg(days).arg(hours, 2, 10, QLatin1Char('0')).arg(mins, 2, 10, QLatin1Char('0'));
-    if (hours > 0) return QStringLiteral("%1h %2m").arg(hours).arg(mins, 2, 10, QLatin1Char('0'));
-    return QStringLiteral("%1m").arg(mins);
+    if (seconds <= 0) return QStringLiteral("00:00:00");
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    const qint64 secs = seconds % 60;
+    return QStringLiteral("%1:%2:%3")
+        .arg(hours, 2, 10, QLatin1Char('0'))
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(secs, 2, 10, QLatin1Char('0'));
 }
 
 QString formatMessageByteCount(qint64 bytes)
@@ -3371,6 +3371,7 @@ void NuRpcService::setError(const QString& message)
     m_sync_state = QStringLiteral("Unknown");
     m_sync_detail = QStringLiteral("Waiting for backend RPC.");
     m_sync_eta = QStringLiteral("Unknown");
+    m_sync_average_blocks_per_second = 0.0;
     m_sync_progress_percent = 0;
     if (!message.isEmpty()) {
         rebuildNodeMetrics();
@@ -3961,6 +3962,12 @@ void NuRpcService::refreshNode()
         if (m_sync_last_sample_ms > 0 && now_ms > m_sync_last_sample_ms && m_sync_last_block_height >= 0 && m_block_height > m_sync_last_block_height) {
             const int block_delta = m_block_height - m_sync_last_block_height;
             const double seconds = double(now_ms - m_sync_last_sample_ms) / 1000.0;
+            const double sample_blocks_per_second = seconds > 0.0 ? double(block_delta) / seconds : 0.0;
+            if (sample_blocks_per_second > 0.0) {
+                m_sync_average_blocks_per_second = m_sync_average_blocks_per_second > 0.0
+                    ? (m_sync_average_blocks_per_second * 0.75) + (sample_blocks_per_second * 0.25)
+                    : sample_blocks_per_second;
+            }
             const bool recent_udp_accept = m_fast_sync_last_udp_accepted_height >= (m_block_height - block_delta + 1)
                 && m_fast_sync_last_udp_accepted_height <= m_block_height
                 && m_lan_fast_sync_last_progress_ms > 0
@@ -3979,18 +3986,17 @@ void NuRpcService::refreshNode()
         const QString progress_text = QString::number(progress * 100.0, 'f', progress >= 0.999 ? 3 : 2) + QStringLiteral("%");
         if (syncing) {
             QString eta = QStringLiteral("calculating");
-            if (m_sync_last_sample_ms > 0 && now_ms > m_sync_last_sample_ms) {
+            if (blocks_behind > 0 && m_sync_average_blocks_per_second > 0.0) {
+                eta = formatSyncEtaSeconds(qint64(std::ceil(blocks_behind / m_sync_average_blocks_per_second)));
+            } else if (m_sync_last_sample_ms > 0 && now_ms > m_sync_last_sample_ms) {
                 const double seconds = double(now_ms - m_sync_last_sample_ms) / 1000.0;
                 const double progress_delta = progress - m_sync_last_progress;
                 if (progress_delta > 0.0000001) {
                     eta = formatSyncEtaSeconds(qint64(std::ceil((1.0 - progress) / (progress_delta / seconds))));
-                } else if (m_sync_last_block_height >= 0 && m_block_height > m_sync_last_block_height && blocks_behind > 0) {
-                    const double blocks_per_second = double(m_block_height - m_sync_last_block_height) / seconds;
-                    if (blocks_per_second > 0.0) eta = formatSyncEtaSeconds(qint64(std::ceil(blocks_behind / blocks_per_second)));
                 }
             }
             m_sync_eta = eta;
-            m_sync_state = QStringLiteral("Syncing | %1 done | Est. %2").arg(progress_text, eta);
+            m_sync_state = QStringLiteral("Syncing | %1 done | ETA %2").arg(progress_text, eta);
             m_sync_detail = QStringLiteral("%1 done. Block %2 of %3 headers. %4 block%5 behind. Estimated time remaining: %6.")
                 .arg(progress_text)
                 .arg(m_block_height)
@@ -3999,7 +4005,8 @@ void NuRpcService::refreshNode()
                 .arg(blocks_behind == 1 ? QString() : QStringLiteral("s"))
                 .arg(eta);
         } else {
-            m_sync_eta = QStringLiteral("0m");
+            m_sync_eta = QStringLiteral("00:00:00");
+            m_sync_average_blocks_per_second = 0.0;
             m_sync_state = QStringLiteral("Up to Date");
             m_sync_detail = QStringLiteral("Up to Date. Block %1 of %2 headers.").arg(m_block_height).arg(headers);
         }
