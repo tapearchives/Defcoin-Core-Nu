@@ -27,6 +27,18 @@ Date: 2026-06-10
   Fast Sync, Quick Clone, or network behavior changes are introduced by the
   style pass.
 
+## Tahoe Apple Silicon Build
+
+- Built backend tools and verified `defcoind`, `defcoin-cli`, and
+  `defcoin-wallet` report `v26.6.5`.
+- Built Tahoe Qt/QML app in `build/nu-qml-arm64-26.6.5`.
+- Staged Apple Silicon distribution:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.5-20260610/apple-silicon/Defcoin Core Nu.app`
+- Staged DMG:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.5-20260610/apple-silicon/Defcoin-Core-Nu-v26.6.5-macOS-AppleSilicon.dmg`
+- Codesign deep verification passed. Gatekeeper `spctl` rejects the local build
+  because it is ad-hoc signed and not Developer ID notarized.
+
 ## Porting Notes
 
 - Lion should use the same policy idea, but keep Ruff rules conservative for

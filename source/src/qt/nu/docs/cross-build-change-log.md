@@ -106,7 +106,23 @@ Verification performed:
 - `ruff check --fix` and `ruff format` were run on Nu Python helpers; no Python
   source changes were needed.
 - `python3 src/qt/nu/tools/defcoin_fast_syncd.py --help` exits successfully.
-- Final Tahoe build verification follows after packaging.
+- Backend tools rebuilt and report `v26.6.5`.
+- `cmake -S source/src/qt/nu/app -B build/nu-qml-arm64-26.6.5 -G Ninja ...`
+  configured successfully.
+- `cmake --build build/nu-qml-arm64-26.6.5 --target DefcoinCoreNuResources
+  -j6` completed successfully.
+- Staged Tahoe Apple Silicon app:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.5-20260610/apple-silicon/Defcoin Core Nu.app`.
+- Staged Tahoe Apple Silicon DMG:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.5-20260610/apple-silicon/Defcoin-Core-Nu-v26.6.5-macOS-AppleSilicon.dmg`.
+- Staged app `Info.plist` reports `CFBundleShortVersionString=26.6.5` and
+  `CFBundleVersion=26.6.5`.
+- Bundled `Contents/Resources/nu/bin/defcoind` reports `Defcoin Core Nu version
+  v26.6.5`.
+- `codesign --verify --deep --strict` passed. `spctl --assess` rejects the
+  ad-hoc-signed local build as expected without Developer ID notarization.
+- `mdls` reports `kMDItemKind = "Application"` and
+  `kMDItemContentType = "com.apple.application-bundle"` for the staged app.
 
 Risks / follow-up:
 - Large `NuRpcService.cpp` and `NuRpcService.h` diffs are mechanical
