@@ -53,6 +53,66 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.5 - 2026-06-10 - Nu style baseline and DOX tool notes
+
+Big picture:
+- Tahoe moves from the 26.6.4 letter-suffix line to the `26.6.5` release
+  label. The change is intentionally a developer-quality/style baseline, not a
+  Fast Sync or wallet behavior change.
+- Nu-owned C++, Objective-C++, and helper code under `src/qt/nu` now has a
+  local clang-format policy that is separate from upstream/Core formatting.
+- The Nu tools folder now has a DOX index and `defcoin_fast_syncd.py` has a
+  companion agent note documenting the responder-only Fast Sync assumptions.
+
+Porting priority:
+- Lion Intel: required for source-hygiene parity. Use the same DOX/companion
+  model, but keep Ruff rules conservative because Lion-era scripts may need
+  older Python compatibility.
+- Catalina UTM: recommended. The style policy is Tahoe-source-first, but
+  Catalina should not diverge in Nu-owned code style.
+- Windows: recommended before the next Windows package. Use the same
+  `26.6.5` label and avoid applying the Nu style to upstream Core files.
+- Server: read the new `defcoin_fast_syncd.py.agent.md` before changing the
+  Fast Sync responder; no server feature change is introduced by this entry.
+
+Changed behavior:
+- No intended runtime behavior changes.
+- Frontend and backend visible release labels now report `26.6.5`.
+
+Changed files and important details:
+- `src/clientversion.h`: `DEFCOIN_RELEASE_VERSION_STR` advanced to `26.6.5`
+  so backend tools and About/splash backend identity agree.
+- `src/qt/nu/app/CMakeLists.txt`: project version and
+  `DEFCOIN_NU_RELEASE_NAME` advanced to `26.6.5`.
+- `src/qt/nu/.clang-format`: local Nu formatter policy, with separate C++ and
+  Objective-C sections so `.mm` files parse correctly.
+- `src/qt/nu/tools/AGENTS.md`: DOX index for Nu tools.
+- `src/qt/nu/tools/defcoin_fast_syncd.py.agent.md`: documents server/LAN
+  Fast Sync responder boundaries.
+
+Compatibility notes:
+- Do not run this Nu style profile over upstream Core files outside
+  `src/qt/nu`.
+- Do not enable Ruff `UP`/pyupgrade rules on Lion scripts until the target
+  Python runtime is confirmed.
+
+Build/package notes:
+- Tahoe target: Apple Silicon `26.6.5`.
+- Lion target should use `26.6.5-Lion-alpha` if rebuilt for parity.
+
+Verification performed:
+- `/usr/bin/xcrun clang-format -style=file --dump-config` passed for both
+  `NuRpcService.cpp` and `MacHelp.mm` assumptions.
+- `ruff check --fix` and `ruff format` were run on Nu Python helpers; no Python
+  source changes were needed.
+- `python3 src/qt/nu/tools/defcoin_fast_syncd.py --help` exits successfully.
+- Final Tahoe build verification follows after packaging.
+
+Risks / follow-up:
+- Large `NuRpcService.cpp` and `NuRpcService.h` diffs are mechanical
+  formatting churn. Review functional patches separately from this style
+  baseline when debugging regressions.
+
 ### 26.6.4cf - 2026-06-10 - Traffic graph identity and instance relaunch guard
 
 Big picture:
