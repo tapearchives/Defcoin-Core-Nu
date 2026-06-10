@@ -53,6 +53,92 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4cc - 2026-06-09 - Fast Sync UDP all-modes scheduler fix
+
+Big picture:
+- Current Tahoe/Lion testing proved UDP transport could work when Core TCP
+  block copy was disabled, but all-modes sync was still mostly losing because
+  the GUI asked Core to reserve the exact next local height for LAN peers.
+- With Core TCP enabled, Core usually already had that height queued or stored
+  before UDP could win, producing repeated `block-already-have-data` deferrals.
+- The long-term rule is now explicit: UDP Fast Sync is only a transport choice.
+  When normal Core TCP sync is active, UDP must use Core's own `reserve-next`
+  scheduling so Core chooses a safe unscheduled block.
+
+Porting priority:
+- Lion Intel: required and already applied to the physical iMac source for
+  `26.6.4cc-Lion-alpha`.
+- Catalina UTM: required before any Catalina Fast Sync test.
+- Windows: required before the next Windows Fast Sync build.
+- Server: required for requester behavior only if the server is also being used
+  as a Fast Sync requester. Responder-only serving can keep existing serve path,
+  but version parity should still receive the backend reservation scan.
+
+Changed behavior:
+- Normal all-modes sync (`Core TCP` enabled, `Fast Sync UDP` enabled) now calls
+  `reservefastsyncblock reserve-next <nodeid>` even for LAN/private peers.
+- Explicit-height LAN reservations remain for UDP-only benchmarking and
+  Core-TCP-disabled debug launches.
+- The backend `reserve-next` RPC asks Core for a wider candidate set and filters
+  out blocks already active, already stored, or already in flight before
+  returning a UDP reservation.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp::requestLanFastSyncBlock()`: changed
+  `direct_lan_reservation` to depend only on `core_tcp_blocks_disabled`.
+- `src/net_processing.cpp::ReserveNextFastSyncBlockInFlight()`: changed the
+  non-explicit path from a single candidate to a bounded scan of
+  `MAX_BLOCKS_IN_TRANSIT_PER_PEER + MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER + 32`
+  and a one-block filtered result.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: bumped Tahoe label
+  to `26.6.4cc`.
+- Lion equivalent changes were applied in
+  `src/qt/nu/legacy-osx107/main.cpp`, `src/net_processing.cpp`,
+  `src/clientversion.h`, `src/qt/nu/legacy-osx107/DefcoinCoreNuLegacy.pro`,
+  and `src/qt/nu/legacy-osx107/Info.plist`.
+
+Compatibility notes:
+- Do not reintroduce the old `coreTcpBlocksDisabled || LAN/private` condition
+  for all-modes sync. That condition is correct for UDP-only tests, but it
+  races Core TCP in normal sync.
+- Seeing occasional `no-downloadable-block-in-window` is expected when Core TCP
+  is already filling the best nearby blocks. It is no longer proof that UDP is
+  blocked; look for current-run `NU_UDP_FASTSYNC_SERVE` and
+  `UDP fast sync accepted block` evidence.
+
+Build/package notes:
+- Tahoe staged app:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.4cc-20260609/apple-silicon/Defcoin Core Nu.app`.
+- Tahoe staged DMG:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.4cc-20260609/apple-silicon/Defcoin-Core-Nu-v26.6.4cc-macOS-AppleSilicon.dmg`.
+- Lion staged app:
+  `/Users/david/_Distribution_Versions/Defcoin Core Nu/Nu-26.6.4cc-Lion-alpha-20260609-iMac/stage/Defcoin Core Nu.app`.
+
+Verification performed:
+- Tahoe staged app reports frontend `26.6.4cc`, bundled backend
+  `Defcoin Core Nu version v26.6.4cc`, deep codesign verifies, and `hdiutil
+  verify` reports the DMG checksum is valid.
+- Lion staged app reports frontend `26.6.4cc-Lion-alpha` and bundled backend
+  `v26.6.4cc-Lion-alpha-40e4ee1-dirty`.
+- Fresh Lion public chain reset with all three modes enabled and Quick Clone
+  declined: Lion accepted current-run UDP Fast Sync blocks from Tahoe while
+  normal Core TCP sync remained active. Observed examples include UDP-accepted
+  blocks `3005`, `3006`, `3015`, `16962`, `17864`, and `19368`.
+- Tahoe current-run log showed matching `NU_UDP_FASTSYNC_SERVE` rows to
+  `192.168.0.189` and `[2603:808c:f40:200::48b]`.
+- Persistence check: Lion stopped cleanly at block `21559`, relaunched without
+  deleting chain data, and resumed at block `22632`, then continued to block
+  `27024` with additional UDP accepts.
+
+Risks / follow-up:
+- In all-modes sync UDP is currently supplemental rather than dominant; Core
+  TCP still advances most blocks. Future optimization should tune the
+  candidate scan/window only after measuring CPU cost and avoiding duplicate
+  reservations.
+- The old iMac produced a short-lived child-process crash report at
+  `2026-06-09 20:35:00 -0500`, but the main frontend/backend continued and
+  the safe-stop/relaunch persistence check passed. Inspect if repeated.
+
 ### 26.6.4ca - 2026-06-09 - Metrics details parity and compact UDP status
 
 Big picture:

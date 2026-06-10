@@ -6921,7 +6921,10 @@ void NuRpcService::requestLanFastSyncBlock()
         }
         return;
     }
-    const bool direct_lan_reservation = core_tcp_blocks_disabled || isPrivateLocalOrProvenUdpFastSyncTarget(host);
+    // With normal Core TCP block transfer active, let Core choose an
+    // unscheduled block even for LAN peers. Asking for local height + 1 races
+    // the TCP path and usually returns "already have data" before UDP can win.
+    const bool direct_lan_reservation = core_tcp_blocks_disabled;
     const int wanted_height = direct_lan_reservation ? nextLanFastSyncWantedHeight() : -1;
     if (direct_lan_reservation && wanted_height <= 0) {
         m_lan_fast_sync_status = QStringLiteral("UDP fast sync waiting for Core to advance before reserving another LAN block. %1").arg(fallback_text);

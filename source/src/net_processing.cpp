@@ -1297,12 +1297,30 @@ bool ReserveNextFastSyncBlockInFlight(CTxMemPool& mempool, NodeId nodeid, uint25
         }
     } else {
         NodeId staller = -1;
-        FindNextBlocksToDownload(nodeid, 1, blocks_to_download, staller, Params().GetConsensus());
+        FindNextBlocksToDownload(
+            nodeid,
+            MAX_BLOCKS_IN_TRANSIT_PER_PEER + MAX_FAST_SYNC_EXTRA_BLOCKS_IN_TRANSIT_PER_PEER + 32,
+            blocks_to_download,
+            staller,
+            Params().GetConsensus());
+        std::vector<const CBlockIndex*> filtered_blocks;
+        for (const CBlockIndex* candidate : blocks_to_download) {
+            if (candidate == nullptr) continue;
+            const uint256 candidate_hash = candidate->GetBlockHash();
+            if ((candidate->nStatus & BLOCK_HAVE_DATA) ||
+                ::ChainActive().Contains(candidate) ||
+                mapBlocksInFlight.count(candidate_hash) != 0) {
+                continue;
+            }
+            filtered_blocks.push_back(candidate);
+            break;
+        }
+        blocks_to_download.swap(filtered_blocks);
         if (blocks_to_download.empty()) {
             if (staller != -1) {
                 reason = "waiting-for-block-window";
             } else {
-                reason = "no-downloadable-block";
+                reason = "no-downloadable-block-in-window";
             }
         }
     }
