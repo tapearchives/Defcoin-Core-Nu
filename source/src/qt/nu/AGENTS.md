@@ -25,6 +25,7 @@ This folder owns the Tahoe Nu frontend, QML views/components, bridge services, N
 - QML is the presentation layer. Use existing custom QML/Canvas components where Lion parity matters; use newer Qt modules only when the platform matrix supports them.
 - For frontend changes, check both layout density and text clipping at realistic window sizes.
 - For service changes, keep C++ bridge APIs narrow and explicit.
+- If a QML, C++, or build file has a sibling `[full filename].agent.md`, read that companion before editing the file and keep it current with durable behavior changes.
 
 ## Verification
 

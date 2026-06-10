@@ -23,6 +23,7 @@ This git tree is the current Tahoe / Apple Silicon Defcoin Core Nu source, based
 - Prefer established Litecoin/Bitcoin Core patterns for backend changes.
 - For QML UI changes, keep Tahoe presentation aligned with Lion where possible and avoid adding dependencies Lion cannot share unless documented.
 - For UDP/LAN tests, treat the macOS Local Network Allow prompt as a hard gate before drawing conclusions.
+- If a source or project file has a sibling `[full filename].agent.md`, read it before editing that file. Use companion docs only for files with meaningful Nu divergence, fragile platform behavior, or cross-build risk.
 
 ## Verification
 
@@ -34,5 +35,6 @@ This git tree is the current Tahoe / Apple Silicon Defcoin Core Nu source, based
 ## Child DOX Index
 
 - `source/src/qt/nu/AGENTS.md` - Nu Qt/QML frontend, bridge, local docs, tools, and assets.
-- `source/src/` - backend and consensus-adjacent source, governed by this doc unless a deeper AGENTS.md is added.
+- `source/src/AGENTS.md` - backend and consensus-adjacent source, including Fast Sync service bits, reservations, validation, wallet storage, and RPC hooks.
+- `source/build_msvc/AGENTS.md` - Windows/MSVC project files and build graph.
 - `scripts/`, `build/`, `.github/` - build helpers and generated/local tooling governed by this doc.
