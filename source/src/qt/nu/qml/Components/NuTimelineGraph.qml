@@ -9,6 +9,10 @@ Item {
 
     property color receivedColor: NuTokens.dataReceived
     property color sentColor: NuTokens.dataSent
+    property color tcpReceivedColor: "#2fb8a6"
+    property color tcpSentColor: "#4f9cff"
+    property color udpReceivedColor: "#8bd450"
+    property color udpSentColor: "#8b7cf6"
     property var samples: []
     property real windowStart: 0
     property real windowEnd: 1
@@ -82,7 +86,13 @@ Item {
             let peakReceived = visible[0]
             let peakSent = visible[0]
             for (let i = 0; i < visible.length; ++i) {
-                maxValue = Math.max(maxValue, Math.max(0, Number(visible[i].received) || 0), Math.max(0, Number(visible[i].sent) || 0))
+                maxValue = Math.max(maxValue,
+                                    Math.max(0, Number(visible[i].received) || 0),
+                                    Math.max(0, Number(visible[i].sent) || 0),
+                                    Math.max(0, Number(visible[i].tcpReceived) || 0),
+                                    Math.max(0, Number(visible[i].tcpSent) || 0),
+                                    Math.max(0, Number(visible[i].udpReceived) || 0),
+                                    Math.max(0, Number(visible[i].udpSent) || 0))
                 if (Math.max(0, Number(visible[i].received) || 0) > Math.max(0, Number(peakReceived.received) || 0)) peakReceived = visible[i]
                 if (Math.max(0, Number(visible[i].sent) || 0) > Math.max(0, Number(peakSent.sent) || 0)) peakSent = visible[i]
             }
@@ -101,13 +111,15 @@ Item {
                 const normalized = Math.max(0, Math.min(1, safeRate(value) / Math.max(1, maxValue)))
                 return Math.max(plotTop, Math.min(plotBottom - 1, plotBottom - 1 - normalized * (plotBottom - plotTop - 28)))
             }
-            function drawLine(key, color) {
+            function drawLine(key, color, lineWidth, dashPattern, alpha) {
                 ctx.save()
                 ctx.beginPath()
                 ctx.rect(0, plotTop, width, plotBottom - plotTop)
                 ctx.clip()
                 ctx.strokeStyle = color
-                ctx.lineWidth = 2
+                ctx.lineWidth = lineWidth
+                ctx.globalAlpha = alpha
+                if (ctx.setLineDash) ctx.setLineDash(dashPattern)
                 ctx.beginPath()
                 for (let i = 0; i < visible.length; ++i) {
                     const x = xFor(visible[i])
@@ -116,11 +128,16 @@ Item {
                     else ctx.lineTo(x, y)
                 }
                 ctx.stroke()
+                if (ctx.setLineDash) ctx.setLineDash([])
                 ctx.restore()
             }
 
-            drawLine("received", root.receivedColor)
-            drawLine("sent", root.sentColor)
+            drawLine("tcpReceived", root.tcpReceivedColor, 1.5, [8, 5], 0.82)
+            drawLine("tcpSent", root.tcpSentColor, 1.5, [8, 5], 0.82)
+            drawLine("udpReceived", root.udpReceivedColor, 1.7, [2, 4], 0.88)
+            drawLine("udpSent", root.udpSentColor, 1.7, [2, 4], 0.88)
+            drawLine("received", root.receivedColor, 2.5, [], 1.0)
+            drawLine("sent", root.sentColor, 2.5, [], 1.0)
 
             ctx.fillStyle = NuTokens.textSecondary
             ctx.font = "13px sans-serif"
@@ -129,22 +146,33 @@ Item {
             ctx.fillText("Peak rec'd " + formatRate(peakReceived.received), Math.min(width - 160, xFor(peakReceived) + 8), receivedLabelY)
             ctx.fillText("Peak sent " + formatRate(peakSent.sent), Math.min(width - 150, xFor(peakSent) + 8), sentLabelY)
 
-            const legendX = Math.max(12, width - 178)
-            ctx.lineWidth = 3
-            ctx.strokeStyle = root.receivedColor
-            ctx.beginPath()
-            ctx.moveTo(legendX, 18)
-            ctx.lineTo(legendX + 36, 18)
-            ctx.stroke()
-            ctx.strokeStyle = root.sentColor
-            ctx.beginPath()
-            ctx.moveTo(legendX, 38)
-            ctx.lineTo(legendX + 36, 38)
-            ctx.stroke()
+            const legendX = Math.max(12, width - 410)
+            function legendLine(x, y, color, dashPattern) {
+                ctx.save()
+                ctx.strokeStyle = color
+                ctx.lineWidth = 3
+                if (ctx.setLineDash) ctx.setLineDash(dashPattern)
+                ctx.beginPath()
+                ctx.moveTo(x, y)
+                ctx.lineTo(x + 28, y)
+                ctx.stroke()
+                if (ctx.setLineDash) ctx.setLineDash([])
+                ctx.restore()
+            }
+            legendLine(legendX, 18, root.receivedColor, [])
+            legendLine(legendX, 38, root.sentColor, [])
+            legendLine(legendX + 132, 18, root.tcpReceivedColor, [8, 5])
+            legendLine(legendX + 132, 38, root.tcpSentColor, [8, 5])
+            legendLine(legendX + 250, 18, root.udpReceivedColor, [2, 4])
+            legendLine(legendX + 250, 38, root.udpSentColor, [2, 4])
             ctx.fillStyle = NuTokens.textPrimary
             ctx.font = "13px sans-serif"
-            ctx.fillText("Received", legendX + 46, 22)
-            ctx.fillText("Sent", legendX + 46, 42)
+            ctx.fillText("Rec'd total", legendX + 34, 22)
+            ctx.fillText("Sent total", legendX + 34, 42)
+            ctx.fillText("Rec'd TCP", legendX + 166, 22)
+            ctx.fillText("Sent TCP", legendX + 166, 42)
+            ctx.fillText("Rec'd UDP", legendX + 284, 22)
+            ctx.fillText("Sent UDP", legendX + 284, 42)
         }
 
         MouseArea {
@@ -192,7 +220,15 @@ Item {
                 anchors.centerIn: parent
                 color: NuTokens.textInverse
                 font.pixelSize: NuTokens.fontSmall
-                text: canvas.hoverSample ? (canvas.formatSampleTime(canvas.hoverSample) + "\nRec'd " + canvas.formatRate(canvas.hoverSample.received) + "\nSent " + canvas.formatRate(canvas.hoverSample.sent)) : ""
+                text: canvas.hoverSample
+                      ? (canvas.formatSampleTime(canvas.hoverSample)
+                         + "\nRec'd total " + canvas.formatRate(canvas.hoverSample.received)
+                         + " | TCP " + canvas.formatRate(canvas.hoverSample.tcpReceived)
+                         + " | UDP " + canvas.formatRate(canvas.hoverSample.udpReceived)
+                         + "\nSent total " + canvas.formatRate(canvas.hoverSample.sent)
+                         + " | TCP " + canvas.formatRate(canvas.hoverSample.tcpSent)
+                         + " | UDP " + canvas.formatRate(canvas.hoverSample.udpSent))
+                      : ""
             }
         }
     }

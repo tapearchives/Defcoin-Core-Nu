@@ -4100,9 +4100,21 @@ void NuRpcService::refreshNode()
     rpcCall(QStringLiteral("getnettotals"), {}, false, [this](const QJsonValue& result, const QString& error) {
         if (!error.isEmpty()) return;
         const QJsonObject totals = result.toObject();
-        m_traffic_received_total = formatBytes(totals.value(QStringLiteral("totalbytesrecv")).toVariant().toLongLong());
-        m_traffic_sent_total = formatBytes(totals.value(QStringLiteral("totalbytessent")).toVariant().toLongLong());
-        m_metric_traffic = m_traffic_received_total + QStringLiteral(" received / ") + m_traffic_sent_total + QStringLiteral(" sent");
+        const qint64 tcp_recv = totals.value(QStringLiteral("totalbytesrecv")).toVariant().toLongLong();
+        const qint64 tcp_sent = totals.value(QStringLiteral("totalbytessent")).toVariant().toLongLong();
+        const qint64 udp_recv = m_lan_fast_sync_udp_bytes_received;
+        const qint64 udp_sent = m_lan_fast_sync_udp_bytes_sent;
+        const qint64 quick_clone_recv = m_lan_quick_clone_udp_bytes_received;
+        const qint64 quick_clone_sent = m_lan_quick_clone_udp_bytes_sent;
+        m_traffic_tcp_received_total = formatBytes(tcp_recv);
+        m_traffic_tcp_sent_total = formatBytes(tcp_sent);
+        m_traffic_udp_received_total = formatBytes(udp_recv);
+        m_traffic_udp_sent_total = formatBytes(udp_sent);
+        m_traffic_quick_clone_received_total = formatBytes(quick_clone_recv);
+        m_traffic_quick_clone_sent_total = formatBytes(quick_clone_sent);
+        m_traffic_received_total = formatBytes(tcp_recv + udp_recv);
+        m_traffic_sent_total = formatBytes(tcp_sent + udp_sent);
+        m_metric_traffic = m_traffic_received_total + QStringLiteral(" rec'd / ") + m_traffic_sent_total + QStringLiteral(" sent");
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
         Q_EMIT trafficChanged();
@@ -4649,24 +4661,53 @@ void NuRpcService::sampleTraffic()
         const qint64 now_wall_ms = QDateTime::currentMSecsSinceEpoch();
         const qint64 recv = totals.value(QStringLiteral("totalbytesrecv")).toVariant().toLongLong();
         const qint64 sent = totals.value(QStringLiteral("totalbytessent")).toVariant().toLongLong();
-        m_traffic_received_total = formatBytes(recv);
-        m_traffic_sent_total = formatBytes(sent);
+        const qint64 udp_recv = m_lan_fast_sync_udp_bytes_received;
+        const qint64 udp_sent = m_lan_fast_sync_udp_bytes_sent;
+        const qint64 quick_clone_recv = m_lan_quick_clone_udp_bytes_received;
+        const qint64 quick_clone_sent = m_lan_quick_clone_udp_bytes_sent;
+        m_traffic_tcp_received_total = formatBytes(recv);
+        m_traffic_tcp_sent_total = formatBytes(sent);
+        m_traffic_udp_received_total = formatBytes(udp_recv);
+        m_traffic_udp_sent_total = formatBytes(udp_sent);
+        m_traffic_quick_clone_received_total = formatBytes(quick_clone_recv);
+        m_traffic_quick_clone_sent_total = formatBytes(quick_clone_sent);
+        m_traffic_received_total = formatBytes(recv + udp_recv);
+        m_traffic_sent_total = formatBytes(sent + udp_sent);
 
-        double recv_rate = 0.0;
-        double sent_rate = 0.0;
+        double tcp_recv_rate = 0.0;
+        double tcp_sent_rate = 0.0;
+        double udp_recv_rate = 0.0;
+        double udp_sent_rate = 0.0;
+        double quick_clone_recv_rate = 0.0;
+        double quick_clone_sent_rate = 0.0;
         qint64 recv_delta = 0;
         qint64 sent_delta = 0;
+        qint64 udp_recv_delta = 0;
+        qint64 udp_sent_delta = 0;
+        qint64 quick_clone_recv_delta = 0;
+        qint64 quick_clone_sent_delta = 0;
         bool sync_transport_changed = false;
         if (m_last_traffic_ms > 0 && now_ms > m_last_traffic_ms) {
             const double seconds = (now_ms - m_last_traffic_ms) / 1000.0;
             recv_delta = qMax<qint64>(0, recv - m_last_bytes_recv);
             sent_delta = qMax<qint64>(0, sent - m_last_bytes_sent);
-            recv_rate = qMax(0.0, recv_delta / seconds);
-            sent_rate = qMax(0.0, sent_delta / seconds);
+            udp_recv_delta = qMax<qint64>(0, udp_recv - m_last_udp_bytes_recv);
+            udp_sent_delta = qMax<qint64>(0, udp_sent - m_last_udp_bytes_sent);
+            quick_clone_recv_delta = qMax<qint64>(0, quick_clone_recv - m_last_quick_clone_bytes_recv);
+            quick_clone_sent_delta = qMax<qint64>(0, quick_clone_sent - m_last_quick_clone_bytes_sent);
+            tcp_recv_rate = qMax(0.0, recv_delta / seconds);
+            tcp_sent_rate = qMax(0.0, sent_delta / seconds);
+            udp_recv_rate = qMax(0.0, udp_recv_delta / seconds);
+            udp_sent_rate = qMax(0.0, udp_sent_delta / seconds);
+            quick_clone_recv_rate = qMax(0.0, quick_clone_recv_delta / seconds);
+            quick_clone_sent_rate = qMax(0.0, quick_clone_sent_delta / seconds);
             if (m_syncing && seconds > 0.0 && (recv_delta > 0 || sent_delta > 0)) {
                 m_sync_tcp_bytes_received += recv_delta;
                 m_sync_tcp_bytes_sent += sent_delta;
                 m_sync_tcp_active_seconds += seconds;
+                sync_transport_changed = true;
+            }
+            if (quick_clone_recv_delta > 0 || quick_clone_sent_delta > 0) {
                 sync_transport_changed = true;
             }
         }
@@ -4674,12 +4715,27 @@ void NuRpcService::sampleTraffic()
         m_last_traffic_ms = now_ms;
         m_last_bytes_recv = recv;
         m_last_bytes_sent = sent;
+        m_last_udp_bytes_recv = udp_recv;
+        m_last_udp_bytes_sent = udp_sent;
+        m_last_quick_clone_bytes_recv = quick_clone_recv;
+        m_last_quick_clone_bytes_sent = quick_clone_sent;
+        m_quick_clone_received_rate_bytes_per_second = quick_clone_recv_rate;
+        m_quick_clone_sent_rate_bytes_per_second = quick_clone_sent_rate;
+
+        const double recv_rate = tcp_recv_rate + udp_recv_rate;
+        const double sent_rate = tcp_sent_rate + udp_sent_rate;
 
         QVariantMap point;
         point.insert(QStringLiteral("seconds"), now_ms / 1000.0);
         point.insert(QStringLiteral("timestampMs"), now_wall_ms);
         point.insert(QStringLiteral("received"), recv_rate);
         point.insert(QStringLiteral("sent"), sent_rate);
+        point.insert(QStringLiteral("tcpReceived"), tcp_recv_rate);
+        point.insert(QStringLiteral("tcpSent"), tcp_sent_rate);
+        point.insert(QStringLiteral("udpReceived"), udp_recv_rate);
+        point.insert(QStringLiteral("udpSent"), udp_sent_rate);
+        point.insert(QStringLiteral("quickCloneReceived"), quick_clone_recv_rate);
+        point.insert(QStringLiteral("quickCloneSent"), quick_clone_sent_rate);
         point.insert(QStringLiteral("sampleCount"), 1);
 
         const qint64 bucket_ms = now_wall_ms - (now_wall_ms % TRAFFIC_CHART_BUCKET_MS);
@@ -4690,8 +4746,19 @@ void NuRpcService::sampleTraffic()
             if (last_bucket_ms == bucket_ms) {
                 const int sample_count = qMax(1, last_point.value(QStringLiteral("sampleCount")).toInt());
                 const int next_count = sample_count + 1;
-                point.insert(QStringLiteral("received"), ((last_point.value(QStringLiteral("received")).toDouble() * sample_count) + recv_rate) / next_count);
-                point.insert(QStringLiteral("sent"), ((last_point.value(QStringLiteral("sent")).toDouble() * sample_count) + sent_rate) / next_count);
+                const QStringList rate_keys = {
+                    QStringLiteral("received"),
+                    QStringLiteral("sent"),
+                    QStringLiteral("tcpReceived"),
+                    QStringLiteral("tcpSent"),
+                    QStringLiteral("udpReceived"),
+                    QStringLiteral("udpSent"),
+                    QStringLiteral("quickCloneReceived"),
+                    QStringLiteral("quickCloneSent")
+                };
+                for (const QString& key : rate_keys) {
+                    point.insert(key, ((last_point.value(key).toDouble() * sample_count) + point.value(key).toDouble()) / next_count);
+                }
                 point.insert(QStringLiteral("sampleCount"), next_count);
                 m_traffic_samples.last() = point;
             } else {
@@ -5268,6 +5335,35 @@ QString NuRpcService::fastSyncUdpDetailSummary() const
              QString::number(m_lan_fast_sync_retransmit_errors));
 }
 
+QString NuRpcService::quickCloneTrafficSummary() const
+{
+    const qint64 received = m_lan_quick_clone_udp_bytes_received;
+    const qint64 sent = m_lan_quick_clone_udp_bytes_sent;
+    const qint64 total = received + sent;
+    const double live_total_rate = qMax(0.0, m_quick_clone_received_rate_bytes_per_second + m_quick_clone_sent_rate_bytes_per_second);
+    const double seconds = (m_lan_quick_clone_udp_first_activity_ms > 0 && m_lan_quick_clone_udp_last_activity_ms > m_lan_quick_clone_udp_first_activity_ms)
+        ? qMax(1.0, double(m_lan_quick_clone_udp_last_activity_ms - m_lan_quick_clone_udp_first_activity_ms) / 1000.0)
+        : (total > 0 ? 1.0 : 0.0);
+    const QString live_rate = live_total_rate > 0.0
+        ? QStringLiteral("live %1/s total (in %2/s, out %3/s)")
+              .arg(formatBytes(static_cast<qint64>(std::llround(live_total_rate))),
+                   formatBytes(static_cast<qint64>(std::llround(m_quick_clone_received_rate_bytes_per_second))),
+                   formatBytes(static_cast<qint64>(std::llround(m_quick_clone_sent_rate_bytes_per_second))))
+        : QStringLiteral("live idle");
+    const QString avg_rate = total > 0
+        ? QStringLiteral("avg %1/s over %2s")
+              .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
+                   QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1))
+        : QStringLiteral("no clone traffic yet");
+    return QStringLiteral("%1 | %2 | data %3 rec'd, %4 sent | packets %5/%6")
+        .arg(live_rate,
+             avg_rate,
+             formatBytes(received),
+             formatBytes(sent),
+             QString::number(m_lan_quick_clone_udp_packets_received),
+             QString::number(m_lan_quick_clone_udp_packets_sent));
+}
+
 QString NuRpcService::syncTransportDecisionSummary() const
 {
     const int udp_samples = m_fast_sync_udp_successes + m_fast_sync_udp_failures;
@@ -5324,7 +5420,7 @@ QString NuRpcService::syncTransportProbeSummary() const
              QString::number(m_lan_fast_sync_retransmit_errors));
 }
 
-void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes)
+void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes, bool quick_clone)
 {
     if (sent_bytes <= 0 && received_bytes <= 0) return;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -5335,10 +5431,26 @@ void NuRpcService::recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 receive
     if (sent_bytes > 0) {
         m_lan_fast_sync_udp_bytes_sent += sent_bytes;
         ++m_lan_fast_sync_udp_packets_sent;
+        if (quick_clone) {
+            if (m_lan_quick_clone_udp_first_activity_ms <= 0) {
+                m_lan_quick_clone_udp_first_activity_ms = now;
+            }
+            m_lan_quick_clone_udp_last_activity_ms = now;
+            m_lan_quick_clone_udp_bytes_sent += sent_bytes;
+            ++m_lan_quick_clone_udp_packets_sent;
+        }
     }
     if (received_bytes > 0) {
         m_lan_fast_sync_udp_bytes_received += received_bytes;
         ++m_lan_fast_sync_udp_packets_received;
+        if (quick_clone) {
+            if (m_lan_quick_clone_udp_first_activity_ms <= 0) {
+                m_lan_quick_clone_udp_first_activity_ms = now;
+            }
+            m_lan_quick_clone_udp_last_activity_ms = now;
+            m_lan_quick_clone_udp_bytes_received += received_bytes;
+            ++m_lan_quick_clone_udp_packets_received;
+        }
     }
 }
 
@@ -6823,13 +6935,14 @@ void NuRpcService::sendLanFastSyncBlockRequest(int height, const QString& host, 
     transfer.node_id = node_id;
     transfer.height = height;
     transfer.request_ms = request_ms;
+    transfer.clone_mode = clone_mode;
     m_lan_fast_sync_transfers_by_id.insert(request_id, transfer);
     m_lan_fast_sync_reserved_node_id = -1;
     m_lan_fast_sync_reserved_hash.clear();
     updateLanFastSyncRequestState();
     refreshLanFastSyncCurrentTargetHosts();
     m_fast_sync_last_udp_attempt_ms = request_ms;
-    recordLanFastSyncUdpTraffic(written, 0);
+    recordLanFastSyncUdpTraffic(written, 0, clone_mode);
     const QString key = normalizedFastSyncHost(peer_address);
     m_udp_fast_sync_attempted_peer_hosts.insert(key);
     if (!key.isEmpty()) {
@@ -7042,8 +7155,9 @@ void NuRpcService::handleLanFastSyncDatagrams()
                 udpFastSyncEndpointText(sender, datagram.senderPort()));
             continue;
         }
-        recordLanFastSyncUdpTraffic(0, datagram_size);
         const QString type = header.value(QStringLiteral("type")).toString();
+        const bool clone_datagram = header.value(QStringLiteral("clone_mode")).toBool(false);
+        recordLanFastSyncUdpTraffic(0, datagram_size, clone_datagram);
         if (type == QLatin1String("probe")) {
             handleLanFastSyncProbe(header, sender, datagram.senderPort());
         } else if (type == QLatin1String("probe-ack")) {
@@ -7242,11 +7356,11 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
     const int peer_chunk_bytes = qBound(LAN_FAST_SYNC_MIN_CHUNK_BYTES,
                                         qMin(requested_chunk_bytes, lanFastSyncChunkBytesForDatagram(peer_max_datagram)),
                                         LAN_FAST_SYNC_MAX_CHUNK_BYTES);
-    rpcCall(QStringLiteral("getblockhash"), {height}, false, [this, request_id, height, sender, reply_port, peer_max_datagram, peer_chunk_bytes](const QJsonValue& hash_result, const QString& hash_error) {
+    rpcCall(QStringLiteral("getblockhash"), {height}, false, [this, request_id, height, sender, reply_port, peer_max_datagram, peer_chunk_bytes, clone_request](const QJsonValue& hash_result, const QString& hash_error) {
         if (!hash_error.isEmpty() || !m_lan_fast_sync_socket) return;
         const QString hash = hash_result.toString();
         if (!isHex256(hash)) return;
-        rpcCall(QStringLiteral("getblock"), {hash, 0}, false, [this, request_id, height, sender, reply_port, hash, peer_max_datagram, peer_chunk_bytes](const QJsonValue& block_result, const QString& block_error) {
+        rpcCall(QStringLiteral("getblock"), {hash, 0}, false, [this, request_id, height, sender, reply_port, hash, peer_max_datagram, peer_chunk_bytes, clone_request](const QJsonValue& block_result, const QString& block_error) {
             if (!block_error.isEmpty() || !m_lan_fast_sync_socket) return;
             const QString raw_hex = block_result.toString();
             if (!isLowerRiskHexText(raw_hex, LAN_FAST_SYNC_MAX_BLOCK_BYTES * 2)) return;
@@ -7272,11 +7386,12 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
                 chunk_header.insert(QStringLiteral("max_datagram"), peer_max_datagram);
                 chunk_header.insert(QStringLiteral("block_checksum"), block_checksum);
                 chunk_header.insert(QStringLiteral("chunk_checksum"), lanFastSyncChecksum(chunk));
+                if (clone_request) chunk_header.insert(QStringLiteral("clone_mode"), true);
                 const QByteArray datagram = lanFastSyncDatagram(chunk_header, chunk, peer_max_datagram);
                 if (!datagram.isEmpty() && datagram.size() <= peer_max_datagram) {
                     const qint64 written = m_lan_fast_sync_socket->writeDatagram(datagram, sender, reply_port);
                     if (written > 0) {
-                        recordLanFastSyncUdpTraffic(written, 0);
+                        recordLanFastSyncUdpTraffic(written, 0, clone_request);
                         sent_any_chunk = true;
                     }
                 }
@@ -8949,8 +9064,8 @@ void NuRpcService::rebuildNodeMetrics()
                   QStringLiteral("Normal Core P2P sync and validation path. Chain advances here are active-chain height increases not attributed to UDP fast sync; they can include validation of locally available block data.")),
         metricRow(QStringLiteral("Fast Sync (UDP)"), fastSyncUdpSummary(),
                   QStringLiteral("UDP Fast Sync totals for this Nu session. Average speed includes failed UDP attempts, checksum failures, timeouts, and retries so the protocol comparison is not inflated by ignoring failures.")),
-        metricRow(QStringLiteral("Quick Clone (LAN UDP)"), m_lan_quick_clone_status,
-                  QStringLiteral("Trusted-LAN public-chain copy status. Quick Clone/DCOL never copies wallets, keys, settings, peers, bans, or RPC cookies; snapshot replacement is gated by manifest verification.")),
+        metricRow(QStringLiteral("Quick Clone (LAN UDP)"), m_lan_quick_clone_status + QStringLiteral(" | ") + quickCloneTrafficSummary(),
+                  QStringLiteral("Trusted-LAN public-chain copy status and measured copy traffic. Quick Clone/DCOL never copies wallets, keys, settings, peers, bans, or RPC cookies; snapshot replacement is gated by manifest verification.")),
         metricRow(QStringLiteral("Traffic"), m_metric_traffic,
                   QStringLiteral("Total backend P2P network traffic reported by getnettotals, independent of the sync-only speed rows.")),
         metricRow(QStringLiteral("Network active"), m_metric_network_active,
@@ -18301,13 +18416,19 @@ void NuRpcService::exportTrafficCsv()
         return;
     }
     QTextStream out(&file);
-    out << "Seconds,Local Time,Average received bytes per second,Average sent bytes per second\n";
+    out << "Seconds,Local Time,Average total received B/s,Average total sent B/s,Average TCP received B/s,Average TCP sent B/s,Average UDP received B/s,Average UDP sent B/s,Average Quick Clone received B/s,Average Quick Clone sent B/s\n";
     for (const QVariant& point_value : m_traffic_samples) {
         const QVariantMap point = point_value.toMap();
         out << point.value(QStringLiteral("seconds")).toDouble() << ','
             << '"' << QDateTime::fromMSecsSinceEpoch(point.value(QStringLiteral("timestampMs")).toLongLong()).toLocalTime().toString(Qt::ISODate) << '"' << ','
             << point.value(QStringLiteral("received")).toDouble() << ','
-            << point.value(QStringLiteral("sent")).toDouble() << '\n';
+            << point.value(QStringLiteral("sent")).toDouble() << ','
+            << point.value(QStringLiteral("tcpReceived")).toDouble() << ','
+            << point.value(QStringLiteral("tcpSent")).toDouble() << ','
+            << point.value(QStringLiteral("udpReceived")).toDouble() << ','
+            << point.value(QStringLiteral("udpSent")).toDouble() << ','
+            << point.value(QStringLiteral("quickCloneReceived")).toDouble() << ','
+            << point.value(QStringLiteral("quickCloneSent")).toDouble() << '\n';
     }
     Q_EMIT userMessage(QStringLiteral("Export complete"), QStringLiteral("The network traffic CSV was written successfully."));
 }

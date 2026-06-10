@@ -25,6 +25,7 @@
 #include <QQmlContext>
 #include <QtQml/qqml.h>
 #include <QProcess>
+#include <QPushButton>
 #include <QQuickStyle>
 #include <QDir>
 #include <QDebug>
@@ -32,6 +33,7 @@
 #include <QScreen>
 #include <QSplashScreen>
 #include <QStyleHints>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 #include <QWidget>
@@ -58,6 +60,89 @@ QString productName()
 QString productBundleIdentifier()
 {
     return kExploreApp ? QStringLiteral("org.defcoincore.DefcoinCoreNuExplore") : QStringLiteral("org.defcoincore.DefcoinCoreNu");
+}
+
+bool tryAcquireSingleInstanceLock(QLockFile& lock)
+{
+    if (lock.tryLock(100)) {
+        return true;
+    }
+    if (lock.removeStaleLockFile()) {
+        return lock.tryLock(100);
+    }
+    return false;
+}
+
+enum class SingleInstanceAction {
+    CheckAgain,
+    CloseOther,
+    Quit
+};
+
+QString singleInstanceOwnerText(QLockFile& lock)
+{
+    qint64 pid = 0;
+    QString hostname;
+    QString appname;
+    if (!lock.getLockInfo(&pid, &hostname, &appname)) {
+        return QStringLiteral("Nu could not read the other window's process details.");
+    }
+
+    QStringList details;
+    if (pid > 0) {
+        details << QStringLiteral("PID %1").arg(pid);
+    }
+    if (!appname.isEmpty()) {
+        details << appname;
+    }
+    if (!hostname.isEmpty()) {
+        details << QStringLiteral("host %1").arg(hostname);
+    }
+    return details.isEmpty()
+        ? QStringLiteral("Nu could not read the other window's process details.")
+        : details.join(QStringLiteral(" • "));
+}
+
+bool requestSingleInstanceOwnerClose(QLockFile& lock)
+{
+    qint64 pid = 0;
+    QString hostname;
+    QString appname;
+    if (!lock.getLockInfo(&pid, &hostname, &appname) || pid <= 0 || pid == QCoreApplication::applicationPid()) {
+        return false;
+    }
+
+#if defined(Q_OS_WIN)
+    return QProcess::execute(QStringLiteral("taskkill"),
+                             {QStringLiteral("/PID"), QString::number(pid), QStringLiteral("/T")}) == 0;
+#else
+    return QProcess::execute(QStringLiteral("/bin/kill"),
+                             {QStringLiteral("-TERM"), QString::number(pid)}) == 0;
+#endif
+}
+
+SingleInstanceAction promptSingleInstanceConflict(QLockFile& lock, const QString& name, const QString& dataDir)
+{
+    QMessageBox box(QMessageBox::Warning,
+                    QStringLiteral("%1 is already open").arg(name),
+                    QStringLiteral("Another %1 window is still using this data directory.").arg(name));
+    box.setInformativeText(QStringLiteral("%1\n\nClose the other window, then press OK to check again. "
+                                          "You can also ask Nu to close the other instance for you.")
+                               .arg(singleInstanceOwnerText(lock)));
+    box.setDetailedText(QStringLiteral("Data directory:\n%1").arg(dataDir));
+    QPushButton* checkAgainButton = box.addButton(QStringLiteral("OK"), QMessageBox::AcceptRole);
+    QPushButton* closeOtherButton = box.addButton(QStringLiteral("Close Other Instance"), QMessageBox::DestructiveRole);
+    box.addButton(QStringLiteral("Quit"), QMessageBox::RejectRole);
+    box.setDefaultButton(checkAgainButton);
+    box.exec();
+
+    if (box.clickedButton() == closeOtherButton) {
+        return SingleInstanceAction::CloseOther;
+    }
+    if (box.clickedButton() == checkAgainButton) {
+        return SingleInstanceAction::CheckAgain;
+    }
+    return SingleInstanceAction::Quit;
 }
 
 QHash<QString, QString> readBuildInfoProperties(const QString& resourceRoot)
@@ -348,12 +433,22 @@ int main(int argc, char* argv[])
         QDir().mkpath(dataDir);
         singleInstanceLock = std::make_unique<QLockFile>(QDir(dataDir).filePath(kExploreApp ? QStringLiteral("defcoin-core-nu-explore-gui.lock") : QStringLiteral("defcoin-core-nu-gui.lock")));
         singleInstanceLock->setStaleLockTime(30000);
-        if (!singleInstanceLock->tryLock(100) &&
-            !(singleInstanceLock->removeStaleLockFile() && singleInstanceLock->tryLock(100))) {
-            QMessageBox::warning(nullptr,
-                                 QStringLiteral("%1 is already open").arg(productName()),
-                                 QStringLiteral("Another %1 window is already using this data directory:\n\n%2\n\nClose the other window before opening this build.").arg(productName(), dataDir));
-            return 2;
+        bool hasSingleInstanceLock = tryAcquireSingleInstanceLock(*singleInstanceLock);
+        while (!hasSingleInstanceLock) {
+            const SingleInstanceAction action = promptSingleInstanceConflict(*singleInstanceLock, productName(), dataDir);
+            if (action == SingleInstanceAction::Quit) {
+                return 2;
+            }
+            if (action == SingleInstanceAction::CloseOther) {
+                requestSingleInstanceOwnerClose(*singleInstanceLock);
+            }
+            for (int attempt = 0; attempt < 20 && !hasSingleInstanceLock; ++attempt) {
+                QApplication::processEvents(QEventLoop::AllEvents, 50);
+                hasSingleInstanceLock = tryAcquireSingleInstanceLock(*singleInstanceLock);
+                if (!hasSingleInstanceLock) {
+                    QThread::msleep(250);
+                }
+            }
         }
     }
 

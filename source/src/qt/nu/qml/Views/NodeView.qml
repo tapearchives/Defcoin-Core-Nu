@@ -692,10 +692,83 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: NuTokens.spaceMd
 
-                Label {
-                    text: "Total Received: " + NuService.trafficReceivedTotal + "    Total Sent: " + NuService.trafficSentTotal
-                    color: NuTokens.textPrimary
-                    font.pixelSize: NuTokens.fontBody
+                GridLayout {
+                    columns: 4
+                    rowSpacing: 2
+                    columnSpacing: NuTokens.spaceMd
+
+                    Label {
+                        text: ""
+                        font.pixelSize: NuTokens.fontTiny
+                    }
+                    Label {
+                        text: "TCP"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.bold: true
+                    }
+                    Label {
+                        text: "UDP"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.bold: true
+                    }
+                    Label {
+                        text: "Total traffic"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.bold: true
+                    }
+
+                    Label {
+                        text: "Total rec'd:"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                    }
+                    Label {
+                        text: NuService.trafficTcpReceivedTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                    }
+                    Label {
+                        text: NuService.trafficUdpReceivedTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                    }
+                    Label {
+                        text: NuService.trafficReceivedTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                        font.bold: true
+                    }
+
+                    Label {
+                        text: "Total sent:"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                    }
+                    Label {
+                        text: NuService.trafficTcpSentTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                    }
+                    Label {
+                        text: NuService.trafficUdpSentTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                    }
+                    Label {
+                        text: NuService.trafficSentTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                        font.bold: true
+                    }
                 }
                 Item { Layout.fillWidth: true }
                 NuActionButton {

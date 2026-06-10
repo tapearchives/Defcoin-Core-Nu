@@ -53,6 +53,124 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.4cf - 2026-06-10 - Traffic graph identity and instance relaunch guard
+
+Big picture:
+- Metrics > Traffic now treats Quick Clone correctly as UDP traffic, not as a
+  fourth transport family. The chart and footer show TCP, UDP, and total
+  traffic only; the Quick Clone operational copy rate remains on Metrics >
+  Status.
+- Duplicate-instance startup handling now re-checks the lock after the user
+  presses OK. It no longer exits after one warning while leaving the user to
+  guess whether the first instance closed.
+
+Porting priority:
+- Lion Intel: required. Port the graph/footer simplification and the
+  single-instance re-check dialog.
+- Catalina UTM: required for UI parity.
+- Windows: required for startup parity; use the Windows task close path in
+  `requestSingleInstanceOwnerClose()`.
+- Server: not required; no server behavior changed.
+
+Changed behavior:
+- Traffic graph line contract:
+  solid green/blue are total received/sent, dashed teal/blue are TCP
+  received/sent, dotted lime/purple are UDP received/sent.
+- Quick Clone bytes are still counted by `recordLanFastSyncUdpTraffic()` into
+  `m_lan_fast_sync_udp_bytes_*`; clone-mode datagrams additionally update the
+  Quick Clone subset counters for Status text only.
+- The traffic footer is a 2x3 data grid: TCP, UDP, Total traffic.
+- If another Nu window owns the GUI lock, pressing OK checks the lock again.
+  The dialog reappears if the other window is still open, and includes a
+  `Close Other Instance` action.
+
+Changed files and important details:
+- `src/qt/nu/qml/Components/NuTimelineGraph.qml`: removed Quick Clone as a
+  separate series; assigned distinct colors and labels to each remaining
+  traffic series.
+- `src/qt/nu/qml/Views/NodeView.qml`: removed the Quick Clone footer column.
+- `src/qt/nu/app/main.cpp`: added single-instance helper functions and a
+  re-check loop around the GUI `QLockFile`.
+- `src/qt/nu/tools/nu_test_launch_gate.sh`: stopped using AppleScript
+  application-name quit commands because macOS can resolve `Defcoin Core Nu` to
+  a stale test bundle and launch it while trying to quit it. The helper now
+  closes already-running Nu frontends by PID.
+- `src/clientversion.h`, `src/qt/nu/app/CMakeLists.txt`: version advanced to
+  `26.6.4cf`.
+
+Compatibility notes:
+- Do not remove the Quick Clone counters from C++; Status still uses them to
+  report Quick Clone copy rate. Only the graph/footer should hide the separate
+  Quick Clone column.
+- UDP totals must include both Fast Sync UDP and Quick Clone UDP.
+
+Verification performed:
+- Pending final Tahoe rebuild and smoke launch after this entry.
+
+Risks / follow-up:
+- Confirm the duplicate-instance dialog uses acceptable wording on Lion's older
+  Qt stack.
+
+### 26.6.4ce - 2026-06-09 - Traffic graph protocol and Quick Clone breakdown
+
+Big picture:
+- Metrics > Traffic now separates total, TCP, UDP, and Quick Clone copy
+  telemetry. Quick Clone is a UDP subset, not a fourth transport added to the
+  total.
+- The Status page Quick Clone row now includes measured live and average copy
+  rates so users can see whether Quick Clone is actually moving data.
+
+Porting priority:
+- Lion Intel: required for UI parity. Port the same C++ counters, QML graph
+  series, footer grid, status row text, and CSV columns.
+- Catalina UTM: required before parity testing the Metrics page.
+- Windows: required before the next Windows parity build.
+- Server: not required; this is Nu GUI telemetry. Server responder code only
+  needs the underlying Fast Sync/Quick Clone wire behavior.
+
+Changed behavior:
+- `trafficSamples` now contains `received`, `sent`, `tcpReceived`, `tcpSent`,
+  `udpReceived`, `udpSent`, `quickCloneReceived`, and `quickCloneSent`.
+- Graph style contract:
+  solid lines are total traffic, dashed lines are TCP, dotted lines are UDP,
+  and dot-dash lines are Quick Clone.
+- Footer contract:
+  rows are `Total rec'd:` and `Total sent:`; columns are TCP, UDP, Quick
+  Clone, and Total traffic.
+- Quick Clone status now appends live total/in/out rate, observed average,
+  received/sent totals, and packet counts.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.h`: added Quick Clone traffic properties,
+  per-session counters, and in-flight transfer `clone_mode`.
+- `src/qt/nu/app/NuRpcService.cpp`: classifies clone-mode UDP datagrams,
+  computes TCP/UDP/Quick Clone sample rates, extends CSV export, and appends
+  Quick Clone rate telemetry to the Metrics status row.
+- `src/qt/nu/qml/Components/NuTimelineGraph.qml`: draws protocol breakouts
+  and updates legend/hover text.
+- `src/qt/nu/qml/Views/NodeView.qml`: replaces the old total-only footer with
+  a tight protocol grid.
+
+Compatibility notes:
+- Older peers that do not echo `clone_mode` on served chunks may still show
+  their bytes in UDP/total without the Quick Clone subset. Tahoe/Lion parity
+  builds should both carry the `clone_mode` chunk header.
+- Do not double-count Quick Clone in total traffic. Total remains TCP plus UDP.
+
+Build/package notes:
+- Tahoe source version was advanced to `26.6.4ce`.
+
+Verification performed:
+- `git diff --check`: clean before build.
+- `make -j6 src/defcoind src/defcoin-cli src/defcoin-tx src/defcoin-wallet`:
+  succeeded with existing AppleClang/Boost/BDB warnings.
+- `cmake --build build/nu-qml-arm64-26.6.4ce --target DefcoinCoreNu -j 6`:
+  succeeded after adding the missing async lambda capture for `clone_request`.
+
+Risks / follow-up:
+- Smoke-test the rendered Metrics > Traffic legend/footer on Tahoe and Lion
+  after packaging. The footer is intentionally denser than before.
+
 ### 26.6.4cc - 2026-06-09 - Fast Sync UDP all-modes scheduler fix
 
 Big picture:

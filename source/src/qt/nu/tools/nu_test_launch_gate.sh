@@ -144,14 +144,16 @@ wait_for_no_defcoind() {
 kill_existing_nu() {
   local pids
 
-  # Prefer the app's close path first; it asks defcoind to flush wallet,
-  # mempool, peer anchors, block index, and chainstate before exiting.
-  /usr/bin/osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
-tell application "Defcoin Core Nu" to quit
-tell application "DefcoinCoreNu" to quit
-APPLESCRIPT
+  # Do not use AppleScript by application name here. macOS can resolve that
+  # name to an older test bundle and launch it while trying to quit it.
+  # Work strictly from already-running process ids.
+  pids=$(nu_frontend_pids)
+  if [[ -n "$pids" ]]; then
+    log_event "frontend_close_requested" "" "term" "$pids"
+    kill $pids 2>/dev/null || true
+    sleep 2
+  fi
 
-  sleep 2
   pids=$(defcoind_pids)
   if [[ -n "$pids" ]]; then
     while IFS= read -r pid; do

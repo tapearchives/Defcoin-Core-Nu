@@ -78,6 +78,12 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QVariantList trafficSamples READ trafficSamples NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficReceivedTotal READ trafficReceivedTotal NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficSentTotal READ trafficSentTotal NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficTcpReceivedTotal READ trafficTcpReceivedTotal NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficTcpSentTotal READ trafficTcpSentTotal NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficUdpReceivedTotal READ trafficUdpReceivedTotal NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficUdpSentTotal READ trafficUdpSentTotal NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficQuickCloneReceivedTotal READ trafficQuickCloneReceivedTotal NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficQuickCloneSentTotal READ trafficQuickCloneSentTotal NOTIFY trafficChanged)
     Q_PROPERTY(QStringList logLines READ logLines NOTIFY logChanged)
     Q_PROPERTY(QVariantList logLineNumbers READ logLineNumbers NOTIFY logChanged)
     Q_PROPERTY(QString consoleOutput READ consoleOutput NOTIFY consoleChanged)
@@ -260,6 +266,12 @@ public:
     QVariantList trafficSamples() const { return m_traffic_samples; }
     QString trafficReceivedTotal() const { return m_traffic_received_total; }
     QString trafficSentTotal() const { return m_traffic_sent_total; }
+    QString trafficTcpReceivedTotal() const { return m_traffic_tcp_received_total; }
+    QString trafficTcpSentTotal() const { return m_traffic_tcp_sent_total; }
+    QString trafficUdpReceivedTotal() const { return m_traffic_udp_received_total; }
+    QString trafficUdpSentTotal() const { return m_traffic_udp_sent_total; }
+    QString trafficQuickCloneReceivedTotal() const { return m_traffic_quick_clone_received_total; }
+    QString trafficQuickCloneSentTotal() const { return m_traffic_quick_clone_sent_total; }
     QStringList logLines() const { return m_log_lines; }
     QVariantList logLineNumbers() const { return m_log_line_numbers; }
     QString consoleOutput() const { return m_console_output; }
@@ -732,12 +744,13 @@ private:
     QString coreSyncPathSummary() const;
     QString fastSyncUdpSummary() const;
     QString fastSyncUdpDetailSummary() const;
+    QString quickCloneTrafficSummary() const;
     QString syncTransportDecisionSummary() const;
     QString syncTransportProbeSummary() const;
     QString syncBenchmarkSummary() const;
     void updateSyncBenchmarkState(bool syncing, int headers, int blocks_behind, double progress);
     QString coreSchedulingWaitStatus(const QString& feature, const QString& reason) const;
-    void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes);
+    void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes, bool quick_clone = false);
     QString udpFastSyncEndpointText(const QHostAddress& address, quint16 port = 0) const;
     void recordFastSyncUdpDiagnostic(const QString& reason, const QString& detail = QString());
     enum class FastSyncTransport {
@@ -1071,6 +1084,7 @@ private:
         int expected_size = 0;
         int assembled_bytes = 0;
         qint64 request_ms = 0;
+        bool clone_mode = false;
     };
     struct LanFastSyncReadyBlock {
         QByteArray block;
@@ -1120,8 +1134,20 @@ private:
     qint64 m_last_traffic_ms = 0;
     qint64 m_last_bytes_recv = -1;
     qint64 m_last_bytes_sent = -1;
+    qint64 m_last_udp_bytes_recv = -1;
+    qint64 m_last_udp_bytes_sent = -1;
+    qint64 m_last_quick_clone_bytes_recv = -1;
+    qint64 m_last_quick_clone_bytes_sent = -1;
     QString m_traffic_received_total = QStringLiteral("0 B");
     QString m_traffic_sent_total = QStringLiteral("0 B");
+    QString m_traffic_tcp_received_total = QStringLiteral("0 B");
+    QString m_traffic_tcp_sent_total = QStringLiteral("0 B");
+    QString m_traffic_udp_received_total = QStringLiteral("0 B");
+    QString m_traffic_udp_sent_total = QStringLiteral("0 B");
+    QString m_traffic_quick_clone_received_total = QStringLiteral("0 B");
+    QString m_traffic_quick_clone_sent_total = QStringLiteral("0 B");
+    double m_quick_clone_received_rate_bytes_per_second = 0.0;
+    double m_quick_clone_sent_rate_bytes_per_second = 0.0;
     qint64 m_sync_tcp_bytes_received = 0;
     qint64 m_sync_tcp_bytes_sent = 0;
     double m_sync_tcp_active_seconds = 0.0;
@@ -1197,6 +1223,12 @@ private:
     qint64 m_lan_fast_sync_udp_packets_sent = 0;
     qint64 m_lan_fast_sync_udp_first_activity_ms = 0;
     qint64 m_lan_fast_sync_udp_last_activity_ms = 0;
+    qint64 m_lan_quick_clone_udp_bytes_received = 0;
+    qint64 m_lan_quick_clone_udp_bytes_sent = 0;
+    qint64 m_lan_quick_clone_udp_packets_received = 0;
+    qint64 m_lan_quick_clone_udp_packets_sent = 0;
+    qint64 m_lan_quick_clone_udp_first_activity_ms = 0;
+    qint64 m_lan_quick_clone_udp_last_activity_ms = 0;
     qint64 m_lan_fast_sync_started_ms = 0;
     qint64 m_lan_fast_sync_request_ms = 0;
     qint64 m_lan_fast_sync_last_progress_ms = 0;
