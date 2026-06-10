@@ -1,5 +1,5 @@
-#include "NuRpcService.h"
 #include "NuPlatformIntegration.h"
+#include "NuRpcService.h"
 #include "NuVelopackUpdater.h"
 #if defined(__APPLE__)
 #include "MacHelp.h"
@@ -7,28 +7,27 @@
 
 #include <QApplication>
 #include <QColor>
+#include <QDebug>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QGuiApplication>
 #include <QHash>
+#include <QIODevice>
 #include <QIcon>
 #include <QImage>
-#include <QIODevice>
 #include <QLinearGradient>
 #include <QLockFile>
 #include <QMessageBox>
+#include <QMetaObject>
 #include <QPainter>
 #include <QPixmap>
-#include <QGuiApplication>
-#include <QMetaObject>
-#include <QQmlApplicationEngine>
-#include <QQmlContext>
-#include <QtQml/qqml.h>
 #include <QProcess>
 #include <QPushButton>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include <QQuickStyle>
-#include <QDir>
-#include <QDebug>
 #include <QQuickWindow>
 #include <QScreen>
 #include <QSplashScreen>
@@ -38,6 +37,7 @@
 #include <QUrl>
 #include <QWidget>
 #include <QWindow>
+#include <QtQml/qqml.h>
 
 #include <memory>
 
@@ -59,7 +59,8 @@ QString productName()
 
 QString productBundleIdentifier()
 {
-    return kExploreApp ? QStringLiteral("org.defcoincore.DefcoinCoreNuExplore") : QStringLiteral("org.defcoincore.DefcoinCoreNu");
+    return kExploreApp ? QStringLiteral("org.defcoincore.DefcoinCoreNuExplore") :
+                         QStringLiteral("org.defcoincore.DefcoinCoreNu");
 }
 
 bool tryAcquireSingleInstanceLock(QLockFile& lock)
@@ -73,11 +74,7 @@ bool tryAcquireSingleInstanceLock(QLockFile& lock)
     return false;
 }
 
-enum class SingleInstanceAction {
-    CheckAgain,
-    CloseOther,
-    Quit
-};
+enum class SingleInstanceAction { CheckAgain, CloseOther, Quit };
 
 QString singleInstanceOwnerText(QLockFile& lock)
 {
@@ -98,9 +95,8 @@ QString singleInstanceOwnerText(QLockFile& lock)
     if (!hostname.isEmpty()) {
         details << QStringLiteral("host %1").arg(hostname);
     }
-    return details.isEmpty()
-        ? QStringLiteral("Nu could not read the other window's process details.")
-        : details.join(QStringLiteral(" • "));
+    return details.isEmpty() ? QStringLiteral("Nu could not read the other window's process details.") :
+                               details.join(QStringLiteral(" • "));
 }
 
 bool requestSingleInstanceOwnerClose(QLockFile& lock)
@@ -116,8 +112,7 @@ bool requestSingleInstanceOwnerClose(QLockFile& lock)
     return QProcess::execute(QStringLiteral("taskkill"),
                              {QStringLiteral("/PID"), QString::number(pid), QStringLiteral("/T")}) == 0;
 #else
-    return QProcess::execute(QStringLiteral("/bin/kill"),
-                             {QStringLiteral("-TERM"), QString::number(pid)}) == 0;
+    return QProcess::execute(QStringLiteral("/bin/kill"), {QStringLiteral("-TERM"), QString::number(pid)}) == 0;
 #endif
 }
 
@@ -209,19 +204,23 @@ void drawNuBrandSplash(QPixmap& pixmap, const QString& resourceRoot)
     const int wordW = panel.right() - wordX - 44;
     QFontMetrics brandMetrics(brandFont);
     painter.drawText(QRect(wordX, wordY, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("DEF"));
-    painter.drawText(QRect(wordX + brandMetrics.horizontalAdvance(QStringLiteral("DEF")) + 2, wordY, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("COIN"));
+    painter.drawText(QRect(wordX + brandMetrics.horizontalAdvance(QStringLiteral("DEF")) + 2, wordY, wordW, 66),
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     QStringLiteral("COIN"));
     painter.drawText(QRect(wordX, wordY + 50, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("CORE NU"));
     if (kExploreApp) {
-        const int targetWidth = qMax(brandMetrics.horizontalAdvance(QStringLiteral("DEF")) + 2 + brandMetrics.horizontalAdvance(QStringLiteral("COIN")),
-                                    brandMetrics.horizontalAdvance(QStringLiteral("CORE NU")));
+        const int targetWidth = qMax(brandMetrics.horizontalAdvance(QStringLiteral("DEF")) + 2 +
+                                         brandMetrics.horizontalAdvance(QStringLiteral("COIN")),
+                                     brandMetrics.horizontalAdvance(QStringLiteral("CORE NU")));
         QFont exploreFont = brandFont;
         QFont noSpacingFont = brandFont;
         noSpacingFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
         const QString exploreText = QStringLiteral("EXPLORE");
         const int baseWidth = QFontMetrics(noSpacingFont).horizontalAdvance(exploreText);
-        const double fittedSpacing = exploreText.size() > 1
-            ? qMax(0.0, static_cast<double>(targetWidth - baseWidth) / static_cast<double>(exploreText.size() - 1))
-            : 1.15;
+        const double fittedSpacing =
+            exploreText.size() > 1 ?
+                qMax(0.0, static_cast<double>(targetWidth - baseWidth) / static_cast<double>(exploreText.size() - 1)) :
+                1.15;
         exploreFont.setLetterSpacing(QFont::AbsoluteSpacing, fittedSpacing);
         painter.setFont(exploreFont);
         painter.drawText(QRect(wordX, wordY + 100, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, exploreText);
@@ -231,11 +230,13 @@ void drawNuBrandSplash(QPixmap& pixmap, const QString& resourceRoot)
 #if defined(Q_OS_WIN)
 void holdTopmostBriefly(QWidget* context, HWND hwnd)
 {
-    if (!context || !hwnd) return;
+    if (!context || !hwnd)
+        return;
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
     QTimer::singleShot(2200, context, [context] {
         HWND current_hwnd = reinterpret_cast<HWND>(context->winId());
-        if (!current_hwnd) return;
+        if (!current_hwnd)
+            return;
         SetWindowPos(current_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
         BringWindowToTop(current_hwnd);
         SetForegroundWindow(current_hwnd);
@@ -244,11 +245,13 @@ void holdTopmostBriefly(QWidget* context, HWND hwnd)
 
 void holdTopmostBriefly(QWindow* context, HWND hwnd)
 {
-    if (!context || !hwnd) return;
+    if (!context || !hwnd)
+        return;
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
     QTimer::singleShot(2200, context, [context] {
         HWND current_hwnd = reinterpret_cast<HWND>(context->winId());
-        if (!current_hwnd) return;
+        if (!current_hwnd)
+            return;
         SetWindowPos(current_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
         BringWindowToTop(current_hwnd);
         SetForegroundWindow(current_hwnd);
@@ -261,13 +264,13 @@ void holdTopmostBriefly(QWindow* context, HWND hwnd)
 bool platformSupportsWindowActivation()
 {
     const QString platform = QGuiApplication::platformName().toLower();
-    return !platform.contains(QStringLiteral("offscreen")) &&
-        !platform.contains(QStringLiteral("minimal"));
+    return !platform.contains(QStringLiteral("offscreen")) && !platform.contains(QStringLiteral("minimal"));
 }
 
 void activateWindowForUser(QQuickWindow* window)
 {
-    if (!window) return;
+    if (!window)
+        return;
     if (QScreen* screen = QGuiApplication::primaryScreen()) {
         window->setScreen(screen);
         const QRect available = screen->availableGeometry();
@@ -313,7 +316,8 @@ void activateWindowForUser(QQuickWindow* window)
 void activateTopLevelWindowsForUser()
 {
     for (QWindow* window : QGuiApplication::topLevelWindows()) {
-        if (!window || !window->isVisible()) continue;
+        if (!window || !window->isVisible())
+            continue;
         if (auto* quickWindow = qobject_cast<QQuickWindow*>(window)) {
             activateWindowForUser(quickWindow);
             continue;
@@ -329,7 +333,8 @@ void activateTopLevelWindowsForUser()
 
 void activateSplashForUser(QSplashScreen* splash)
 {
-    if (!splash) return;
+    if (!splash)
+        return;
     splash->show();
     if (platformSupportsWindowActivation()) {
         splash->raise();
@@ -361,7 +366,7 @@ QString nuDefaultDataDir()
 #endif
 }
 
-}
+} // namespace
 
 int main(int argc, char* argv[])
 {
@@ -381,19 +386,21 @@ int main(int argc, char* argv[])
 #ifdef Q_OS_MACOS
     const QString appDir = QCoreApplication::applicationDirPath();
     const QString pluginDir = QDir(appDir).filePath("../PlugIns");
-    if (QDir(pluginDir).exists()) QCoreApplication::setLibraryPaths({pluginDir});
+    if (QDir(pluginDir).exists())
+        QCoreApplication::setLibraryPaths({pluginDir});
     const QString resourceRoot = QDir(appDir).filePath("../Resources/nu");
     const QString deployedQmlRoot = QDir(appDir).filePath("../Resources/qml");
 #else
     const QString appDir = QCoreApplication::applicationDirPath();
     const QString pluginDir = QDir(appDir).filePath("plugins");
-    if (QDir(pluginDir).exists()) QCoreApplication::setLibraryPaths({pluginDir});
+    if (QDir(pluginDir).exists())
+        QCoreApplication::setLibraryPaths({pluginDir});
     const QString resourceRoot = QDir(appDir).filePath("nu");
     const QString deployedQmlRoot = QDir(appDir).filePath("qml");
 #endif
     const QStringList arguments = app.arguments();
     const bool allowDebugEnvironment = arguments.contains(QStringLiteral("--debug-use-env")) ||
-        !qEnvironmentVariableIsEmpty("DEFCOIN_NU_ALLOW_DEBUG_ENV");
+                                       !qEnvironmentVariableIsEmpty("DEFCOIN_NU_ALLOW_DEBUG_ENV");
     if (!allowDebugEnvironment) {
         qunsetenv("DEFCOIN_NU_DEBUG_DISABLE_CORE_TCP_SYNC");
         qunsetenv("DEFCOIN_NU_DEBUG_DISABLE_CORE_SYNC");
@@ -403,14 +410,13 @@ int main(int argc, char* argv[])
         qunsetenv("DEFCOIN_NU_QUICK_CLONE_NOW");
     }
     const bool buildSmokeTest = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_SMOKE_TEST");
-    const bool smokeTest = arguments.contains(QStringLiteral("--smoke-test")) ||
-        buildSmokeTest;
+    const bool smokeTest = arguments.contains(QStringLiteral("--smoke-test")) || buildSmokeTest;
     if (buildSmokeTest) {
         return 0;
     }
     const bool allowMultiple = arguments.contains(QStringLiteral("--allow-multiple"));
     const bool quickCloneNow = arguments.contains(QStringLiteral("--quick-clone-now")) ||
-        !qEnvironmentVariableIsEmpty("DEFCOIN_NU_QUICK_CLONE_NOW");
+                               !qEnvironmentVariableIsEmpty("DEFCOIN_NU_QUICK_CLONE_NOW");
     if (arguments.contains(QStringLiteral("--debug-disable-core-tcp-sync"))) {
         qputenv("DEFCOIN_NU_DEBUG_DISABLE_CORE_TCP_SYNC", "1");
     }
@@ -431,11 +437,14 @@ int main(int argc, char* argv[])
     if (!smokeTest && !allowMultiple) {
         const QString dataDir = nuDefaultDataDir();
         QDir().mkpath(dataDir);
-        singleInstanceLock = std::make_unique<QLockFile>(QDir(dataDir).filePath(kExploreApp ? QStringLiteral("defcoin-core-nu-explore-gui.lock") : QStringLiteral("defcoin-core-nu-gui.lock")));
+        singleInstanceLock = std::make_unique<QLockFile>(
+            QDir(dataDir).filePath(kExploreApp ? QStringLiteral("defcoin-core-nu-explore-gui.lock") :
+                                                 QStringLiteral("defcoin-core-nu-gui.lock")));
         singleInstanceLock->setStaleLockTime(30000);
         bool hasSingleInstanceLock = tryAcquireSingleInstanceLock(*singleInstanceLock);
         while (!hasSingleInstanceLock) {
-            const SingleInstanceAction action = promptSingleInstanceConflict(*singleInstanceLock, productName(), dataDir);
+            const SingleInstanceAction action =
+                promptSingleInstanceConflict(*singleInstanceLock, productName(), dataDir);
             if (action == SingleInstanceAction::Quit) {
                 return 2;
             }
@@ -452,8 +461,8 @@ int main(int argc, char* argv[])
         }
     }
 
-    bool velopackHookLaunch = !qEnvironmentVariableIsEmpty("VELOPACK_FIRSTRUN") ||
-        !qEnvironmentVariableIsEmpty("VELOPACK_RESTART");
+    bool velopackHookLaunch =
+        !qEnvironmentVariableIsEmpty("VELOPACK_FIRSTRUN") || !qEnvironmentVariableIsEmpty("VELOPACK_RESTART");
     for (const QString& argument : arguments) {
         if (argument.startsWith(QStringLiteral("--veloapp-"))) {
             velopackHookLaunch = true;
@@ -481,10 +490,12 @@ int main(int argc, char* argv[])
         QPixmap displaySplash(720, 405);
         displaySplash.fill(QColor("#05080a"));
         drawNuBrandSplash(displaySplash, resourceRoot);
-        const QString splashText = QStringLiteral(
-            "%1 v%2 • Core Memories • Backend derives from Litecoin Core v0.21.5.5 + Defcoin parameters\n"
-            "© 2014-2026 Defcoin Core developers • © 2011-2026 Litecoin Core developers • © 2009-2026 Bitcoin Core developers")
-            .arg(productName(), QStringLiteral(DEFCOIN_NU_VERSION));
+        const QString splashText =
+            QStringLiteral(
+                "%1 v%2 • Core Memories • Backend derives from Litecoin Core v0.21.5.5 + Defcoin parameters\n"
+                "© 2014-2026 Defcoin Core developers • © 2011-2026 Litecoin Core developers • © 2009-2026 Bitcoin Core "
+                "developers")
+                .arg(productName(), QStringLiteral(DEFCOIN_NU_VERSION));
         QPainter painter(&displaySplash);
         painter.setRenderHint(QPainter::TextAntialiasing, true);
         const QRect textRect(18, displaySplash.height() - 60, displaySplash.width() - 36, 50);
@@ -520,19 +531,30 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("NuBuildTimestamp"), buildTimestamp);
     engine.rootContext()->setContextProperty(QStringLiteral("NuGitCommit"), gitCommit);
     engine.rootContext()->setContextProperty(QStringLiteral("NuHelpEnabled"), kNuHelpEnabled);
-    if (QDir(deployedQmlRoot).exists()) engine.addImportPath(deployedQmlRoot);
+    if (QDir(deployedQmlRoot).exists())
+        engine.addImportPath(deployedQmlRoot);
     engine.addImportPath(resourceRoot + "/qml");
     engine.addImportPath(resourceRoot);
 
-    const QUrl mainUrl = QUrl::fromLocalFile(resourceRoot + (kExploreApp ? QStringLiteral("/qml/ExploreMain.qml") : QStringLiteral("/qml/Main.qml")));
+    const QUrl mainUrl = QUrl::fromLocalFile(
+        resourceRoot + (kExploreApp ? QStringLiteral("/qml/ExploreMain.qml") : QStringLiteral("/qml/Main.qml")));
 #if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] {
-        QCoreApplication::exit(-1);
-    }, Qt::QueuedConnection);
+    QObject::connect(
+        &engine,
+        &QQmlApplicationEngine::objectCreationFailed,
+        &app,
+        [] { QCoreApplication::exit(-1); },
+        Qt::QueuedConnection);
 #else
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app, [mainUrl](QObject* object, const QUrl& url) {
-        if (!object && url == mainUrl) QCoreApplication::exit(-1);
-    }, Qt::QueuedConnection);
+    QObject::connect(
+        &engine,
+        &QQmlApplicationEngine::objectCreated,
+        &app,
+        [mainUrl](QObject* object, const QUrl& url) {
+            if (!object && url == mainUrl)
+                QCoreApplication::exit(-1);
+        },
+        Qt::QueuedConnection);
 #endif
     engine.load(mainUrl);
 
@@ -559,16 +581,23 @@ int main(int argc, char* argv[])
         const int searchIndex = arguments.indexOf("--search");
         if (openAddressIndex >= 0 && openAddressIndex + 1 < arguments.size()) {
             rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
-            QTimer::singleShot(450, &service, [&service, value = arguments.at(openAddressIndex + 1)] { service.openAddressInExplorer(value); });
+            QTimer::singleShot(450, &service, [&service, value = arguments.at(openAddressIndex + 1)] {
+                service.openAddressInExplorer(value);
+            });
         } else if (openTxIndex >= 0 && openTxIndex + 1 < arguments.size()) {
             rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
-            QTimer::singleShot(450, &service, [&service, value = arguments.at(openTxIndex + 1)] { service.openTransactionInExplorer(value); });
+            QTimer::singleShot(450, &service, [&service, value = arguments.at(openTxIndex + 1)] {
+                service.openTransactionInExplorer(value);
+            });
         } else if (openBlockIndex >= 0 && openBlockIndex + 1 < arguments.size()) {
             rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
-            QTimer::singleShot(450, &service, [&service, value = arguments.at(openBlockIndex + 1)] { service.openBlockInExplorer(value); });
+            QTimer::singleShot(450, &service, [&service, value = arguments.at(openBlockIndex + 1)] {
+                service.openBlockInExplorer(value);
+            });
         } else if (searchIndex >= 0 && searchIndex + 1 < arguments.size()) {
             rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
-            QTimer::singleShot(450, &service, [&service, value = arguments.at(searchIndex + 1)] { service.searchExplorer(value); });
+            QTimer::singleShot(
+                450, &service, [&service, value = arguments.at(searchIndex + 1)] { service.searchExplorer(value); });
         }
         const int nodeTabIndex = arguments.indexOf("--node-tab");
         if (nodeTabIndex >= 0 && nodeTabIndex + 1 < arguments.size()) {
@@ -614,19 +643,16 @@ int main(int argc, char* argv[])
                 QTimer::singleShot(1800, rootWindow, [rootWindow] { activateWindowForUser(rootWindow); });
             }
             if (arguments.contains(QStringLiteral("--open-about"))) {
-                QTimer::singleShot(250, rootObject, [rootObject] {
-                    QMetaObject::invokeMethod(rootObject, "openAboutSummary");
-                });
+                QTimer::singleShot(
+                    250, rootObject, [rootObject] { QMetaObject::invokeMethod(rootObject, "openAboutSummary"); });
             }
             if (kNuHelpEnabled && arguments.contains(QStringLiteral("--open-help"))) {
-                QTimer::singleShot(250, rootObject, [rootObject] {
-                    QMetaObject::invokeMethod(rootObject, "openHelpManual");
-                });
+                QTimer::singleShot(
+                    250, rootObject, [rootObject] { QMetaObject::invokeMethod(rootObject, "openHelpManual"); });
             }
             if (kNuHelpEnabled && arguments.contains(QStringLiteral("--open-details"))) {
-                QTimer::singleShot(250, rootObject, [rootObject] {
-                    QMetaObject::invokeMethod(rootObject, "openDetailedAbout");
-                });
+                QTimer::singleShot(
+                    250, rootObject, [rootObject] { QMetaObject::invokeMethod(rootObject, "openDetailedAbout"); });
             }
             if (splash) {
                 QTimer::singleShot(650, splash, &QSplashScreen::close);
@@ -640,15 +666,14 @@ int main(int argc, char* argv[])
     }
 
     if (!kExploreApp && quickCloneNow) {
-        QTimer::singleShot(2500, &service, [&service] {
-            service.syncUsingQuickCloneNow();
-        });
+        QTimer::singleShot(2500, &service, [&service] { service.syncUsingQuickCloneNow(); });
     }
 
     if (!rootWindow) {
         for (QWindow* window : QGuiApplication::topLevelWindows()) {
             auto* quickWindow = qobject_cast<QQuickWindow*>(window);
-            if (!quickWindow) continue;
+            if (!quickWindow)
+                continue;
             rootWindow = quickWindow;
             platform.setMainWindow(rootWindow);
             rootWindow->setIcon(appIcon);
@@ -674,7 +699,8 @@ int main(int argc, char* argv[])
         if (delayIndex >= 0 && delayIndex + 1 < arguments.size()) {
             bool ok = false;
             const int parsed = arguments.at(delayIndex + 1).toInt(&ok);
-            if (ok) grabDelayMs = qBound(250, parsed, 30000);
+            if (ok)
+                grabDelayMs = qBound(250, parsed, 30000);
         }
         QTimer::singleShot(grabDelayMs, &app, [rootWindow, outputPath] {
             QQuickWindow* targetWindow = rootWindow;

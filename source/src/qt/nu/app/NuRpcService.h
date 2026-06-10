@@ -3,11 +3,11 @@
 
 #include <QByteArray>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonValue>
 #include <QObject>
-#include <QElapsedTimer>
 #include <QPair>
 #include <QSet>
 #include <QStringList>
@@ -96,29 +96,40 @@ class NuRpcService final : public QObject
     Q_PROPERTY(bool psbtLoaded READ psbtLoaded NOTIFY psbtChanged)
     Q_PROPERTY(bool psbtFinalized READ psbtFinalized NOTIFY psbtChanged)
     Q_PROPERTY(QString currentPsbtSummary READ currentPsbtSummary NOTIFY psbtChanged)
-    Q_PROPERTY(bool onlyDefcoinUserAgents READ onlyDefcoinUserAgents WRITE setOnlyDefcoinUserAgents NOTIFY settingsChanged)
-    Q_PROPERTY(bool onlyDefcoinMagicBytes READ onlyDefcoinMagicBytes WRITE setOnlyDefcoinMagicBytes NOTIFY settingsChanged)
-    Q_PROPERTY(bool switchToDefcoinOnlyMagicStartingJuly2026 READ switchToDefcoinOnlyMagicStartingJuly2026 WRITE setSwitchToDefcoinOnlyMagicStartingJuly2026 NOTIFY settingsChanged)
-    Q_PROPERTY(bool disallowLanNodeDiscovery READ disallowLanNodeDiscovery WRITE setDisallowLanNodeDiscovery NOTIFY settingsChanged)
-    Q_PROPERTY(bool lanNodeDiscoveryEnabled READ lanNodeDiscoveryEnabled WRITE setLanNodeDiscoveryEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(
+        bool onlyDefcoinUserAgents READ onlyDefcoinUserAgents WRITE setOnlyDefcoinUserAgents NOTIFY settingsChanged)
+    Q_PROPERTY(
+        bool onlyDefcoinMagicBytes READ onlyDefcoinMagicBytes WRITE setOnlyDefcoinMagicBytes NOTIFY settingsChanged)
+    Q_PROPERTY(bool switchToDefcoinOnlyMagicStartingJuly2026 READ switchToDefcoinOnlyMagicStartingJuly2026 WRITE
+                   setSwitchToDefcoinOnlyMagicStartingJuly2026 NOTIFY settingsChanged)
+    Q_PROPERTY(bool disallowLanNodeDiscovery READ disallowLanNodeDiscovery WRITE setDisallowLanNodeDiscovery NOTIFY
+                   settingsChanged)
+    Q_PROPERTY(bool lanNodeDiscoveryEnabled READ lanNodeDiscoveryEnabled WRITE setLanNodeDiscoveryEnabled NOTIFY
+                   settingsChanged)
     Q_PROPERTY(bool lanFastSyncEnabled READ lanFastSyncEnabled WRITE setLanFastSyncEnabled NOTIFY settingsChanged)
     Q_PROPERTY(QString lanFastSyncStatus READ lanFastSyncStatus NOTIFY stateChanged)
     Q_PROPERTY(bool lanQuickCloneEnabled READ lanQuickCloneEnabled WRITE setLanQuickCloneEnabled NOTIFY settingsChanged)
     Q_PROPERTY(QString lanQuickCloneStatus READ lanQuickCloneStatus NOTIFY stateChanged)
-    Q_PROPERTY(bool quickCloneAutoValidateAfter READ quickCloneAutoValidateAfter WRITE setQuickCloneAutoValidateAfter NOTIFY settingsChanged)
+    Q_PROPERTY(bool quickCloneAutoValidateAfter READ quickCloneAutoValidateAfter WRITE setQuickCloneAutoValidateAfter
+                   NOTIFY settingsChanged)
     Q_PROPERTY(QString quickCloneValidationStatus READ quickCloneValidationStatus NOTIFY stateChanged)
     Q_PROPERTY(bool quickCloneValidationRunning READ quickCloneValidationRunning NOTIFY stateChanged)
     Q_PROPERTY(bool advancedToolsVisible READ advancedToolsVisible WRITE setAdvancedToolsVisible NOTIFY settingsChanged)
-    Q_PROPERTY(bool upnpConnectionsEnabled READ upnpConnectionsEnabled WRITE setUpnpConnectionsEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(
+        bool upnpConnectionsEnabled READ upnpConnectionsEnabled WRITE setUpnpConnectionsEnabled NOTIFY settingsChanged)
     Q_PROPERTY(bool showLanNodeDiscoveryNotice READ showLanNodeDiscoveryNotice NOTIFY settingsChanged)
-    Q_PROPERTY(bool automaticUpdateChecksEnabled READ automaticUpdateChecksEnabled WRITE setAutomaticUpdateChecksEnabled NOTIFY settingsChanged)
-    Q_PROPERTY(QString tableCopyDelimiterStyle READ tableCopyDelimiterStyle WRITE setTableCopyDelimiterStyle NOTIFY settingsChanged)
-    Q_PROPERTY(QString tableCopyCustomDelimiter READ tableCopyCustomDelimiter WRITE setTableCopyCustomDelimiter NOTIFY settingsChanged)
+    Q_PROPERTY(bool automaticUpdateChecksEnabled READ automaticUpdateChecksEnabled WRITE setAutomaticUpdateChecksEnabled
+                   NOTIFY settingsChanged)
+    Q_PROPERTY(QString tableCopyDelimiterStyle READ tableCopyDelimiterStyle WRITE setTableCopyDelimiterStyle NOTIFY
+                   settingsChanged)
+    Q_PROPERTY(QString tableCopyCustomDelimiter READ tableCopyCustomDelimiter WRITE setTableCopyCustomDelimiter NOTIFY
+                   settingsChanged)
     Q_PROPERTY(int logVerbosity READ logVerbosity WRITE setLogVerbosity NOTIFY settingsChanged)
     Q_PROPERTY(QString logSearchPattern READ logSearchPattern WRITE setLogSearchPattern NOTIFY settingsChanged)
     Q_PROPERTY(QString logLastSearchPattern READ logLastSearchPattern NOTIFY settingsChanged)
     Q_PROPERTY(QString logRemovePattern READ logRemovePattern WRITE setLogRemovePattern NOTIFY settingsChanged)
-    Q_PROPERTY(bool backgroundCloseEnabled READ backgroundCloseEnabled WRITE setBackgroundCloseEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(
+        bool backgroundCloseEnabled READ backgroundCloseEnabled WRITE setBackgroundCloseEnabled NOTIFY settingsChanged)
     Q_PROPERTY(QString updateStatus READ updateStatus NOTIFY updateStatusChanged)
     Q_PROPERTY(int updateDownloadProgress READ updateDownloadProgress NOTIFY updateStatusChanged)
     Q_PROPERTY(bool recoveryActive READ recoveryActive NOTIFY recoveryChanged)
@@ -150,7 +161,8 @@ class NuRpcService final : public QObject
     Q_PROPERTY(int minerRejectedShares READ minerRejectedShares NOTIFY minerChanged)
     Q_PROPERTY(QString minerSummaryText READ minerSummaryText NOTIFY minerChanged)
     Q_PROPERTY(bool maskBalances READ maskBalances WRITE setMaskBalances NOTIFY settingsChanged)
-    Q_PROPERTY(bool thirdPartyTxUrlsEnabled READ thirdPartyTxUrlsEnabled WRITE setThirdPartyTxUrlsEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(bool thirdPartyTxUrlsEnabled READ thirdPartyTxUrlsEnabled WRITE setThirdPartyTxUrlsEnabled NOTIFY
+                   settingsChanged)
     Q_PROPERTY(QString thirdPartyTxUrl READ thirdPartyTxUrl WRITE setThirdPartyTxUrl NOTIFY settingsChanged)
     Q_PROPERTY(QString explorerMode READ explorerMode NOTIFY settingsChanged)
     Q_PROPERTY(QString explorerDatabasePath READ explorerDatabasePath NOTIFY explorerChanged)
@@ -194,7 +206,8 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QVariantList explorerContactRelationships READ explorerContactRelationships NOTIFY explorerChanged)
     Q_PROPERTY(QString explorerAnalyticsStatus READ explorerAnalyticsStatus NOTIFY explorerChanged)
     Q_PROPERTY(bool explorerTop100Scanning READ explorerTop100Scanning NOTIFY explorerChanged)
-    Q_PROPERTY(bool explorerTop100FocusedIndexing READ explorerTop100FocusedIndexing WRITE setExplorerTop100FocusedIndexing NOTIFY settingsChanged)
+    Q_PROPERTY(bool explorerTop100FocusedIndexing READ explorerTop100FocusedIndexing WRITE
+                   setExplorerTop100FocusedIndexing NOTIFY settingsChanged)
     Q_PROPERTY(QString explorerTop100Status READ explorerTop100Status NOTIFY explorerChanged)
     Q_PROPERTY(int explorerTop100ScanHeight READ explorerTop100ScanHeight NOTIFY explorerChanged)
     Q_PROPERTY(int explorerTop100ScanEndHeight READ explorerTop100ScanEndHeight NOTIFY explorerChanged)
@@ -209,208 +222,745 @@ class NuRpcService final : public QObject
     Q_PROPERTY(int forensicsScanTip READ forensicsScanTip NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsIrregularMessageCount READ forensicsIrregularMessageCount NOTIFY forensicsChanged)
     Q_PROPERTY(bool forensicsScanComplete READ forensicsScanComplete NOTIFY forensicsChanged)
-    Q_PROPERTY(bool forensicsAcceptBip141AsRegular READ forensicsAcceptBip141AsRegular WRITE setForensicsAcceptBip141AsRegular NOTIFY settingsChanged)
+    Q_PROPERTY(bool forensicsAcceptBip141AsRegular READ forensicsAcceptBip141AsRegular WRITE
+                   setForensicsAcceptBip141AsRegular NOTIFY settingsChanged)
     Q_PROPERTY(bool forensicsMissingWitnessFound READ forensicsMissingWitnessFound NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsFirstMissingWitnessHeight READ forensicsFirstMissingWitnessHeight NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsMissingWitnessCount READ forensicsMissingWitnessCount NOTIFY forensicsChanged)
     Q_PROPERTY(bool forensicsWitnessRepairRunning READ forensicsWitnessRepairRunning NOTIFY forensicsChanged)
-    Q_PROPERTY(bool forensicsWitnessInspectionAvailable READ forensicsWitnessInspectionAvailable NOTIFY forensicsChanged)
+    Q_PROPERTY(
+        bool forensicsWitnessInspectionAvailable READ forensicsWitnessInspectionAvailable NOTIFY forensicsChanged)
     Q_PROPERTY(QString forensicsWitnessRepairStatus READ forensicsWitnessRepairStatus NOTIFY forensicsChanged)
     Q_PROPERTY(int forensicsWitnessRepairStartHeight READ forensicsWitnessRepairStartHeight NOTIFY forensicsChanged)
-    Q_PROPERTY(int forensicsWitnessRepairInspectedBlocks READ forensicsWitnessRepairInspectedBlocks NOTIFY forensicsChanged)
-    Q_PROPERTY(int forensicsWitnessRepairFirstMissingHeight READ forensicsWitnessRepairFirstMissingHeight NOTIFY forensicsChanged)
+    Q_PROPERTY(
+        int forensicsWitnessRepairInspectedBlocks READ forensicsWitnessRepairInspectedBlocks NOTIFY forensicsChanged)
+    Q_PROPERTY(int forensicsWitnessRepairFirstMissingHeight READ forensicsWitnessRepairFirstMissingHeight NOTIFY
+                   forensicsChanged)
 
 public:
     explicit NuRpcService(QObject* parent = nullptr);
     ~NuRpcService() override;
 
-    bool rpcConnected() const { return m_rpc_connected; }
-    QString connectionStatus() const { return m_connection_status; }
-    QString lastError() const { return m_last_error; }
-    QString networkState() const { return m_network_state; }
-    int peerCount() const { return m_peer_count; }
-    int blockHeight() const { return m_block_height; }
-    int headerHeight() const { return m_header_height; }
-    bool syncing() const { return m_syncing; }
-    QString syncState() const { return m_sync_state; }
-    QString syncDetail() const { return m_sync_detail; }
-    QString syncEta() const { return m_sync_eta; }
-    int syncProgressPercent() const { return m_sync_progress_percent; }
-    QString recentNetworkHashrate() const { return m_metric_network_hashrate; }
-    QString networkDifficulty() const { return m_metric_difficulty; }
-    QString recentAverageBlockTime() const { return m_metric_average_block_time; }
-    bool walletLocked() const { return m_wallet_locked; }
-    bool walletEncrypted() const { return m_wallet_encrypted; }
-    QString totalBalance() const { return m_mask_balances ? QStringLiteral("******** DFC") : m_total_balance; }
-    QString availableBalance() const { return m_mask_balances ? QStringLiteral("********") : m_available_balance; }
-    QString pendingBalance() const { return m_mask_balances ? QStringLiteral("********") : m_pending_balance; }
-    QString immatureBalance() const { return m_mask_balances ? QStringLiteral("********") : m_immature_balance; }
-    int walletTransactionCount() const { return m_wallet_transaction_count; }
-    QString receiveAddress() const { return m_receive_address; }
-    QString receiveQrSource() const { return m_receive_qr_source; }
-    QVariantList addressBook() const { return m_address_book; }
-    QVariantList receiveRequests() const { return m_receive_requests; }
-    QVariantList recentTransactions() const { return m_recent_transactions; }
-    QStringList availableWallets() const { return m_available_wallets; }
-    QStringList loadedWallets() const { return m_loaded_wallets; }
-    QString currentWalletName() const { return m_wallet_name; }
-    bool walletSelected() const { return m_wallet_selected; }
-    int walletAddressCount() const { return m_wallet_address_count; }
-    int walletNonZeroAddressCount() const { return m_wallet_nonzero_address_count; }
-    QVariantList walletFileStats() const { return m_wallet_file_stats; }
-    QVariantList peers() const { return m_peers; }
-    QVariantList peerRowsSimple() const { return m_peer_rows_simple; }
-    QVariantList peerRowsDetailed() const { return m_peer_rows_detailed; }
-    QVariantList bannedPeerRows() const { return m_banned_peer_rows; }
-    QVariantList nodeMetrics() const { return m_node_metrics; }
-    QVariantList trafficSamples() const { return m_traffic_samples; }
-    QString trafficReceivedTotal() const { return m_traffic_received_total; }
-    QString trafficSentTotal() const { return m_traffic_sent_total; }
-    QString trafficTcpReceivedTotal() const { return m_traffic_tcp_received_total; }
-    QString trafficTcpSentTotal() const { return m_traffic_tcp_sent_total; }
-    QString trafficUdpReceivedTotal() const { return m_traffic_udp_received_total; }
-    QString trafficUdpSentTotal() const { return m_traffic_udp_sent_total; }
-    QString trafficQuickCloneReceivedTotal() const { return m_traffic_quick_clone_received_total; }
-    QString trafficQuickCloneSentTotal() const { return m_traffic_quick_clone_sent_total; }
-    QStringList logLines() const { return m_log_lines; }
-    QVariantList logLineNumbers() const { return m_log_line_numbers; }
-    QString consoleOutput() const { return m_console_output; }
-    QString paperWalletAddress() const { return m_paper_wallet_address; }
-    QString paperWalletWif() const { return m_paper_wallet_wif; }
-    QString paperWalletStatus() const { return m_paper_wallet_status; }
-    bool paperWalletReady() const { return !m_paper_wallet_address.isEmpty() && !m_paper_wallet_wif.isEmpty(); }
-    bool feeEstimateAvailable() const { return m_fee_estimate_available; }
-    QString feeEstimateStatus() const { return m_fee_estimate_status; }
-    bool psbtLoaded() const { return !m_current_psbt.isEmpty(); }
-    bool psbtFinalized() const { return !m_current_psbt_final_hex.isEmpty(); }
-    QString currentPsbtSummary() const { return m_current_psbt_summary; }
-    bool onlyDefcoinUserAgents() const { return m_only_defcoin_user_agents; }
-    bool onlyDefcoinMagicBytes() const { return m_only_defcoin_magic_bytes; }
-    bool switchToDefcoinOnlyMagicStartingJuly2026() const { return m_switch_to_defcoin_only_magic_starting_july_2026; }
-    bool disallowLanNodeDiscovery() const { return !m_lan_node_discovery_enabled; }
-    bool lanNodeDiscoveryEnabled() const { return m_lan_node_discovery_enabled; }
-    bool lanFastSyncEnabled() const { return m_lan_fast_sync_enabled; }
-    QString lanFastSyncStatus() const { return m_lan_fast_sync_status; }
-    bool lanQuickCloneEnabled() const { return m_lan_quick_clone_enabled; }
-    QString lanQuickCloneStatus() const { return m_lan_quick_clone_status; }
-    bool quickCloneAutoValidateAfter() const { return m_quick_clone_auto_validate_after; }
-    QString quickCloneValidationStatus() const { return m_quick_clone_validation_status; }
-    bool quickCloneValidationRunning() const { return m_quick_clone_validation_running; }
-    bool advancedToolsVisible() const { return m_advanced_tools_visible; }
-    bool upnpConnectionsEnabled() const { return m_upnp_connections_enabled; }
-    bool showLanNodeDiscoveryNotice() const { return !m_lan_node_discovery_notice_acknowledged && !m_lan_node_discovery_enabled; }
-    bool automaticUpdateChecksEnabled() const { return m_automatic_update_checks_enabled; }
-    QString tableCopyDelimiterStyle() const { return m_table_copy_delimiter_style; }
-    QString tableCopyCustomDelimiter() const { return m_table_copy_custom_delimiter; }
-    int logVerbosity() const { return m_log_verbosity; }
-    QString logSearchPattern() const { return m_log_search_pattern; }
-    QString logLastSearchPattern() const { return m_log_last_search_pattern; }
-    QString logRemovePattern() const { return m_log_remove_pattern; }
-    bool backgroundCloseEnabled() const { return m_background_close_enabled; }
-    QString updateStatus() const { return m_update_status; }
-    int updateDownloadProgress() const { return m_update_download_progress; }
-    bool recoveryActive() const { return m_recovery_active; }
-    bool recoveryFinished() const { return m_recovery_finished; }
-    QString recoveryStatus() const { return m_recovery_status; }
-    int recoveryProgress() const { return m_recovery_progress; }
-    QString recoveryFoundAmount() const { return m_recovery_found_amount; }
-    int recoveryFoundAddressCount() const { return m_recovery_found_address_count; }
-    QString recoveryRecentFoundAddress() const { return m_recovery_recent_found_address; }
-    QString recoveryDetectedMethod() const { return m_recovery_detected_method; }
-    QString recoveryCurrentMethod() const { return m_recovery_current_method; }
-    QString recoveryElapsed() const { return m_recovery_elapsed; }
-    QString recoveryEta() const { return m_recovery_eta; }
-    bool recoveryCancelable() const { return m_recovery_cancelable; }
+    bool rpcConnected() const
+    {
+        return m_rpc_connected;
+    }
+    QString connectionStatus() const
+    {
+        return m_connection_status;
+    }
+    QString lastError() const
+    {
+        return m_last_error;
+    }
+    QString networkState() const
+    {
+        return m_network_state;
+    }
+    int peerCount() const
+    {
+        return m_peer_count;
+    }
+    int blockHeight() const
+    {
+        return m_block_height;
+    }
+    int headerHeight() const
+    {
+        return m_header_height;
+    }
+    bool syncing() const
+    {
+        return m_syncing;
+    }
+    QString syncState() const
+    {
+        return m_sync_state;
+    }
+    QString syncDetail() const
+    {
+        return m_sync_detail;
+    }
+    QString syncEta() const
+    {
+        return m_sync_eta;
+    }
+    int syncProgressPercent() const
+    {
+        return m_sync_progress_percent;
+    }
+    QString recentNetworkHashrate() const
+    {
+        return m_metric_network_hashrate;
+    }
+    QString networkDifficulty() const
+    {
+        return m_metric_difficulty;
+    }
+    QString recentAverageBlockTime() const
+    {
+        return m_metric_average_block_time;
+    }
+    bool walletLocked() const
+    {
+        return m_wallet_locked;
+    }
+    bool walletEncrypted() const
+    {
+        return m_wallet_encrypted;
+    }
+    QString totalBalance() const
+    {
+        return m_mask_balances ? QStringLiteral("******** DFC") : m_total_balance;
+    }
+    QString availableBalance() const
+    {
+        return m_mask_balances ? QStringLiteral("********") : m_available_balance;
+    }
+    QString pendingBalance() const
+    {
+        return m_mask_balances ? QStringLiteral("********") : m_pending_balance;
+    }
+    QString immatureBalance() const
+    {
+        return m_mask_balances ? QStringLiteral("********") : m_immature_balance;
+    }
+    int walletTransactionCount() const
+    {
+        return m_wallet_transaction_count;
+    }
+    QString receiveAddress() const
+    {
+        return m_receive_address;
+    }
+    QString receiveQrSource() const
+    {
+        return m_receive_qr_source;
+    }
+    QVariantList addressBook() const
+    {
+        return m_address_book;
+    }
+    QVariantList receiveRequests() const
+    {
+        return m_receive_requests;
+    }
+    QVariantList recentTransactions() const
+    {
+        return m_recent_transactions;
+    }
+    QStringList availableWallets() const
+    {
+        return m_available_wallets;
+    }
+    QStringList loadedWallets() const
+    {
+        return m_loaded_wallets;
+    }
+    QString currentWalletName() const
+    {
+        return m_wallet_name;
+    }
+    bool walletSelected() const
+    {
+        return m_wallet_selected;
+    }
+    int walletAddressCount() const
+    {
+        return m_wallet_address_count;
+    }
+    int walletNonZeroAddressCount() const
+    {
+        return m_wallet_nonzero_address_count;
+    }
+    QVariantList walletFileStats() const
+    {
+        return m_wallet_file_stats;
+    }
+    QVariantList peers() const
+    {
+        return m_peers;
+    }
+    QVariantList peerRowsSimple() const
+    {
+        return m_peer_rows_simple;
+    }
+    QVariantList peerRowsDetailed() const
+    {
+        return m_peer_rows_detailed;
+    }
+    QVariantList bannedPeerRows() const
+    {
+        return m_banned_peer_rows;
+    }
+    QVariantList nodeMetrics() const
+    {
+        return m_node_metrics;
+    }
+    QVariantList trafficSamples() const
+    {
+        return m_traffic_samples;
+    }
+    QString trafficReceivedTotal() const
+    {
+        return m_traffic_received_total;
+    }
+    QString trafficSentTotal() const
+    {
+        return m_traffic_sent_total;
+    }
+    QString trafficTcpReceivedTotal() const
+    {
+        return m_traffic_tcp_received_total;
+    }
+    QString trafficTcpSentTotal() const
+    {
+        return m_traffic_tcp_sent_total;
+    }
+    QString trafficUdpReceivedTotal() const
+    {
+        return m_traffic_udp_received_total;
+    }
+    QString trafficUdpSentTotal() const
+    {
+        return m_traffic_udp_sent_total;
+    }
+    QString trafficQuickCloneReceivedTotal() const
+    {
+        return m_traffic_quick_clone_received_total;
+    }
+    QString trafficQuickCloneSentTotal() const
+    {
+        return m_traffic_quick_clone_sent_total;
+    }
+    QStringList logLines() const
+    {
+        return m_log_lines;
+    }
+    QVariantList logLineNumbers() const
+    {
+        return m_log_line_numbers;
+    }
+    QString consoleOutput() const
+    {
+        return m_console_output;
+    }
+    QString paperWalletAddress() const
+    {
+        return m_paper_wallet_address;
+    }
+    QString paperWalletWif() const
+    {
+        return m_paper_wallet_wif;
+    }
+    QString paperWalletStatus() const
+    {
+        return m_paper_wallet_status;
+    }
+    bool paperWalletReady() const
+    {
+        return !m_paper_wallet_address.isEmpty() && !m_paper_wallet_wif.isEmpty();
+    }
+    bool feeEstimateAvailable() const
+    {
+        return m_fee_estimate_available;
+    }
+    QString feeEstimateStatus() const
+    {
+        return m_fee_estimate_status;
+    }
+    bool psbtLoaded() const
+    {
+        return !m_current_psbt.isEmpty();
+    }
+    bool psbtFinalized() const
+    {
+        return !m_current_psbt_final_hex.isEmpty();
+    }
+    QString currentPsbtSummary() const
+    {
+        return m_current_psbt_summary;
+    }
+    bool onlyDefcoinUserAgents() const
+    {
+        return m_only_defcoin_user_agents;
+    }
+    bool onlyDefcoinMagicBytes() const
+    {
+        return m_only_defcoin_magic_bytes;
+    }
+    bool switchToDefcoinOnlyMagicStartingJuly2026() const
+    {
+        return m_switch_to_defcoin_only_magic_starting_july_2026;
+    }
+    bool disallowLanNodeDiscovery() const
+    {
+        return !m_lan_node_discovery_enabled;
+    }
+    bool lanNodeDiscoveryEnabled() const
+    {
+        return m_lan_node_discovery_enabled;
+    }
+    bool lanFastSyncEnabled() const
+    {
+        return m_lan_fast_sync_enabled;
+    }
+    QString lanFastSyncStatus() const
+    {
+        return m_lan_fast_sync_status;
+    }
+    bool lanQuickCloneEnabled() const
+    {
+        return m_lan_quick_clone_enabled;
+    }
+    QString lanQuickCloneStatus() const
+    {
+        return m_lan_quick_clone_status;
+    }
+    bool quickCloneAutoValidateAfter() const
+    {
+        return m_quick_clone_auto_validate_after;
+    }
+    QString quickCloneValidationStatus() const
+    {
+        return m_quick_clone_validation_status;
+    }
+    bool quickCloneValidationRunning() const
+    {
+        return m_quick_clone_validation_running;
+    }
+    bool advancedToolsVisible() const
+    {
+        return m_advanced_tools_visible;
+    }
+    bool upnpConnectionsEnabled() const
+    {
+        return m_upnp_connections_enabled;
+    }
+    bool showLanNodeDiscoveryNotice() const
+    {
+        return !m_lan_node_discovery_notice_acknowledged && !m_lan_node_discovery_enabled;
+    }
+    bool automaticUpdateChecksEnabled() const
+    {
+        return m_automatic_update_checks_enabled;
+    }
+    QString tableCopyDelimiterStyle() const
+    {
+        return m_table_copy_delimiter_style;
+    }
+    QString tableCopyCustomDelimiter() const
+    {
+        return m_table_copy_custom_delimiter;
+    }
+    int logVerbosity() const
+    {
+        return m_log_verbosity;
+    }
+    QString logSearchPattern() const
+    {
+        return m_log_search_pattern;
+    }
+    QString logLastSearchPattern() const
+    {
+        return m_log_last_search_pattern;
+    }
+    QString logRemovePattern() const
+    {
+        return m_log_remove_pattern;
+    }
+    bool backgroundCloseEnabled() const
+    {
+        return m_background_close_enabled;
+    }
+    QString updateStatus() const
+    {
+        return m_update_status;
+    }
+    int updateDownloadProgress() const
+    {
+        return m_update_download_progress;
+    }
+    bool recoveryActive() const
+    {
+        return m_recovery_active;
+    }
+    bool recoveryFinished() const
+    {
+        return m_recovery_finished;
+    }
+    QString recoveryStatus() const
+    {
+        return m_recovery_status;
+    }
+    int recoveryProgress() const
+    {
+        return m_recovery_progress;
+    }
+    QString recoveryFoundAmount() const
+    {
+        return m_recovery_found_amount;
+    }
+    int recoveryFoundAddressCount() const
+    {
+        return m_recovery_found_address_count;
+    }
+    QString recoveryRecentFoundAddress() const
+    {
+        return m_recovery_recent_found_address;
+    }
+    QString recoveryDetectedMethod() const
+    {
+        return m_recovery_detected_method;
+    }
+    QString recoveryCurrentMethod() const
+    {
+        return m_recovery_current_method;
+    }
+    QString recoveryElapsed() const
+    {
+        return m_recovery_elapsed;
+    }
+    QString recoveryEta() const
+    {
+        return m_recovery_eta;
+    }
+    bool recoveryCancelable() const
+    {
+        return m_recovery_cancelable;
+    }
     QStringList bip39EnglishWords() const;
-    QString minerExecutable() const { return m_miner_executable; }
-    QString minerPoolUrl() const { return m_miner_pool_url; }
-    QString minerPayoutAddress() const { return m_miner_payout_address; }
-    QString minerPassword() const { return m_miner_password; }
-    int minerThreads() const { return m_miner_threads; }
-    int minerNiceLevel() const { return m_miner_nice_level; }
-    QString minerStatus() const { return m_miner_status; }
-    QString minerLog() const { return m_miner_log; }
+    QString minerExecutable() const
+    {
+        return m_miner_executable;
+    }
+    QString minerPoolUrl() const
+    {
+        return m_miner_pool_url;
+    }
+    QString minerPayoutAddress() const
+    {
+        return m_miner_payout_address;
+    }
+    QString minerPassword() const
+    {
+        return m_miner_password;
+    }
+    int minerThreads() const
+    {
+        return m_miner_threads;
+    }
+    int minerNiceLevel() const
+    {
+        return m_miner_nice_level;
+    }
+    QString minerStatus() const
+    {
+        return m_miner_status;
+    }
+    QString minerLog() const
+    {
+        return m_miner_log;
+    }
     bool minerRunning() const;
     QString miningStateText() const;
     QString miningMethodText() const;
-    QString minerHashrateText() const { return m_miner_hashrate_text; }
-    int minerAcceptedShares() const { return m_miner_accepted_shares; }
-    int minerRejectedShares() const { return m_miner_rejected_shares; }
+    QString minerHashrateText() const
+    {
+        return m_miner_hashrate_text;
+    }
+    int minerAcceptedShares() const
+    {
+        return m_miner_accepted_shares;
+    }
+    int minerRejectedShares() const
+    {
+        return m_miner_rejected_shares;
+    }
     QString minerSummaryText() const;
     QString walletMiningPayoutAddress() const;
-    bool maskBalances() const { return m_mask_balances; }
-    bool thirdPartyTxUrlsEnabled() const { return m_third_party_tx_urls_enabled; }
-    QString thirdPartyTxUrl() const { return m_third_party_tx_url; }
-    QString explorerMode() const { return m_explorer_mode; }
+    bool maskBalances() const
+    {
+        return m_mask_balances;
+    }
+    bool thirdPartyTxUrlsEnabled() const
+    {
+        return m_third_party_tx_urls_enabled;
+    }
+    QString thirdPartyTxUrl() const
+    {
+        return m_third_party_tx_url;
+    }
+    QString explorerMode() const
+    {
+        return m_explorer_mode;
+    }
     QString explorerDatabasePath() const;
-    QVariantList explorerRecentLookups() const { return m_explorer_recent_lookups; }
-    bool explorerIndexing() const { return m_explorer_indexing; }
-    QString explorerIndexStatus() const { return m_explorer_index_status; }
-    int explorerIndexHeight() const { return m_explorer_index_height; }
-    int explorerIndexTip() const { return m_explorer_index_tip; }
-    int explorerIndexedBlockCount() const { return m_explorer_indexed_block_count; }
-    int explorerIndexedOutputCount() const { return m_explorer_indexed_output_count; }
-    QVariantList explorerRichList() const { return m_explorer_rich_list; }
-    QVariantList explorerMovements() const { return m_explorer_movements; }
-    QVariantMap coindroidsSummary() const { return m_coindroids_summary; }
-    QVariantList coindroidsWindowRows() const { return m_coindroids_window_rows; }
-    QVariantList coindroidsEndpointRows() const { return m_coindroids_endpoint_rows; }
-    QVariantList coindroidsWinnerRows() const { return m_coindroids_winner_rows; }
-    QVariantList coindroidsPhaseRows() const { return m_coindroids_phase_rows; }
-    QVariantList coindroidsPublishedRows() const { return m_coindroids_published_rows; }
-    QVariantList coindroidsVanityRows() const { return m_coindroids_vanity_rows; }
-    QVariantList coindroidsOpReturnRows() const { return m_coindroids_op_return_rows; }
-    QVariantList coindroidsBotRows() const { return m_coindroids_bot_rows; }
-    QVariantList coindroidsPayoutRows() const { return m_coindroids_payout_rows; }
-    QVariantList coindroidsAttackAddressRows() const { return m_coindroids_attack_address_rows; }
-    QVariantList coindroidsQrSeedRows() const { return m_coindroids_qr_seed_rows; }
-    QVariantList coindroidsSourceAmmoRows() const { return m_coindroids_source_ammo_rows; }
-    QVariantList coindroidsOloRows() const { return m_coindroids_olo_rows; }
-    QVariantList coindroidsGameAddressRows() const { return m_coindroids_game_address_rows; }
-    QVariantList coindroidsEvidenceRows() const { return m_coindroids_evidence_rows; }
-    QString coindroidsStatus() const { return m_coindroids_status; }
-    bool coindroidsScanning() const { return m_coindroids_scanning; }
-    QVariantMap defcoinTimelineSummary() const { return m_defcoin_timeline_summary; }
-    QVariantList defcoinTimelineRows() const { return m_defcoin_timeline_rows; }
-    QString defcoinTimelineCriteria() const { return m_defcoin_timeline_criteria; }
-    QString defcoinTimelineStatus() const { return m_defcoin_timeline_status; }
-    QVariantMap networkPulseSummary() const { return m_network_pulse_summary; }
-    QVariantList networkPulseHistoryRows() const { return m_network_pulse_history_rows; }
-    QString networkPulseStatus() const { return m_network_pulse_status; }
-    QVariantList explorerContactSets() const { return m_explorer_contact_sets; }
-    QString currentExplorerContactSetName() const { return m_current_explorer_contact_set_name; }
-    QVariantList explorerContacts() const { return m_explorer_contacts; }
-    QVariantList explorerContactRelationships() const { return m_explorer_contact_relationships; }
-    QString explorerAnalyticsStatus() const { return m_explorer_analytics_status; }
-    bool explorerTop100Scanning() const { return m_explorer_top100_scanning; }
-    bool explorerTop100FocusedIndexing() const { return m_explorer_top100_focused_indexing; }
-    QString explorerTop100Status() const { return m_explorer_top100_status; }
-    int explorerTop100ScanHeight() const { return m_explorer_top100_scan_height; }
-    int explorerTop100ScanEndHeight() const { return m_explorer_top100_scan_end_height; }
-    int explorerTop100TimelineStartHeight() const { return m_explorer_top100_timeline_start_height; }
-    int explorerTop100TimelineEndHeight() const { return m_explorer_top100_timeline_end_height; }
-    int explorerTop100TimelineEventCount() const { return m_explorer_top100_timeline_event_count; }
-    QVariantList forensicsIrregularMessages() const { return m_forensics_irregular_messages; }
-    bool forensicsScanning() const { return m_forensics_scanning; }
-    QString forensicsScanStatus() const { return m_forensics_scan_status; }
-    QString forensicsScanSummary() const { return m_forensics_scan_summary; }
-    int forensicsScanHeight() const { return m_forensics_scan_height; }
-    int forensicsScanTip() const { return m_forensics_scan_tip; }
-    int forensicsIrregularMessageCount() const { return m_forensics_irregular_messages.size(); }
-    bool forensicsScanComplete() const { return m_forensics_scan_complete; }
-    bool forensicsAcceptBip141AsRegular() const { return m_forensics_accept_bip141_as_regular; }
-    bool forensicsMissingWitnessFound() const { return m_forensics_missing_witness_found; }
-    int forensicsFirstMissingWitnessHeight() const { return m_forensics_first_missing_witness_height; }
-    int forensicsMissingWitnessCount() const { return m_forensics_missing_witness_count; }
-    bool forensicsWitnessRepairRunning() const { return m_forensics_witness_repair_running; }
-    bool forensicsWitnessInspectionAvailable() const { return m_forensics_witness_inspection_available; }
-    QString forensicsWitnessRepairStatus() const { return m_forensics_witness_repair_status; }
-    int forensicsWitnessRepairStartHeight() const { return m_forensics_witness_repair_start_height; }
-    int forensicsWitnessRepairInspectedBlocks() const { return m_forensics_witness_repair_inspected_blocks; }
-    int forensicsWitnessRepairFirstMissingHeight() const { return m_forensics_witness_repair_first_missing_height; }
+    QVariantList explorerRecentLookups() const
+    {
+        return m_explorer_recent_lookups;
+    }
+    bool explorerIndexing() const
+    {
+        return m_explorer_indexing;
+    }
+    QString explorerIndexStatus() const
+    {
+        return m_explorer_index_status;
+    }
+    int explorerIndexHeight() const
+    {
+        return m_explorer_index_height;
+    }
+    int explorerIndexTip() const
+    {
+        return m_explorer_index_tip;
+    }
+    int explorerIndexedBlockCount() const
+    {
+        return m_explorer_indexed_block_count;
+    }
+    int explorerIndexedOutputCount() const
+    {
+        return m_explorer_indexed_output_count;
+    }
+    QVariantList explorerRichList() const
+    {
+        return m_explorer_rich_list;
+    }
+    QVariantList explorerMovements() const
+    {
+        return m_explorer_movements;
+    }
+    QVariantMap coindroidsSummary() const
+    {
+        return m_coindroids_summary;
+    }
+    QVariantList coindroidsWindowRows() const
+    {
+        return m_coindroids_window_rows;
+    }
+    QVariantList coindroidsEndpointRows() const
+    {
+        return m_coindroids_endpoint_rows;
+    }
+    QVariantList coindroidsWinnerRows() const
+    {
+        return m_coindroids_winner_rows;
+    }
+    QVariantList coindroidsPhaseRows() const
+    {
+        return m_coindroids_phase_rows;
+    }
+    QVariantList coindroidsPublishedRows() const
+    {
+        return m_coindroids_published_rows;
+    }
+    QVariantList coindroidsVanityRows() const
+    {
+        return m_coindroids_vanity_rows;
+    }
+    QVariantList coindroidsOpReturnRows() const
+    {
+        return m_coindroids_op_return_rows;
+    }
+    QVariantList coindroidsBotRows() const
+    {
+        return m_coindroids_bot_rows;
+    }
+    QVariantList coindroidsPayoutRows() const
+    {
+        return m_coindroids_payout_rows;
+    }
+    QVariantList coindroidsAttackAddressRows() const
+    {
+        return m_coindroids_attack_address_rows;
+    }
+    QVariantList coindroidsQrSeedRows() const
+    {
+        return m_coindroids_qr_seed_rows;
+    }
+    QVariantList coindroidsSourceAmmoRows() const
+    {
+        return m_coindroids_source_ammo_rows;
+    }
+    QVariantList coindroidsOloRows() const
+    {
+        return m_coindroids_olo_rows;
+    }
+    QVariantList coindroidsGameAddressRows() const
+    {
+        return m_coindroids_game_address_rows;
+    }
+    QVariantList coindroidsEvidenceRows() const
+    {
+        return m_coindroids_evidence_rows;
+    }
+    QString coindroidsStatus() const
+    {
+        return m_coindroids_status;
+    }
+    bool coindroidsScanning() const
+    {
+        return m_coindroids_scanning;
+    }
+    QVariantMap defcoinTimelineSummary() const
+    {
+        return m_defcoin_timeline_summary;
+    }
+    QVariantList defcoinTimelineRows() const
+    {
+        return m_defcoin_timeline_rows;
+    }
+    QString defcoinTimelineCriteria() const
+    {
+        return m_defcoin_timeline_criteria;
+    }
+    QString defcoinTimelineStatus() const
+    {
+        return m_defcoin_timeline_status;
+    }
+    QVariantMap networkPulseSummary() const
+    {
+        return m_network_pulse_summary;
+    }
+    QVariantList networkPulseHistoryRows() const
+    {
+        return m_network_pulse_history_rows;
+    }
+    QString networkPulseStatus() const
+    {
+        return m_network_pulse_status;
+    }
+    QVariantList explorerContactSets() const
+    {
+        return m_explorer_contact_sets;
+    }
+    QString currentExplorerContactSetName() const
+    {
+        return m_current_explorer_contact_set_name;
+    }
+    QVariantList explorerContacts() const
+    {
+        return m_explorer_contacts;
+    }
+    QVariantList explorerContactRelationships() const
+    {
+        return m_explorer_contact_relationships;
+    }
+    QString explorerAnalyticsStatus() const
+    {
+        return m_explorer_analytics_status;
+    }
+    bool explorerTop100Scanning() const
+    {
+        return m_explorer_top100_scanning;
+    }
+    bool explorerTop100FocusedIndexing() const
+    {
+        return m_explorer_top100_focused_indexing;
+    }
+    QString explorerTop100Status() const
+    {
+        return m_explorer_top100_status;
+    }
+    int explorerTop100ScanHeight() const
+    {
+        return m_explorer_top100_scan_height;
+    }
+    int explorerTop100ScanEndHeight() const
+    {
+        return m_explorer_top100_scan_end_height;
+    }
+    int explorerTop100TimelineStartHeight() const
+    {
+        return m_explorer_top100_timeline_start_height;
+    }
+    int explorerTop100TimelineEndHeight() const
+    {
+        return m_explorer_top100_timeline_end_height;
+    }
+    int explorerTop100TimelineEventCount() const
+    {
+        return m_explorer_top100_timeline_event_count;
+    }
+    QVariantList forensicsIrregularMessages() const
+    {
+        return m_forensics_irregular_messages;
+    }
+    bool forensicsScanning() const
+    {
+        return m_forensics_scanning;
+    }
+    QString forensicsScanStatus() const
+    {
+        return m_forensics_scan_status;
+    }
+    QString forensicsScanSummary() const
+    {
+        return m_forensics_scan_summary;
+    }
+    int forensicsScanHeight() const
+    {
+        return m_forensics_scan_height;
+    }
+    int forensicsScanTip() const
+    {
+        return m_forensics_scan_tip;
+    }
+    int forensicsIrregularMessageCount() const
+    {
+        return m_forensics_irregular_messages.size();
+    }
+    bool forensicsScanComplete() const
+    {
+        return m_forensics_scan_complete;
+    }
+    bool forensicsAcceptBip141AsRegular() const
+    {
+        return m_forensics_accept_bip141_as_regular;
+    }
+    bool forensicsMissingWitnessFound() const
+    {
+        return m_forensics_missing_witness_found;
+    }
+    int forensicsFirstMissingWitnessHeight() const
+    {
+        return m_forensics_first_missing_witness_height;
+    }
+    int forensicsMissingWitnessCount() const
+    {
+        return m_forensics_missing_witness_count;
+    }
+    bool forensicsWitnessRepairRunning() const
+    {
+        return m_forensics_witness_repair_running;
+    }
+    bool forensicsWitnessInspectionAvailable() const
+    {
+        return m_forensics_witness_inspection_available;
+    }
+    QString forensicsWitnessRepairStatus() const
+    {
+        return m_forensics_witness_repair_status;
+    }
+    int forensicsWitnessRepairStartHeight() const
+    {
+        return m_forensics_witness_repair_start_height;
+    }
+    int forensicsWitnessRepairInspectedBlocks() const
+    {
+        return m_forensics_witness_repair_inspected_blocks;
+    }
+    int forensicsWitnessRepairFirstMissingHeight() const
+    {
+        return m_forensics_witness_repair_first_missing_height;
+    }
 
     Q_INVOKABLE void refresh();
-    Q_INVOKABLE void requestNewAddress(const QString& label = QString(), const QString& amount = QString(), const QString& message = QString());
+    Q_INVOKABLE void requestNewAddress(const QString& label = QString(),
+                                       const QString& amount = QString(),
+                                       const QString& message = QString());
     Q_INVOKABLE void deleteReceiveRequest(const QString& address);
     Q_INVOKABLE void deleteReceiveRequests(const QVariantList& addresses);
     Q_INVOKABLE void sendCoins(const QString& address,
@@ -446,7 +996,10 @@ public:
     Q_INVOKABLE void runRpcConsoleCommand(const QString& command_text, const QString& wallet_name);
     Q_INVOKABLE void clearConsoleOutput();
     Q_INVOKABLE void generatePaperWallet(bool import_public_address = false, const QString& label = QString());
-    Q_INVOKABLE void importWatchOnlyAddress(const QString& address, const QString& label, bool rescan = false, int start_height = -1);
+    Q_INVOKABLE void importWatchOnlyAddress(const QString& address,
+                                            const QString& label,
+                                            bool rescan = false,
+                                            int start_height = -1);
     Q_INVOKABLE QString walletDisplayName(const QString& name) const;
     Q_INVOKABLE void copyText(const QString& text);
     Q_INVOKABLE void copySensitiveTextAfterWarning(const QString& text);
@@ -508,7 +1061,8 @@ public:
     Q_INVOKABLE void searchExplorer(const QString& query);
     Q_INVOKABLE void openExplorerLink(const QString& link);
     Q_INVOKABLE void refreshExplorerRecentLookups();
-    Q_INVOKABLE void refreshExplorerAnalytics(int movement_threshold_coins = 5000, const QString& scope = QStringLiteral("all"));
+    Q_INVOKABLE void refreshExplorerAnalytics(int movement_threshold_coins = 5000,
+                                              const QString& scope = QStringLiteral("all"));
     Q_INVOKABLE void refreshCoindroidsAnalytics();
     Q_INVOKABLE void refreshDefcoinTimeline();
     Q_INVOKABLE void refreshNetworkPulseHistory(int window_blocks = 120);
@@ -563,11 +1117,8 @@ public:
     Q_INVOKABLE QVariantMap convertCompatibilityEncoding(const QString& text) const;
     Q_INVOKABLE void chooseMinerExecutable();
     Q_INVOKABLE void useWalletReceiveAddressForMining();
-    Q_INVOKABLE void saveMinerConfiguration(const QString& pool_url,
-                                            const QString& payout_address,
-                                            const QString& password,
-                                            int threads,
-                                            int nice_level);
+    Q_INVOKABLE void saveMinerConfiguration(
+        const QString& pool_url, const QString& payout_address, const QString& password, int threads, int nice_level);
     Q_INVOKABLE void startConfiguredMiner();
     Q_INVOKABLE void stopMiner();
     Q_INVOKABLE void clearMinerLog();
@@ -661,9 +1212,14 @@ private:
     void pruneCoreWalletAutoloadSettings(const QStringList& force_remove = {});
     bool shouldAutostartAfterTransportError(QNetworkReply* reply) const;
     void rpcCall(const QString& method, const QJsonArray& params, bool wallet_scoped, RpcCallback callback);
-    void rpcCallForWallet(const QString& method, const QJsonArray& params, const QString& wallet_name, RpcCallback callback);
+    void rpcCallForWallet(const QString& method,
+                          const QJsonArray& params,
+                          const QString& wallet_name,
+                          RpcCallback callback);
     void rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls, bool wallet_scoped, RpcBatchCallback callback);
-    void rpcBatchCallAsSingles(const QVector<QPair<QString, QJsonArray>>& calls, bool wallet_scoped, RpcBatchCallback callback);
+    void rpcBatchCallAsSingles(const QVector<QPair<QString, QJsonArray>>& calls,
+                               bool wallet_scoped,
+                               RpcBatchCallback callback);
     void handleReply(QNetworkReply* reply);
     QUrl rpcUrl(bool wallet_scoped) const;
     QUrl rpcUrlForWallet(const QString& wallet_name) const;
@@ -753,18 +1309,8 @@ private:
     void recordLanFastSyncUdpTraffic(qint64 sent_bytes, qint64 received_bytes, bool quick_clone = false);
     QString udpFastSyncEndpointText(const QHostAddress& address, quint16 port = 0) const;
     void recordFastSyncUdpDiagnostic(const QString& reason, const QString& detail = QString());
-    enum class FastSyncTransport {
-        TcpCore,
-        UdpFastSync
-    };
-    enum class FastSyncUdpFailureKind {
-        ProbeSend,
-        RequestSend,
-        RequestTimeout,
-        Checksum,
-        Buffer,
-        Submit
-    };
+    enum class FastSyncTransport { TcpCore, UdpFastSync };
+    enum class FastSyncUdpFailureKind { ProbeSend, RequestSend, RequestTimeout, Checksum, Buffer, Submit };
     void recordFastSyncTransportSuccess(FastSyncTransport transport, int blocks, int height, double seconds);
     void recordFastSyncTransportFailure(FastSyncTransport transport);
     void recordFastSyncUdpSuccess(int height, qint64 latency_ms);
@@ -786,7 +1332,10 @@ private:
     QVariantMap receiveRequestRow(const QVariantMap& meta) const;
     void loadReceiveRequests();
     void saveReceiveRequests() const;
-    QString defcoinUri(const QString& address, const QString& amount, const QString& label, const QString& message) const;
+    QString defcoinUri(const QString& address,
+                       const QString& amount,
+                       const QString& label,
+                       const QString& message) const;
     QString qrSourceForUri(const QString& uri) const;
     QString normalizedExplorerUrl(const QString& url) const;
     QString explorerAddressUrlTemplate(const QString& url) const;
@@ -830,12 +1379,18 @@ private:
     void refreshExplorerTop100TimelineStats();
     QString explorerBlockHashAtHeight(int height) const;
     QString explorerBlockHashForTransaction(const QString& txid) const;
-    QString explorerCachedBlockHtml(const QString& block_id, QJsonObject* raw_json = nullptr, bool* found = nullptr) const;
-    QString explorerIndexedTransactionHtml(const QString& txid, QJsonObject* raw_json = nullptr, bool* found = nullptr) const;
+    QString explorerCachedBlockHtml(const QString& block_id,
+                                    QJsonObject* raw_json = nullptr,
+                                    bool* found = nullptr) const;
+    QString explorerIndexedTransactionHtml(const QString& txid,
+                                           QJsonObject* raw_json = nullptr,
+                                           bool* found = nullptr) const;
     QString explorerIndexedAddressHtml(const QString& address, bool* found = nullptr) const;
     bool explorerPruneFromHeight(int height, QString* error = nullptr);
     bool storeExplorerBlock(const QJsonObject& block, QString* error = nullptr);
-    bool storeExplorerBlocks(const QVector<QJsonObject>& blocks, int* output_rows_written = nullptr, QString* error = nullptr);
+    bool storeExplorerBlocks(const QVector<QJsonObject>& blocks,
+                             int* output_rows_written = nullptr,
+                             QString* error = nullptr);
     void emitExplorerChangedThrottled(bool force = false);
     void scheduleExplorerIndexStep(int delay_ms = 0);
     void explorerIndexStep();
@@ -854,11 +1409,8 @@ private:
         bool is_anchor = false;
         QVector<ExplorerTop100EventRow> rows;
     };
-    bool prepareExplorerTop100EventWrite(int height,
-                                         qint64 block_time,
-                                         bool force_anchor,
-                                         ExplorerTop100EventWrite* event,
-                                         QString* error = nullptr);
+    bool prepareExplorerTop100EventWrite(
+        int height, qint64 block_time, bool force_anchor, ExplorerTop100EventWrite* event, QString* error = nullptr);
     bool writeExplorerTop100EventBatch(const QVector<ExplorerTop100EventWrite>& events, QString* error = nullptr);
     bool writeExplorerTop100Events(int height, qint64 block_time, bool force_anchor, QString* error = nullptr);
     bool finishExplorerTop100Scan(bool completed, QString* error = nullptr);
@@ -868,9 +1420,7 @@ private:
     void resetForensicsPrefixCompression();
     void finalizeForensicsPrefixCompression(QVariantList& rows);
     bool appendForensicsDisplayRow(QVariantList& rows, const QVariantMap& display_row);
-    QString explorerLookupHtml(const QString& title,
-                               const QString& summary_html,
-                               const QJsonValue& raw_json) const;
+    QString explorerLookupHtml(const QString& title, const QString& summary_html, const QJsonValue& raw_json) const;
     void emitExplorerError(const QString& title, const QString& detail);
     void rebuildNodeMetrics();
     QString helpManualPath(const QString& page) const;
@@ -902,7 +1452,8 @@ private:
     bool validateMnemonic(const QString& phrase, QString* normalized = nullptr, QString* error = nullptr) const;
     bool looksLikeRecoveryPhraseText(const QString& text) const;
     bool requireLocalRecoveryRpc(const QString& operation);
-    bool mnemonicMaterial(const QString& phrase, const QString& wif_mode, QString* wif, QString* xprv, QString* error) const;
+    bool mnemonicMaterial(
+        const QString& phrase, const QString& wif_mode, QString* wif, QString* xprv, QString* error) const;
     QString descriptorForRecoveryPath(const QString& xprv, const QString& derivation_path, QString* error) const;
     static QString normalizedVersionString(QString version);
     static bool isVersionNewer(const QString& candidate, const QString& current);
@@ -1175,7 +1726,10 @@ private:
     qint64 m_chain_progress_last_diagnostic_ms = 0;
     int m_chain_progress_last_diagnostic_headers = -1;
     int m_chain_progress_last_diagnostic_blocks = -1;
-    QString m_console_output = QStringLiteral("Welcome to the Defcoin Core Nu RPC console.\nUse the command line below for standard Core commands, for example getblockchaininfo or listtransactions \"*\" 5.\nJSON parameter arrays are still accepted after the method name when needed.\n\nWARNING: Do not paste commands from strangers into this console.");
+    QString m_console_output = QStringLiteral(
+        "Welcome to the Defcoin Core Nu RPC console.\nUse the command line below for standard Core commands, for "
+        "example getblockchaininfo or listtransactions \"*\" 5.\nJSON parameter arrays are still accepted after the "
+        "method name when needed.\n\nWARNING: Do not paste commands from strangers into this console.");
     QString m_paper_wallet_address;
     QString m_paper_wallet_wif;
     QString m_paper_wallet_status = QStringLiteral("No paper wallet generated in this session.");
@@ -1263,7 +1817,8 @@ private:
     qint64 m_fast_sync_udp_cooldown_until_ms = 0;
     qint64 m_fast_sync_last_probe_ms = 0;
     qint64 m_fast_sync_last_udp_attempt_ms = 0;
-    QString m_fast_sync_decision_summary = QStringLiteral("Fast sync selector waiting for peer samples; normal TCP sync and UDP will be sampled when available.");
+    QString m_fast_sync_decision_summary = QStringLiteral(
+        "Fast sync selector waiting for peer samples; normal TCP sync and UDP will be sampled when available.");
     int m_fast_sync_last_udp_accepted_height = -1;
     int m_fast_sync_udp_datagram_index = 0;
     int m_fast_sync_current_datagram_bytes = 1232;
@@ -1302,7 +1857,8 @@ private:
     bool m_defcoin_timeline_loaded = false;
     QVariantMap m_network_pulse_summary;
     QVariantList m_network_pulse_history_rows;
-    QString m_network_pulse_status = QStringLiteral("Network Pulse waits for the Explorer index to cache block timestamps.");
+    QString m_network_pulse_status =
+        QStringLiteral("Network Pulse waits for the Explorer index to cache block timestamps.");
     QVariantList m_explorer_contacts;
     QVariantList m_explorer_contact_relationships;
     QVariantList m_explorer_contact_sets;
@@ -1333,7 +1889,8 @@ private:
     struct ExplorerTop100EntryLess {
         bool operator()(const ExplorerTop100Entry& a, const ExplorerTop100Entry& b) const
         {
-            if (a.balance != b.balance) return a.balance < b.balance;
+            if (a.balance != b.balance)
+                return a.balance < b.balance;
             return a.address > b.address;
         }
     };

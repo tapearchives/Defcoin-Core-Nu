@@ -9,8 +9,7 @@
 
 class QLibrary;
 
-struct NuVelopackUpdateDetails
-{
+struct NuVelopackUpdateDetails {
     QString version;
     QString packageName;
     QString notesMarkdown;

@@ -12,10 +12,10 @@
 #include <QMetaObject>
 #include <QWindow>
 
-NuPlatformIntegration::NuPlatformIntegration(QObject* parent)
-    : QObject(parent)
+NuPlatformIntegration::NuPlatformIntegration(QObject* parent) : QObject(parent)
 {
-    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &NuPlatformIntegration::shutdownTrayIcon);
+    connect(
+        QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &NuPlatformIntegration::shutdownTrayIcon);
 }
 
 NuPlatformIntegration::~NuPlatformIntegration()
@@ -40,7 +40,8 @@ void NuPlatformIntegration::setMainWindow(QWindow* window)
 
 void NuPlatformIntegration::setService(NuRpcService* service)
 {
-    if (m_service == service) return;
+    if (m_service == service)
+        return;
     if (m_service) {
         disconnect(m_service, nullptr, this, nullptr);
     }
@@ -64,7 +65,8 @@ void NuPlatformIntegration::setTrayIcon(const QIcon& icon)
 void NuPlatformIntegration::installMacApplicationMenu()
 {
 #if defined(Q_OS_MACOS)
-    if (m_mac_menu_bar) return;
+    if (m_mac_menu_bar)
+        return;
 
     m_mac_menu_bar = new QMenuBar(nullptr);
     m_mac_menu_bar->setNativeMenuBar(true);
@@ -81,7 +83,8 @@ void NuPlatformIntegration::installMacApplicationMenu()
     QAction* update_action = app_menu->addAction(QObject::tr("Check for Updates..."));
     update_action->setMenuRole(QAction::ApplicationSpecificRole);
     connect(update_action, &QAction::triggered, this, [this] {
-        if (m_service) m_service->checkForUpdates(true);
+        if (m_service)
+            m_service->checkForUpdates(true);
     });
 
     app_menu->addSeparator();
@@ -109,7 +112,8 @@ void NuPlatformIntegration::showAboutQt()
 
 void NuPlatformIntegration::showMainWindow()
 {
-    if (!m_main_window) return;
+    if (!m_main_window)
+        return;
     m_main_window->showNormal();
     m_main_window->raise();
     m_main_window->requestActivate();
@@ -127,7 +131,8 @@ void NuPlatformIntegration::quitApplication()
 void NuPlatformIntegration::showBackgroundNotice()
 {
     ensureTrayIcon();
-    if (!m_tray || m_background_notice_shown) return;
+    if (!m_tray || m_background_notice_shown)
+        return;
     m_background_notice_shown = true;
     m_tray->showMessage(QApplication::applicationDisplayName(),
                         QObject::tr("%1 is running in the background.").arg(QApplication::applicationDisplayName()),
@@ -142,7 +147,8 @@ void NuPlatformIntegration::hideTrayIcon()
 
 void NuPlatformIntegration::refreshNodeStatus()
 {
-    if (!m_status_action) return;
+    if (!m_status_action)
+        return;
     m_status_action->setText(QObject::tr("Node Status: %1").arg(currentNodeStatusText()));
 }
 
@@ -156,7 +162,8 @@ void NuPlatformIntegration::handleSettingsChanged()
 
 void NuPlatformIntegration::ensureTrayIcon()
 {
-    if (m_tray || !trayAvailable()) return;
+    if (m_tray || !trayAvailable())
+        return;
 
     m_tray_menu = new QMenu();
     QAction* show_action = m_tray_menu->addAction(QObject::tr("Show %1").arg(QApplication::applicationDisplayName()));
@@ -203,13 +210,16 @@ void NuPlatformIntegration::shutdownTrayIcon()
 
 void NuPlatformIntegration::invokeRootMethod(const char* method)
 {
-    if (!m_root_object) return;
+    if (!m_root_object)
+        return;
     QMetaObject::invokeMethod(m_root_object, method, Qt::QueuedConnection);
 }
 
 QString NuPlatformIntegration::currentNodeStatusText() const
 {
-    if (!m_service) return QObject::tr("Starting");
-    if (!m_service->rpcConnected()) return QObject::tr("RPC not connected");
+    if (!m_service)
+        return QObject::tr("Starting");
+    if (!m_service->rpcConnected())
+        return QObject::tr("RPC not connected");
     return QObject::tr("%1, %2 peers").arg(m_service->networkState(), QString::number(m_service->peerCount()));
 }

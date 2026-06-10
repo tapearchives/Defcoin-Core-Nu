@@ -24,16 +24,16 @@ QStringList velopackRuntimeCandidates(const QString& app_dir)
     candidates << QStringLiteral("velopack_libc_osx");
 #elif defined(Q_OS_WIN)
     const QString arch = QSysInfo::currentCpuArchitecture().toLower();
-    const QString dll = arch.contains(QStringLiteral("arm")) || arch.contains(QStringLiteral("aarch64"))
-        ? QStringLiteral("velopack_libc_win_arm64_msvc.dll")
-        : QStringLiteral("velopack_libc_win_x64_msvc.dll");
+    const QString dll = arch.contains(QStringLiteral("arm")) || arch.contains(QStringLiteral("aarch64")) ?
+                            QStringLiteral("velopack_libc_win_arm64_msvc.dll") :
+                            QStringLiteral("velopack_libc_win_x64_msvc.dll");
     candidates << QDir(resolved_app_dir).filePath(dll);
     candidates << dll;
 #elif defined(Q_OS_LINUX)
     const QString arch = QSysInfo::currentCpuArchitecture().toLower();
-    const QString so = arch.contains(QStringLiteral("arm")) || arch.contains(QStringLiteral("aarch64"))
-        ? QStringLiteral("velopack_libc_linux_arm64_gnu.so")
-        : QStringLiteral("velopack_libc_linux_x64_gnu.so");
+    const QString so = arch.contains(QStringLiteral("arm")) || arch.contains(QStringLiteral("aarch64")) ?
+                           QStringLiteral("velopack_libc_linux_arm64_gnu.so") :
+                           QStringLiteral("velopack_libc_linux_x64_gnu.so");
     candidates << QDir(resolved_app_dir).filePath(so);
     candidates << so;
 #endif
@@ -52,10 +52,9 @@ QString charPtrToQString(const char* value)
 {
     return value ? QString::fromUtf8(value) : QString();
 }
-}
+} // namespace
 
-struct NuVelopackUpdater::Asset
-{
+struct NuVelopackUpdater::Asset {
     char* PackageId;
     char* Version;
     char* Type;
@@ -67,8 +66,7 @@ struct NuVelopackUpdater::Asset
     char* NotesHtml;
 };
 
-struct NuVelopackUpdater::UpdateInfo
-{
+struct NuVelopackUpdater::UpdateInfo {
     Asset* TargetFullRelease;
     Asset* BaseRelease;
     Asset** DeltasToTarget;
@@ -76,15 +74,13 @@ struct NuVelopackUpdater::UpdateInfo
     bool IsDowngrade;
 };
 
-struct NuVelopackUpdater::UpdateOptions
-{
+struct NuVelopackUpdater::UpdateOptions {
     bool AllowVersionDowngrade;
     char* ExplicitChannel;
     qint32 MaximumDeltasBeforeFallback;
 };
 
-struct NuVelopackUpdater::LocatorConfig
-{
+struct NuVelopackUpdater::LocatorConfig {
     char* RootAppDir;
     char* UpdateExePath;
     char* PackagesDir;
@@ -93,8 +89,7 @@ struct NuVelopackUpdater::LocatorConfig
     bool IsPortable;
 };
 
-struct NuVelopackUpdater::Api
-{
+struct NuVelopackUpdater::Api {
     using new_update_manager_fn = bool (*)(const char*, UpdateOptions*, LocatorConfig*, void**);
     using get_current_version_fn = size_t (*)(void*, char*, size_t);
     using update_pending_restart_fn = bool (*)(void*, Asset**);
@@ -122,8 +117,7 @@ struct NuVelopackUpdater::Api
     app_run_fn appRun = nullptr;
 };
 
-NuVelopackUpdater::NuVelopackUpdater(QObject* parent)
-    : QObject(parent)
+NuVelopackUpdater::NuVelopackUpdater(QObject* parent) : QObject(parent)
 {
     loadRuntime();
 }
@@ -142,14 +136,19 @@ void NuVelopackUpdater::runStartupHook(const QString& app_dir)
     QLibrary library;
     for (const QString& candidate : velopackRuntimeCandidates(app_dir)) {
         library.setFileName(candidate);
-        if (library.load()) break;
+        if (library.load())
+            break;
     }
-    if (!library.isLoaded()) return;
+    if (!library.isLoaded())
+        return;
 
-    auto set_auto_apply = reinterpret_cast<Api::app_set_auto_apply_on_startup_fn>(library.resolve("vpkc_app_set_auto_apply_on_startup"));
+    auto set_auto_apply =
+        reinterpret_cast<Api::app_set_auto_apply_on_startup_fn>(library.resolve("vpkc_app_set_auto_apply_on_startup"));
     auto run = reinterpret_cast<Api::app_run_fn>(library.resolve("vpkc_app_run"));
-    if (!run) return;
-    if (set_auto_apply) set_auto_apply(true);
+    if (!run)
+        return;
+    if (set_auto_apply)
+        set_auto_apply(true);
     run(nullptr);
 }
 
@@ -170,13 +169,16 @@ QString NuVelopackUpdater::lastError() const
 
 bool NuVelopackUpdater::loadRuntime(const QString& app_dir)
 {
-    if (isRuntimeAvailable()) return true;
+    if (isRuntimeAvailable())
+        return true;
 
     for (const QString& candidate : velopackRuntimeCandidates(app_dir)) {
         auto library = std::make_unique<QLibrary>(candidate);
-        if (!library->load()) continue;
+        if (!library->load())
+            continue;
         m_library = std::move(library);
-        if (resolveApi()) return true;
+        if (resolveApi())
+            return true;
         m_library.reset();
         m_api.reset();
     }
@@ -187,7 +189,8 @@ bool NuVelopackUpdater::loadRuntime(const QString& app_dir)
 
 bool NuVelopackUpdater::resolveApi()
 {
-    if (!m_library || !m_library->isLoaded()) return false;
+    if (!m_library || !m_library->isLoaded())
+        return false;
     auto api = std::make_unique<Api>();
     bool ok = true;
     ok = resolveSymbol(*m_library, api->newUpdateManager, "vpkc_new_update_manager") && ok;
@@ -212,8 +215,10 @@ bool NuVelopackUpdater::resolveApi()
 
 bool NuVelopackUpdater::ensureManager()
 {
-    if (m_manager) return true;
-    if (!loadRuntime()) return false;
+    if (m_manager)
+        return true;
+    if (!loadRuntime())
+        return false;
 
     UpdateOptions options{};
     options.AllowVersionDowngrade = false;
@@ -248,10 +253,12 @@ void NuVelopackUpdater::clearPendingUpdate()
 
 QString NuVelopackUpdater::runtimeError() const
 {
-    if (!m_api || !m_api->getLastError) return QString();
+    if (!m_api || !m_api->getLastError)
+        return QString();
     QByteArray buffer(2048, Qt::Uninitialized);
     const size_t needed = m_api->getLastError(buffer.data(), size_t(buffer.size()));
-    if (needed == 0) return QString();
+    if (needed == 0)
+        return QString();
     if (needed > size_t(buffer.size())) {
         buffer.resize(int(needed + 1));
         m_api->getLastError(buffer.data(), size_t(buffer.size()));
@@ -261,36 +268,45 @@ QString NuVelopackUpdater::runtimeError() const
 
 QString NuVelopackUpdater::targetVersion() const
 {
-    if (m_pending_restart_asset) return charPtrToQString(m_pending_restart_asset->Version);
-    if (m_update_info && m_update_info->TargetFullRelease) return charPtrToQString(m_update_info->TargetFullRelease->Version);
+    if (m_pending_restart_asset)
+        return charPtrToQString(m_pending_restart_asset->Version);
+    if (m_update_info && m_update_info->TargetFullRelease)
+        return charPtrToQString(m_update_info->TargetFullRelease->Version);
     return QString();
 }
 
 QString NuVelopackUpdater::targetPackageName() const
 {
-    if (m_pending_restart_asset) return charPtrToQString(m_pending_restart_asset->FileName);
-    if (m_update_info && m_update_info->TargetFullRelease) return charPtrToQString(m_update_info->TargetFullRelease->FileName);
+    if (m_pending_restart_asset)
+        return charPtrToQString(m_pending_restart_asset->FileName);
+    if (m_update_info && m_update_info->TargetFullRelease)
+        return charPtrToQString(m_update_info->TargetFullRelease->FileName);
     return QStringLiteral("Velopack package");
 }
 
 QString NuVelopackUpdater::targetNotesMarkdown() const
 {
-    if (m_pending_restart_asset) return charPtrToQString(m_pending_restart_asset->NotesMarkdown);
-    if (m_update_info && m_update_info->TargetFullRelease) return charPtrToQString(m_update_info->TargetFullRelease->NotesMarkdown);
+    if (m_pending_restart_asset)
+        return charPtrToQString(m_pending_restart_asset->NotesMarkdown);
+    if (m_update_info && m_update_info->TargetFullRelease)
+        return charPtrToQString(m_update_info->TargetFullRelease->NotesMarkdown);
     return QString();
 }
 
 quint64 NuVelopackUpdater::targetSize() const
 {
-    if (m_pending_restart_asset) return m_pending_restart_asset->Size;
-    if (m_update_info && m_update_info->TargetFullRelease) return m_update_info->TargetFullRelease->Size;
+    if (m_pending_restart_asset)
+        return m_pending_restart_asset->Size;
+    if (m_update_info && m_update_info->TargetFullRelease)
+        return m_update_info->TargetFullRelease->Size;
     return 0;
 }
 
 NuVelopackUpdater::CheckState NuVelopackUpdater::checkForUpdates(NuVelopackUpdateDetails& details)
 {
     clearPendingUpdate();
-    if (!ensureManager()) return CheckState::NotAvailable;
+    if (!ensureManager())
+        return CheckState::NotAvailable;
 
     Asset* pending_restart_asset = nullptr;
     if (m_api->updatePendingRestart(m_manager, &pending_restart_asset) && pending_restart_asset) {
@@ -325,7 +341,8 @@ NuVelopackUpdater::CheckState NuVelopackUpdater::checkForUpdates(NuVelopackUpdat
 
     Q_UNUSED(kUpdateError);
     m_last_error = runtimeError();
-    if (m_last_error.isEmpty()) m_last_error = QStringLiteral("Velopack could not check for updates.");
+    if (m_last_error.isEmpty())
+        m_last_error = QStringLiteral("Velopack could not check for updates.");
     return CheckState::Error;
 }
 
@@ -342,12 +359,15 @@ bool NuVelopackUpdater::downloadPendingUpdate(const std::function<void(int)>& pr
 
     auto callback = [](void* user_data, size_t progress) {
         const auto* cb = static_cast<const std::function<void(int)>*>(user_data);
-        if (cb && *cb) (*cb)(qBound(0, int(progress), 100));
+        if (cb && *cb)
+            (*cb)(qBound(0, int(progress), 100));
     };
 
-    if (!m_api->downloadUpdates(m_manager, m_update_info, callback, const_cast<std::function<void(int)>*>(&progress_callback))) {
+    if (!m_api->downloadUpdates(
+            m_manager, m_update_info, callback, const_cast<std::function<void(int)>*>(&progress_callback))) {
         m_last_error = runtimeError();
-        if (m_last_error.isEmpty()) m_last_error = QStringLiteral("Velopack could not download the update.");
+        if (m_last_error.isEmpty())
+            m_last_error = QStringLiteral("Velopack could not download the update.");
         return false;
     }
 
@@ -363,7 +383,8 @@ bool NuVelopackUpdater::applyPendingUpdate(bool restart)
     }
 
     Asset* asset = m_pending_restart_asset;
-    if (!asset && m_update_info) asset = m_update_info->TargetFullRelease;
+    if (!asset && m_update_info)
+        asset = m_update_info->TargetFullRelease;
     if (!asset) {
         m_last_error = QStringLiteral("Velopack update metadata is no longer available.");
         return false;
@@ -371,7 +392,8 @@ bool NuVelopackUpdater::applyPendingUpdate(bool restart)
 
     if (!m_api->waitExitThenApplyUpdates(m_manager, asset, false, restart, nullptr, 0)) {
         m_last_error = runtimeError();
-        if (m_last_error.isEmpty()) m_last_error = QStringLiteral("Velopack could not launch the updater.");
+        if (m_last_error.isEmpty())
+            m_last_error = QStringLiteral("Velopack could not launch the updater.");
         return false;
     }
     return true;
