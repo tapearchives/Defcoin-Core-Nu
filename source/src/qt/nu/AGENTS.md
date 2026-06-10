@@ -19,10 +19,12 @@ This folder owns the Tahoe Nu frontend, QML views/components, bridge services, N
 - Keep chart labels unique and ensure transport counters are not double-counted.
 - Selectable/copyable diagnostic text should support normal clipboard use where practical.
 - Do not add Qt modules that break Lion parity without documenting the fallback.
+- Nu-owned C, C++, Objective-C, and Objective-C++ files in this subtree use the local `.clang-format`; backend/Core files outside this subtree keep the Litecoin/Core `source/src/.clang-format` style.
 
 ## Work Guidance
 
 - QML is the presentation layer. Use existing custom QML/Canvas components where Lion parity matters; use newer Qt modules only when the platform matrix supports them.
+- Use `.clang-format` for Nu app C/C++/Obj-C++ touched hunks or new Nu-owned files. On Tahoe, `/usr/bin/xcrun clang-format` is the expected Xcode formatter path. Do not use it as a global QML formatter.
 - For frontend changes, check both layout density and text clipping at realistic window sizes.
 - For service changes, keep C++ bridge APIs narrow and explicit.
 - If a QML, C++, or build file has a sibling `[full filename].agent.md`, read that companion before editing the file and keep it current with durable behavior changes.
