@@ -53,6 +53,54 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.5a - 2026-06-10 - Metrics traffic clarity and mast alignment
+
+Big picture:
+- This is a UI/metrics clarity build after the 26.6.5 style baseline.
+- No consensus or wallet-storage behavior changed.
+- The main cross-build risk is keeping the new traffic counter names and QML
+  graph sample fields in parity on Lion and Windows.
+
+Technical changes:
+- `src/clientversion.h`: visible Defcoin release identity moved to `26.6.5a`.
+- `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
+  `26.6.5a`.
+- `src/qt/nu/app/NuRpcService.h/.cpp`: split formatted Fast Sync UDP totals out
+  of the existing UDP total by subtracting the Quick Clone UDP subset. Traffic
+  samples now include `fastSyncUdpReceived` and `fastSyncUdpSent`; CSV export
+  also includes those columns.
+- `src/qt/nu/qml/Components/NuTimelineGraph.qml`: Traffic simple mode remains
+  total sent/received; Details mode draws stacked filled TCP / FS UDP / QC UDP
+  components for sent and received groups with unique labels and colors.
+- `src/qt/nu/qml/Views/NodeView.qml`: one linked `Details` switch now controls
+  Traffic, Status, and Peers. Footer totals show TCP, FS UDP, QC UDP, and total.
+- `src/qt/nu/qml/Views/MiningView.qml`: Reward Calculator `Use current values`
+  fills current miner hashrate in KH/s when Nu has a running miner hashrate.
+- `src/qt/nu/qml/Shell/StatusStrip.qml`,
+  `src/qt/nu/qml/Components/NuStatusDot.qml`, and
+  `src/qt/nu/qml/Components/NuMetricRow.qml`: mast dot/text alignment tightened.
+- `src/qt/nu/qml/Components/NuDataTable.qml`: row height estimation now respects
+  explicit newline-separated summaries while avoiding extra height for one-line
+  content.
+
+Verification performed:
+- `git diff --check` passed.
+- `qmllint -I src/qt/nu/qml` on the touched QML files exited 0 with only the
+  known `Defcoin.Nu` import/context-property warnings.
+- `/opt/homebrew/bin/ruff check --config source/src/qt/nu/tools/ruff.toml
+  source/src/qt/nu/tools source/src/qt/nu/app/repair_macos_qt_bundle.py` passed.
+- `/opt/homebrew/bin/ruff format --check --config source/src/qt/nu/tools/ruff.toml
+  source/src/qt/nu/tools source/src/qt/nu/app/repair_macos_qt_bundle.py` passed.
+- `clang-format --dry-run --Werror` passed for `NuRpcService.cpp/.h`.
+- Tahoe Apple Silicon resources build passed for
+  `build/nu-qml-arm64-26.6.5a`.
+- Windows backend and Nu Qt shell/resources build passed for
+  `build/nu-qml-win64-26.6.5a`; packaged one NSIS setup EXE and one portable
+  ZIP in `Tools/Defcoin Core Nu/Nu-26.6.5a-Windows-11-x86_64-20260610_053604`.
+- Lion source parity changes were applied and lint-clean locally, but the
+  physical Lion iMac at `192.168.2.19` was unreachable during this pass, so the
+  Lion package build still needs to run when that host is back online.
+
 ### 26.6.5 - 2026-06-10 - Nu style baseline and DOX tool notes
 
 Big picture:

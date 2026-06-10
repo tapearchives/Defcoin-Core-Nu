@@ -7,6 +7,7 @@ import "../Theme"
 RowLayout {
     id: root
     spacing: NuTokens.spaceSm
+    implicitHeight: Math.max(26, dot.implicitHeight, dotLabel.implicitHeight)
 
     property string label: ""
     property color stateColor: NuTokens.stateInactive
@@ -23,6 +24,7 @@ RowLayout {
     }
 
     Rectangle {
+        id: dot
         implicitWidth: 14
         implicitHeight: 14
         radius: 7
@@ -41,10 +43,13 @@ RowLayout {
     }
 
     Label {
+        id: dotLabel
         Layout.maximumWidth: root.labelMaximumWidth
+        Layout.alignment: Qt.AlignVCenter
         text: root.label
         color: NuTokens.textPrimary
         font.pixelSize: NuTokens.fontBody
         elide: Text.ElideRight
+        verticalAlignment: Text.AlignVCenter
     }
 }

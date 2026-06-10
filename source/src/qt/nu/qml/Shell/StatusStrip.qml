@@ -186,6 +186,14 @@ Rectangle {
         return "The active wallet is loaded and not encrypted."
     }
 
+    function syncMastValue() {
+        if (!NuService.syncing) return NuService.syncState
+        const tip = Number(NuService.headerHeight || 0)
+        if (tip <= 0) return NuService.syncState
+        return "Block " + NuService.blockHeight + " of " + tip
+                + " (" + NuService.syncProgressPercent + "%, ETA " + NuService.syncEta + ")"
+    }
+
     function currentWalletIndex() {
         if (!NuService.walletSelected)
             return -1
@@ -348,8 +356,8 @@ Rectangle {
 
             NuMetricRow {
                 label: "Sync"
-                value: NuService.syncState
-                valueMaximumWidth: NuService.syncing ? (root.width < 900 ? 220 : 300) : 120
+                value: root.syncMastValue()
+                valueMaximumWidth: NuService.syncing ? (root.width < 900 ? 300 : 430) : 120
                 helpText: NuService.syncing
                           ? "Blockchain synchronization progress from Core's getblockchaininfo: verification progress, current block, known headers, and an ETA derived from recent progress."
                           : "The local chain is caught up to the best headers currently known by this node."

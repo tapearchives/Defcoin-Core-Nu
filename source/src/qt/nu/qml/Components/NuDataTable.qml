@@ -538,7 +538,11 @@ Rectangle {
             const cellWidth = Number(columnWidths[c] || columnMin(c))
             const iconPad = cellHasLanIcon(row, c) ? (compact ? 30 : 34) : 0
             const available = Math.max(28, cellWidth - textPadding() * 2 - iconPad)
-            const wanted = Math.max(1, Math.ceil(roughTextWidth(valueAt(row, c), c) / available))
+            const text = String(valueAt(row, c) === undefined || valueAt(row, c) === null ? "" : valueAt(row, c))
+            const segments = text.split("\n")
+            let wanted = Math.max(1, segments.length)
+            for (let s = 0; s < segments.length; ++s)
+                wanted = Math.max(wanted, Math.ceil(roughTextWidth(segments[s], c) / available))
             lines = Math.max(lines, Math.min(Math.max(1, maxWrappedBodyLines), wanted))
         }
 

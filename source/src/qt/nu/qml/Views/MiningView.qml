@@ -131,9 +131,35 @@ ColumnLayout {
         return (86400 / secondsPerBlock) * reward
     }
 
+    function currentMinerHashrateKh() {
+        const raw = String(NuService.minerHashrateText || "").replace(/,/g, "").trim()
+        if (raw.length === 0 || raw === "-") return 0
+
+        const match = raw.match(/([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?)(?:H\/s|hash\/s|hashes\/s)?/i)
+        if (!match) return 0
+
+        let value = Number(match[1])
+        if (!Number.isFinite(value) || value <= 0) return 0
+
+        const unit = String(match[2] || "").toUpperCase()
+        if (unit === "M") value *= 1000
+        else if (unit === "G") value *= 1000000
+        else if (unit === "T") value *= 1000000000
+        else if (unit.length === 0 && raw.match(/\bH\/s\b/i)) value /= 1000
+        return value
+    }
+
+    function formatCalculatorValue(value) {
+        if (!Number.isFinite(value) || value <= 0) return ""
+        return value.toFixed(value >= 100 ? 2 : 4).replace(/0+$/, "").replace(/\.$/, "")
+    }
+
     function useCurrentRewardDefaults() {
         rewardDifficulty.text = parseDecimal(NuService.networkDifficulty, 0.091).toFixed(8).replace(/0+$/, "").replace(/\.$/, "")
         rewardBlockValue.text = root.currentBlockReward().toFixed(8).replace(/0+$/, "").replace(/\.$/, "")
+        const minerHashrate = root.currentMinerHashrateKh()
+        if (minerHashrate > 0)
+            rewardHashrate.text = root.formatCalculatorValue(minerHashrate)
     }
 
     function saveConfig() {
@@ -552,7 +578,7 @@ ColumnLayout {
                     NuActionButton {
                         Layout.preferredWidth: 180
                         text: "Use current values"
-                        helpText: "Load current backend difficulty and the current block reward for this chain height."
+                        helpText: "Load current backend difficulty, current block reward, and the running miner hashrate when Nu is managing a miner."
                         onClicked: root.useCurrentRewardDefaults()
                     }
                 }

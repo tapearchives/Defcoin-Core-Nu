@@ -4586,10 +4586,14 @@ void NuRpcService::refreshNode()
         const qint64 udp_sent = m_lan_fast_sync_udp_bytes_sent;
         const qint64 quick_clone_recv = m_lan_quick_clone_udp_bytes_received;
         const qint64 quick_clone_sent = m_lan_quick_clone_udp_bytes_sent;
+        const qint64 fast_sync_udp_recv = qMax<qint64>(0, udp_recv - quick_clone_recv);
+        const qint64 fast_sync_udp_sent = qMax<qint64>(0, udp_sent - quick_clone_sent);
         m_traffic_tcp_received_total = formatBytes(tcp_recv);
         m_traffic_tcp_sent_total = formatBytes(tcp_sent);
         m_traffic_udp_received_total = formatBytes(udp_recv);
         m_traffic_udp_sent_total = formatBytes(udp_sent);
+        m_traffic_fast_sync_udp_received_total = formatBytes(fast_sync_udp_recv);
+        m_traffic_fast_sync_udp_sent_total = formatBytes(fast_sync_udp_sent);
         m_traffic_quick_clone_received_total = formatBytes(quick_clone_recv);
         m_traffic_quick_clone_sent_total = formatBytes(quick_clone_sent);
         m_traffic_received_total = formatBytes(tcp_recv + udp_recv);
@@ -5220,10 +5224,14 @@ void NuRpcService::sampleTraffic()
         const qint64 udp_sent = m_lan_fast_sync_udp_bytes_sent;
         const qint64 quick_clone_recv = m_lan_quick_clone_udp_bytes_received;
         const qint64 quick_clone_sent = m_lan_quick_clone_udp_bytes_sent;
+        const qint64 fast_sync_udp_recv = qMax<qint64>(0, udp_recv - quick_clone_recv);
+        const qint64 fast_sync_udp_sent = qMax<qint64>(0, udp_sent - quick_clone_sent);
         m_traffic_tcp_received_total = formatBytes(recv);
         m_traffic_tcp_sent_total = formatBytes(sent);
         m_traffic_udp_received_total = formatBytes(udp_recv);
         m_traffic_udp_sent_total = formatBytes(udp_sent);
+        m_traffic_fast_sync_udp_received_total = formatBytes(fast_sync_udp_recv);
+        m_traffic_fast_sync_udp_sent_total = formatBytes(fast_sync_udp_sent);
         m_traffic_quick_clone_received_total = formatBytes(quick_clone_recv);
         m_traffic_quick_clone_sent_total = formatBytes(quick_clone_sent);
         m_traffic_received_total = formatBytes(recv + udp_recv);
@@ -5233,6 +5241,8 @@ void NuRpcService::sampleTraffic()
         double tcp_sent_rate = 0.0;
         double udp_recv_rate = 0.0;
         double udp_sent_rate = 0.0;
+        double fast_sync_udp_recv_rate = 0.0;
+        double fast_sync_udp_sent_rate = 0.0;
         double quick_clone_recv_rate = 0.0;
         double quick_clone_sent_rate = 0.0;
         qint64 recv_delta = 0;
@@ -5256,6 +5266,8 @@ void NuRpcService::sampleTraffic()
             udp_sent_rate = qMax(0.0, udp_sent_delta / seconds);
             quick_clone_recv_rate = qMax(0.0, quick_clone_recv_delta / seconds);
             quick_clone_sent_rate = qMax(0.0, quick_clone_sent_delta / seconds);
+            fast_sync_udp_recv_rate = qMax(0.0, udp_recv_rate - quick_clone_recv_rate);
+            fast_sync_udp_sent_rate = qMax(0.0, udp_sent_rate - quick_clone_sent_rate);
             if (m_syncing && seconds > 0.0 && (recv_delta > 0 || sent_delta > 0)) {
                 m_sync_tcp_bytes_received += recv_delta;
                 m_sync_tcp_bytes_sent += sent_delta;
@@ -5289,6 +5301,8 @@ void NuRpcService::sampleTraffic()
         point.insert(QStringLiteral("tcpSent"), tcp_sent_rate);
         point.insert(QStringLiteral("udpReceived"), udp_recv_rate);
         point.insert(QStringLiteral("udpSent"), udp_sent_rate);
+        point.insert(QStringLiteral("fastSyncUdpReceived"), fast_sync_udp_recv_rate);
+        point.insert(QStringLiteral("fastSyncUdpSent"), fast_sync_udp_sent_rate);
         point.insert(QStringLiteral("quickCloneReceived"), quick_clone_recv_rate);
         point.insert(QStringLiteral("quickCloneSent"), quick_clone_sent_rate);
         point.insert(QStringLiteral("sampleCount"), 1);
@@ -5307,6 +5321,8 @@ void NuRpcService::sampleTraffic()
                                                QStringLiteral("tcpSent"),
                                                QStringLiteral("udpReceived"),
                                                QStringLiteral("udpSent"),
+                                               QStringLiteral("fastSyncUdpReceived"),
+                                               QStringLiteral("fastSyncUdpSent"),
                                                QStringLiteral("quickCloneReceived"),
                                                QStringLiteral("quickCloneSent")};
                 for (const QString& key : rate_keys) {
@@ -5672,6 +5688,20 @@ QString NuRpcService::syncTransportSpeedSummary() const
         const double percent = (100.0 * static_cast<double>(part)) / static_cast<double>(total);
         return QStringLiteral("%1%").arg(QString::number(percent, 'f', percent >= 10.0 ? 0 : 1));
     };
+    const double udp_rate_bytes = udp_seconds > 0.0 ? udp_total / qMax(1.0, udp_seconds) : 0.0;
+    const double core_rate_bytes = core_block_seconds > 0.0 ? core_block_total / qMax(1.0, core_block_seconds) : 0.0;
+    const double combined_rate_bytes =
+        combined_seconds > 0.0 ? block_transport_total / qMax(1.0, combined_seconds) : 0.0;
+    QString best;
+    if (udp_rate_bytes <= 0.0 && core_rate_bytes <= 0.0) {
+        best = QStringLiteral("collecting samples");
+    } else if (udp_rate_bytes > core_rate_bytes * 1.15) {
+        best = QStringLiteral("UDP faster now");
+    } else if (core_rate_bytes > udp_rate_bytes * 1.15) {
+        best = QStringLiteral("Core/TCP faster now");
+    } else {
+        best = QStringLiteral("Core/TCP and UDP similar");
+    }
     QSet<QString> failed_sources = m_udp_fast_sync_block_failed_peer_hosts;
     for (const QString& host : m_udp_fast_sync_block_success_peer_hosts) {
         failed_sources.remove(host);
@@ -5680,28 +5710,27 @@ QString NuRpcService::syncTransportSpeedSummary() const
     attempted_sources.unite(m_udp_fast_sync_block_success_peer_hosts);
     attempted_sources.unite(failed_sources);
 
-    QStringList parts;
-    parts.push_back(QStringLiteral("Blocks UDP %1/%2 (%3), TCP/Core %4/%2 (%5)")
-                        .arg(udp_blocks)
-                        .arg(block_total)
-                        .arg(percent_text(udp_blocks, block_total))
-                        .arg(core_blocks)
-                        .arg(percent_text(core_blocks, block_total)));
-    parts.push_back(QStringLiteral("Rates combined %1, TCP-block %2, UDP %3")
-                        .arg(volume_rate(block_transport_total, combined_seconds),
-                             volume_rate(core_block_total, core_block_seconds),
-                             volume_rate(udp_total, udp_seconds)));
-    parts.push_back(QStringLiteral("UDP sources %1/%2 ok, %3 failed, served %4")
-                        .arg(m_udp_fast_sync_block_success_peer_hosts.size())
-                        .arg(attempted_sources.size())
-                        .arg(failed_sources.size())
-                        .arg(m_udp_fast_sync_block_served_peer_hosts.size()));
-    parts.push_back(QStringLiteral("UDP fail %1").arg(m_fast_sync_udp_failures));
-    parts.push_back(QStringLiteral("Headers %1").arg(volume_rate(m_sync_core_header_bytes, core_header_seconds)));
-    if (tcp_total > 0) {
-        parts.push_back(QStringLiteral("Core net %1").arg(volume_rate(tcp_total, tcp_seconds)));
+    QString summary = QStringLiteral("Working: %1. Blocks UDP %2/%3 (%4), Core/TCP %5/%3 (%6); combined %7/s.")
+                          .arg(best,
+                               QString::number(udp_blocks),
+                               QString::number(block_total),
+                               percent_text(udp_blocks, block_total),
+                               QString::number(core_blocks),
+                               percent_text(core_blocks, block_total),
+                               formatBytes(static_cast<qint64>(std::llround(combined_rate_bytes))));
+    summary += QStringLiteral("\nRates UDP %1, Core/TCP %2; UDP peers %3/%4 ok, %5 failed, %6 protocol failures.")
+                   .arg(volume_rate(udp_total, udp_seconds),
+                        volume_rate(core_block_total, core_block_seconds),
+                        QString::number(m_udp_fast_sync_block_success_peer_hosts.size()),
+                        QString::number(attempted_sources.size()),
+                        QString::number(failed_sources.size()),
+                        QString::number(m_fast_sync_udp_failures));
+    if (m_sync_core_header_bytes > 0 || tcp_total > 0) {
+        summary +=
+            QStringLiteral(" Headers %1; Core net %2.")
+                .arg(volume_rate(m_sync_core_header_bytes, core_header_seconds), volume_rate(tcp_total, tcp_seconds));
     }
-    return parts.join(QStringLiteral(" | "));
+    return summary;
 }
 
 QString NuRpcService::syncBenchmarkSummary() const
@@ -5813,18 +5842,16 @@ QString NuRpcService::coreSyncPathSummary() const
                                        .arg(formatBytes(static_cast<qint64>(
                                            std::llround(m_sync_core_header_bytes / qMax(1.0, header_seconds))))) :
                                    QStringLiteral("headers waiting");
-    return QStringLiteral(
-               "Core/TCP block path %1/%2 blocks%3 | %4 | %5 | block-body %6 (recv %7) | %8 (%9 total) | fail %10")
+    return QStringLiteral("Blocks %1/%2%3; %4; %5; block data %6 rec'd, %7 total. Headers %8; failures %9.")
         .arg(
             QString::number(core_blocks),
             QString::number(block_total),
             share >= 0.0 ? QStringLiteral(" (%1%)").arg(QString::number(share, 'f', share >= 10.0 ? 0 : 1)) : QString(),
             avg,
             ewma,
-            formatBytes(total),
             formatBytes(received),
+            formatBytes(total),
             header_avg,
-            formatBytes(m_sync_tcp_bytes_received + m_sync_tcp_bytes_sent),
             QString::number(m_fast_sync_tcp_failures));
 }
 
@@ -5869,7 +5896,7 @@ QString NuRpcService::fastSyncUdpSummary() const
                                    QStringLiteral("%1%").arg(QString::number(share, 'f', share >= 10.0 ? 0 : 1)) :
                                    QStringLiteral("-");
     return QStringLiteral(
-               "UDP %1/%2 blocks (%3) | %4 | %5 | peers %6/%7 ok, %8 failed | sent %9, rec'd %10 | failures %11")
+               "Blocks %1/%2 (%3); %4; %5; peers %6/%7 ok, %8 failed.\nData rec'd %9, sent %10; failures %11.")
         .arg(QString::number(udp_blocks),
              QString::number(block_total),
              share_text,
@@ -5878,8 +5905,8 @@ QString NuRpcService::fastSyncUdpSummary() const
              QString::number(m_udp_fast_sync_block_success_peer_hosts.size()),
              QString::number(attempted_sources.size()),
              QString::number(failed_sources.size()),
-             formatBytes(m_lan_fast_sync_udp_bytes_sent),
              formatBytes(m_lan_fast_sync_udp_bytes_received),
+             formatBytes(m_lan_fast_sync_udp_bytes_sent),
              QString::number(m_fast_sync_udp_failures));
 }
 
@@ -5926,9 +5953,10 @@ QString NuRpcService::fastSyncUdpDetailSummary() const
                                  .arg(QString::number(udp_samples),
                                       QString::number(FAST_SYNC_PROTOCOL_MIN_UDP_PROBES),
                                       QString::number(udp_warmup_percent));
-    return QStringLiteral("UDP %1/%2 blocks%3 | %4 | %5 | data %6 (in %7, out %8) | sources %9/%10 ok, %11 failed, "
-                          "served %12 | probe %13/%14 B | pkts %15/%16 | fail timeout/checksum/buffer/submit "
-                          "%17/%18/%19/%20 | send fail req/probe %21/%22 | probe miss %23 | retry %24")
+    return QStringLiteral(
+               "Blocks %1/%2%3; %4; %5; data %6 (in %7, out %8); sources %9/%10 ok, %11 failed, served %12.\n"
+               "Probe %13/%14 B; packets rec'd/sent %15/%16; failures timeout/checksum/buffer/submit "
+               "%17/%18/%19/%20; send fail req/probe %21/%22; probe miss %23; retry %24.")
         .arg(
             QString::number(udp_blocks),
             QString::number(block_total),
@@ -10181,7 +10209,14 @@ void NuRpcService::validateExistingBlockchain()
 
 void NuRpcService::rebuildNodeMetrics()
 {
-    const QString sync_value = QStringLiteral("%1% | %2").arg(m_sync_progress_percent).arg(m_sync_state);
+    const QString sync_value = m_header_height > 0 ?
+                                   QStringLiteral("Block %1 of %2 (%3%, ETA %4) | %5")
+                                       .arg(QString::number(m_block_height),
+                                            QString::number(m_header_height),
+                                            QString::number(m_sync_progress_percent),
+                                            m_sync_eta,
+                                            m_sync_state) :
+                                   QStringLiteral("%1% | %2").arg(m_sync_progress_percent).arg(m_sync_state);
     const QString data_dir = m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir;
     m_node_metrics = {
         metricRow(QStringLiteral("Syncing"),
@@ -10227,11 +10262,13 @@ void NuRpcService::rebuildNodeMetrics()
                            "connection into this node; Out means this node opened the connection to a peer.")),
         metricRow(QStringLiteral("Blocks"),
                   m_metric_blocks,
-                  QStringLiteral("Current fully validated active-chain block height.")),
+                  QStringLiteral("Current fully validated active-chain block height."),
+                  true),
         metricRow(QStringLiteral("Headers"),
                   m_metric_headers,
                   QStringLiteral("Highest header height known by the backend. Headers can be ahead of fully downloaded "
-                                 "blocks during sync.")),
+                                 "blocks during sync."),
+                  true),
         metricRow(QStringLiteral("Verification"),
                   m_metric_verification,
                   QStringLiteral("Backend verification progress estimate across the active chain.")),
@@ -20900,8 +20937,8 @@ void NuRpcService::exportTrafficCsv()
     }
     QTextStream out(&file);
     out << "Seconds,Local Time,Average total received B/s,Average total sent B/s,Average TCP received B/s,Average TCP "
-           "sent B/s,Average UDP received B/s,Average UDP sent B/s,Average Quick Clone received B/s,Average Quick "
-           "Clone sent B/s\n";
+           "sent B/s,Average UDP received B/s,Average UDP sent B/s,Average Fast Sync UDP received B/s,Average Fast "
+           "Sync UDP sent B/s,Average Quick Clone UDP received B/s,Average Quick Clone UDP sent B/s\n";
     for (const QVariant& point_value : m_traffic_samples) {
         const QVariantMap point = point_value.toMap();
         out << point.value(QStringLiteral("seconds")).toDouble() << ',' << '"'
@@ -20914,6 +20951,8 @@ void NuRpcService::exportTrafficCsv()
             << point.value(QStringLiteral("tcpSent")).toDouble() << ','
             << point.value(QStringLiteral("udpReceived")).toDouble() << ','
             << point.value(QStringLiteral("udpSent")).toDouble() << ','
+            << point.value(QStringLiteral("fastSyncUdpReceived")).toDouble() << ','
+            << point.value(QStringLiteral("fastSyncUdpSent")).toDouble() << ','
             << point.value(QStringLiteral("quickCloneReceived")).toDouble() << ','
             << point.value(QStringLiteral("quickCloneSent")).toDouble() << '\n';
     }

@@ -82,6 +82,8 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString trafficTcpSentTotal READ trafficTcpSentTotal NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficUdpReceivedTotal READ trafficUdpReceivedTotal NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficUdpSentTotal READ trafficUdpSentTotal NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficFastSyncUdpReceivedTotal READ trafficFastSyncUdpReceivedTotal NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficFastSyncUdpSentTotal READ trafficFastSyncUdpSentTotal NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficQuickCloneReceivedTotal READ trafficQuickCloneReceivedTotal NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficQuickCloneSentTotal READ trafficQuickCloneSentTotal NOTIFY trafficChanged)
     Q_PROPERTY(QStringList logLines READ logLines NOTIFY logChanged)
@@ -424,6 +426,14 @@ public:
     QString trafficUdpSentTotal() const
     {
         return m_traffic_udp_sent_total;
+    }
+    QString trafficFastSyncUdpReceivedTotal() const
+    {
+        return m_traffic_fast_sync_udp_received_total;
+    }
+    QString trafficFastSyncUdpSentTotal() const
+    {
+        return m_traffic_fast_sync_udp_sent_total;
     }
     QString trafficQuickCloneReceivedTotal() const
     {
@@ -1695,6 +1705,8 @@ private:
     QString m_traffic_tcp_sent_total = QStringLiteral("0 B");
     QString m_traffic_udp_received_total = QStringLiteral("0 B");
     QString m_traffic_udp_sent_total = QStringLiteral("0 B");
+    QString m_traffic_fast_sync_udp_received_total = QStringLiteral("0 B");
+    QString m_traffic_fast_sync_udp_sent_total = QStringLiteral("0 B");
     QString m_traffic_quick_clone_received_total = QStringLiteral("0 B");
     QString m_traffic_quick_clone_sent_total = QStringLiteral("0 B");
     double m_quick_clone_received_rate_bytes_per_second = 0.0;

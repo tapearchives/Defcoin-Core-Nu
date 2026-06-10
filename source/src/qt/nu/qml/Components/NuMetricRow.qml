@@ -39,6 +39,7 @@ Rectangle {
         Label {
             text: root.label
             Layout.maximumWidth: root.labelMaximumWidth
+            Layout.alignment: Qt.AlignVCenter
             color: NuTokens.textSecondary
             font.pixelSize: NuTokens.fontSmall
             elide: Text.ElideRight
@@ -48,6 +49,7 @@ Rectangle {
         Label {
             text: root.value
             Layout.maximumWidth: root.valueMaximumWidth
+            Layout.alignment: Qt.AlignVCenter
             color: NuTokens.textPrimary
             font.pixelSize: NuTokens.fontBody
             font.weight: Font.DemiBold

@@ -26,8 +26,7 @@ ColumnLayout {
     property bool peerSimpleSortAscending: true
     property string peerDetailedSortKey: ""
     property bool peerDetailedSortAscending: true
-    property bool peerDetails: root.initialPeerView === 1
-    property bool statusDetails: false
+    property bool detailsMode: root.initialPeerView === 1
     property var statusRows: []
     property var selectedPeerNodeIds: []
     property var selectedBannedPeerKeys: []
@@ -164,8 +163,8 @@ ColumnLayout {
 
     function applyPeerSortForCurrentView() {
         if (!peersTable) return
-        const viewKey = root.peerDetails ? root.peerDetailedSortKey : root.peerSimpleSortKey
-        const viewAscending = root.peerDetails ? root.peerDetailedSortAscending : root.peerSimpleSortAscending
+        const viewKey = root.detailsMode ? root.peerDetailedSortKey : root.peerSimpleSortKey
+        const viewAscending = root.detailsMode ? root.peerDetailedSortAscending : root.peerSimpleSortAscending
         if (viewKey.length > 0 && peersTable.applyExternalSort(viewKey, viewAscending)) return
         if (root.peerSortKey.length > 0 && peersTable.applyExternalSort(root.peerSortKey, root.peerSortAscending)) return
         peersTable.sortColumn = -1
@@ -173,7 +172,7 @@ ColumnLayout {
 
     function displayedStatusRows() {
         const source = NuService.nodeMetrics || []
-        if (root.statusDetails) return source
+        if (root.detailsMode) return source
         let rows = []
         for (let i = 0; i < source.length; ++i) {
             const row = source[i]
@@ -418,7 +417,13 @@ ColumnLayout {
 
     spacing: NuTokens.spaceLg
 
-    onStatusDetailsChanged: root.refreshDisplayedStatusRows()
+    onDetailsModeChanged: {
+        root.refreshDisplayedStatusRows()
+        Qt.callLater(function() {
+            root.applyPeerSortForCurrentView()
+            if (peersTable) peersTable.forceResetColumnWidths()
+        })
+    }
 
     Component.onCompleted: {
         root.refreshLogFilterPresets()
@@ -435,6 +440,28 @@ ColumnLayout {
         title: "Metrics"
         detail: "Traffic, sync status, peer details, and network health."
         dense: true
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: NuTokens.spaceMd
+
+        NuDetailsSwitch {
+            id: globalDetailsSwitch
+            checked: root.detailsMode
+            helpText: "Show detailed traffic components, full sync diagnostics, and the full peer protocol table."
+            onCheckedChanged: root.detailsMode = checked
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: root.detailsMode
+                  ? "Detailed transport, sync, and peer diagnostics."
+                  : "Primary sync health, traffic, and peer status."
+            color: NuTokens.textSecondary
+            font.pixelSize: NuTokens.fontSmall
+            elide: Text.ElideRight
+        }
     }
 
     NuTabBar {
@@ -454,30 +481,8 @@ ColumnLayout {
         ColumnLayout {
             spacing: NuTokens.spaceMd
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: NuTokens.spaceMd
-
-                NuDetailsSwitch {
-                    id: statusDetailsSwitch
-                    checked: root.statusDetails
-                    helpText: "Show lower-frequency backend details, probe internals, paths, and message breakdowns."
-                    onCheckedChanged: root.statusDetails = checked
-                }
-
-                Label {
-                    Layout.fillWidth: true
-                    text: root.statusDetails
-                          ? "Full sync, network, backend, and diagnostic details."
-                          : "Primary sync health, transport mix, traffic, and chain progress."
-                    color: NuTokens.textSecondary
-                    font.pixelSize: NuTokens.fontSmall
-                    elide: Text.ElideRight
-                }
-            }
-
             NuDataTable {
-                tableId: root.statusDetails ? "nodeStatusMetricsDetailed" : "nodeStatusMetricsSimple"
+                tableId: root.detailsMode ? "nodeStatusMetricsDetailed" : "nodeStatusMetricsSimple"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 columns: ["Metric", "Value"]
@@ -486,12 +491,12 @@ ColumnLayout {
                     "Current value. The default view shows the highest-value sync and node health rows; Details adds lower-frequency diagnostics."
                 ]
                 columnTypes: ["text", "text"]
-                columnWeights: [0.58, 4.0]
-                columnMinimums: [176, 380]
-                columnMaximums: [234, 1600]
+                columnWeights: [0.78, 4.0]
+                columnMinimums: [230, 380]
+                columnMaximums: [300, 1600]
                 fitColumnsToViewport: true
                 wrapBodyText: true
-                maxWrappedBodyLines: root.statusDetails ? 3 : 2
+                maxWrappedBodyLines: root.detailsMode ? 3 : 2
                 compact: true
                 autoFitOnRowsChanged: true
                 alwaysShowHorizontalScrollBar: false
@@ -508,22 +513,9 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: NuTokens.spaceMd
 
-                NuDetailsSwitch {
-                    id: peerDetailsSwitch
-                    checked: root.peerDetails
-                    helpText: "Show the full peer protocol table."
-                    onCheckedChanged: {
-                        root.peerDetails = checked
-                        Qt.callLater(function() {
-                            root.applyPeerSortForCurrentView()
-                            peersTable.forceResetColumnWidths()
-                        })
-                    }
-                }
-
                 Label {
                     Layout.fillWidth: true
-                    text: root.peerDetails
+                    text: root.detailsMode
                           ? "Full protocol fields for network inspection."
                           : "Core peer health and traffic."
                     color: NuTokens.textSecondary
@@ -558,24 +550,24 @@ ColumnLayout {
                 plainClickSelectsRows: true
                 rowKeyMetaField: "nodeId"
                 selectedRowKeys: root.selectedPeerNodeIds
-                alwaysShowHorizontalScrollBar: root.peerDetails
-                tableId: root.peerDetails ? "nodePeersDetailed" : "nodePeersSimple"
+                alwaysShowHorizontalScrollBar: root.detailsMode
+                tableId: root.detailsMode ? "nodePeersDetailed" : "nodePeersSimple"
                 restoreSavedColumnWidths: false
-                columns: root.peerDetails ? root.detailedPeerColumns : root.simplePeerColumns
-                columnTooltips: root.peerDetails ? root.detailedPeerTooltips : root.simplePeerTooltips
-                columnTypes: root.peerDetails ? root.detailedPeerTypes : root.simplePeerTypes
-                sortColumnKeys: root.peerDetails ? root.detailedPeerSortKeys : root.simplePeerSortKeys
-                columnSortMetaFields: root.peerDetails ? root.detailedPeerSortMetaFields : []
-                columnWeights: root.peerDetails ? root.detailedPeerWeights : root.simplePeerWeights
-                columnMinimums: root.peerDetails ? root.detailedPeerMinimums : root.simplePeerMinimums
-                columnMaximums: root.peerDetails ? root.detailedPeerMaximums : root.simplePeerMaximums
-                rows: root.peerDetails ? root.displayedDetailedPeerRows() : NuService.peerRowsSimple
+                columns: root.detailsMode ? root.detailedPeerColumns : root.simplePeerColumns
+                columnTooltips: root.detailsMode ? root.detailedPeerTooltips : root.simplePeerTooltips
+                columnTypes: root.detailsMode ? root.detailedPeerTypes : root.simplePeerTypes
+                sortColumnKeys: root.detailsMode ? root.detailedPeerSortKeys : root.simplePeerSortKeys
+                columnSortMetaFields: root.detailsMode ? root.detailedPeerSortMetaFields : []
+                columnWeights: root.detailsMode ? root.detailedPeerWeights : root.simplePeerWeights
+                columnMinimums: root.detailsMode ? root.detailedPeerMinimums : root.simplePeerMinimums
+                columnMaximums: root.detailsMode ? root.detailedPeerMaximums : root.simplePeerMaximums
+                rows: root.detailsMode ? root.displayedDetailedPeerRows() : NuService.peerRowsSimple
                 emptyText: "Peers hydrate here after the tab renders."
                 onRowSelectionChanged: (keys) => root.selectedPeerNodeIds = keys
                 onSortChanged: (column, ascending, key) => {
                     root.peerSortKey = key
                     root.peerSortAscending = ascending
-                    if (root.peerDetails) {
+                    if (root.detailsMode) {
                         root.peerDetailedSortKey = key
                         root.peerDetailedSortAscending = ascending
                     } else {
@@ -656,6 +648,7 @@ ColumnLayout {
             NuTimelineGraph {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                detailsMode: root.detailsMode
                 samples: root.trafficPaused ? root.frozenTrafficSamples : NuService.trafficSamples
                 windowStart: root.trafficWindowStart
                 windowEnd: root.trafficWindowEnd
@@ -693,7 +686,7 @@ ColumnLayout {
                 spacing: NuTokens.spaceMd
 
                 GridLayout {
-                    columns: 4
+                    columns: 5
                     rowSpacing: 2
                     columnSpacing: NuTokens.spaceMd
 
@@ -708,10 +701,24 @@ ColumnLayout {
                         font.bold: true
                     }
                     Label {
-                        text: "UDP"
+                        text: "FS UDP"
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontTiny
                         font.bold: true
+                        ToolTip.visible: fsUdpHeaderHover.hovered
+                        ToolTip.text: "Fast Sync UDP"
+                        ToolTip.delay: NuTokens.tooltipDelay
+                        HoverHandler { id: fsUdpHeaderHover }
+                    }
+                    Label {
+                        text: "QC UDP"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.bold: true
+                        ToolTip.visible: qcUdpHeaderHover.hovered
+                        ToolTip.text: "Quick Clone UDP"
+                        ToolTip.delay: NuTokens.tooltipDelay
+                        HoverHandler { id: qcUdpHeaderHover }
                     }
                     Label {
                         text: "Total traffic"
@@ -732,7 +739,13 @@ ColumnLayout {
                         font.family: NuTokens.monoFont
                     }
                     Label {
-                        text: NuService.trafficUdpReceivedTotal
+                        text: NuService.trafficFastSyncUdpReceivedTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                    }
+                    Label {
+                        text: NuService.trafficQuickCloneReceivedTotal
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
@@ -757,7 +770,13 @@ ColumnLayout {
                         font.family: NuTokens.monoFont
                     }
                     Label {
-                        text: NuService.trafficUdpSentTotal
+                        text: NuService.trafficFastSyncUdpSentTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                    }
+                    Label {
+                        text: NuService.trafficQuickCloneSentTotal
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
