@@ -67,7 +67,11 @@ def is_private_or_local(host):
         pass
     try:
         packed = socket.inet_pton(socket.AF_INET6, host)
-        return host == "::1" or (packed[0] & 0xFE) == 0xFC or (packed[0] == 0xFE and (packed[1] & 0xC0) == 0x80)
+        return (
+            host == "::1"
+            or (packed[0] & 0xFE) == 0xFC
+            or (packed[0] == 0xFE and (packed[1] & 0xC0) == 0x80)
+        )
     except OSError:
         return False
 
@@ -109,7 +113,9 @@ def is_loopback(host):
 def peer_advertises_fast_sync_service(peer):
     services = peer.get("services")
     try:
-        services_value = int(services.strip() or "0", 16) if isinstance(services, str) else int(services or 0)
+        services_value = (
+            int(services.strip() or "0", 16) if isinstance(services, str) else int(services or 0)
+        )
     except (TypeError, ValueError):
         return False
     return bool(services_value & FAST_SYNC_SERVICE_BIT)
@@ -322,9 +328,15 @@ class FastSyncDaemon:
             self.log_ignored_client(host, now)
             return
 
-        sender_cap = MAX_DATAGRAM_BYTES if is_private_or_local(host) else INTERNET_PROBE_DATAGRAM_BYTES
-        peer_max_datagram = max(576, min(sender_cap, int(header.get("max_datagram", SAFE_DATAGRAM_BYTES))))
-        requested_chunk = int(header.get("chunk_bytes", chunk_bytes_for_datagram(peer_max_datagram)))
+        sender_cap = (
+            MAX_DATAGRAM_BYTES if is_private_or_local(host) else INTERNET_PROBE_DATAGRAM_BYTES
+        )
+        peer_max_datagram = max(
+            576, min(sender_cap, int(header.get("max_datagram", SAFE_DATAGRAM_BYTES)))
+        )
+        requested_chunk = int(
+            header.get("chunk_bytes", chunk_bytes_for_datagram(peer_max_datagram))
+        )
         peer_chunk_bytes = max(
             MIN_CHUNK_BYTES,
             min(MAX_CHUNK_BYTES, requested_chunk, chunk_bytes_for_datagram(peer_max_datagram)),
@@ -354,7 +366,12 @@ class FastSyncDaemon:
             self.stats["probes"] += 1
             self.stats["sent_datagrams"] += 1
             self.stats["sent_bytes"] += sent
-            logging.info("acked probe host=%s datagram=%s chunk=%s", host, peer_max_datagram, peer_chunk_bytes)
+            logging.info(
+                "acked probe host=%s datagram=%s chunk=%s",
+                host,
+                peer_max_datagram,
+                peer_chunk_bytes,
+            )
 
     def handle_request(self, sock, sender, header):
         host = normalize_ip(sender[0])
@@ -378,9 +395,15 @@ class FastSyncDaemon:
         if height > tip:
             return
 
-        sender_cap = MAX_DATAGRAM_BYTES if is_private_or_local(host) else INTERNET_PROBE_DATAGRAM_BYTES
-        peer_max_datagram = max(576, min(sender_cap, int(header.get("max_datagram", SAFE_DATAGRAM_BYTES))))
-        requested_chunk = int(header.get("chunk_bytes", chunk_bytes_for_datagram(peer_max_datagram)))
+        sender_cap = (
+            MAX_DATAGRAM_BYTES if is_private_or_local(host) else INTERNET_PROBE_DATAGRAM_BYTES
+        )
+        peer_max_datagram = max(
+            576, min(sender_cap, int(header.get("max_datagram", SAFE_DATAGRAM_BYTES)))
+        )
+        requested_chunk = int(
+            header.get("chunk_bytes", chunk_bytes_for_datagram(peer_max_datagram))
+        )
         peer_chunk_bytes = max(
             MIN_CHUNK_BYTES,
             min(MAX_CHUNK_BYTES, requested_chunk, chunk_bytes_for_datagram(peer_max_datagram)),
@@ -445,10 +468,14 @@ class FastSyncDaemon:
         if now - last < MAX_IGNORED_LOG_INTERVAL_SECONDS:
             return
         self.last_ignore_log_by_host[host] = now
-        logging.info("ignored udp request from host without connected Fast Sync service bit=%s", host)
+        logging.info(
+            "ignored udp request from host without connected Fast Sync service bit=%s", host
+        )
         if len(self.last_ignore_log_by_host) > 2048:
             self.last_ignore_log_by_host = {
-                key: value for key, value in self.last_ignore_log_by_host.items() if now - value < 600
+                key: value
+                for key, value in self.last_ignore_log_by_host.items()
+                if now - value < 600
             }
 
     def is_allowed_fast_sync_client(self, host, now):

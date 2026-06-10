@@ -34,7 +34,5 @@ This git tree is the current Tahoe / Apple Silicon Defcoin Core Nu source, based
 
 ## Child DOX Index
 
-- `source/src/qt/nu/AGENTS.md` - Nu Qt/QML frontend, bridge, local docs, tools, and assets.
-- `source/src/AGENTS.md` - backend and consensus-adjacent source, including Fast Sync service bits, reservations, validation, wallet storage, and RPC hooks.
-- `source/build_msvc/AGENTS.md` - Windows/MSVC project files and build graph.
+- `source/AGENTS.md` - source-root contracts for backend, Nu frontend, Windows staging, and generated build boundaries.
 - `scripts/`, `build/`, `.github/` - build helpers and generated/local tooling governed by this doc.

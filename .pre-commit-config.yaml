@@ -3,7 +3,24 @@ repos:
     rev: v0.15.15
     hooks:
       - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
+        args: [--fix, --exit-non-zero-on-fix, --config, source/src/qt/nu/tools/ruff.toml]
         files: ^source/src/qt/nu/(app/repair_macos_qt_bundle\.py|tools/.*\.py)$
       - id: ruff-format
+        args: [--config, source/src/qt/nu/tools/ruff.toml]
         files: ^source/src/qt/nu/(app/repair_macos_qt_bundle\.py|tools/.*\.py)$
+
+  - repo: local
+    hooks:
+      - id: nu-clang-format-check
+        name: clang-format check Nu C/C++
+        entry: /usr/bin/xcrun clang-format --dry-run --Werror
+        language: system
+        files: ^source/src/qt/nu/app/.*\.(c|cc|cpp|cxx|h|hh|hpp|hxx|m|mm)$
+        pass_filenames: true
+
+      - id: windows-vcxproj-xml-check
+        name: parse Windows vcxproj XML
+        entry: python3 -c "import sys, xml.etree.ElementTree as ET; [ET.parse(path) for path in sys.argv[1:]]"
+        language: system
+        files: ^source/build_msvc/.*\.vcxproj$
+        pass_filenames: true

@@ -263,7 +263,9 @@ def ensure_frameworks(app_bundle: Path, qt_root: Path) -> None:
                     continue
                 source = source_framework_for(framework, dep, roots)
                 if source is None:
-                    raise RuntimeError(f"Unable to locate Qt framework {framework} required by {macho}")
+                    raise RuntimeError(
+                        f"Unable to locate Qt framework {framework} required by {macho}"
+                    )
                 copy_framework(source, target)
                 copied = True
         if not copied:
@@ -383,13 +385,17 @@ def validate_bundle(app_bundle: Path) -> None:
             if name is not None:
                 bundled = contents_dir / "Frameworks" / name
                 desired = flat_dylib_install_name(macho, contents_dir, name)
-                if not bundled.exists() and (dep.startswith("/opt/homebrew/") or dep.startswith("@rpath/")):
+                if not bundled.exists() and (
+                    dep.startswith("/opt/homebrew/") or dep.startswith("@rpath/")
+                ):
                     missing.append(f"{macho}: {dep}")
                 elif (
                     bundled.exists()
                     and dep != desired
                     and (
-                        dep.startswith("/opt/homebrew/") or dep.startswith("@rpath/") or dep.startswith("@loader_path/")
+                        dep.startswith("/opt/homebrew/")
+                        or dep.startswith("@rpath/")
+                        or dep.startswith("@loader_path/")
                     )
                 ):
                     unresolved.append(f"{macho}: {dep}")
