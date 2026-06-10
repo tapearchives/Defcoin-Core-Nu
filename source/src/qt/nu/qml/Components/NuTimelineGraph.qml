@@ -12,10 +12,8 @@ Item {
     property color sentColor: NuTokens.dataSent
     property color tcpReceivedColor: "#21a56f"
     property color tcpSentColor: "#2f80ed"
-    property color fastSyncUdpReceivedColor: "#c94949"
-    property color fastSyncUdpSentColor: "#d9a321"
-    property color quickCloneUdpReceivedColor: "#8a6a44"
-    property color quickCloneUdpSentColor: "#2a9d8f"
+    property color udpReceivedColor: "#b74b4b"
+    property color udpSentColor: "#d9a321"
     property var samples: []
     property real windowStart: 0
     property real windowEnd: 1
@@ -55,10 +53,6 @@ Item {
         function componentRate(sample, key) {
             if (!sample) return 0
             if (sample[key] !== undefined) return safeRate(sample[key])
-            if (key === "fastSyncUdpReceived")
-                return Math.max(0, safeRate(sample.udpReceived) - safeRate(sample.quickCloneReceived))
-            if (key === "fastSyncUdpSent")
-                return Math.max(0, safeRate(sample.udpSent) - safeRate(sample.quickCloneSent))
             return 0
         }
 
@@ -71,9 +65,11 @@ Item {
 
         function formatRate(value) {
             value = Math.max(0, Number(value) || 0)
-            if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(2) + " MB/s"
-            if (value >= 1024) return (value / 1024).toFixed(1) + " KB/s"
-            return Math.round(value) + " B/s"
+            let bits = value * 8
+            if (bits >= 1000 * 1000 * 1000) return (bits / (1000 * 1000 * 1000)).toFixed(2) + " Gb/s"
+            if (bits >= 1000 * 1000) return (bits / (1000 * 1000)).toFixed(bits >= 100 * 1000 * 1000 ? 0 : 1) + " Mb/s"
+            if (bits >= 1000) return (bits / 1000).toFixed(bits >= 100 * 1000 ? 0 : 1) + " Kb/s"
+            return Math.round(bits) + " b/s"
         }
 
         function formatSampleTime(sample) {
@@ -106,13 +102,11 @@ Item {
 
             const receivedComponents = [
                 { key: "tcpReceived", label: "Rec'd TCP", color: root.tcpReceivedColor },
-                { key: "fastSyncUdpReceived", label: "Rec'd FS UDP", color: root.fastSyncUdpReceivedColor },
-                { key: "quickCloneReceived", label: "Rec'd QC UDP", color: root.quickCloneUdpReceivedColor }
+                { key: "udpReceived", label: "Rec'd UDP", color: root.udpReceivedColor }
             ]
             const sentComponents = [
                 { key: "tcpSent", label: "Sent TCP", color: root.tcpSentColor },
-                { key: "fastSyncUdpSent", label: "Sent FS UDP", color: root.fastSyncUdpSentColor },
-                { key: "quickCloneSent", label: "Sent QC UDP", color: root.quickCloneUdpSentColor }
+                { key: "udpSent", label: "Sent UDP", color: root.udpSentColor }
             ]
             const groups = [
                 { label: "Rec'd", components: receivedComponents, totalKey: "received", color: root.receivedColor },
@@ -254,11 +248,9 @@ Item {
             if (root.detailsMode) {
                 const legendX = Math.max(12, width - 500)
                 legendSwatch(legendX, 18, root.tcpReceivedColor, "Rec'd TCP")
-                legendSwatch(legendX + 118, 18, root.fastSyncUdpReceivedColor, "Rec'd FS UDP")
-                legendSwatch(legendX + 258, 18, root.quickCloneUdpReceivedColor, "Rec'd QC UDP")
+                legendSwatch(legendX + 118, 18, root.udpReceivedColor, "Rec'd UDP")
                 legendSwatch(legendX, 38, root.tcpSentColor, "Sent TCP")
-                legendSwatch(legendX + 118, 38, root.fastSyncUdpSentColor, "Sent FS UDP")
-                legendSwatch(legendX + 258, 38, root.quickCloneUdpSentColor, "Sent QC UDP")
+                legendSwatch(legendX + 118, 38, root.udpSentColor, "Sent UDP")
             } else {
                 const legendX = Math.max(12, width - 250)
                 legendSwatch(legendX, 18, root.receivedColor, "Rec'd total")
@@ -315,17 +307,15 @@ Item {
                       ? (root.detailsMode
                          ? (canvas.formatSampleTime(canvas.hoverSample)
                             + "\nRec'd total " + canvas.formatRate(canvas.groupTotal(canvas.hoverSample, [
-                                { key: "tcpReceived" }, { key: "fastSyncUdpReceived" }, { key: "quickCloneReceived" }
+                                { key: "tcpReceived" }, { key: "udpReceived" }
                             ]))
                             + " | TCP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "tcpReceived"))
-                            + " | FS UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "fastSyncUdpReceived"))
-                            + " | QC UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "quickCloneReceived"))
+                            + " | UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "udpReceived"))
                             + "\nSent total " + canvas.formatRate(canvas.groupTotal(canvas.hoverSample, [
-                                { key: "tcpSent" }, { key: "fastSyncUdpSent" }, { key: "quickCloneSent" }
+                                { key: "tcpSent" }, { key: "udpSent" }
                             ]))
                             + " | TCP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "tcpSent"))
-                            + " | FS UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "fastSyncUdpSent"))
-                            + " | QC UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "quickCloneSent")))
+                            + " | UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "udpSent")))
                          : (canvas.formatSampleTime(canvas.hoverSample)
                             + "\nRec'd total " + canvas.formatRate(canvas.hoverSample.received)
                             + "\nSent total " + canvas.formatRate(canvas.hoverSample.sent)))

@@ -50,7 +50,7 @@ ColumnLayout {
     readonly property int legacyDetailedLanColumnStart: 4
     readonly property int detailedFastSyncColumnIndex: 9
     property var detailedPeerColumns: ["Node", "Dir.", "IP", "Port", "Reverse\nDNS Name", "Seed Source /\nLAN Workstation Name", "Protocol\nVersion", "Magic", "Services", "Fast\nSync\nAvail", "Methods", "Ping", "Min Ping", "Sent", "Rec'd", "User Agent", "Connection Time", "Start\nHeight", "Last Send", "Last Recv", "Last TX", "Last Block", "Synced\nHeaders", "Synced\nBlocks", "Conn Type", "Network", "Addr\nEntries", "Min Fee\nFilter"]
-    property var detailedPeerTypes: ["number", "text", "ipport", "number", "reverseDns", "seedLanSource", "number", "text", "center", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
+    property var detailedPeerTypes: ["number", "text", "ipport", "number", "reverseDns", "seedLanSource", "center", "center", "text", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
     property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "transportMethods", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
     property var detailedPeerSortMetaFields: ["", "", "", "", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
     property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 1.05, 1.35, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
@@ -686,7 +686,7 @@ ColumnLayout {
                 spacing: NuTokens.spaceMd
 
                 GridLayout {
-                    columns: 5
+                    columns: 4
                     rowSpacing: 2
                     columnSpacing: NuTokens.spaceMd
 
@@ -699,32 +699,25 @@ ColumnLayout {
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontTiny
                         font.bold: true
+                        Layout.alignment: Qt.AlignRight
                     }
                     Label {
-                        text: "FS UDP"
+                        text: "UDP"
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontTiny
                         font.bold: true
-                        ToolTip.visible: fsUdpHeaderHover.hovered
-                        ToolTip.text: "Fast Sync UDP"
+                        Layout.alignment: Qt.AlignRight
+                        ToolTip.visible: udpHeaderHover.hovered
+                        ToolTip.text: "Fast Sync UDP and Quick Clone UDP combined"
                         ToolTip.delay: NuTokens.tooltipDelay
-                        HoverHandler { id: fsUdpHeaderHover }
-                    }
-                    Label {
-                        text: "QC UDP"
-                        color: NuTokens.textSecondary
-                        font.pixelSize: NuTokens.fontTiny
-                        font.bold: true
-                        ToolTip.visible: qcUdpHeaderHover.hovered
-                        ToolTip.text: "Quick Clone UDP"
-                        ToolTip.delay: NuTokens.tooltipDelay
-                        HoverHandler { id: qcUdpHeaderHover }
+                        HoverHandler { id: udpHeaderHover }
                     }
                     Label {
                         text: "Total traffic"
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontTiny
                         font.bold: true
+                        Layout.alignment: Qt.AlignRight
                     }
 
                     Label {
@@ -737,18 +730,16 @@ ColumnLayout {
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
                     }
                     Label {
-                        text: NuService.trafficFastSyncUdpReceivedTotal
+                        text: NuService.trafficUdpReceivedTotal
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
-                    }
-                    Label {
-                        text: NuService.trafficQuickCloneReceivedTotal
-                        color: NuTokens.textPrimary
-                        font.pixelSize: NuTokens.fontTiny
-                        font.family: NuTokens.monoFont
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
                     }
                     Label {
                         text: NuService.trafficReceivedTotal
@@ -756,6 +747,8 @@ ColumnLayout {
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
                         font.bold: true
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
                     }
 
                     Label {
@@ -768,18 +761,16 @@ ColumnLayout {
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
                     }
                     Label {
-                        text: NuService.trafficFastSyncUdpSentTotal
+                        text: NuService.trafficUdpSentTotal
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
-                    }
-                    Label {
-                        text: NuService.trafficQuickCloneSentTotal
-                        color: NuTokens.textPrimary
-                        font.pixelSize: NuTokens.fontTiny
-                        font.family: NuTokens.monoFont
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
                     }
                     Label {
                         text: NuService.trafficSentTotal
@@ -787,6 +778,8 @@ ColumnLayout {
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
                         font.bold: true
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
                     }
                 }
                 Item { Layout.fillWidth: true }

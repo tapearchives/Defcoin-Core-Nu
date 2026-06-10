@@ -191,18 +191,30 @@ ColumnLayout {
                                     wrapMode: Text.WordWrap
                                 }
 
-                                NuCheckBox {
-                                    text: "Allow Quick Clone from trusted LAN nodes"
-                                    checked: NuService.lanQuickCloneEnabled
-                                    helpText: "Advanced. Use only with Defcoin Core Nu nodes you own and trust on the same LAN. Normal validation-based sync remains the default; DCOL snapshot replacement is gated by manifests and hash checks before any public chain folders are swapped."
-                                    onToggled: NuService.lanQuickCloneEnabled = checked
-                                }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: NuTokens.spaceMd
 
-                                NuCheckBox {
-                                    text: "Automatically validate blocks after Quick Clone"
-                                    checked: NuService.quickCloneAutoValidateAfter
-                                    helpText: "Runs Core's online verifychain path after a Quick Clone when available. This can slow the wallet while it runs, but it gives a post-copy integrity check without copying any wallet data."
-                                    onToggled: NuService.quickCloneAutoValidateAfter = checked
+                                    NuCheckBox {
+                                        text: "Allow Quick Clone from LAN nodes"
+                                        checked: NuService.lanQuickCloneEnabled
+                                        helpText: "Advanced. Use only with Defcoin Core Nu nodes on your LAN. Normal validation-based sync remains available; DCOL snapshot replacement is gated by manifests and hash checks before any public chain folders are swapped."
+                                        onToggled: NuService.lanQuickCloneEnabled = checked
+                                    }
+
+                                    NuCheckBox {
+                                        text: "Provide Quick Clones to LAN nodes"
+                                        checked: NuService.lanQuickCloneProvideEnabled
+                                        helpText: "Allows this wallet to answer trusted-LAN Quick Clone block requests using public blockchain data only. Wallet files, private keys, passphrases, settings, peers, bans, and RPC cookies are never sent."
+                                        onToggled: NuService.lanQuickCloneProvideEnabled = checked
+                                    }
+
+                                    NuCheckBox {
+                                        text: "Automatically validate blocks after Quick Clone"
+                                        checked: NuService.quickCloneAutoValidateAfter
+                                        helpText: "Runs Core's online verifychain path after a Quick Clone when available. This can slow the wallet while it runs, but it gives a post-copy integrity check without copying any wallet data."
+                                        onToggled: NuService.quickCloneAutoValidateAfter = checked
+                                    }
                                 }
 
                                 RowLayout {

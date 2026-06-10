@@ -187,10 +187,11 @@ Rectangle {
     }
 
     function syncMastValue() {
-        if (!NuService.syncing) return NuService.syncState
+        if (!NuService.syncing) return "Up to Date"
         const tip = Number(NuService.headerHeight || 0)
-        if (tip <= 0) return NuService.syncState
-        return "Block " + NuService.blockHeight + " of " + tip
+        const mode = String(NuService.syncTransportMode || "Syncing")
+        if (tip <= 0) return mode
+        return mode + " | " + NuService.blockHeight + "/" + tip
                 + " (" + NuService.syncProgressPercent + "%, ETA " + NuService.syncEta + ")"
     }
 
@@ -324,6 +325,20 @@ Rectangle {
                 stateColor: root.networkStatusColor()
                 helpText: root.networkStatusHelp()
                 labelMaximumWidth: root.width < 900 ? 170 : 230
+            }
+
+            NuMetricRow {
+                label: "TX:"
+                value: NuService.trafficSentRate
+                valueMaximumWidth: 92
+                helpText: "Recent total network transmit rate, including Core TCP, Fast Sync UDP, and Quick Clone UDP traffic."
+            }
+
+            NuMetricRow {
+                label: "RX:"
+                value: NuService.trafficReceivedRate
+                valueMaximumWidth: 92
+                helpText: "Recent total network receive rate, including Core TCP, Fast Sync UDP, and Quick Clone UDP traffic."
             }
 
             NuMetricRow {

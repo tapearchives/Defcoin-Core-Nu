@@ -53,6 +53,80 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.5d - 2026-06-10 - Sync mode mast and Quick Clone request isolation
+
+Big picture:
+- This build fixes confusing Quick Clone/Fast Sync status mixing and makes the
+  mast show the active sync transport in a compact form.
+- Quick Clone and Fast Sync still share the UDP transport implementation, but a
+  block transfer now carries its own `clone_mode` flag from request through
+  chunk assembly and submit status. Do not derive transfer type from the global
+  Quick Clone setting.
+- The visible Quick Clone setting is now an allowed/armed preference. A
+  session-only request flag controls actual Quick Clone scheduling after the
+  prompt/manual action. This prevents default-on settings from silently
+  hijacking ordinary UDP Fast Sync.
+- Traffic rate displays now use bits per second for rates. Total volume remains
+  byte based.
+
+Porting priority:
+- Lion Intel: required. Port the per-request `clone_mode` parameter, earliest
+  missing-block Quick Clone scheduling, staged-gap debug log, status text, and
+  Settings/Peers/UI changes.
+- Catalina UTM: required before its next package if it shares the Qt/QML shell.
+- Windows: required. This shared source has the Windows QML/C++ changes; rebuild
+  the Windows package from this source before testing the LAN icon and traffic
+  footer there.
+- Server: no Quick Clone UI. Keep Fast Sync responder behavior unchanged except
+  for any shared transport-only bug fixes that do not depend on the QML service.
+
+Changed behavior:
+- Mast `Sync` value now reports `via TCP`, `via UDP FS`, `via UDP QC`, or
+  `Up to Date`, then the current block/header progress and ETA while syncing.
+- Mast shows compact `TX:` and `RX:` recent traffic rates.
+- Quick Clone receiver requests the earliest missing Core-reserved block instead
+  of filling a farther-ahead staged cache first.
+- Staged-gap logs use `NU_UDP_FASTSYNC_STAGED_GAP mode=quick-clone|fast-sync`.
+- Quick Clone settings default on for both receive and provide:
+  `Allow Quick Clone from LAN nodes` and `Provide Quick Clones to LAN nodes`.
+- Accepting the Quick Clone prompt or clicking the manual action starts the
+  session. Merely enabling the checkbox keeps the node armed and listening.
+- Metrics details show TCP and UDP; Quick Clone UDP is counted inside UDP, not
+  as an extra graph/footer total.
+- Services column is left-justified; Protocol Version and Magic are centered;
+  workstation cells reserve width for the LAN icon.
+
+Changed files and important details:
+- `src/clientversion.h`: visible Defcoin release identity moved to `26.6.5d`.
+- `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
+  `26.6.5d`.
+- `src/qt/nu/app/NuRpcService.h/.cpp`: added `syncTransportMode`,
+  `trafficReceivedRate`, `trafficSentRate`, `lanQuickCloneProvideEnabled`,
+  per-request `clone_mode`, session-only Quick Clone request state, bit-rate
+  formatting helpers, clone-aware status, and throttled staged-gap diagnostics.
+- `src/qt/nu/qml/Shell/StatusStrip.qml`: mast sync mode and TX/RX rates.
+- `src/qt/nu/qml/Views/SettingsView.qml`: compact Quick Clone checkbox row and
+  the new provider toggle.
+- `src/qt/nu/qml/Views/NodeView.qml`: traffic footer consolidation and peer
+  column alignment.
+- `src/qt/nu/qml/Components/NuTimelineGraph.qml`: detail graph now draws TCP and
+  UDP components only; Quick Clone remains part of UDP.
+- `src/qt/nu/qml/Components/NuDataTable.qml`: workstation LAN-icon auto-fit
+  padding and revised alignment heuristics.
+
+Verification performed:
+- `git diff --check` passed.
+- `qmllint -I src/qt/nu/qml` on the touched QML files exited 0 with only the
+  known `Defcoin.Nu` import/context-property warnings.
+- Native Apple Silicon `DefcoinCoreNu` build completed in
+  `build/nu-qml-arm64-26.6.5d`.
+
+Risks / follow-up:
+- Live UDP/Quick Clone testing still requires the macOS Local Network `Allow`
+  prompt to be cleared on first launch of the new Tahoe app bundle.
+- The Lion port must keep the same status strings and debug marker names so
+  cross-machine log comparison stays useful.
+
 ### 26.6.5b - 2026-06-10 - Windows launch visibility and menu crash guard
 
 Big picture:

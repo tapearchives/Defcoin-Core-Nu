@@ -47,6 +47,7 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString syncState READ syncState NOTIFY stateChanged)
     Q_PROPERTY(QString syncDetail READ syncDetail NOTIFY stateChanged)
     Q_PROPERTY(QString syncEta READ syncEta NOTIFY stateChanged)
+    Q_PROPERTY(QString syncTransportMode READ syncTransportMode NOTIFY stateChanged)
     Q_PROPERTY(int syncProgressPercent READ syncProgressPercent NOTIFY stateChanged)
     Q_PROPERTY(QString recentNetworkHashrate READ recentNetworkHashrate NOTIFY stateChanged)
     Q_PROPERTY(QString networkDifficulty READ networkDifficulty NOTIFY stateChanged)
@@ -78,6 +79,8 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QVariantList trafficSamples READ trafficSamples NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficReceivedTotal READ trafficReceivedTotal NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficSentTotal READ trafficSentTotal NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficReceivedRate READ trafficReceivedRate NOTIFY trafficChanged)
+    Q_PROPERTY(QString trafficSentRate READ trafficSentRate NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficTcpReceivedTotal READ trafficTcpReceivedTotal NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficTcpSentTotal READ trafficTcpSentTotal NOTIFY trafficChanged)
     Q_PROPERTY(QString trafficUdpReceivedTotal READ trafficUdpReceivedTotal NOTIFY trafficChanged)
@@ -111,6 +114,8 @@ class NuRpcService final : public QObject
     Q_PROPERTY(bool lanFastSyncEnabled READ lanFastSyncEnabled WRITE setLanFastSyncEnabled NOTIFY settingsChanged)
     Q_PROPERTY(QString lanFastSyncStatus READ lanFastSyncStatus NOTIFY stateChanged)
     Q_PROPERTY(bool lanQuickCloneEnabled READ lanQuickCloneEnabled WRITE setLanQuickCloneEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(bool lanQuickCloneProvideEnabled READ lanQuickCloneProvideEnabled WRITE setLanQuickCloneProvideEnabled
+                   NOTIFY settingsChanged)
     Q_PROPERTY(QString lanQuickCloneStatus READ lanQuickCloneStatus NOTIFY stateChanged)
     Q_PROPERTY(bool quickCloneAutoValidateAfter READ quickCloneAutoValidateAfter WRITE setQuickCloneAutoValidateAfter
                    NOTIFY settingsChanged)
@@ -287,6 +292,10 @@ public:
     {
         return m_sync_eta;
     }
+    QString syncTransportMode() const
+    {
+        return m_sync_transport_mode;
+    }
     int syncProgressPercent() const
     {
         return m_sync_progress_percent;
@@ -411,6 +420,14 @@ public:
     {
         return m_traffic_sent_total;
     }
+    QString trafficReceivedRate() const
+    {
+        return m_traffic_received_rate;
+    }
+    QString trafficSentRate() const
+    {
+        return m_traffic_sent_rate;
+    }
     QString trafficTcpReceivedTotal() const
     {
         return m_traffic_tcp_received_total;
@@ -522,6 +539,10 @@ public:
     bool lanQuickCloneEnabled() const
     {
         return m_lan_quick_clone_enabled;
+    }
+    bool lanQuickCloneProvideEnabled() const
+    {
+        return m_lan_quick_clone_provide_enabled;
     }
     QString lanQuickCloneStatus() const
     {
@@ -1141,6 +1162,7 @@ public Q_SLOTS:
     void setLanNodeDiscoveryEnabled(bool enabled);
     void setLanFastSyncEnabled(bool enabled);
     void setLanQuickCloneEnabled(bool enabled);
+    void setLanQuickCloneProvideEnabled(bool enabled);
     void setQuickCloneAutoValidateAfter(bool enabled);
     void setAdvancedToolsVisible(bool enabled);
     void setUpnpConnectionsEnabled(bool enabled);
@@ -1279,7 +1301,8 @@ private:
     QString quickClonePromptText() const;
     QString selectLanQuickCloneTargetHost(int* node_id, int* peer_tip) const;
     QString selectLanQuickCloneProbeHost(int* node_id) const;
-    void sendLanFastSyncBlockRequest(int height, const QString& host, int node_id, const QString& expected_hash);
+    void sendLanFastSyncBlockRequest(
+        int height, const QString& host, int node_id, const QString& expected_hash, bool clone_mode = false);
     void releaseLanFastSyncReservation();
     void releaseLanFastSyncReservationFor(int node_id, const QString& hash);
     void releaseAllLanFastSyncReservations();
@@ -1290,6 +1313,7 @@ private:
     bool canStartMoreLanFastSyncTransfers() const;
     bool hasLanFastSyncPendingHeight(int height) const;
     int nextLanFastSyncWantedHeight() const;
+    bool hasLanFastSyncReadyCloneBlock() const;
     qint64 lanFastSyncBufferedBytes() const;
     int lanFastSyncLocalInflightCount(const QString& host) const;
     void handleLanFastSyncProbe(const QJsonObject& header, const QHostAddress& sender, quint16 sender_port);
@@ -1470,6 +1494,8 @@ private:
 
     static QString formatAmount(const QJsonValue& value);
     static QString formatBytes(qint64 bytes);
+    static QString formatBitRate(double bytes_per_second);
+    static QString formatCompactBitRate(double bytes_per_second);
     static QString formatPing(const QJsonValue& seconds);
     static QString formatServices(const QString& services_hex);
     static QString formatServiceDetails(const QString& services_hex);
@@ -1572,6 +1598,7 @@ private:
     QString m_sync_state = QStringLiteral("Unknown");
     QString m_sync_detail = QStringLiteral("Waiting for backend status.");
     QString m_sync_eta = QStringLiteral("Unknown");
+    QString m_sync_transport_mode = QStringLiteral("Up to Date");
     int m_sync_progress_percent = 0;
     double m_sync_last_progress = -1.0;
     double m_sync_average_blocks_per_second = 0.0;
@@ -1654,6 +1681,7 @@ private:
         int node_id = -1;
         int height = -1;
         qint64 request_ms = 0;
+        bool clone_mode = false;
     };
     QSet<QString> m_lan_quick_clone_candidate_hosts;
     QSet<QString> m_quick_clone_snapshot_candidate_hosts;
@@ -1709,6 +1737,8 @@ private:
     QString m_traffic_fast_sync_udp_sent_total = QStringLiteral("0 B");
     QString m_traffic_quick_clone_received_total = QStringLiteral("0 B");
     QString m_traffic_quick_clone_sent_total = QStringLiteral("0 B");
+    QString m_traffic_received_rate = QStringLiteral("~0 b/s");
+    QString m_traffic_sent_rate = QStringLiteral("~0 b/s");
     double m_quick_clone_received_rate_bytes_per_second = 0.0;
     double m_quick_clone_sent_rate_bytes_per_second = 0.0;
     qint64 m_sync_tcp_bytes_received = 0;
@@ -1753,7 +1783,9 @@ private:
     bool m_only_defcoin_user_agents = true;
     bool m_advanced_tools_visible = false;
     bool m_lan_fast_sync_enabled = true;
-    bool m_lan_quick_clone_enabled = false;
+    bool m_lan_quick_clone_enabled = true;
+    bool m_lan_quick_clone_requested = false;
+    bool m_lan_quick_clone_provide_enabled = true;
     bool m_debug_disable_core_tcp_sync = false;
     bool m_debug_disable_core_sync = false;
     bool m_debug_disable_fast_sync = false;
@@ -1798,6 +1830,7 @@ private:
     qint64 m_lan_fast_sync_started_ms = 0;
     qint64 m_lan_fast_sync_request_ms = 0;
     qint64 m_lan_fast_sync_last_progress_ms = 0;
+    qint64 m_lan_fast_sync_last_gap_log_ms = 0;
     QString m_lan_fast_sync_last_failure_detail;
     int m_lan_fast_sync_reserved_node_id = -1;
     QString m_lan_fast_sync_reserved_hash;

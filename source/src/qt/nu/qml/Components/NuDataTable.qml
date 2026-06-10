@@ -239,8 +239,6 @@ Rectangle {
         if (type === "bytes" || type === "amount" || type === "duration" || type === "number") return true
         return name === "dir." || name === "dir" || name.indexOf("direction") >= 0
                || name === "port"
-               || name.indexOf("magic") >= 0 || name.indexOf("protocol") >= 0
-               || name === "version" || name === "svcs" || name === "services"
     }
 
     function centerAlignColumn(index) {
@@ -611,7 +609,10 @@ Rectangle {
             let wanted = roughTextWidth(columns[c], c) + 14
             for (let r = 0; r < measuredRows.length; ++r) {
                 const row = rowCells(measuredRows[r])
-                if (row && row.length > c) wanted = Math.max(wanted, roughTextWidth(row[c], c))
+                if (row && row.length > c) {
+                    const iconPad = cellHasLanIcon(measuredRows[r], c) ? (compact ? 30 : 34) : 0
+                    wanted = Math.max(wanted, roughTextWidth(row[c], c) + iconPad)
+                }
             }
             const hardMax = isActionColumn(c) ? columnMax(c) : Math.max(columnMax(c), wanted)
             out[c] = Math.max(columnMin(c), Math.min(hardMax, Math.ceil(wanted)))

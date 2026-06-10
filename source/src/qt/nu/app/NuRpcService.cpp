@@ -2660,6 +2660,7 @@ NuRpcService::NuRpcService(QObject* parent)
     }
     if (m_debug_disable_quick_clone) {
         m_lan_quick_clone_enabled = false;
+        m_lan_quick_clone_requested = false;
         m_lan_quick_clone_status = QStringLiteral("Quick Clone disabled by debug launch switch.");
     }
     appendLaunchDiagnostic(QStringLiteral("Frontend application launched."));
@@ -2688,9 +2689,10 @@ NuRpcService::NuRpcService(QObject* parent)
         QStringLiteral(
             "UDP fast sync: %1. This optional peer transport submits received blocks through normal Core validation.")
             .arg(boolText(m_lan_fast_sync_enabled)));
-    appendLaunchDiagnostic(QStringLiteral("Quick Clone: %1. When enabled, Nu uses trusted-LAN discovery and guarded "
-                                          "public-chain copy scaffolding; wallet data is never copied.")
-                               .arg(boolText(m_lan_quick_clone_enabled)));
+    appendLaunchDiagnostic(QStringLiteral("Quick Clone: receive=%1, provide=%2. When enabled, Nu uses trusted-LAN "
+                                          "discovery and guarded public-chain copy scaffolding; wallet data is never "
+                                          "copied.")
+                               .arg(boolText(m_lan_quick_clone_enabled), boolText(m_lan_quick_clone_provide_enabled)));
     rebuildNodeMetrics();
     connect(m_network, &QNetworkAccessManager::finished, this, &NuRpcService::handleReply);
     m_uptime.start();
@@ -2751,15 +2753,13 @@ void NuRpcService::loadLocalSettings()
     }
     m_lan_node_discovery_enabled = nu_settings.value(QStringLiteral("LanNodeDiscoveryEnabled"), false).toBool();
     m_lan_fast_sync_enabled = nu_settings.value(QStringLiteral("LanFastSyncEnabled"), true).toBool();
-    const bool quick_clone_was_persisted = nu_settings.value(QStringLiteral("LanQuickCloneEnabled"), false).toBool();
-    m_lan_quick_clone_enabled = false;
+    m_lan_quick_clone_enabled = nu_settings.value(QStringLiteral("LanQuickCloneEnabled"), true).toBool();
+    m_lan_quick_clone_provide_enabled = nu_settings.value(QStringLiteral("LanQuickCloneProvideEnabled"), true).toBool();
     m_quick_clone_auto_validate_after =
         nu_settings.value(QStringLiteral("QuickCloneAutoValidateAfter"), false).toBool();
-    if (quick_clone_was_persisted) {
-        nu_settings.setValue(QStringLiteral("LanQuickCloneEnabled"), false);
-        m_lan_quick_clone_status =
-            QStringLiteral("Quick Clone not requested; trusted-LAN discovery continues in the background.");
-    }
+    m_lan_quick_clone_status = m_lan_quick_clone_enabled ?
+                                   QStringLiteral("Quick Clone armed; waiting for a LAN clone source when needed.") :
+                                   QStringLiteral("Quick Clone off.");
     m_advanced_tools_visible = nu_settings.value(QStringLiteral("AdvancedToolsVisible"), false).toBool();
     m_explorer_top100_focused_indexing =
         nu_settings.value(QStringLiteral("ExplorerTop100FocusedIndexing"), false).toBool();
@@ -4490,6 +4490,7 @@ void NuRpcService::refreshNode()
             m_sync_eta = QStringLiteral("00:00:00");
             m_sync_average_blocks_per_second = 0.0;
             m_sync_state = QStringLiteral("Up to Date");
+            m_sync_transport_mode = QStringLiteral("Up to Date");
             m_sync_detail = QStringLiteral("Up to Date. Block %1 of %2 headers.").arg(m_block_height).arg(headers);
         }
         m_sync_last_progress = progress;
@@ -5296,6 +5297,24 @@ void NuRpcService::sampleTraffic()
 
         const double recv_rate = tcp_recv_rate + udp_recv_rate;
         const double sent_rate = tcp_sent_rate + udp_sent_rate;
+        m_traffic_received_rate = formatCompactBitRate(recv_rate);
+        m_traffic_sent_rate = formatCompactBitRate(sent_rate);
+        QString next_sync_transport_mode = m_syncing ? m_sync_transport_mode : QStringLiteral("Up to Date");
+        if (m_syncing) {
+            if (quick_clone_recv_delta > 0 || quick_clone_sent_delta > 0) {
+                next_sync_transport_mode = QStringLiteral("via UDP QC");
+            } else if (udp_recv_delta > 0 || udp_sent_delta > 0) {
+                next_sync_transport_mode = QStringLiteral("via UDP FS");
+            } else if (recv_delta > 0 || sent_delta > 0) {
+                next_sync_transport_mode = QStringLiteral("via TCP");
+            } else if (next_sync_transport_mode.isEmpty() || next_sync_transport_mode == QLatin1String("Up to Date")) {
+                next_sync_transport_mode = QStringLiteral("Syncing");
+            }
+        }
+        if (m_sync_transport_mode != next_sync_transport_mode) {
+            m_sync_transport_mode = next_sync_transport_mode;
+            sync_transport_changed = true;
+        }
 
         QVariantMap point;
         point.insert(QStringLiteral("seconds"), now_ms / 1000.0);
@@ -5443,6 +5462,7 @@ void NuRpcService::sendLanDiscoveryAnnouncement()
     message.insert(QStringLiteral("host"), workstation_name);
     message.insert(QStringLiteral("workstation_name"), workstation_name);
     message.insert(QStringLiteral("quick_clone_protocol"), QStringLiteral("dcol-manifest-v1"));
+    message.insert(QStringLiteral("quick_clone_provider_enabled"), m_lan_quick_clone_provide_enabled);
     message.insert(QStringLiteral("quick_clone_snapshot_available"), false);
     message.insert(QStringLiteral("quick_clone_export_status"), QStringLiteral("not-prepared"));
 
@@ -5567,8 +5587,15 @@ void NuRpcService::handleLanDiscoveryAnnouncement(const QJsonObject& message, co
     const QString sender_key = normalizedFastSyncHost(sender);
     if (sender_key.isEmpty())
         return;
-    m_lan_quick_clone_candidate_hosts.insert(sender_key);
-    if (message.value(QStringLiteral("quick_clone_snapshot_available")).toBool(false)) {
+    const bool quick_clone_provider_enabled =
+        message.value(QStringLiteral("quick_clone_provider_enabled")).toBool(true);
+    if (quick_clone_provider_enabled) {
+        m_lan_quick_clone_candidate_hosts.insert(sender_key);
+    } else {
+        m_lan_quick_clone_candidate_hosts.remove(sender_key);
+        m_quick_clone_snapshot_candidate_hosts.remove(sender_key);
+    }
+    if (quick_clone_provider_enabled && message.value(QStringLiteral("quick_clone_snapshot_available")).toBool(false)) {
         m_quick_clone_snapshot_candidate_hosts.insert(sender_key);
     } else {
         m_quick_clone_snapshot_candidate_hosts.remove(sender_key);
@@ -5634,9 +5661,9 @@ QString NuRpcService::lanFastSyncRateSummary() const
             1.0;
     const double blocks_per_second = m_lan_fast_sync_blocks_received / seconds;
     const double bytes_per_second = (m_lan_fast_sync_udp_bytes_received + m_lan_fast_sync_udp_bytes_sent) / seconds;
-    return QStringLiteral("%1 blocks/s | %2/s")
+    return QStringLiteral("%1 blocks/s | %2")
         .arg(QString::number(blocks_per_second, 'f', blocks_per_second >= 10.0 ? 1 : 2),
-             formatBytes(static_cast<qint64>(bytes_per_second)));
+             formatBitRate(bytes_per_second));
 }
 
 QString NuRpcService::lanFastSyncMethodSummary() const
@@ -5684,8 +5711,8 @@ QString NuRpcService::syncTransportSpeedSummary() const
     auto volume_rate = [this](qint64 bytes, double seconds) {
         if (bytes <= 0)
             return QStringLiteral("-");
-        const qint64 average_rate = static_cast<qint64>(std::llround(bytes / qMax(1.0, seconds)));
-        return QStringLiteral("%1/s avg (%2)").arg(formatBytes(average_rate), formatBytes(bytes));
+        const double average_rate = bytes / qMax(1.0, seconds);
+        return QStringLiteral("%1 avg (%2)").arg(formatBitRate(average_rate), formatBytes(bytes));
     };
     auto percent_text = [](int part, int total) {
         if (total <= 0)
@@ -5715,14 +5742,14 @@ QString NuRpcService::syncTransportSpeedSummary() const
     attempted_sources.unite(m_udp_fast_sync_block_success_peer_hosts);
     attempted_sources.unite(failed_sources);
 
-    QString summary = QStringLiteral("Working: %1. Blocks UDP %2/%3 (%4), Core/TCP %5/%3 (%6); combined %7/s.")
+    QString summary = QStringLiteral("Working: %1. Blocks UDP %2/%3 (%4), Core/TCP %5/%3 (%6); combined %7.")
                           .arg(best,
                                QString::number(udp_blocks),
                                QString::number(block_total),
                                percent_text(udp_blocks, block_total),
                                QString::number(core_blocks),
                                percent_text(core_blocks, block_total),
-                               formatBytes(static_cast<qint64>(std::llround(combined_rate_bytes))));
+                               formatBitRate(combined_rate_bytes));
     summary += QStringLiteral("\nRates UDP %1, Core/TCP %2; UDP peers %3/%4 ok, %5 failed, %6 protocol failures.")
                    .arg(volume_rate(udp_total, udp_seconds),
                         volume_rate(core_block_total, core_block_seconds),
@@ -5832,8 +5859,8 @@ QString NuRpcService::coreSyncPathSummary() const
     const int block_total = udp_blocks + core_blocks;
     const double share =
         block_total > 0 ? (100.0 * static_cast<double>(core_blocks)) / static_cast<double>(block_total) : -1.0;
-    const QString avg = total > 0 ? QStringLiteral("%1/s data avg over %2s")
-                                        .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
+    const QString avg = total > 0 ? QStringLiteral("%1 data avg over %2s")
+                                        .arg(formatBitRate(total / qMax(1.0, seconds)),
                                              QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1)) :
                                     QStringLiteral("-");
     const QString ewma = m_fast_sync_tcp_ewma_blocks_per_second > 0.0 ?
@@ -5842,11 +5869,10 @@ QString NuRpcService::coreSyncPathSummary() const
                                                       'f',
                                                       m_fast_sync_tcp_ewma_blocks_per_second >= 10.0 ? 1 : 2)) :
                              QStringLiteral("recent waiting");
-    const QString header_avg = m_sync_core_header_bytes > 0 ?
-                                   QStringLiteral("%1/s headers")
-                                       .arg(formatBytes(static_cast<qint64>(
-                                           std::llround(m_sync_core_header_bytes / qMax(1.0, header_seconds))))) :
-                                   QStringLiteral("headers waiting");
+    const QString header_avg =
+        m_sync_core_header_bytes > 0 ?
+            QStringLiteral("%1 headers").arg(formatBitRate(m_sync_core_header_bytes / qMax(1.0, header_seconds))) :
+            QStringLiteral("headers waiting");
     return QStringLiteral("Blocks %1/%2%3; %4; %5; block data %6 rec'd, %7 total. Headers %8; failures %9.")
         .arg(
             QString::number(core_blocks),
@@ -5884,8 +5910,8 @@ QString NuRpcService::fastSyncUdpSummary() const
          m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms) ?
             qMax(1.0, double(m_lan_fast_sync_udp_last_activity_ms - m_lan_fast_sync_udp_first_activity_ms) / 1000.0) :
             (total > 0 || m_fast_sync_udp_failures > 0 ? 1.0 : 0.0);
-    const QString avg = total > 0 ? QStringLiteral("%1/s data avg over %2s")
-                                        .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
+    const QString avg = total > 0 ? QStringLiteral("%1 data avg over %2s")
+                                        .arg(formatBitRate(total / qMax(1.0, seconds)),
                                              QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1)) :
                                     QStringLiteral("-");
     const QString ewma = m_fast_sync_udp_ewma_blocks_per_second > 0.0 ?
@@ -5945,8 +5971,8 @@ QString NuRpcService::fastSyncUdpDetailSummary() const
          m_lan_fast_sync_udp_last_activity_ms > m_lan_fast_sync_udp_first_activity_ms) ?
             qMax(1.0, double(m_lan_fast_sync_udp_last_activity_ms - m_lan_fast_sync_udp_first_activity_ms) / 1000.0) :
             (total > 0 || m_fast_sync_udp_failures > 0 ? 1.0 : 0.0);
-    const QString avg = total > 0 ? QStringLiteral("%1/s data avg over %2s")
-                                        .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
+    const QString avg = total > 0 ? QStringLiteral("%1 data avg over %2s")
+                                        .arg(formatBitRate(total / qMax(1.0, seconds)),
                                              QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1)) :
                                     QStringLiteral("-");
     const QString ewma = m_fast_sync_udp_ewma_blocks_per_second > 0.0 ?
@@ -6002,18 +6028,16 @@ QString NuRpcService::quickCloneTrafficSummary() const
             qMax(1.0,
                  double(m_lan_quick_clone_udp_last_activity_ms - m_lan_quick_clone_udp_first_activity_ms) / 1000.0) :
             (total > 0 ? 1.0 : 0.0);
-    const QString live_rate =
-        live_total_rate > 0.0 ?
-            QStringLiteral("live %1/s total (in %2/s, out %3/s)")
-                .arg(formatBytes(static_cast<qint64>(std::llround(live_total_rate))),
-                     formatBytes(static_cast<qint64>(std::llround(m_quick_clone_received_rate_bytes_per_second))),
-                     formatBytes(static_cast<qint64>(std::llround(m_quick_clone_sent_rate_bytes_per_second)))) :
-            QStringLiteral("live idle");
-    const QString avg_rate = total > 0 ?
-                                 QStringLiteral("avg %1/s over %2s")
-                                     .arg(formatBytes(static_cast<qint64>(std::llround(total / qMax(1.0, seconds)))),
-                                          QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1)) :
-                                 QStringLiteral("no clone traffic yet");
+    const QString live_rate = live_total_rate > 0.0 ?
+                                  QStringLiteral("live %1 total (in %2, out %3)")
+                                      .arg(formatBitRate(live_total_rate),
+                                           formatBitRate(m_quick_clone_received_rate_bytes_per_second),
+                                           formatBitRate(m_quick_clone_sent_rate_bytes_per_second)) :
+                                  QStringLiteral("live idle");
+    const QString avg_rate = total > 0 ? QStringLiteral("avg %1 over %2s")
+                                             .arg(formatBitRate(total / qMax(1.0, seconds)),
+                                                  QString::number(seconds, 'f', seconds >= 10.0 ? 0 : 1)) :
+                                         QStringLiteral("no clone traffic yet");
     return QStringLiteral("%1 | %2 | data %3 rec'd, %4 sent | packets %5/%6")
         .arg(live_rate,
              avg_rate,
@@ -6507,6 +6531,15 @@ int NuRpcService::nextLanFastSyncWantedHeight() const
     return height <= m_header_height ? height : -1;
 }
 
+bool NuRpcService::hasLanFastSyncReadyCloneBlock() const
+{
+    for (const LanFastSyncReadyBlock& ready : m_lan_fast_sync_ready_blocks_by_height) {
+        if (ready.clone_mode)
+            return true;
+    }
+    return false;
+}
+
 void NuRpcService::releaseLanFastSyncReservationFor(int node_id, const QString& hash)
 {
     if (node_id < 0 || hash.isEmpty())
@@ -6561,12 +6594,12 @@ void NuRpcService::expireLanFastSyncTransfers(qint64 now)
                 .arg(age_ms)
                 .arg(m_lan_fast_sync_transfers_by_id.size())
                 .arg(m_lan_fast_sync_ready_blocks_by_height.size()));
-        if (m_lan_quick_clone_enabled) {
+        if (transfer.clone_mode) {
             acknowledgeLanQuickCloneSourceOffline(
                 transfer.host, transfer.height, QStringLiteral("LAN source stopped answering"));
             m_lan_quick_clone_status =
                 QStringLiteral("Quick Clone marked %1 offline after missing chunks for block %2; trying another "
-                               "trusted LAN source if available.")
+                               "LAN source if available.")
                     .arg(transfer.host.isEmpty() ? QStringLiteral("current LAN source") : transfer.host)
                     .arg(transfer.height);
             m_lan_fast_sync_status = m_lan_quick_clone_status;
@@ -6608,18 +6641,40 @@ void NuRpcService::submitNextLanFastSyncReadyBlock()
     if (!m_lan_fast_sync_ready_blocks_by_height.contains(next_height)) {
         if (!m_lan_fast_sync_ready_blocks_by_height.isEmpty()) {
             int lowest_ready = std::numeric_limits<int>::max();
+            int highest_ready = 0;
             for (auto it = m_lan_fast_sync_ready_blocks_by_height.constBegin();
                  it != m_lan_fast_sync_ready_blocks_by_height.constEnd();
                  ++it) {
                 lowest_ready = qMin(lowest_ready, it.key());
+                highest_ready = qMax(highest_ready, it.key());
             }
+            const bool clone_mode = hasLanFastSyncReadyCloneBlock();
+            const QString status =
+                clone_mode ?
+                    QStringLiteral("Quick Clone has %1 LAN block%2 staged; requesting missing block %3 before "
+                                   "submitting block %4.") :
+                    QStringLiteral(
+                        "UDP fast sync has %1 block%2 staged; requesting missing block %3 before submitting block %4.");
             m_lan_fast_sync_status =
-                QStringLiteral("UDP fast sync has %1 block%2 staged; waiting for block %3 before submitting block %4.")
-                    .arg(m_lan_fast_sync_ready_blocks_by_height.size())
+                status.arg(m_lan_fast_sync_ready_blocks_by_height.size())
                     .arg(m_lan_fast_sync_ready_blocks_by_height.size() == 1 ? QString() : QStringLiteral("s"))
                     .arg(next_height)
                     .arg(lowest_ready);
-            if (m_lan_quick_clone_enabled)
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+            if (now - m_lan_fast_sync_last_gap_log_ms >= 2500) {
+                m_lan_fast_sync_last_gap_log_ms = now;
+                appendDebugLogLineFromNu(
+                    QStringLiteral("NU_UDP_FASTSYNC_STAGED_GAP mode=%1 expected=%2 lowest=%3 "
+                                   "highest=%4 active=%5 staged=%6 local_block=%7")
+                        .arg(clone_mode ? QStringLiteral("quick-clone") : QStringLiteral("fast-sync"))
+                        .arg(next_height)
+                        .arg(lowest_ready)
+                        .arg(highest_ready)
+                        .arg(m_lan_fast_sync_transfers_by_id.size())
+                        .arg(m_lan_fast_sync_ready_blocks_by_height.size())
+                        .arg(m_block_height));
+            }
+            if (clone_mode)
                 m_lan_quick_clone_status = m_lan_fast_sync_status;
             rebuildNodeMetrics();
             Q_EMIT stateChanged();
@@ -6635,17 +6690,21 @@ void NuRpcService::submitNextLanFastSyncReadyBlock()
 
     m_lan_fast_sync_submit_in_flight = true;
     m_lan_fast_sync_submitting_height = ready.height;
-    m_lan_fast_sync_status = QStringLiteral("UDP fast sync validating block %1 through Core (%2 staged behind it).")
-                                 .arg(ready.height)
-                                 .arg(m_lan_fast_sync_ready_blocks_by_height.size());
-    if (m_lan_quick_clone_enabled) {
+    const bool clone_mode = ready.clone_mode;
+    m_lan_fast_sync_status =
+        clone_mode ? QStringLiteral("Quick Clone submitting LAN block %1 through Core (%2 staged behind it).")
+                         .arg(ready.height)
+                         .arg(m_lan_fast_sync_ready_blocks_by_height.size()) :
+                     QStringLiteral("UDP fast sync validating block %1 through Core (%2 staged behind it).")
+                         .arg(ready.height)
+                         .arg(m_lan_fast_sync_ready_blocks_by_height.size());
+    if (clone_mode) {
         m_lan_quick_clone_status = m_lan_fast_sync_status;
     }
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
 
     const QString block_hex = QString::fromLatin1(ready.block.toHex());
-    const bool clone_mode = m_lan_quick_clone_enabled;
     rpcCall(
         QStringLiteral("submitblock"),
         {block_hex},
@@ -6810,7 +6869,7 @@ void NuRpcService::resetLanFastSyncTransfer(const QString& status)
     m_lan_fast_sync_ready_blocks_by_height.clear();
     m_udp_fast_sync_current_target_hosts.clear();
     m_lan_fast_sync_status = status;
-    if (m_lan_quick_clone_enabled)
+    if (m_lan_quick_clone_requested)
         m_lan_quick_clone_status = status;
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
@@ -6980,19 +7039,31 @@ void NuRpcService::lanQuickCloneTick()
         return;
     }
 
+    const int wanted_height = nextLanFastSyncWantedHeight();
+    if (wanted_height <= 0) {
+        m_lan_quick_clone_status =
+            QStringLiteral("Quick Clone waiting for the next missing LAN block; %1 active, %2 staged.")
+                .arg(m_lan_fast_sync_transfers_by_id.size())
+                .arg(m_lan_fast_sync_ready_blocks_by_height.size());
+        m_lan_fast_sync_status = m_lan_quick_clone_status;
+        rebuildNodeMetrics();
+        Q_EMIT stateChanged();
+        return;
+    }
+
     m_lan_fast_sync_reserve_in_flight = true;
     if (!m_lan_quick_clone_status.startsWith(QStringLiteral("Quick Clone waiting on Core scheduling"))) {
         m_lan_quick_clone_status =
-            QStringLiteral("Quick Clone checking Core for the next LAN block from %1.").arg(host);
+            QStringLiteral("Quick Clone reserving LAN block %1 from %2.").arg(wanted_height).arg(host);
         m_lan_fast_sync_status = m_lan_quick_clone_status;
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
     }
     rpcCall(
         QStringLiteral("reservefastsyncblock"),
-        {QStringLiteral("reserve-next"), node_id},
+        {QStringLiteral("reserve"), node_id, QString::number(wanted_height)},
         false,
-        [this, host, node_id](const QJsonValue& result, const QString& error) {
+        [this, host, node_id, wanted_height](const QJsonValue& result, const QString& error) {
             m_lan_fast_sync_reserve_in_flight = false;
             const QJsonObject obj = result.toObject();
             const bool success = error.isEmpty() && obj.value(QStringLiteral("success")).toBool(false);
@@ -7002,7 +7073,8 @@ void NuRpcService::lanQuickCloneTick()
             const int height = obj.value(QStringLiteral("height")).toInt(-1);
             if (!success || hash.size() != 64 || height <= 0) {
                 const qint64 callback_now = QDateTime::currentMSecsSinceEpoch();
-                const QString detail = QStringLiteral("block %1 peer %2 headers %3 local-blocks %4: %5")
+                const QString detail = QStringLiteral("wanted %1 got %2 peer %3 headers %4 local-blocks %5: %6")
+                                           .arg(wanted_height)
                                            .arg(height)
                                            .arg(node_id)
                                            .arg(m_header_height)
@@ -7031,6 +7103,11 @@ void NuRpcService::lanQuickCloneTick()
                                                       callback_now - m_lan_quick_clone_last_reservation_status_ms >=
                                                           QUICK_CLONE_RESERVATION_BACKOFF_MS;
                     m_lan_quick_clone_last_reservation_reason = reason;
+                    if (reason == QLatin1String("block-already-in-flight") ||
+                        reason == QLatin1String("block-already-have-data") ||
+                        reason == QLatin1String("block-already-in-flight-from-peer")) {
+                        QTimer::singleShot(250, this, &NuRpcService::lanFastSyncTick);
+                    }
                     if (should_update_status) {
                         m_lan_quick_clone_last_reservation_status_ms = callback_now;
                         m_lan_quick_clone_status = coreSchedulingWaitStatus(QStringLiteral("Quick Clone"), reason);
@@ -7065,13 +7142,13 @@ void NuRpcService::lanQuickCloneTick()
                 QStringLiteral("Quick Clone receiving blockchain over LAN: requesting reserved block %1 from %2.")
                     .arg(height)
                     .arg(host);
-            sendLanFastSyncBlockRequest(height, host, node_id, hash);
+            sendLanFastSyncBlockRequest(height, host, node_id, hash, true);
         });
 }
 
 void NuRpcService::lanFastSyncTick()
 {
-    if (m_debug_disable_fast_sync && !m_lan_quick_clone_enabled) {
+    if (m_debug_disable_fast_sync && !m_lan_quick_clone_requested) {
         if (m_lan_fast_sync_socket)
             stopLanFastSyncSocket();
         if (m_lan_fast_sync_status != QLatin1String("UDP fast sync disabled by debug launch switch.")) {
@@ -7102,7 +7179,8 @@ void NuRpcService::lanFastSyncTick()
     if (!m_lan_fast_sync_socket || !m_rpc_connected)
         return;
     processQueuedLanDiscoveryAddNodes();
-    if (m_lan_quick_clone_enabled) {
+    if (m_lan_quick_clone_enabled && m_lan_quick_clone_requested && quickCloneMissingChainThresholdReached() &&
+        hasQuickCloneLanCandidate()) {
         lanQuickCloneTick();
         return;
     }
@@ -7348,7 +7426,7 @@ void NuRpcService::acknowledgeLanQuickCloneSourceOffline(const QString& host, in
 
 bool NuRpcService::sendUdpFastSyncProbe(const QString& host, int node_id)
 {
-    if (!m_lan_fast_sync_socket || host.isEmpty() || (node_id < 0 && !m_lan_quick_clone_enabled))
+    if (!m_lan_fast_sync_socket || host.isEmpty() || (node_id < 0 && !m_lan_quick_clone_requested))
         return false;
     QHostAddress peer_address;
     if (!peer_address.setAddress(host)) {
@@ -7367,7 +7445,7 @@ bool NuRpcService::sendUdpFastSyncProbe(const QString& host, int node_id)
     header.insert(QStringLiteral("port"), int(LAN_FAST_SYNC_PORT));
     header.insert(QStringLiteral("tip"), m_block_height);
     header.insert(QStringLiteral("node_id"), node_id);
-    if (m_lan_quick_clone_enabled && isPrivateOrLocalFastSyncAddress(peer_address)) {
+    if (m_lan_quick_clone_requested && isPrivateOrLocalFastSyncAddress(peer_address)) {
         header.insert(QStringLiteral("clone_mode"), true);
     }
     header.insert(QStringLiteral("max_datagram"), max_datagram);
@@ -7403,7 +7481,7 @@ bool NuRpcService::sendUdpFastSyncProbe(const QString& host, int node_id)
                                 QStringLiteral("peer %1 host %2 id %3").arg(node_id).arg(host, probe_id.left(8)));
     m_lan_fast_sync_status =
         QStringLiteral("UDP fast sync probing peer %1 on %2 before block requests.").arg(node_id).arg(host);
-    if (m_lan_quick_clone_enabled && isPrivateOrLocalFastSyncAddress(peer_address)) {
+    if (m_lan_quick_clone_requested && isPrivateOrLocalFastSyncAddress(peer_address)) {
         m_lan_quick_clone_status = QStringLiteral("Quick Clone probing LAN source %1.").arg(host);
     }
     rebuildNodeMetrics();
@@ -7590,12 +7668,9 @@ void NuRpcService::releaseLanFastSyncReservation()
     releaseLanFastSyncReservationFor(node_id, hash);
 }
 
-void NuRpcService::sendLanFastSyncBlockRequest(int height,
-                                               const QString& host,
-                                               int node_id,
-                                               const QString& expected_hash)
+void NuRpcService::sendLanFastSyncBlockRequest(
+    int height, const QString& host, int node_id, const QString& expected_hash, bool clone_mode)
 {
-    const bool clone_mode = m_lan_quick_clone_enabled;
     if (!m_lan_fast_sync_socket || height <= 0 || host.isEmpty() || (node_id < 0 && !clone_mode) ||
         (!clone_mode && expected_hash.size() != 64)) {
         releaseLanFastSyncReservation();
@@ -7928,7 +8003,7 @@ void NuRpcService::requestLanFastSyncBlock()
                 }
                 m_lan_fast_sync_reserved_node_id = node_id;
                 m_lan_fast_sync_reserved_hash = hash;
-                sendLanFastSyncBlockRequest(height, host, node_id, hash);
+                sendLanFastSyncBlockRequest(height, host, node_id, hash, false);
             });
 }
 
@@ -8001,7 +8076,7 @@ void NuRpcService::handleLanFastSyncDatagrams()
         } else if (type == QLatin1String("block-chunk")) {
             const bool lan_chunk = isPrivateOrLocalFastSyncAddress(sender);
             if (!isUdpFastSyncAllowedPeer(sender) && !lan_chunk &&
-                !(m_lan_quick_clone_enabled && isLanQuickCloneAllowedPeer(sender))) {
+                !(m_lan_quick_clone_requested && isLanQuickCloneAllowedPeer(sender))) {
                 recordFastSyncUdpDiagnostic(QStringLiteral("dropped UDP Fast Sync block chunk from non-peer"),
                                             udpFastSyncEndpointText(sender, datagram.senderPort()));
                 continue;
@@ -8169,6 +8244,11 @@ void NuRpcService::handleLanFastSyncRequest(const QJsonObject& header, const QHo
     if (!m_rpc_connected || !m_lan_fast_sync_enabled)
         return;
     const bool clone_request = header.value(QStringLiteral("clone_mode")).toBool(false);
+    if (clone_request && !m_lan_quick_clone_provide_enabled) {
+        recordFastSyncUdpDiagnostic(QStringLiteral("dropped Quick Clone request while provider is off"),
+                                    udpFastSyncEndpointText(sender, sender_port));
+        return;
+    }
     if (!isUdpFastSyncAllowedPeer(sender) && !isPrivateOrLocalFastSyncAddress(sender) &&
         !(clone_request && isLanQuickCloneAllowedPeer(sender)))
         return;
@@ -8313,7 +8393,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
     if (m_lan_fast_sync_transfers_by_id.isEmpty())
         return;
     if (!isUdpFastSyncAllowedPeer(sender) && !isPrivateOrLocalFastSyncAddress(sender) &&
-        !(m_lan_quick_clone_enabled && isLanQuickCloneAllowedPeer(sender)))
+        !(m_lan_quick_clone_requested && isLanQuickCloneAllowedPeer(sender)))
         return;
     const QString sender_key = normalizedFastSyncHost(sender);
     const QString request_id = header.value(QStringLiteral("id")).toString();
@@ -8324,6 +8404,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
         return;
     }
     LanFastSyncTransfer& transfer = m_lan_fast_sync_transfers_by_id[request_id];
+    const bool clone_mode = transfer.clone_mode;
     const int height = header.value(QStringLiteral("height")).toInt(-1);
     if (height != transfer.height)
         return;
@@ -8333,14 +8414,14 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
         updateLanFastSyncRequestState();
         refreshLanFastSyncCurrentTargetHosts();
         m_lan_fast_sync_status =
-            m_lan_quick_clone_enabled ?
+            clone_mode ?
                 QStringLiteral(
                     "Quick Clone skipped LAN block %1 because Core already has it; trying the next missing block.")
                     .arg(height) :
                 QStringLiteral(
                     "UDP fast sync skipped block %1 because Core already advanced; normal sync remains active.")
                     .arg(height);
-        if (m_lan_quick_clone_enabled)
+        if (clone_mode)
             m_lan_quick_clone_status = m_lan_fast_sync_status;
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
@@ -8412,10 +8493,13 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
         updateLanFastSyncRequestState();
         refreshLanFastSyncCurrentTargetHosts();
         m_lan_fast_sync_status =
-            QStringLiteral(
-                "UDP fast sync exceeded the reserved block buffer at block %1; normal TCP fallback remains active.")
-                .arg(height);
-        if (m_lan_quick_clone_enabled)
+            clone_mode ?
+                QStringLiteral("Quick Clone buffer is full at block %1; submitting staged LAN blocks before retrying.")
+                    .arg(height) :
+                QStringLiteral(
+                    "UDP fast sync exceeded the reserved block buffer at block %1; normal TCP fallback remains active.")
+                    .arg(height);
+        if (clone_mode)
             m_lan_quick_clone_status = m_lan_fast_sync_status;
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
@@ -8437,13 +8521,20 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
     }
 
     if (transfer.chunks.size() < transfer.expected_chunks) {
-        m_lan_fast_sync_status = QStringLiteral("UDP fast sync receiving block %1 from %2 (%3/%4 chunks, %5 active).")
-                                     .arg(height)
-                                     .arg(transfer.host)
-                                     .arg(transfer.chunks.size())
-                                     .arg(transfer.expected_chunks)
-                                     .arg(m_lan_fast_sync_transfers_by_id.size());
-        if (m_lan_quick_clone_enabled)
+        m_lan_fast_sync_status =
+            clone_mode ? QStringLiteral("Quick Clone receiving LAN block %1 from %2 (%3/%4 chunks, %5 active).")
+                             .arg(height)
+                             .arg(transfer.host)
+                             .arg(transfer.chunks.size())
+                             .arg(transfer.expected_chunks)
+                             .arg(m_lan_fast_sync_transfers_by_id.size()) :
+                         QStringLiteral("UDP fast sync receiving block %1 from %2 (%3/%4 chunks, %5 active).")
+                             .arg(height)
+                             .arg(transfer.host)
+                             .arg(transfer.chunks.size())
+                             .arg(transfer.expected_chunks)
+                             .arg(m_lan_fast_sync_transfers_by_id.size());
+        if (clone_mode)
             m_lan_quick_clone_status = m_lan_fast_sync_status;
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
@@ -8470,9 +8561,12 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
         updateLanFastSyncRequestState();
         refreshLanFastSyncCurrentTargetHosts();
         m_lan_fast_sync_status =
-            QStringLiteral("UDP fast sync checksum mismatch at block %1; normal TCP fallback remains active.")
-                .arg(height);
-        if (m_lan_quick_clone_enabled)
+            clone_mode ?
+                QStringLiteral("Quick Clone checksum mismatch at LAN block %1; requesting the block again.")
+                    .arg(height) :
+                QStringLiteral("UDP fast sync checksum mismatch at block %1; normal TCP fallback remains active.")
+                    .arg(height);
+        if (clone_mode)
             m_lan_quick_clone_status = m_lan_fast_sync_status;
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
@@ -8486,12 +8580,12 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
         updateLanFastSyncRequestState();
         refreshLanFastSyncCurrentTargetHosts();
         m_lan_fast_sync_status =
-            m_lan_quick_clone_enabled ?
+            clone_mode ?
                 QStringLiteral("Quick Clone received a duplicate LAN block %1; continuing with the next missing block.")
                     .arg(transfer.height) :
                 QStringLiteral("UDP fast sync received a duplicate block %1; waiting for Core to advance.")
                     .arg(transfer.height);
-        if (m_lan_quick_clone_enabled)
+        if (clone_mode)
             m_lan_quick_clone_status = m_lan_fast_sync_status;
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
@@ -8506,6 +8600,7 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
     ready.node_id = transfer.node_id;
     ready.height = transfer.height;
     ready.request_ms = transfer.request_ms;
+    ready.clone_mode = transfer.clone_mode;
     const int expected_chunks = transfer.expected_chunks;
     m_lan_fast_sync_ready_blocks_by_height.insert(ready.height, ready);
     m_lan_fast_sync_transfers_by_id.remove(request_id);
@@ -8513,7 +8608,9 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
     refreshLanFastSyncCurrentTargetHosts();
     appendDebugLogLineFromNu(
         QStringLiteral(
-            "NU_UDP_FASTSYNC_STAGED height=%1 host=%2 request_id=%3 block_bytes=%4 chunks=%5 active=%6 staged=%7")
+            "NU_UDP_FASTSYNC_STAGED mode=%1 height=%2 host=%3 request_id=%4 block_bytes=%5 chunks=%6 active=%7 "
+            "staged=%8")
+            .arg(ready.clone_mode ? QStringLiteral("quick-clone") : QStringLiteral("fast-sync"))
             .arg(ready.height)
             .arg(ready.host)
             .arg(request_id.left(8))
@@ -8521,12 +8618,18 @@ void NuRpcService::handleLanFastSyncChunk(const QJsonObject& header,
             .arg(expected_chunks)
             .arg(m_lan_fast_sync_transfers_by_id.size())
             .arg(m_lan_fast_sync_ready_blocks_by_height.size()));
-    m_lan_fast_sync_status = QStringLiteral("UDP fast sync staged block %1 from %2 (%3 active, %4 staged).")
-                                 .arg(ready.height)
-                                 .arg(ready.host)
-                                 .arg(m_lan_fast_sync_transfers_by_id.size())
-                                 .arg(m_lan_fast_sync_ready_blocks_by_height.size());
-    if (m_lan_quick_clone_enabled)
+    m_lan_fast_sync_status = ready.clone_mode ?
+                                 QStringLiteral("Quick Clone staged LAN block %1 from %2 (%3 active, %4 staged).")
+                                     .arg(ready.height)
+                                     .arg(ready.host)
+                                     .arg(m_lan_fast_sync_transfers_by_id.size())
+                                     .arg(m_lan_fast_sync_ready_blocks_by_height.size()) :
+                                 QStringLiteral("UDP fast sync staged block %1 from %2 (%3 active, %4 staged).")
+                                     .arg(ready.height)
+                                     .arg(ready.host)
+                                     .arg(m_lan_fast_sync_transfers_by_id.size())
+                                     .arg(m_lan_fast_sync_ready_blocks_by_height.size());
+    if (ready.clone_mode)
         m_lan_quick_clone_status = m_lan_fast_sync_status;
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
@@ -10111,8 +10214,8 @@ QString NuRpcService::quickClonePromptText() const
                           "manifest and streaming checksums, briefly stop the receiver backend for the final folder "
                           "swap, then restart and confirm the expected best block hash.\n\n"
                           "Current progress: block %1 of %2 headers (%3 blocks missing). Normal sync estimate: %4.\n\n"
-                          "Yes enables Quick Clone discovery and trusted-LAN copy scaffolding. No keeps normal sync "
-                          "and will not ask again during this missing-chain cycle.")
+                          "Yes starts a Quick Clone session using LAN sources. No keeps normal sync and will not ask "
+                          "again during this missing-chain cycle.")
         .arg(m_block_height)
         .arg(m_header_height)
         .arg(missing)
@@ -10135,8 +10238,9 @@ void NuRpcService::evaluateQuickClonePrompt()
         m_quick_clone_prompt_declined_for_cycle = false;
         m_quick_clone_prompt_shown_for_cycle = false;
     }
-    if (!m_lan_node_discovery_enabled || m_lan_quick_clone_enabled || m_quick_clone_prompt_declined_for_cycle ||
-        m_quick_clone_prompt_shown_for_cycle || !hasQuickCloneLanCandidate()) {
+    if (!m_lan_node_discovery_enabled || !m_lan_quick_clone_enabled || m_lan_quick_clone_requested ||
+        m_quick_clone_prompt_declined_for_cycle || m_quick_clone_prompt_shown_for_cycle ||
+        !hasQuickCloneLanCandidate()) {
         return;
     }
 
@@ -10152,10 +10256,15 @@ void NuRpcService::syncUsingQuickCloneNow()
         Q_EMIT stateChanged();
         return;
     }
+    m_lan_quick_clone_requested = true;
     setLanQuickCloneEnabled(true);
+    if (!m_lan_fast_sync_enabled && !m_debug_disable_fast_sync)
+        setLanFastSyncEnabled(true);
+    if (!m_lan_node_discovery_enabled)
+        setLanNodeDiscoveryEnabled(true);
     ensureLanFastSyncSocket();
     sendLanDiscoveryAnnouncement();
-    m_lan_quick_clone_status = QStringLiteral("Quick Clone requested; waiting for a trusted LAN source.");
+    m_lan_quick_clone_status = QStringLiteral("Quick Clone requested; waiting for a LAN source.");
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
 }
@@ -10168,6 +10277,7 @@ void NuRpcService::acceptQuickClonePrompt()
 
 void NuRpcService::declineQuickClonePrompt()
 {
+    m_lan_quick_clone_requested = false;
     if (quickCloneMissingChainThresholdReached()) {
         m_quick_clone_prompt_declined_for_cycle = true;
     }
@@ -10348,12 +10458,13 @@ void NuRpcService::rebuildNodeMetrics()
                   true),
         metricRow(
             QStringLiteral("Launch defaults"),
-            QStringLiteral(
-                "listen=1, discover=%1, allowlannodediscovery=%2, defcoinfastsync=%3, quickclone=%4, upnp=%5")
+            QStringLiteral("listen=1, discover=%1, allowlannodediscovery=%2, defcoinfastsync=%3, quickclone=%4, "
+                           "quickcloneprovide=%5, upnp=%6")
                 .arg((m_lan_node_discovery_enabled || m_lan_fast_sync_enabled || m_upnp_connections_enabled) ? 1 : 0)
                 .arg((m_lan_node_discovery_enabled || m_lan_fast_sync_enabled) ? 1 : 0)
                 .arg(m_lan_fast_sync_enabled ? 1 : 0)
                 .arg(m_lan_quick_clone_enabled ? 1 : 0)
+                .arg(m_lan_quick_clone_provide_enabled ? 1 : 0)
                 .arg(m_upnp_connections_enabled ? 1 : 0),
             QStringLiteral("Nu launch-time networking flags and feature defaults passed into the managed backend."),
             true)};
@@ -10502,6 +10613,7 @@ void NuRpcService::setLanQuickCloneEnabled(bool enabled)
 {
     if (m_debug_disable_quick_clone && enabled) {
         m_lan_quick_clone_enabled = false;
+        m_lan_quick_clone_requested = false;
         m_lan_quick_clone_status = QStringLiteral("Quick Clone disabled by debug launch switch.");
         rebuildNodeMetrics();
         Q_EMIT settingsChanged();
@@ -10511,8 +10623,10 @@ void NuRpcService::setLanQuickCloneEnabled(bool enabled)
     if (m_lan_quick_clone_enabled == enabled)
         return;
     m_lan_quick_clone_enabled = enabled;
+    if (!enabled)
+        m_lan_quick_clone_requested = false;
     QSettings settings;
-    settings.setValue(QStringLiteral("LanQuickCloneEnabled"), false);
+    settings.setValue(QStringLiteral("LanQuickCloneEnabled"), enabled);
 
     if (enabled) {
         m_quick_clone_auto_validate_ran_this_session = false;
@@ -10523,10 +10637,14 @@ void NuRpcService::setLanQuickCloneEnabled(bool enabled)
         ensureLanFastSyncSocket();
         sendLanDiscoveryAnnouncement();
         m_lan_quick_clone_status =
-            QStringLiteral("Quick Clone requested. Nu will use trusted LAN sources only; wallet data is never copied.");
-        appendLaunchDiagnostic(
-            QStringLiteral("Quick Clone requested for this session. Wallet data is not copied; trusted-LAN "
-                           "public-chain copy remains guarded by Core block acceptance."));
+            m_lan_quick_clone_requested ?
+                QStringLiteral("Quick Clone requested. Nu will use LAN sources only; wallet data is never copied.") :
+                QStringLiteral("Quick Clone armed; waiting for a LAN clone source when needed.");
+        if (m_lan_quick_clone_requested) {
+            appendLaunchDiagnostic(
+                QStringLiteral("Quick Clone requested for this session. Wallet data is not copied; LAN public-chain "
+                               "copy remains guarded by Core block acceptance."));
+        }
         QTimer::singleShot(0, this, &NuRpcService::lanFastSyncTick);
     } else {
         resetLanFastSyncTransfer(QStringLiteral("UDP fast sync idle."));
@@ -10538,6 +10656,28 @@ void NuRpcService::setLanQuickCloneEnabled(bool enabled)
         appendLaunchDiagnostic(QStringLiteral("Quick Clone disabled."));
     }
 
+    rebuildNodeMetrics();
+    Q_EMIT settingsChanged();
+    Q_EMIT stateChanged();
+}
+
+void NuRpcService::setLanQuickCloneProvideEnabled(bool enabled)
+{
+    if (m_lan_quick_clone_provide_enabled == enabled)
+        return;
+    m_lan_quick_clone_provide_enabled = enabled;
+    QSettings settings;
+    settings.setValue(QStringLiteral("LanQuickCloneProvideEnabled"), enabled);
+
+    if (enabled) {
+        if (!m_lan_fast_sync_enabled && !m_debug_disable_fast_sync)
+            setLanFastSyncEnabled(true);
+        ensureLanFastSyncSocket();
+        sendLanDiscoveryAnnouncement();
+        appendLaunchDiagnostic(QStringLiteral("Quick Clone LAN provider enabled."));
+    } else {
+        appendLaunchDiagnostic(QStringLiteral("Quick Clone LAN provider disabled."));
+    }
     rebuildNodeMetrics();
     Q_EMIT settingsChanged();
     Q_EMIT stateChanged();
@@ -20941,25 +21081,25 @@ void NuRpcService::exportTrafficCsv()
         return;
     }
     QTextStream out(&file);
-    out << "Seconds,Local Time,Average total received B/s,Average total sent B/s,Average TCP received B/s,Average TCP "
-           "sent B/s,Average UDP received B/s,Average UDP sent B/s,Average Fast Sync UDP received B/s,Average Fast "
-           "Sync UDP sent B/s,Average Quick Clone UDP received B/s,Average Quick Clone UDP sent B/s\n";
+    out << "Seconds,Local Time,Average total received b/s,Average total sent b/s,Average TCP received b/s,Average TCP "
+           "sent b/s,Average UDP received b/s,Average UDP sent b/s,Average Fast Sync UDP received b/s,Average Fast "
+           "Sync UDP sent b/s,Average Quick Clone UDP received b/s,Average Quick Clone UDP sent b/s\n";
     for (const QVariant& point_value : m_traffic_samples) {
         const QVariantMap point = point_value.toMap();
         out << point.value(QStringLiteral("seconds")).toDouble() << ',' << '"'
             << QDateTime::fromMSecsSinceEpoch(point.value(QStringLiteral("timestampMs")).toLongLong())
                    .toLocalTime()
                    .toString(Qt::ISODate)
-            << '"' << ',' << point.value(QStringLiteral("received")).toDouble() << ','
-            << point.value(QStringLiteral("sent")).toDouble() << ','
-            << point.value(QStringLiteral("tcpReceived")).toDouble() << ','
-            << point.value(QStringLiteral("tcpSent")).toDouble() << ','
-            << point.value(QStringLiteral("udpReceived")).toDouble() << ','
-            << point.value(QStringLiteral("udpSent")).toDouble() << ','
-            << point.value(QStringLiteral("fastSyncUdpReceived")).toDouble() << ','
-            << point.value(QStringLiteral("fastSyncUdpSent")).toDouble() << ','
-            << point.value(QStringLiteral("quickCloneReceived")).toDouble() << ','
-            << point.value(QStringLiteral("quickCloneSent")).toDouble() << '\n';
+            << '"' << ',' << point.value(QStringLiteral("received")).toDouble() * 8.0 << ','
+            << point.value(QStringLiteral("sent")).toDouble() * 8.0 << ','
+            << point.value(QStringLiteral("tcpReceived")).toDouble() * 8.0 << ','
+            << point.value(QStringLiteral("tcpSent")).toDouble() * 8.0 << ','
+            << point.value(QStringLiteral("udpReceived")).toDouble() * 8.0 << ','
+            << point.value(QStringLiteral("udpSent")).toDouble() * 8.0 << ','
+            << point.value(QStringLiteral("fastSyncUdpReceived")).toDouble() * 8.0 << ','
+            << point.value(QStringLiteral("fastSyncUdpSent")).toDouble() * 8.0 << ','
+            << point.value(QStringLiteral("quickCloneReceived")).toDouble() * 8.0 << ','
+            << point.value(QStringLiteral("quickCloneSent")).toDouble() * 8.0 << '\n';
     }
     Q_EMIT userMessage(QStringLiteral("Export complete"),
                        QStringLiteral("The network traffic CSV was written successfully."));
@@ -21422,6 +21562,35 @@ QString NuRpcService::formatBytes(qint64 bytes)
         ++unit;
     }
     return QStringLiteral("%1 %2").arg(value, 0, unit == 0 ? 'f' : 'f', unit == 0 ? 0 : 1).arg(units.at(unit));
+}
+
+QString NuRpcService::formatBitRate(double bytes_per_second)
+{
+    static const QStringList units{
+        QStringLiteral("b/s"), QStringLiteral("Kb/s"), QStringLiteral("Mb/s"), QStringLiteral("Gb/s")};
+    double value = qMax(0.0, bytes_per_second * 8.0);
+    int unit = 0;
+    while (value >= 1000.0 && unit + 1 < units.size()) {
+        value /= 1000.0;
+        ++unit;
+    }
+    const int decimals = unit == 0 || value >= 100.0 ? 0 : (value >= 10.0 ? 1 : 2);
+    return QStringLiteral("%1 %2").arg(value, 0, 'f', decimals).arg(units.at(unit));
+}
+
+QString NuRpcService::formatCompactBitRate(double bytes_per_second)
+{
+    static const QStringList units{
+        QStringLiteral("b/s"), QStringLiteral("Kb/s"), QStringLiteral("Mb/s"), QStringLiteral("Gb/s")};
+    double value = qMax(0.0, bytes_per_second * 8.0);
+    int unit = 0;
+    while (value >= 1000.0 && unit + 1 < units.size()) {
+        value /= 1000.0;
+        ++unit;
+    }
+    if (unit == 2 && value >= 999.5)
+        return QStringLiteral("~999+ Mb/s");
+    return QStringLiteral("~%1 %2").arg(qRound(value)).arg(units.at(unit));
 }
 
 QString NuRpcService::formatPing(const QJsonValue& seconds)
