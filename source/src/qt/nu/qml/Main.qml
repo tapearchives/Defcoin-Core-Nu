@@ -365,7 +365,6 @@ ApplicationWindow {
             id: fileMenu
             title: qsTr("File")
             width: Math.max(implicitWidth, 460)
-            onAboutToShow: NuService.refresh()
             NuMenuItem { text: qsTr("Create Wallet..."); onTriggered: createWalletDialog.open() }
             NuMenuItem { text: qsTr("Create Wallet with Recovery Phrase..."); onTriggered: createRecoveryWalletDialog.open() }
             NuMenuItem { text: qsTr("Restore Wallet from Recovery Phrase..."); onTriggered: restoreRecoveryWalletDialog.open() }
@@ -376,8 +375,6 @@ ApplicationWindow {
                 width: Math.max(implicitWidth, 480)
                 leftPadding: 0
                 rightPadding: 0
-                onAboutToShow: NuService.refresh()
-
                 Instantiator {
                     id: openWalletItems
                     model: NuService.availableWallets

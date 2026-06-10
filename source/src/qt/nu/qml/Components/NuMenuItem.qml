@@ -32,9 +32,16 @@ MenuItem {
                : (control.darkNativeMenu ? "#1c1c1e" : NuTokens.panelBase)
     }
 
+    // Windows Qt 6.10 has been observed to destabilize when every menu item owns
+    // an extra Shortcut object. Keep menu selection simple there; platform
+    // accelerators can be reintroduced as top-level actions after the crash path
+    // is verified.
     Shortcut {
         sequences: control.shortcut === "" ? [] : [control.shortcut]
-        enabled: control.enabled && control.visible && control.shortcut !== ""
+        enabled: Qt.platform.os !== "windows"
+                 && control.enabled
+                 && control.visible
+                 && control.shortcut !== ""
         onActivated: control.triggered()
     }
 }

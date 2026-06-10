@@ -53,6 +53,48 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.5b - 2026-06-10 - Windows launch visibility and menu crash guard
+
+Big picture:
+- This is a Windows-focused stability pass after the 26.6.5a UI/metrics build.
+- No consensus, wallet storage, Fast Sync, or Quick Clone protocol behavior
+  changed.
+- The main goals are to make slow Windows launches observable and remove recent
+  UI-thread/menu crash risks.
+
+Technical changes:
+- `src/clientversion.h`: visible Defcoin release identity moved to `26.6.5b`.
+- `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
+  `26.6.5b`.
+- `src/qt/nu/app/main.cpp`: adds `nu-gui-launch.log`, QML-warning capture, and
+  startup splash phase messages with elapsed seconds.
+- `src/qt/nu/app/NuRpcService.cpp`: wallet Nu builds skip startup loading of the
+  separated Explorer recent-lookups SQLite cache and contact sets; Explore
+  builds still load them.
+- `src/qt/nu/qml/Main.qml`: menu-open handlers no longer call
+  `NuService.refresh()` while the user is opening File/Open Wallet menus.
+- `src/qt/nu/qml/Components/NuMenuItem.qml`: Windows disables the extra
+  per-menu-item `Shortcut` wrapper to avoid a Qt 6.10 Windows menu crash path.
+
+Verification performed:
+- `git diff --check` passed.
+- `qmllint` passed for the changed QML files with only existing
+  context-property/import warnings.
+- `clang-format --dry-run --Werror` passed for the changed C++ files.
+- Native Apple Silicon syntax build completed.
+- Windows Qt 6.10.1 MinGW frontend build completed, and the Windows payload was
+  packaged into a clean NSIS setup EXE and portable ZIP under the Tools folder.
+- The portable ZIP tested cleanly and the package contains the required Qt
+  runtime files, platform plugin, `qt.conf`, and backend tools.
+- PE import audit against the cleaned payload found no missing non-system DLLs.
+
+Packaging caveat:
+- The 26.6.5b Windows package reuses the prior Windows backend executables. The
+  frontend/backend protocol did not change in this pass, but the backend depends
+  rebuild is still blocked by whitespace in the current `Defcoin Core Nu` path.
+  Use a no-space backend build root before the next backend-facing Windows
+  release.
+
 ### 26.6.5a - 2026-06-10 - Metrics traffic clarity and mast alignment
 
 Big picture:

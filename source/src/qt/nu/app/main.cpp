@@ -7,8 +7,10 @@
 
 #include <QApplication>
 #include <QColor>
+#include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
@@ -32,6 +34,7 @@
 #include <QScreen>
 #include <QSplashScreen>
 #include <QStyleHints>
+#include <QTextStream>
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
@@ -39,6 +42,8 @@
 #include <QWindow>
 #include <QtQml/qqml.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 
 #if defined(Q_OS_WIN)
@@ -52,6 +57,9 @@ constexpr bool kNuHelpEnabled = DEFCOIN_NU_HELP_ENABLED != 0;
 #endif
 constexpr bool kExploreApp = DEFCOIN_NU_EXPLORE_APP != 0;
 
+QFile* gLaunchLogFile = nullptr;
+QtMessageHandler gPreviousMessageHandler = nullptr;
+
 QString productName()
 {
     return kExploreApp ? QStringLiteral("Defcoin Core Nu Explore") : QStringLiteral("Defcoin Core Nu");
@@ -61,6 +69,55 @@ QString productBundleIdentifier()
 {
     return kExploreApp ? QStringLiteral("org.defcoincore.DefcoinCoreNuExplore") :
                          QStringLiteral("org.defcoincore.DefcoinCoreNu");
+}
+
+void writeLaunchLogLine(const QString& message)
+{
+    if (!gLaunchLogFile || !gLaunchLogFile->isOpen())
+        return;
+
+    QTextStream out(gLaunchLogFile);
+    out << QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz t")) << ' '
+        << message.trimmed() << '\n';
+    out.flush();
+    gLaunchLogFile->flush();
+}
+
+void nuQtMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& message)
+{
+    QString level;
+    switch (type) {
+    case QtDebugMsg:
+        level = QStringLiteral("debug");
+        break;
+    case QtInfoMsg:
+        level = QStringLiteral("info");
+        break;
+    case QtWarningMsg:
+        level = QStringLiteral("warning");
+        break;
+    case QtCriticalMsg:
+        level = QStringLiteral("critical");
+        break;
+    case QtFatalMsg:
+        level = QStringLiteral("fatal");
+        break;
+    }
+
+    QString line = QStringLiteral("[%1] %2").arg(level, message);
+    if (context.file && context.line > 0) {
+        line += QStringLiteral(" (%1:%2)").arg(QString::fromUtf8(context.file), QString::number(context.line));
+    }
+    writeLaunchLogLine(line);
+
+    if (gPreviousMessageHandler) {
+        gPreviousMessageHandler(type, context, message);
+    } else {
+        std::fprintf(stderr, "%s\n", qPrintable(line));
+    }
+
+    if (type == QtFatalMsg)
+        std::abort();
 }
 
 bool tryAcquireSingleInstanceLock(QLockFile& lock)
@@ -366,6 +423,58 @@ QString nuDefaultDataDir()
 #endif
 }
 
+void initializeLaunchLog(const QString& dataDir)
+{
+    QDir().mkpath(dataDir);
+    const QString path = QDir(dataDir).filePath(QStringLiteral("nu-gui-launch.log"));
+    gLaunchLogFile = new QFile(path);
+    if (!gLaunchLogFile->open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        delete gLaunchLogFile;
+        gLaunchLogFile = nullptr;
+        return;
+    }
+    writeLaunchLogLine(
+        QStringLiteral("===== %1 %2 launch log started =====").arg(productName(), QStringLiteral(DEFCOIN_NU_VERSION)));
+    writeLaunchLogLine(QStringLiteral("Launch log path: %1").arg(QDir::toNativeSeparators(path)));
+}
+
+class StartupReporter
+{
+public:
+    void start()
+    {
+        m_elapsed.start();
+    }
+
+    void setSplash(QSplashScreen* splash)
+    {
+        m_splash = splash;
+    }
+
+    void step(const QString& message)
+    {
+        const QString clean = message.trimmed();
+        writeLaunchLogLine(
+            QStringLiteral("Startup phase at %1s: %2").arg(QString::number(elapsedSeconds(), 'f', 1), clean));
+        if (!m_splash)
+            return;
+
+        m_splash->showMessage(QStringLiteral("%1\nElapsed: %2s").arg(clean, QString::number(elapsedSeconds(), 'f', 1)),
+                              Qt::AlignLeft | Qt::AlignBottom,
+                              QColor("#f6f6f2"));
+        QApplication::processEvents(QEventLoop::AllEvents, 25);
+    }
+
+private:
+    double elapsedSeconds() const
+    {
+        return m_elapsed.isValid() ? static_cast<double>(m_elapsed.elapsed()) / 1000.0 : 0.0;
+    }
+
+    QElapsedTimer m_elapsed;
+    QSplashScreen* m_splash = nullptr;
+};
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -380,6 +489,11 @@ int main(int argc, char* argv[])
     QApplication::setOrganizationDomain("defcoincore.org");
     QApplication::setFont(QFont(QStringLiteral("Arial")));
     QGuiApplication::styleHints()->setTabFocusBehavior(Qt::TabFocusAllControls);
+    initializeLaunchLog(nuDefaultDataDir());
+    gPreviousMessageHandler = qInstallMessageHandler(nuQtMessageHandler);
+    StartupReporter startup;
+    startup.start();
+    startup.step(QStringLiteral("Preparing application startup."));
 
     QQuickStyle::setStyle("Basic");
 
@@ -411,6 +525,7 @@ int main(int argc, char* argv[])
     }
     const bool buildSmokeTest = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_SMOKE_TEST");
     const bool smokeTest = arguments.contains(QStringLiteral("--smoke-test")) || buildSmokeTest;
+    startup.step(QStringLiteral("Parsed launch arguments."));
     if (buildSmokeTest) {
         return 0;
     }
@@ -435,6 +550,7 @@ int main(int argc, char* argv[])
 
     std::unique_ptr<QLockFile> singleInstanceLock;
     if (!smokeTest && !allowMultiple) {
+        startup.step(QStringLiteral("Checking single-instance data-directory lock."));
         const QString dataDir = nuDefaultDataDir();
         QDir().mkpath(dataDir);
         singleInstanceLock = std::make_unique<QLockFile>(
@@ -459,6 +575,7 @@ int main(int argc, char* argv[])
                 }
             }
         }
+        startup.step(QStringLiteral("Single-instance lock acquired."));
     }
 
     bool velopackHookLaunch =
@@ -470,6 +587,7 @@ int main(int argc, char* argv[])
         }
     }
     if (!smokeTest && velopackHookLaunch) {
+        startup.step(QStringLiteral("Running update startup hook."));
         NuVelopackUpdater::runStartupHook(appDir);
     }
 
@@ -512,13 +630,17 @@ int main(int argc, char* argv[])
             splash->setWindowFlag(Qt::WindowStaysOnTopHint, true);
         }
         activateSplashForUser(splash);
+        startup.setSplash(splash);
+        startup.step(QStringLiteral("Showing startup window."));
         app.processEvents();
         if (forceRaise) {
             QTimer::singleShot(250, splash, [splash] { activateSplashForUser(splash); });
         }
     }
 
+    startup.step(QStringLiteral("Constructing wallet service."));
     NuRpcService service;
+    startup.step(QStringLiteral("Constructing platform integration."));
     NuPlatformIntegration platform;
     platform.setService(&service);
     platform.setTrayIcon(appIcon);
@@ -526,6 +648,11 @@ int main(int argc, char* argv[])
     qmlRegisterSingletonInstance("Defcoin.Nu", 1, 0, "NuPlatform", &platform);
 
     QQmlApplicationEngine engine;
+    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app, [](const QList<QQmlError>& warnings) {
+        for (const QQmlError& warning : warnings) {
+            writeLaunchLogLine(QStringLiteral("QML warning: %1").arg(warning.toString()));
+        }
+    });
     engine.rootContext()->setContextProperty(QStringLiteral("NuBuildVersion"), QStringLiteral(DEFCOIN_NU_VERSION));
     engine.rootContext()->setContextProperty(QStringLiteral("NuBuildId"), buildId);
     engine.rootContext()->setContextProperty(QStringLiteral("NuBuildTimestamp"), buildTimestamp);
@@ -556,7 +683,10 @@ int main(int argc, char* argv[])
         },
         Qt::QueuedConnection);
 #endif
+    startup.step(QStringLiteral("Loading Qt Quick interface."));
     engine.load(mainUrl);
+    startup.step(engine.rootObjects().isEmpty() ? QStringLiteral("Qt Quick interface failed to load.") :
+                                                  QStringLiteral("Qt Quick interface loaded."));
 
     if (smokeTest && grabIndex < 0) {
         if (splash) {
@@ -569,6 +699,7 @@ int main(int argc, char* argv[])
     QQuickWindow* rootWindow = nullptr;
     if (!engine.rootObjects().isEmpty()) {
         QObject* rootObject = engine.rootObjects().constFirst();
+        startup.step(QStringLiteral("Activating main window."));
         platform.setRootObject(rootObject);
         platform.installMacApplicationMenu();
         const int routeIndex = arguments.indexOf("--route");
@@ -655,6 +786,7 @@ int main(int argc, char* argv[])
                     250, rootObject, [rootObject] { QMetaObject::invokeMethod(rootObject, "openDetailedAbout"); });
             }
             if (splash) {
+                startup.step(QStringLiteral("Main window visible; closing startup window."));
                 QTimer::singleShot(650, splash, &QSplashScreen::close);
                 QTimer::singleShot(900, splash, &QObject::deleteLater);
             }

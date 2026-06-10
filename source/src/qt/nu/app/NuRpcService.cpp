@@ -2830,8 +2830,13 @@ void NuRpcService::loadLocalSettings()
             m_third_party_tx_urls_enabled = false;
         }
     }
+#if DEFCOIN_NU_EXPLORE_APP
     loadExplorerRecentLookups();
     loadExplorerContacts();
+#else
+    m_explorer_recent_lookups.clear();
+    m_explorer_contacts.clear();
+#endif
 }
 
 QString NuRpcService::defaultDataDir() const
