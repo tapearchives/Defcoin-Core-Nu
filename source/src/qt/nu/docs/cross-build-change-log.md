@@ -53,6 +53,456 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.7a - 2026-06-11 - Wallet-tab, shutdown, mining mast, and UDP selector polish
+
+Big picture:
+- This build skips the 26.6.6 label and moves Tahoe to 26.6.7a. It is a
+  wallet/UI polish and Fast Sync selector tuning pass; it does not alter
+  consensus, wallet storage, or block validation.
+- The Wallet view had drifted out of sync: the visible Recovery tab opened the
+  Paper Wallet / Watch-only tools panel. This build adds an explicit tab-to-panel
+  mapping so visible Wallet tab labels open their matching panels.
+- The mast/header is tightened for mining and normal sync use. Average block
+  spacing is removed from the mast and should remain in Metrics.
+- Shutdown now presents a status overlay before quitting, warning users not to
+  force-quit while wallets, indexes, and database files are closing cleanly.
+- Shared panels keep their existing hover light and add a subtle dark purple
+  rollover outline. Wallet > Tools is scrollable so Paper Wallet and Watch-only
+  tools stay reachable on smaller windows.
+- Verified UDP Fast Sync peers now keep a minimum selector share and shorter
+  cooldown, so a transient failure does not make the selector over-prefer the
+  normal Core path before UDP has enough fair samples.
+
+Porting priority:
+- Lion Intel: required. Port the Wallet tab mapping, mining mast alignment,
+  shutdown overlay, shared panel hover outline, scrollable Wallet Tools panel,
+  Mining Monitor Follow tail checkbox, new pool presets, splash text nudge, and
+  UDP selector cooldown logic using Qt 5.9-compatible controls.
+- Catalina UTM: required if it shares Tahoe QML.
+- Windows: required. Port the same UI/QML changes and selector behavior.
+- Server: required for Fast Sync parity only. Update visible/version identity
+  and responder/probe behavior; Quick Clone remains Nu-client only.
+
+Changed behavior:
+- Wallet > Recovery now opens recovery phrase tooling; Wallet > Tools opens
+  Paper Wallet and Watch-only tools.
+- Quitting routes through a visible shutdown sequence before the app asks the
+  backend to stop.
+- Wallet > Tools scrolls when content exceeds the available height, and Paper
+  Wallet copy controls use Nu button styling with enough right-side padding.
+- The mast keeps Network/TX/RX/Hashrate/Difficulty on row one and
+  Wallet/Sync/Peers/Block on row two, with stable learned slots.
+- Mining status uses a single aligned dot plus metric rows instead of mixing a
+  status-dot label and metric rows with mismatched baselines.
+- Mining > Monitor can follow the live miner log tail without losing scrollbars.
+- UDP Fast Sync cooldown is shorter for verified UDP peers and the selector
+  keeps probing/sampling verified UDP instead of going silent after minor
+  failures.
+
+Changed files and important details:
+- `src/clientversion.h`: visible Defcoin release identity moved to `26.6.7a`.
+- `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
+  `26.6.7a`.
+- `src/qt/nu/app/NuPlatformIntegration.cpp` and `src/qt/nu/qml/Main.qml`:
+  native Quit now routes through the QML shutdown status overlay.
+- `src/qt/nu/qml/Views/WalletView.qml`: `walletPanelIndexForTab()` maps visible
+  Wallet tabs to the historically declared StackLayout panel order; Wallet
+  Tools content now scrolls when needed.
+- `src/qt/nu/qml/Components/NuPanel.qml` and `NuCopyField.qml`: shared hover
+  outline polish and unclipped Copy button styling.
+- `src/qt/nu/qml/Shell/StatusStrip.qml`: removes average block time from the
+  mast, anchors Sync to row two, and aligns live mining metrics.
+- `src/qt/nu/qml/Views/MiningView.qml`: adds the Follow tail checkbox and the
+  two new pool presets.
+- `src/qt/nu/app/main.cpp`: splash startup status line is nudged down from the
+  top edge.
+- `src/qt/nu/app/NuRpcService.cpp`: verified UDP peers use shorter failure
+  cooldowns and retain selector quota.
+- `src/qt/nu/qml/Main.qml`: Build Notes acknowledgements add the fourth
+  "Everyone we forgot" section requested by the project owner.
+
+Compatibility notes:
+- The UDP selector change is transport-only. Every UDP-received block still goes
+  through Core's normal block acceptance and validation path.
+- Keep Wallet tab metadata and address-book lazy rendering intact; large wallets
+  should not bind thousands of hidden rows just because the Wallet view opened.
+
+Build/package notes:
+- Tahoe Apple Silicon build, staging, codesign verification, and DMG checksum
+  verification passed on 2026-06-11.
+- The staged distribution is
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.7a-20260611/apple-silicon/`.
+- dc903 server Fast Sync/backend was updated after Tahoe passed local build
+  checks. The live server now advertises `/DefcoinCoreNu:26.6.7a/`; the server
+  keeps `DEFCOIN_FASTSYNC` in service bits and UDP listeners on port `10334`.
+
+Verification performed:
+- `git diff --check`: passed.
+- `ruff check src/qt/nu/tools/defcoin_fast_syncd.py`: passed.
+- `ruff format --check src/qt/nu/tools/defcoin_fast_syncd.py`: passed.
+- `qmllint` on modified Wallet, StatusStrip, Mining, and Main QML files:
+  passed with only the known runtime-singleton static warnings.
+- Bundled backend tools report v26.6.7a.
+- Launch gate first-launch test recorded a clean post-allow Local Network audit.
+- QML grabs verified the tightened mast/header. Live Wallet-tab test verified
+  Recovery and Tools content are no longer swapped.
+- Server RPC verification reported blocks and headers equal at `2344693` with
+  `initialblockdownload=false`, and `defcoind` / `defcoin-fast-syncd` /
+  `p2pool-defcoin` were active after restart.
+
+Risks / follow-up:
+- Re-check Tahoe, Lion, and Windows Wallet tabs after porting because the
+  visible labels are now intentionally mapped against an older panel declaration
+  order.
+
+### 26.6.5h - 2026-06-11 - Same-node grouping and embedded trace cleanup
+
+Big picture:
+- This build finishes the peer same-node grouping UX and tightens the route
+  tracing path. It does not change consensus, wallet storage, or block
+  validation.
+- Current Nu nodes advertise a persistent random `node_unique_id` during
+  low-frequency LAN beacon and UDP Fast Sync probe/ack negotiation. Peer tables
+  use that value, or a strong LAN workstation-name fallback, to identify when
+  multiple rows appear to be the same running node over different paths.
+- Fast Sync/Quick Clone in-flight scheduling now also collapses known
+  `node_unique_id` matches into one logical peer so IPv4 and IPv6 rows from the
+  same machine do not consume parallel UDP slots as if they were independent
+  sources. If the active path fails or cools down, the alternate host path can
+  still be selected later.
+
+Porting priority:
+- Lion Intel: required. Port the display-only `(gN)` node grouping suffix,
+  `node_unique_id` peer detail row, in-app Trippy stream window behavior, and
+  package cleanup.
+- Catalina UTM: required if it shares Tahoe QML.
+- Windows: required. Keep `trip.exe` bundled only when a real Windows target
+  binary is available, do not run Unix chmod commands during CMake resource
+  staging, reject host `/opt/homebrew` qrencode during Windows cross-builds,
+  and preserve real numeric peer ids for peer actions.
+- Server: required only for Fast Sync negotiation parity. Server code should
+  learn/use `node_unique_id` during negotiation, not in every block/chunk
+  payload.
+
+Changed behavior:
+- The peer Node column keeps Core's numeric peer id and appends a suffix like
+  `(g1)` only when at least two current rows appear to be the same running Nu
+  node.
+- Hovering the Node column explains `(gN)`. Peer actions still use Core's real
+  numeric peer id from metadata.
+- `node_unique_id` is displayed in peer inspection where known.
+- Trippy now launches in unprivileged stream mode with bounded report cycles so
+  the in-app trace window receives readable text output.
+- Lion packaging now moves the final `.app` to the output directory and removes
+  temporary `stage/` and `dmg-root/` folders after packaging.
+
+Changed files and important details:
+- `src/clientversion.h`: visible Defcoin release identity moved to `26.6.5h`.
+- `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
+  `26.6.5h`; Trippy copy hooks no longer run `/bin/chmod` on Windows; Windows
+  qrencode resolves through `DEFCOIN_NU_QRENCODE_ROOT` or the project target
+  toolchain instead of host Homebrew; Windows Trippy auto-detection searches
+  target toolchain paths only.
+- `src/qt/nu/app/NuRpcService.cpp`: peer row metadata now computes
+  display-only group ids from `node_unique_id` or strong LAN workstation names;
+  `fastSyncLogicalPeerKey()` and the local in-flight counter prevent duplicate
+  same-node UDP scheduling; `tracePeer()` runs
+  `trip -u --mode stream --report-cycles 16`.
+- `src/qt/nu/qml/Views/NodeView.qml`: Node column hover text and peer
+  inspection explain/display `(gN)` without changing selection keys.
+- Lion `src/qt/nu/legacy-osx107/main.cpp`: same display-only grouping and peer
+  detail behavior in the Qt Widgets table.
+- Lion `contrib/legacy-osx107/package_legacy_dmg.sh`: optional `--trip` copy
+  hook and cleanup of temporary packaging folders.
+
+Compatibility notes:
+- `(gN)` is not a Core node id and must never be passed to RPC. Keep using
+  `meta.nodeId` / table item metadata for Retest FastSync, Ban, Inspect, and
+  Traceroute.
+- Do not put `node_unique_id` in high-volume Fast Sync block request/chunk
+  payloads. It belongs in beacons/probes/acks and peer metadata.
+- `Scanning...` LAN names must not be used as grouping keys.
+
+Build/package notes:
+- Tahoe target: `26.6.5h`.
+- Lion target: `26.6.5h-Lion-alpha`.
+- Windows target should use the same `26.6.5h` visible label after parity.
+- Windows builds need `QT_HOST_PATH` pointed at the bundled macOS Qt host tools
+  and `CMAKE_PREFIX_PATH`/`Qt6_DIR` pointed at the bundled MinGW Qt target tree.
+- If no Windows `trip.exe` exists, omit it from the package. Nu falls back to
+  Windows `tracert`; shipping the macOS `trip` binary as `trip.exe` is invalid.
+
+Verification performed:
+- Tahoe Apple Silicon `26.6.5h` DMG built and verified.
+- Physical Lion `26.6.5h-Lion-alpha` Qt 5.9 package built, verified with
+  `hdiutil verify`, and smoke-launched with no Qt `No such slot` warnings.
+- Windows 11 x86_64 package built from fresh 26.6.5h backend binaries and
+  staged at
+  `/Volumes/TB5_4TB/d/litecoincore/Tools/Defcoin Core Nu/Nu-26.6.5h-Windows-11-x86_64-20260611_031651`.
+- Windows package verification confirmed one setup EXE, one portable ZIP,
+  required Qt/runtime/backend files, target PE binaries, and no bundled
+  non-Windows `trip.exe`.
+- dc903 server Fast Sync responder updated and restarted. Loopback probe
+  confirmed `probe-ack` includes the persisted server `node_unique_id`.
+
+Risks / follow-up:
+- A real Windows `trip.exe` is still not bundled because no Windows Trippy
+  target binary/toolchain is present locally. Windows Nu falls back to
+  `tracert` in the same in-app trace window.
+
+### 26.6.5g - 2026-06-10 - Peer inspect, traceroute, and DMG staging cleanup
+
+Big picture:
+- This build adds a readable per-peer inspection popup and a peer route-trace
+  launcher to Metrics > Peers. It does not change consensus, wallet storage, or
+  Fast Sync block scheduling.
+- Apple Silicon packaging now keeps the generated DMG background inside the
+  temporary DMG stage instead of leaving a sidecar PNG in the distribution
+  folder.
+
+Porting priority:
+- Lion Intel: required. Port the user affordances and grouped peer detail view
+  with Lion-compatible UI widgets. Trippy may be optional if the Lion toolchain
+  cannot support a current `trip` binary.
+- Catalina UTM: required if it shares Tahoe QML.
+- Windows: required. Use `trip.exe` when present and fall back to `tracert`.
+- Server: not applicable.
+
+Changed behavior:
+- Double-clicking a peer row opens a grouped peer detail popup.
+- `Inspect Peer` is enabled when exactly one peer row is selected.
+- `Traceroute` is enabled when one or more peer rows are selected and opens one
+  route window per selected peer.
+- Traceroute prefers Trippy's `trip` binary, then falls back to system
+  traceroute/tracert.
+- Header TX/RX compact rates drop the ordinary `~` marker; a `+` remains only
+  for capped display values.
+- Apple Silicon distribution folders no longer retain
+  `defcoin-core-nu-dmg-background.png` or the Explore equivalent.
+
+Changed files and important details:
+- `src/clientversion.h`: visible Defcoin release identity moved to `26.6.5g`.
+- `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
+  `26.6.5g`.
+- `src/qt/nu/qml/Views/NodeView.qml`: peer detail dialog, `Inspect Peer`,
+  `Traceroute`, and double-click handling.
+- `src/qt/nu/app/NuRpcService.h/.cpp`: `tracePeer()` launches Trippy or a
+  platform fallback traceroute for a selected peer endpoint.
+- `src/qt/nu/app/CMakeLists.txt`: optional `DEFCOIN_NU_TRIPPY_BINARY`
+  autodetect/copy hook bundles `trip` into `nu/bin` when present.
+- `src/qt/nu/app/stage_macos_distribution.sh`: DMG background output now points
+  at the temporary staging folder and removes any legacy sidecar PNG.
+- `src/qt/nu/qml/Main.qml` and `doc/license-and-attribution-notices.md`: Trippy
+  optional-tool credit and Apache-2.0 attribution note.
+- `src/qt/nu/assets/licenses/trippy-Apache-2.0-LICENSE.txt`: bundled Trippy
+  Apache-2.0 license text.
+
+Compatibility notes:
+- `tracePeer()` intentionally depends on the current peer endpoint map. It
+  should fail with a user-visible message if the selected peer is stale.
+- If Trippy is bundled on another platform, set `DEFCOIN_NU_TRIPPY_BINARY` and
+  ship the Apache-2.0 license and any upstream NOTICE material with that
+  package.
+
+Verification performed:
+- `git diff --check` passed.
+- `bash -n src/qt/nu/app/stage_macos_distribution.sh` passed.
+- `qmllint -I src/qt/nu/qml src/qt/nu/qml/Views/NodeView.qml` passed with
+  only the expected out-of-bundle `Defcoin.Nu` import warning.
+- `cmake --build build/nu-qml-arm64-26.6.5g --target DefcoinCoreNu -j 6`
+  passed on Tahoe.
+- `cmake --build build/nu-qml-arm64-26.6.5g --target DefcoinCoreNuResources
+  -j 1` passed and `codesign --verify --deep --strict --verbose=2` passed.
+- Apple Silicon staging passed and `hdiutil verify` reported a valid checksum
+  for `Defcoin-Core-Nu-v26.6.5g-macOS-AppleSilicon.dmg`.
+- The staged Apple Silicon distribution folder contains the app and DMG only
+  besides Finder metadata; no generated DMG background PNG remains beside them.
+- The staged Apple Silicon app includes signed `Contents/Resources/nu/bin/trip`
+  and the Trippy Apache-2.0 license asset.
+
+Risks / follow-up:
+- The route trace window is intentionally external because Trippy is a terminal
+  TUI. A future build can embed structured JSON output if we want in-app trace
+  rendering.
+
+### 26.6.5f - 2026-06-10 - Splash, mast, wallet backup, and traffic polish
+
+Big picture:
+- This build tightens visible startup and day-to-day wallet UI behavior after
+  26.6.5e. It does not change consensus, wire protocol, Fast Sync reservation,
+  or Quick Clone scheduling.
+- The mast is no longer a wrapping `Flow`; it is a stable two-line status strip
+  with fixed slot widths so TX/RX and chain numbers do not cause constant visual
+  shifting.
+- Large wallets should no longer freeze the Tools tab just because an offscreen
+  address-book table tried to render thousands of rows.
+
+Porting priority:
+- Lion Intel: required. Port the same intent to the legacy UI: splash progress
+  must not collide, mast/status metrics should be stable, active-wallet backup
+  names should identify the selected wallet, and large address books must not be
+  rendered while hidden.
+- Catalina UTM: required if it shares the QML shell.
+- Windows: required. Rebuild/check both QML frontend and bundled backend; the
+  26.6.5e Windows package still had an older inherited backend.
+- Server: not applicable unless backend release label propagation is needed in
+  a later server package.
+
+Changed behavior:
+- Startup splash progress text is centered at the top of the splash instead of
+  drawing over the bottom version/copyright text.
+- Header line 1 shows Network, TX, RX, Hashrate, Difficulty, Avg block, Peers,
+  and Block in stable slots.
+- Header line 2 shows Wallet in the same left slot under Network, then Sync.
+- Header slot widths learn normal-window content widths and persist through
+  the existing `NuTables/statusHeaderSlots` settings path. Reset views clears
+  that key and restores first-launch header spacing.
+- Active wallet backup defaults to `wallet_<active-wallet>.dat` for BDB/unknown
+  wallets and `wallet_<active-wallet>.sqlite` for SQL wallets.
+- Wallet address-book rendering is lazy: hidden tabs render no rows, and the
+  Addresses tab starts at 500 rows with explicit show-more/show-all controls.
+- Metrics Traffic Details colors now keep received components in a green lane
+  and sent components in a blue lane, with the total receive/send outline drawn
+  on top of each stack.
+- Peak labels now use a small readable plate rather than a dark text stroke.
+
+Changed files and important details:
+- `src/clientversion.h`: visible Defcoin release identity moved to `26.6.5f`.
+- `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
+  `26.6.5f`.
+- `src/qt/nu/app/main.cpp`: `StartupReporter::step()` splash message alignment
+  changed to centered top.
+- `src/qt/nu/qml/Shell/StatusStrip.qml`: replaced mast `Flow` with stable
+  two-line layout slots and settings-backed learned widths.
+- `src/qt/nu/app/NuRpcService.cpp`: `backupWallet()` default filename now uses
+  current wallet name and detected storage type.
+- `src/qt/nu/qml/Views/WalletView.qml`: address-book rows are only generated
+  when the Addresses tab is active, and large wallets render incrementally.
+- `src/qt/nu/qml/Components/NuTimelineGraph.qml`: Details palette, total
+  outlines, and peak label rendering updated.
+
+Compatibility notes:
+- The QML changes are Tahoe/Catalina/Windows friendly. Lion needs equivalent
+  legacy QtWidgets behavior rather than a literal QML import.
+- The backup filename change only changes the save-dialog default path; Core's
+  `backupwallet` RPC still performs the actual backup.
+- The address-book row cap is presentation-only and does not prune wallet data.
+
+Verification performed:
+- `git diff --check` passed for touched Tahoe files.
+- `/opt/homebrew/bin/qmllint -I src/qt/nu/qml` on the touched QML files exited
+  0 with only the known local `Defcoin.Nu` import warning outside a built
+  bundle.
+
+Risks / follow-up:
+- Build and visually inspect Tahoe before release.
+- Rebuild/check Windows and Lion parity before marking this complete.
+- Keep compact-window header slots fixed; only normal-width slots should learn
+  and persist, otherwise narrow windows can become unstable.
+
+### 26.6.5e - 2026-06-10 - Qt 6.11 traffic chart compatibility pass
+
+Big picture:
+- Tahoe now has Qt 6.11.1 available locally, including `QtCanvasPainter` and
+  `QtTaskTree`, but this build deliberately does not link either new module.
+- `QtCanvasPainter` is Technology Preview and licensed Commercial/GPLv3 in Qt
+  6.11.1, which is not a good production dependency for the MIT-derived Nu
+  wallet line without an explicit licensing decision.
+- `QtTaskTree` is also Technology Preview. It may be useful later for backend
+  launch/RPC/index workflows, but this pass avoids a broad async rewrite while
+  Fast Sync/Quick Clone are still being stabilized.
+- Metrics Traffic keeps the Qt Quick Canvas path so Tahoe, Windows, Catalina,
+  and Lion can share the same chart semantics.
+- The Tahoe launch-test gate now treats a new `DefcoinCoreNu` `SIGABRT` crash
+  report as a hard launch failure. It clears the visible macOS crash dialog by
+  clicking `Ignore`, records the DiagnosticReports path, and stops before LAN
+  Allow or UDP testing.
+
+Porting priority:
+- Lion Intel: done in the legacy QtWidgets UI. It uses the same visible model:
+  simple mode shows total received/sent; Details mode stacks TCP, Fast Sync UDP,
+  and Quick Clone UDP components.
+- Catalina UTM: required before next UI rebuild if it shares the QML shell.
+- Windows: required. Rebuild from this source so the footer and hover labels
+  match Tahoe.
+- Server: not applicable. No Fast Sync protocol change.
+- Test tooling: port or keep equivalent launch-gate behavior on any macOS build
+  host that runs automated Nu launch tests. This is not needed on Windows or the
+  server.
+
+Changed behavior:
+- Metrics Traffic Details mode now separates `TCP`, `FS UDP`, and `QC UDP` for
+  both received and sent traffic.
+- Simple mode remains quiet and still shows only total received and total sent.
+- Hover text reports the three component rates so Quick Clone UDP is visible
+  without being mistaken for a third transport.
+- The footer grid now shows `TCP`, `FS UDP`, `QC UDP`, and total traffic totals.
+- Quick Clone traffic is still counted inside total UDP traffic and exported
+  through the existing `quickClone*` sample fields.
+- A new `macos_click_visible_button` helper provides an OCR fallback for system
+  dialogs that are visible but not reliably exposed through Accessibility.
+- `nu_test_launch_gate.sh` records a crash scan timestamp before `open`, checks
+  for a fresh `SIGABRT` report if no PID appears, and also watches for early
+  splash-then-abort crashes for 10 seconds after the PID appears.
+
+Changed files and important details:
+- `src/clientversion.h`: visible Defcoin release identity moved to `26.6.5e`.
+- `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
+  `26.6.5e`.
+- `src/qt/nu/qml/Components/NuTimelineGraph.qml`: Details mode now paints
+  stacked TCP / Fast Sync UDP / Quick Clone UDP areas from existing sample keys.
+- `src/qt/nu/qml/Views/NodeView.qml`: Metrics footer grid now breaks out TCP,
+  Fast Sync UDP, Quick Clone UDP, and total traffic.
+- `src/qt/nu/qml/Components/NuTimelineGraph.qml.agent.md`: updated invariants
+  for the new chart model.
+- `src/qt/nu/tools/macos_click_visible_button.sh/.swift`: generic OCR clicker
+  for exact button text inside required visible context text.
+- `src/qt/nu/tools/nu_test_launch_gate.sh`: new `SIGABRT` crash-report gate and
+  crash-dialog clear path.
+
+Compatibility notes:
+- Do not port `QtCanvasPainter` to Lion or Windows yet. It is not required for
+  this visual model, is Technology Preview, and is not LGPL in Qt 6.11.1.
+- Do not introduce `QtTaskTree` until the async workflow being migrated is
+  isolated and tested; the current timer/RPC flow remains the stable path.
+- No 3D graph was added. TX/RX comparison is clearer as stacked 2D rates and is
+  easier to backport.
+
+Verification performed:
+- `/opt/homebrew/bin/qmllint -I source/src/qt/nu/qml` on `NuTimelineGraph.qml`
+  and `NodeView.qml` exited 0 with only the known local `Defcoin.Nu` import
+  warning outside a built bundle.
+- `/opt/homebrew/bin/qmlformat --check` is not available in this Qt install; no
+  broad formatting rewrite was run.
+- Tahoe `26.6.5e` built and staged at
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.5e-20260610/apple-silicon/Defcoin Core Nu.app`.
+- Tahoe DMG staged and verified at
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.5e-20260610/apple-silicon/Defcoin-Core-Nu-v26.6.5e-macOS-AppleSilicon.dmg`.
+- Tahoe staged app verifies with `codesign --verify --deep --strict`, embeds
+  backend tools reporting `v26.6.5e`, and links Qt frameworks reporting
+  `6.11.1`.
+- Windows frontend rebuilt from the same QML source at
+  `build/nu-qml-win64-26.6.5e` and packaged under
+  `/Volumes/TB5_4TB/d/litecoincore/Tools/Defcoin Core Nu/Nu-26.6.5e-Windows-11-x86_64-20260610_083037`.
+- Windows portable ZIP passed `unzip -t`; setup EXE is a Nullsoft GUI
+  installer. The Windows frontend reports `26.6.5e`, but the embedded Windows
+  backend is inherited from the prior Windows backend build and reports
+  `v26.6.5a` because no fresh Windows backend rebuild was completed in this
+  pass.
+- `bash -n` passed for `nu_test_launch_gate.sh` and
+  `macos_click_visible_button.sh`.
+- `macos_click_visible_button.sh --button Ignore --context "quit unexpectedly"
+  --timeout 1` compiled and returned `context_not_found` with no crash dialog
+  visible, proving it did not click anything opportunistically.
+
+Risks / follow-up:
+- If Windows backend behavior changes are needed, rebuild the Windows backend
+  executables before packaging; this pass changed only the Qt/QML shell and
+  frontend release identity.
+- Build Tahoe and Windows from this source before release.
+- If a future build adopts Qt Canvas Painter, document the explicit license
+  decision and provide a non-CanvasPainter fallback before merging it.
+
 ### 26.6.5d - 2026-06-10 - Sync mode mast and Quick Clone request isolation
 
 Big picture:

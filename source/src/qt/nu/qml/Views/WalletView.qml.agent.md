@@ -10,6 +10,8 @@ Owns wallet management, wallet lists, backups, advanced wallet tools, paper wall
 - Adds watch-only address import with optional rescan/start height.
 - Adds BIP39 recovery/preview workflows and guarded sensitive clipboard flows.
 - Provides wallet rename/delete safeguards around the legacy default `wallet.dat`.
+- Large address books are rendered lazily/capped by default. Keep the first-page/expand controls so opening Wallet tools does not build thousands of hidden table rows and freeze the app.
+- The visible tab order is Files, Recovery, Security, Addresses, Tools, Messages, Compatibility. The QML panels use `walletPanelIndexForTab()` because the Tools panel is historically declared before Recovery; keep the mapping in sync if panels move.
 
 ## Do Not Break
 
@@ -17,6 +19,7 @@ Owns wallet management, wallet lists, backups, advanced wallet tools, paper wall
 - Watch-only addresses cannot spend; keep that warning visible.
 - Wallet delete must move to `Deleted Wallets`, not secure-wipe or silently remove active wallet files.
 - Keep wallet table sort state and simple/detailed columns aligned.
+- Do not bind expensive address-book table rows while the Address Book tab is hidden.
 
 ## Verification
 

@@ -14,6 +14,8 @@ Rectangle {
     implicitHeight: contentColumn.implicitHeight + NuTokens.spaceSm * 2
 
     property bool showExplorerIndexTools: false
+    property var defaultHeaderSlotWidths: [108, 132, 132, 166, 186, 108, 430, 86, 250]
+    property var learnedHeaderSlotWidths: NuService.tableColumnWidths("statusHeaderSlots", defaultHeaderSlotWidths)
 
     signal explorerSearchRequested(string query)
 
@@ -187,12 +189,21 @@ Rectangle {
     }
 
     function syncMastValue() {
-        if (!NuService.syncing) return "Up to Date"
+        if (!NuService.syncing) return "Ready"
         const tip = Number(NuService.headerHeight || 0)
         const mode = String(NuService.syncTransportMode || "Syncing")
         if (tip <= 0) return mode
-        return mode + " | " + NuService.blockHeight + "/" + tip
-                + " (" + NuService.syncProgressPercent + "%, ETA " + NuService.syncEta + ")"
+        return mode + " | " + NuService.syncProgressPercent + "%, ETA " + NuService.syncEta
+    }
+
+    function blockMastValue() {
+        const block = Number(NuService.blockHeight || 0)
+        const tip = Number(NuService.headerHeight || 0)
+        if (NuService.syncing && tip > 0)
+            return block + " of " + tip
+        if (block > 0)
+            return block + ", Up to Date"
+        return NuService.syncing ? "Syncing" : "Up to Date"
     }
 
     function currentWalletIndex() {
@@ -203,6 +214,65 @@ Rectangle {
                 return i
         }
         return -1
+    }
+
+    function headerSlot(index, normalWidth, compactWidth) {
+        if (root.width < 1050)
+            return compactWidth
+        const learned = Number(root.learnedHeaderSlotWidths[index] || normalWidth)
+        return Math.max(normalWidth, learned)
+    }
+
+    function learnedSlotWidth(component, defaultWidth, maximumWidth) {
+        if (!component)
+            return defaultWidth
+        return Math.max(defaultWidth, Math.min(maximumWidth, Math.ceil(component.implicitWidth + NuTokens.spaceMd)))
+    }
+
+    function currentHeaderSlotWidths() {
+        return [
+            root.learnedSlotWidth(networkSlot, 108, 150),
+            root.learnedSlotWidth(txSlot, 132, 180),
+            root.learnedSlotWidth(rxSlot, 132, 180),
+            root.learnedSlotWidth(hashrateSlot, 166, 220),
+            root.learnedSlotWidth(difficultySlot, 186, 240),
+            root.learnedSlotWidth(walletSlot, 108, 150),
+            root.learnedSlotWidth(syncSlot, 430, 720),
+            root.learnedSlotWidth(peersSlot, 86, 120),
+            root.learnedSlotWidth(blockSlot, 250, 320)
+        ]
+    }
+
+    function refreshHeaderSlots() {
+        root.learnedHeaderSlotWidths = NuService.tableColumnWidths("statusHeaderSlots", root.defaultHeaderSlotWidths)
+    }
+
+    function saveLearnedHeaderSlots() {
+        if (root.width < 1050)
+            return
+        const widths = root.currentHeaderSlotWidths()
+        NuService.saveTableColumnWidths("statusHeaderSlots", widths)
+        root.learnedHeaderSlotWidths = widths
+    }
+
+    function scheduleHeaderSlotSave() {
+        if (root.width >= 1050)
+            headerSlotSaveTimer.restart()
+    }
+
+    Component.onCompleted: root.refreshHeaderSlots()
+    Component.onDestruction: root.saveLearnedHeaderSlots()
+
+    Connections {
+        target: NuService
+        function onTableSettingsChanged() { root.refreshHeaderSlots() }
+    }
+
+    Timer {
+        id: headerSlotSaveTimer
+        interval: 1600
+        repeat: false
+        onTriggered: root.saveLearnedHeaderSlots()
     }
 
     ColumnLayout {
@@ -315,74 +385,163 @@ Rectangle {
             }
         }
 
-        Flow {
-            id: statusFlow
+        ColumnLayout {
+            id: statusBlock
             Layout.fillWidth: true
-            Layout.preferredHeight: statusFlow.implicitHeight
-            spacing: root.width < 900 ? NuTokens.spaceMd : NuTokens.spaceLg
-            NuStatusDot {
-                label: root.networkStatusLabel()
-                stateColor: root.networkStatusColor()
-                helpText: root.networkStatusHelp()
-                labelMaximumWidth: root.width < 900 ? 170 : 230
+            Layout.preferredHeight: statusBlock.implicitHeight
+            spacing: 0
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: root.width < 1050 ? NuTokens.spaceSm : NuTokens.spaceMd
+
+                NuStatusDot {
+                    id: networkSlot
+                    Layout.preferredWidth: root.headerSlot(0, 108, 94)
+                    label: root.networkStatusLabel()
+                    stateColor: root.networkStatusColor()
+                    helpText: root.networkStatusHelp()
+                    labelMaximumWidth: root.headerSlot(0, 108, 94) - 26
+                }
+
+                NuMetricRow {
+                    id: txSlot
+                    Layout.preferredWidth: root.headerSlot(1, 132, 112)
+                    label: "TX:"
+                    value: NuService.trafficSentRate
+                    labelMaximumWidth: 30
+                    valueMaximumWidth: root.headerSlot(1, 132, 112) - 44
+                    helpText: "Recent total network transmit rate, including Core TCP, Fast Sync UDP, and Quick Clone UDP traffic."
+                    onImplicitWidthChanged: root.scheduleHeaderSlotSave()
+                }
+
+                NuMetricRow {
+                    id: rxSlot
+                    Layout.preferredWidth: root.headerSlot(2, 132, 112)
+                    label: "RX:"
+                    value: NuService.trafficReceivedRate
+                    labelMaximumWidth: 30
+                    valueMaximumWidth: root.headerSlot(2, 132, 112) - 44
+                    helpText: "Recent total network receive rate, including Core TCP, Fast Sync UDP, and Quick Clone UDP traffic."
+                    onImplicitWidthChanged: root.scheduleHeaderSlotSave()
+                }
+
+                NuMetricRow {
+                    id: hashrateSlot
+                    Layout.preferredWidth: root.headerSlot(3, 166, 140)
+                    label: "Hashrate:"
+                    value: NuService.recentNetworkHashrate
+                    labelMaximumWidth: 74
+                    valueMaximumWidth: root.headerSlot(3, 166, 140) - 88
+                    helpText: "Estimated network hashrate from getnetworkhashps over the last 120 blocks. It is a recent estimate, not an exact live measurement."
+                    onImplicitWidthChanged: root.scheduleHeaderSlotSave()
+                }
+
+                NuMetricRow {
+                    id: difficultySlot
+                    Layout.preferredWidth: root.headerSlot(4, 186, 158)
+                    label: "Difficulty:"
+                    value: NuService.networkDifficulty
+                    labelMaximumWidth: 78
+                    valueMaximumWidth: root.headerSlot(4, 186, 158) - 92
+                    helpText: "Current proof-of-work difficulty from chain state. It can change at retarget boundaries and may lag until RPC refreshes."
+                    onImplicitWidthChanged: root.scheduleHeaderSlotSave()
+                }
+
+                Item { Layout.fillWidth: true }
             }
 
-            NuMetricRow {
-                label: "TX:"
-                value: NuService.trafficSentRate
-                valueMaximumWidth: 92
-                helpText: "Recent total network transmit rate, including Core TCP, Fast Sync UDP, and Quick Clone UDP traffic."
-            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: root.width < 1050 ? NuTokens.spaceSm : NuTokens.spaceMd
 
-            NuMetricRow {
-                label: "RX:"
-                value: NuService.trafficReceivedRate
-                valueMaximumWidth: 92
-                helpText: "Recent total network receive rate, including Core TCP, Fast Sync UDP, and Quick Clone UDP traffic."
-            }
+                NuStatusDot {
+                    id: walletSlot
+                    Layout.preferredWidth: root.headerSlot(5, 108, 94)
+                    label: root.walletStatusLabel()
+                    stateColor: root.walletStatusColor()
+                    helpText: root.walletStatusHelp()
+                    labelMaximumWidth: root.headerSlot(5, 108, 94) - 26
+                }
 
-            NuMetricRow {
-                label: "Hashrate:"
-                value: NuService.recentNetworkHashrate
-                helpText: "Estimated network hashrate from getnetworkhashps over the last 120 blocks. It is a recent estimate, not an exact live measurement."
-            }
+                Rectangle {
+                    id: syncSlot
+                    Layout.preferredWidth: NuService.syncing ? root.headerSlot(6, 430, 260) : 180
+                    implicitWidth: syncContent.implicitWidth + NuTokens.spaceSm * 2
+                    implicitHeight: Math.max(26, syncContent.implicitHeight + NuTokens.spaceXs * 2)
+                    radius: NuTokens.radiusSmall
+                    color: syncHover.hovered ? Qt.rgba(0, 0, 0, 0.035) : "transparent"
 
-            NuMetricRow {
-                label: "Difficulty:"
-                value: NuService.networkDifficulty
-                helpText: "Current proof-of-work difficulty from chain state. It can change at retarget boundaries and may lag until RPC refreshes."
-            }
+                    readonly property string helpText: NuService.syncing
+                                                       ? "Blockchain synchronization progress from Core's getblockchaininfo: verification progress, current block, known headers, and an ETA derived from recent progress."
+                                                       : "The local chain is caught up to the best headers currently known by this node."
 
-            NuMetricRow {
-                label: "Avg block:"
-                value: NuService.recentAverageBlockTime
-                helpText: "Recent average block spacing over up to 120 active-chain blocks, sampled from RPC block headers with the local Explorer index used as fallback."
-            }
+                    ToolTip.visible: syncHover.hovered
+                    ToolTip.text: syncSlot.helpText
+                    ToolTip.delay: NuTokens.tooltipDelay
+                    ToolTip.timeout: NuTokens.tooltipTimeout
 
-            NuMetricRow {
-                label: "Peers"
-                value: NuService.peerCount
-            }
+                    Behavior on color { ColorAnimation { duration: NuTokens.motionFast } }
 
-            NuMetricRow {
-                label: "Block"
-                value: NuService.blockHeight
-            }
+                    HoverHandler {
+                        id: syncHover
+                    }
 
-            NuMetricRow {
-                label: "Sync"
-                value: root.syncMastValue()
-                valueMaximumWidth: NuService.syncing ? (root.width < 900 ? 300 : 430) : 120
-                helpText: NuService.syncing
-                          ? "Blockchain synchronization progress from Core's getblockchaininfo: verification progress, current block, known headers, and an ETA derived from recent progress."
-                          : "The local chain is caught up to the best headers currently known by this node."
-            }
+                    RowLayout {
+                        id: syncContent
+                        anchors.fill: parent
+                        anchors.leftMargin: NuTokens.spaceSm
+                        anchors.rightMargin: NuTokens.spaceSm
+                        spacing: NuTokens.spaceXs
 
-            NuStatusDot {
-                label: root.walletStatusLabel()
-                stateColor: root.walletStatusColor()
-                helpText: root.walletStatusHelp()
-                labelMaximumWidth: 170
+                        Label {
+                            text: "Sync:"
+                            Layout.alignment: Qt.AlignVCenter
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        Label {
+                            text: root.syncMastValue()
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.maximumWidth: NuService.syncing ? root.headerSlot(6, 430, 260) - 60 : 112
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontBody
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+
+                    onImplicitWidthChanged: root.scheduleHeaderSlotSave()
+                }
+
+                Item { Layout.fillWidth: true }
+
+                NuMetricRow {
+                    id: peersSlot
+                    Layout.preferredWidth: root.headerSlot(7, 86, 72)
+                    label: "Peers"
+                    value: NuService.peerCount
+                    labelMaximumWidth: 44
+                    valueMaximumWidth: 30
+                    onImplicitWidthChanged: root.scheduleHeaderSlotSave()
+                }
+
+                NuMetricRow {
+                    id: blockSlot
+                    Layout.preferredWidth: root.headerSlot(8, 250, 188)
+                    label: "Block"
+                    value: root.blockMastValue()
+                    labelMaximumWidth: 44
+                    valueMaximumWidth: root.headerSlot(8, 250, 188) - 58
+                    helpText: NuService.syncing && NuService.headerHeight > 0
+                              ? "Current validated block height compared with the best header height currently known by this node."
+                              : "Current validated active-chain block height. Up to Date means this node is caught up to its known headers."
+                    onImplicitWidthChanged: root.scheduleHeaderSlotSave()
+                }
             }
         }
 
@@ -390,7 +549,7 @@ Rectangle {
             id: miningBubble
             visible: NuService.minerRunning
             Layout.fillWidth: true
-            implicitHeight: visible ? Math.max(34, miningFlow.implicitHeight + NuTokens.spaceXs * 2) : 0
+            implicitHeight: visible ? Math.max(34, miningRow.implicitHeight + NuTokens.spaceXs * 2) : 0
             radius: NuTokens.radiusSmall
             color: "#eef7ff"
             border.color: NuTokens.accentSky
@@ -404,19 +563,38 @@ Rectangle {
                 id: miningBubbleHover
             }
 
-            Flow {
-                id: miningFlow
+            RowLayout {
+                id: miningRow
                 anchors.fill: parent
                 anchors.leftMargin: NuTokens.spaceMd
                 anchors.rightMargin: NuTokens.spaceMd
                 anchors.topMargin: NuTokens.spaceXs
                 anchors.bottomMargin: NuTokens.spaceXs
-                spacing: NuTokens.spaceLg
+                spacing: NuTokens.spaceMd
 
-                NuStatusDot {
-                    label: "Mining State: " + NuService.miningStateText
-                    stateColor: NuTokens.accentSky
-                    labelMaximumWidth: root.width < 900 ? 220 : 300
+                Rectangle {
+                    implicitWidth: 14
+                    implicitHeight: 14
+                    radius: 7
+                    color: Qt.rgba(NuTokens.accentSky.r, NuTokens.accentSky.g, NuTokens.accentSky.b, 0.16)
+                    border.color: Qt.rgba(NuTokens.accentSky.r, NuTokens.accentSky.g, NuTokens.accentSky.b, 0.38)
+                    border.width: 1
+                    Layout.alignment: Qt.AlignVCenter
+
+                    Rectangle {
+                        width: 8
+                        height: 8
+                        radius: 4
+                        anchors.centerIn: parent
+                        color: NuTokens.accentSky
+                    }
+                }
+
+                NuMetricRow {
+                    label: "Mining State:"
+                    value: NuService.miningStateText
+                    labelMaximumWidth: 92
+                    valueMaximumWidth: root.width < 900 ? 180 : 280
                 }
 
                 NuMetricRow {

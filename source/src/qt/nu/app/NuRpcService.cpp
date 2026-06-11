@@ -247,6 +247,36 @@ bool launchExploreLookup(const QString& option, const QString& value)
 #endif
 }
 
+QString firstExistingExecutable(const QStringList& candidates)
+{
+    for (const QString& candidate : candidates) {
+        const QString clean = candidate.trimmed();
+        if (clean.isEmpty())
+            continue;
+        const QFileInfo info(clean);
+        if (info.exists() && info.isExecutable())
+            return info.absoluteFilePath();
+    }
+    return QString();
+}
+
+QString bundledToolCandidate(const QString& name)
+{
+    const QDir app_dir(QCoreApplication::applicationDirPath());
+    const QStringList relative_roots{
+        QStringLiteral("."),
+        QStringLiteral("nu/bin"),
+        QStringLiteral("../Resources/nu/bin"),
+        QStringLiteral("../Resources/bin"),
+    };
+    for (const QString& root : relative_roots) {
+        const QFileInfo info(app_dir.filePath(root + QLatin1Char('/') + name));
+        if (info.exists() && info.isExecutable())
+            return info.absoluteFilePath();
+    }
+    return QString();
+}
+
 QString normalizedFastSyncHost(const QHostAddress& address)
 {
     bool ipv4_ok = false;
@@ -999,6 +1029,25 @@ QString walletStorageTypeForName(const QString& data_dir, const QString& wallet_
         return walletStorageTypeFromFile(direct);
     }
     return walletStorageTypeFromFile(QDir(direct).filePath(QStringLiteral("wallet.dat")));
+}
+
+QString walletBackupDefaultFileName(const QString& wallet_name, const QString& storage_type)
+{
+    QString stem = normalizedWalletListName(wallet_name);
+    stem.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    if (stem.startsWith(QStringLiteral("wallets/")))
+        stem = stem.mid(QStringLiteral("wallets/").size());
+    if (stem.isEmpty() || stem == QLatin1String("wallet.dat"))
+        stem = QStringLiteral("default_wallet");
+
+    stem.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]+")), QStringLiteral("_"));
+    stem.replace(QRegularExpression(QStringLiteral("_+")), QStringLiteral("_"));
+    stem = stem.mid(0, 96).trimmed();
+    if (stem.isEmpty())
+        stem = QStringLiteral("active_wallet");
+
+    const QString extension = storage_type == QLatin1String("SQL") ? QStringLiteral(".sqlite") : QStringLiteral(".dat");
+    return QStringLiteral("wallet_%1%2").arg(stem, extension);
 }
 
 QByteArray sha256Bytes(const QByteArray& data)
@@ -2238,6 +2287,14 @@ QString shellQuoteForDisplay(const QString& value)
     QString out = value;
     out.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
     return QStringLiteral("'%1'").arg(out);
+}
+
+QString appleScriptStringLiteral(QString value)
+{
+    value.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+    value.replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    value.replace(QLatin1Char('\n'), QStringLiteral("\\n"));
+    return QStringLiteral("\"%1\"").arg(value);
 }
 
 QString processCommandForDisplay(const QString& program, const QStringList& args)
@@ -4625,6 +4682,52 @@ void NuRpcService::refreshNode()
         QHash<int, QString> peer_host_by_node_id;
         QHash<int, QString> peer_addr_by_node_id;
         QHash<int, bool> peer_inbound_by_node_id;
+        QHash<QString, int> association_count_by_key;
+        QHash<QString, int> association_group_by_key;
+        int next_association_group = 1;
+        auto peer_association_key = [this](const QJsonObject& peer) {
+            const QPair<QString, QString> endpoint =
+                splitPeerAddressAndPort(peer.value(QStringLiteral("addr")).toString());
+            const QString normalized_host = normalizedFastSyncHost(QHostAddress(endpoint.first));
+            const QString node_unique_id = m_peer_node_unique_id_by_host.value(normalized_host);
+            if (!node_unique_id.isEmpty())
+                return QStringLiteral("node_unique_id:%1").arg(node_unique_id);
+
+            const QString reverse_dns = peerDnsName(peer, endpoint, m_peer_dns_name_by_host);
+            const QString known_dns = peerDomainAlias(peer,
+                                                      endpoint,
+                                                      reverse_dns,
+                                                      m_peer_dns_name_by_host,
+                                                      m_peer_domain_alias_by_host,
+                                                      m_peer_lan_name_by_host);
+            const bool lan_peer =
+                m_lan_node_discovery_enabled &&
+                isVisibleLanPeer(
+                    endpoint.first, reverse_dns, known_dns, m_peer_lan_name_by_host, m_peer_lan_info_by_host);
+            if (!lan_peer)
+                return QString();
+            const QString workstation_info = peerLanWorkstationInfo(endpoint.first,
+                                                                    reverse_dns,
+                                                                    m_peer_lan_info_by_host,
+                                                                    m_peer_lan_name_by_host,
+                                                                    m_peer_dns_name_by_host,
+                                                                    m_peer_lan_lookup_pending);
+            const QString source_or_lan_name = workstation_info != QLatin1String("-") ? workstation_info : known_dns;
+            if (source_or_lan_name == QLatin1String("-") || source_or_lan_name == QLatin1String("Scanning..."))
+                return QString();
+            QString association_key = source_or_lan_name.toLower();
+            association_key.remove(QRegularExpression(QStringLiteral("[^a-z0-9]+")));
+            return association_key.isEmpty() ? QString() : QStringLiteral("lan_name:%1").arg(association_key);
+        };
+        for (const QJsonValue& peer_value : result.toArray()) {
+            const QJsonObject peer = peer_value.toObject();
+            const QString subver = trimUserAgent(peer.value(QStringLiteral("subver")).toString());
+            if (m_only_defcoin_user_agents && !isDefcoinUserAgent(subver))
+                continue;
+            const QString association_key = peer_association_key(peer);
+            if (!association_key.isEmpty())
+                association_count_by_key[association_key] += 1;
+        }
         for (const QJsonValue& peer_value : result.toArray()) {
             const QJsonObject peer = peer_value.toObject();
             const QString subver = trimUserAgent(peer.value(QStringLiteral("subver")).toString());
@@ -4737,13 +4840,97 @@ void NuRpcService::refreshNode()
                 received_message_bytes[it.key()] += it.value().toVariant().toLongLong();
             }
 
+            const QString normalized_host = normalizedFastSyncHost(QHostAddress(endpoint.first));
+            const QString node_unique_id = m_peer_node_unique_id_by_host.value(normalized_host);
+            QString association_label;
+            QString association_key;
+            QString association_reason;
+            if (!node_unique_id.isEmpty()) {
+                association_label = QStringLiteral("node_unique_id %1").arg(node_unique_id.left(12));
+                association_key = QStringLiteral("node_unique_id:%1").arg(node_unique_id);
+                association_reason = QStringLiteral("Matching Nu node_unique_id");
+            } else if (lan_peer && source_or_lan_name != QLatin1String("-") &&
+                       source_or_lan_name != QLatin1String("Scanning...")) {
+                association_label = source_or_lan_name;
+                association_key = association_label.toLower();
+                association_key.remove(QRegularExpression(QStringLiteral("[^a-z0-9]+")));
+                if (!association_key.isEmpty()) {
+                    association_key.prepend(QStringLiteral("lan_name:"));
+                    association_reason = QStringLiteral("Matching LAN workstation name");
+                }
+            }
+            QString display_node_id = node_id;
+            int association_group = 0;
+            QString association_group_tooltip;
+            if (!association_key.isEmpty() && association_count_by_key.value(association_key) > 1 && node_id_int >= 0) {
+                if (!association_group_by_key.contains(association_key))
+                    association_group_by_key.insert(association_key, next_association_group++);
+                association_group = association_group_by_key.value(association_key);
+                display_node_id = QStringLiteral("%1 (g%2)").arg(node_id, QString::number(association_group));
+                association_group_tooltip =
+                    QStringLiteral("Core peer id %1. The (g%2) suffix means Nu grouped this row with another peer row "
+                                   "that appears to be the same running node. Clue: %3.")
+                        .arg(node_id, QString::number(association_group), association_reason);
+            }
+
             const QVariantMap peer_meta{
                 {QStringLiteral("nodeId"), node_id},
+                {QStringLiteral("displayNodeId"), display_node_id},
+                {QStringLiteral("associationGroup"), association_group},
+                {QStringLiteral("associationGroupTooltip"), association_group_tooltip},
                 {QStringLiteral("peerHost"), endpoint.first},
+                {QStringLiteral("peerPort"), fallbackDash(endpoint.second)},
                 {QStringLiteral("peerAddress"), raw_addr},
-                {QStringLiteral("peerInbound"), peer.value(QStringLiteral("inbound")).toBool()}};
+                {QStringLiteral("peerInbound"), peer.value(QStringLiteral("inbound")).toBool()},
+                {QStringLiteral("direction"), direction},
+                {QStringLiteral("ping"), ping},
+                {QStringLiteral("minPing"), min_ping},
+                {QStringLiteral("sent"), sent},
+                {QStringLiteral("received"), received},
+                {QStringLiteral("transportMethods"), transport_methods},
+                {QStringLiteral("fastSyncAvailable"), fast_sync_available},
+                {QStringLiteral("magic"), magic},
+                {QStringLiteral("protocolVersion"), protocol_version},
+                {QStringLiteral("services"), services},
+                {QStringLiteral("servicesHex"), services_hex},
+                {QStringLiteral("serviceDetails"), service_details},
+                {QStringLiteral("reverseDns"), reverse_dns},
+                {QStringLiteral("seedLanSource"), source_or_lan_name},
+                {QStringLiteral("lanTooltip"), lan_tooltip},
+                {QStringLiteral("isLanPeer"), lan_peer},
+                {QStringLiteral("nodeUniqueId"), node_unique_id},
+                {QStringLiteral("nodeUniqueIdSource"), m_peer_node_unique_source_by_host.value(normalized_host)},
+                {QStringLiteral("associationLabel"), association_label},
+                {QStringLiteral("associationKey"), association_key},
+                {QStringLiteral("associationReason"), association_reason},
+                {QStringLiteral("userAgent"), subver},
+                {QStringLiteral("connectionTime"), peerUnixTimeText(peer, QStringLiteral("conntime"))},
+                {QStringLiteral("startHeight"), peerNumberText(peer, QStringLiteral("startingheight"))},
+                {QStringLiteral("lastSend"), peerUnixTimeText(peer, QStringLiteral("lastsend"))},
+                {QStringLiteral("lastRecv"), peerUnixTimeText(peer, QStringLiteral("lastrecv"))},
+                {QStringLiteral("lastTx"), peerUnixTimeText(peer, QStringLiteral("last_transaction"))},
+                {QStringLiteral("lastBlock"), peerUnixTimeText(peer, QStringLiteral("last_block"))},
+                {QStringLiteral("syncedHeaders"), peerSyncHeightText(peer, QStringLiteral("synced_headers"))},
+                {QStringLiteral("syncedBlocks"), peerSyncHeightText(peer, QStringLiteral("synced_blocks"))},
+                {QStringLiteral("connectionType"),
+                 fallbackDash(peer.value(QStringLiteral("connection_type")).toString())},
+                {QStringLiteral("network"), fallbackDash(peer.value(QStringLiteral("network")).toString())},
+                {QStringLiteral("addrEntries"), peerNumberText(peer, QStringLiteral("addr_processed"))},
+                {QStringLiteral("minFeeFilter"),
+                 peer.value(QStringLiteral("minfeefilter")).isDouble() ?
+                     formatAmount(peer.value(QStringLiteral("minfeefilter"))) + QStringLiteral(" DFC/kB") :
+                     QStringLiteral("-")}};
 
-            simple_rows.push_back(tableRow({node_id,
+            QVariantMap simple_peer_meta = peer_meta;
+            if (!association_group_tooltip.isEmpty()) {
+                QVariantList simple_cell_tooltips;
+                for (int i = 0; i < 8; ++i)
+                    simple_cell_tooltips << QString();
+                simple_cell_tooltips[0] = association_group_tooltip;
+                simple_peer_meta.insert(QStringLiteral("cellTooltips"), simple_cell_tooltips);
+            }
+
+            simple_rows.push_back(tableRow({display_node_id,
                                             direction,
                                             peerAddressPortDisplay(raw_addr, endpoint),
                                             transport_methods,
@@ -4751,56 +4938,54 @@ void NuRpcService::refreshNode()
                                             sent,
                                             received,
                                             subver},
-                                           peer_meta));
+                                           simple_peer_meta));
 
             QVariantList cell_tooltips;
             for (int i = 0; i < 28; ++i)
                 cell_tooltips << QString();
+            if (!association_group_tooltip.isEmpty())
+                cell_tooltips[0] = association_group_tooltip;
             if (!lan_tooltip.isEmpty())
                 cell_tooltips[5] = lan_tooltip;
             cell_tooltips[8] = service_details;
 
-            detailed_rows.push_back(tableRow(
-                {node_id,
-                 direction,
-                 peerIpDisplay(endpoint),
-                 fallbackDash(endpoint.second),
-                 reverse_dns,
-                 source_or_lan_name,
-                 protocol_version,
-                 magic,
-                 services,
-                 fast_sync_available,
-                 transport_methods,
-                 ping,
-                 min_ping,
-                 sent,
-                 received,
-                 subver,
-                 peerUnixTimeText(peer, QStringLiteral("conntime")),
-                 peerNumberText(peer, QStringLiteral("startingheight")),
-                 peerUnixTimeText(peer, QStringLiteral("lastsend")),
-                 peerUnixTimeText(peer, QStringLiteral("lastrecv")),
-                 peerUnixTimeText(peer, QStringLiteral("last_transaction")),
-                 peerUnixTimeText(peer, QStringLiteral("last_block")),
-                 peerSyncHeightText(peer, QStringLiteral("synced_headers")),
-                 peerSyncHeightText(peer, QStringLiteral("synced_blocks")),
-                 fallbackDash(peer.value(QStringLiteral("connection_type")).toString()),
-                 fallbackDash(peer.value(QStringLiteral("network")).toString()),
-                 peerNumberText(peer, QStringLiteral("addr_processed")),
-                 peer.value(QStringLiteral("minfeefilter")).isDouble() ?
-                     formatAmount(peer.value(QStringLiteral("minfeefilter"))) + QStringLiteral(" DFC/kB") :
-                     QStringLiteral("-")},
-                {{QStringLiteral("nodeId"), node_id},
-                 {QStringLiteral("peerHost"), endpoint.first},
-                 {QStringLiteral("peerAddress"), raw_addr},
-                 {QStringLiteral("peerInbound"), peer.value(QStringLiteral("inbound")).toBool()},
-                 {QStringLiteral("reverseDnsSort"), reverseDomainSortNotation(reverse_dns)},
-                 {QStringLiteral("knownDnsSort"),
-                  (lan_peer ? QStringLiteral("0|") : QStringLiteral("1|")) +
-                      (lan_peer ? source_or_lan_name.toLower() : reverseDomainSortNotation(source_or_lan_name))},
-                 {QStringLiteral("isLanPeer"), lan_peer},
-                 {QStringLiteral("cellTooltips"), cell_tooltips}}));
+            QVariantMap detailed_peer_meta = peer_meta;
+            detailed_peer_meta.insert(QStringLiteral("reverseDnsSort"), reverseDomainSortNotation(reverse_dns));
+            detailed_peer_meta.insert(
+                QStringLiteral("knownDnsSort"),
+                (lan_peer ? QStringLiteral("0|") : QStringLiteral("1|")) +
+                    (lan_peer ? source_or_lan_name.toLower() : reverseDomainSortNotation(source_or_lan_name)));
+            detailed_peer_meta.insert(QStringLiteral("cellTooltips"), cell_tooltips);
+
+            detailed_rows.push_back(tableRow({display_node_id,
+                                              direction,
+                                              peerIpDisplay(endpoint),
+                                              peer_meta.value(QStringLiteral("peerPort")),
+                                              reverse_dns,
+                                              source_or_lan_name,
+                                              protocol_version,
+                                              magic,
+                                              services,
+                                              fast_sync_available,
+                                              transport_methods,
+                                              ping,
+                                              min_ping,
+                                              sent,
+                                              received,
+                                              subver,
+                                              peer_meta.value(QStringLiteral("connectionTime")),
+                                              peer_meta.value(QStringLiteral("startHeight")),
+                                              peer_meta.value(QStringLiteral("lastSend")),
+                                              peer_meta.value(QStringLiteral("lastRecv")),
+                                              peer_meta.value(QStringLiteral("lastTx")),
+                                              peer_meta.value(QStringLiteral("lastBlock")),
+                                              peer_meta.value(QStringLiteral("syncedHeaders")),
+                                              peer_meta.value(QStringLiteral("syncedBlocks")),
+                                              peer_meta.value(QStringLiteral("connectionType")),
+                                              peer_meta.value(QStringLiteral("network")),
+                                              peer_meta.value(QStringLiteral("addrEntries")),
+                                              peer_meta.value(QStringLiteral("minFeeFilter"))},
+                                             detailed_peer_meta));
         }
         auto message_bytes = [](const QHash<QString, qint64>& messages, const QStringList& names) {
             qint64 total = 0;
@@ -5428,19 +5613,71 @@ bool NuRpcService::isLocalInterfaceAddress(const QHostAddress& address) const
     return false;
 }
 
-void NuRpcService::sendLanDiscoveryAnnouncement()
+QString NuRpcService::ensureNodeUniqueId()
 {
-    if (!m_lan_fast_sync_socket || !m_lan_fast_sync_enabled || !m_lan_node_discovery_enabled)
-        return;
-
-    QSettings settings;
     if (m_lan_discovery_node_id.isEmpty()) {
+        QSettings settings;
         m_lan_discovery_node_id = settings.value(QStringLiteral("LanDiscoveryNodeId")).toString();
         if (m_lan_discovery_node_id.isEmpty()) {
             m_lan_discovery_node_id = QUuid::createUuid().toString(QUuid::Id128);
             settings.setValue(QStringLiteral("LanDiscoveryNodeId"), m_lan_discovery_node_id);
         }
     }
+    if (!m_lan_discovery_node_id_logged) {
+        m_lan_discovery_node_id_logged = true;
+        appendLaunchDiagnostic(QStringLiteral("LAN discovery node_unique_id=%1").arg(m_lan_discovery_node_id.left(12)));
+    }
+    return m_lan_discovery_node_id;
+}
+
+QString NuRpcService::fastSyncLogicalPeerKey(const QString& host) const
+{
+    const QString host_key = normalizedFastSyncHostText(host);
+    if (host_key.isEmpty())
+        return QString();
+
+    const QString node_unique_id = m_peer_node_unique_id_by_host.value(host_key).trimmed();
+    if (!node_unique_id.isEmpty())
+        return QStringLiteral("node_unique_id:%1").arg(node_unique_id);
+
+    return QStringLiteral("host:%1").arg(host_key);
+}
+
+void NuRpcService::rememberPeerNodeUniqueId(const QHostAddress& sender,
+                                            const QJsonObject& header,
+                                            const QString& source)
+{
+    const QString node_unique_id = header.value(QStringLiteral("node_unique_id")).toString().trimmed();
+    if (node_unique_id.isEmpty())
+        return;
+    static const QRegularExpression id_re(QStringLiteral(R"(^[A-Za-z0-9._:-]{8,128}$)"));
+    if (!id_re.match(node_unique_id).hasMatch())
+        return;
+    const QString local_id = ensureNodeUniqueId();
+    if (!local_id.isEmpty() && node_unique_id == local_id)
+        return;
+    const QString sender_key = normalizedFastSyncHost(sender);
+    if (sender_key.isEmpty())
+        return;
+    bool changed = false;
+    if (m_peer_node_unique_id_by_host.value(sender_key) != node_unique_id) {
+        m_peer_node_unique_id_by_host.insert(sender_key, node_unique_id);
+        changed = true;
+    }
+    if (m_peer_node_unique_source_by_host.value(sender_key) != source) {
+        m_peer_node_unique_source_by_host.insert(sender_key, source);
+        changed = true;
+    }
+    if (changed)
+        refreshNode();
+}
+
+void NuRpcService::sendLanDiscoveryAnnouncement()
+{
+    if (!m_lan_fast_sync_socket || !m_lan_fast_sync_enabled || !m_lan_node_discovery_enabled)
+        return;
+
+    const QString node_unique_id = ensureNodeUniqueId();
 
     const QString host_name = lanWorkstationNameFromCandidate(QHostInfo::localHostName());
     const QString workstation_name =
@@ -5453,7 +5690,8 @@ void NuRpcService::sendLanDiscoveryAnnouncement()
     message.insert(QStringLiteral("version"), 1);
     message.insert(QStringLiteral("product"), QStringLiteral("Defcoin Core Nu"));
     message.insert(QStringLiteral("build"), QStringLiteral(DEFCOIN_NU_VERSION));
-    message.insert(QStringLiteral("node_id"), m_lan_discovery_node_id);
+    message.insert(QStringLiteral("node_id"), node_unique_id);
+    message.insert(QStringLiteral("node_unique_id"), node_unique_id);
     message.insert(QStringLiteral("platform"), QSysInfo::prettyProductName());
     message.insert(QStringLiteral("arch"), QSysInfo::currentCpuArchitecture());
     message.insert(QStringLiteral("lan_discovery_protocol"), QStringLiteral("defcoin-nu-lan-announce-v1"));
@@ -5600,8 +5838,11 @@ void NuRpcService::handleLanDiscoveryAnnouncement(const QJsonObject& message, co
     } else {
         m_quick_clone_snapshot_candidate_hosts.remove(sender_key);
     }
-    if (!m_lan_discovery_node_id.isEmpty() &&
-        message.value(QStringLiteral("node_id")).toString() == m_lan_discovery_node_id) {
+    const QString message_node_unique_id = message.value(QStringLiteral("node_unique_id"))
+                                               .toString(message.value(QStringLiteral("node_id")).toString())
+                                               .trimmed();
+    const QString local_node_unique_id = ensureNodeUniqueId();
+    if (!local_node_unique_id.isEmpty() && message_node_unique_id == local_node_unique_id) {
         return;
     }
 
@@ -5611,6 +5852,17 @@ void NuRpcService::handleLanDiscoveryAnnouncement(const QJsonObject& message, co
         quint16(qBound(1, message.value(QStringLiteral("p2p_port")).toInt(DEFCOIN_DEFAULT_P2P_PORT), 65535));
 
     bool changed = false;
+    if (!message_node_unique_id.isEmpty()) {
+        if (m_peer_node_unique_id_by_host.value(sender_key) != message_node_unique_id) {
+            m_peer_node_unique_id_by_host.insert(sender_key, message_node_unique_id);
+            changed = true;
+        }
+        const QString source = QStringLiteral("Nu LAN beacon node_unique_id");
+        if (m_peer_node_unique_source_by_host.value(sender_key) != source) {
+            m_peer_node_unique_source_by_host.insert(sender_key, source);
+            changed = true;
+        }
+    }
     if (!announced_name.isEmpty()) {
         if (m_peer_lan_name_by_host.value(sender_key) != announced_name) {
             m_peer_lan_name_by_host.insert(sender_key, announced_name);
@@ -6254,8 +6506,18 @@ void NuRpcService::recordFastSyncTransportFailure(FastSyncTransport transport)
         ++m_fast_sync_udp_failures;
         const int consecutive_penalty =
             std::min(8, std::max(1, m_fast_sync_udp_failures - m_fast_sync_udp_successes + 1));
-        m_fast_sync_udp_cooldown_until_ms = now + (1000LL << consecutive_penalty);
-        m_fast_sync_udp_ewma_blocks_per_second *= 0.5;
+        bool verified_udp_peer_available = false;
+        for (const QString& host : std::as_const(m_udp_fast_sync_peer_hosts)) {
+            if (isUdpFastSyncHostVerified(host)) {
+                verified_udp_peer_available = true;
+                break;
+            }
+        }
+        const qint64 cooldown_ms = verified_udp_peer_available ?
+                                       std::min<qint64>(15000, 2000LL + 750LL * consecutive_penalty) :
+                                       (1000LL << consecutive_penalty);
+        m_fast_sync_udp_cooldown_until_ms = now + cooldown_ms;
+        m_fast_sync_udp_ewma_blocks_per_second *= verified_udp_peer_available ? 0.75 : 0.5;
     } else {
         ++m_fast_sync_tcp_failures;
         m_fast_sync_tcp_ewma_blocks_per_second *= 0.5;
@@ -6316,11 +6578,19 @@ void NuRpcService::resetFastSyncProtocolWindow()
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const bool udp_in_cooldown = now < m_fast_sync_udp_cooldown_until_ms;
     const bool force_probe = (now - m_fast_sync_last_probe_ms) >= FAST_SYNC_PROTOCOL_PROBE_INTERVAL_MS;
+    bool verified_udp_peer_available = false;
+    for (const QString& host : std::as_const(m_udp_fast_sync_peer_hosts)) {
+        if (isUdpFastSyncHostVerified(host)) {
+            verified_udp_peer_available = true;
+            break;
+        }
+    }
+    const bool udp_temporarily_suppressed = udp_in_cooldown && !force_probe && !verified_udp_peer_available;
 
     if (core_tcp_blocks_disabled) {
         m_fast_sync_window_size = std::max(4, std::min(FAST_SYNC_PROTOCOL_MAX_WINDOW, m_fast_sync_window_size));
         m_fast_sync_tcp_quota_remaining = 0;
-        if (udp_in_cooldown && !force_probe) {
+        if (udp_temporarily_suppressed) {
             m_fast_sync_udp_quota_remaining = 0;
             m_fast_sync_decision_summary = QStringLiteral("UDP test mode; waiting for UDP cooldown");
             return;
@@ -6330,7 +6600,7 @@ void NuRpcService::resetFastSyncProtocolWindow()
         return;
     }
 
-    if (!udp_in_cooldown && udp_samples < FAST_SYNC_PROTOCOL_MIN_UDP_PROBES) {
+    if ((!udp_in_cooldown || verified_udp_peer_available) && udp_samples < FAST_SYNC_PROTOCOL_MIN_UDP_PROBES) {
         m_fast_sync_window_size = std::max(4, std::min(FAST_SYNC_PROTOCOL_MAX_WINDOW, m_fast_sync_window_size));
         m_fast_sync_udp_quota_remaining = 3;
         m_fast_sync_tcp_quota_remaining = 1;
@@ -6366,7 +6636,7 @@ void NuRpcService::resetFastSyncProtocolWindow()
         score(m_fast_sync_tcp_ewma_blocks_per_second, effective_tcp_successes, effective_tcp_failures);
     const double udp_score_raw =
         score(m_fast_sync_udp_ewma_blocks_per_second, m_fast_sync_udp_successes, m_fast_sync_udp_failures);
-    const double udp_score = udp_in_cooldown && !force_probe ? 0.0 : udp_score_raw;
+    const double udp_score = udp_temporarily_suppressed ? 0.0 : udp_score_raw;
 
     if ((tcp_score > udp_score * 1.25 || udp_score > tcp_score * 1.25) &&
         (m_fast_sync_tcp_failures + m_fast_sync_udp_failures) == 0) {
@@ -6383,6 +6653,8 @@ void NuRpcService::resetFastSyncProtocolWindow()
         udp_quota =
             qBound(1, int(std::llround(window * udp_score / std::max(0.0001, tcp_score + udp_score))), window - 1);
     }
+    if (verified_udp_peer_available && !udp_temporarily_suppressed)
+        udp_quota = std::min(window - 1, std::max(udp_quota, std::max(1, window / 3)));
     const int tcp_quota = std::max(1, window - udp_quota);
     m_fast_sync_tcp_quota_remaining = tcp_quota;
     m_fast_sync_udp_quota_remaining = udp_quota;
@@ -6395,7 +6667,9 @@ void NuRpcService::resetFastSyncProtocolWindow()
             (tcp_quota > udp_quota ? QStringLiteral("Core path favored %1:%2").arg(tcp_quota).arg(udp_quota) :
                                      QStringLiteral("Core/UDP balanced 1:1"));
     m_fast_sync_decision_summary =
-        udp_in_cooldown && !force_probe ? QStringLiteral("Core path favored; UDP cooling") : favored;
+        udp_temporarily_suppressed ?
+            QStringLiteral("Core path favored; UDP cooling") :
+            (udp_in_cooldown && !force_probe ? QStringLiteral("%1; verified UDP still sampled").arg(favored) : favored);
 }
 
 bool NuRpcService::shouldAttemptUdpFastSync()
@@ -6420,22 +6694,26 @@ bool NuRpcService::shouldAttemptUdpFastSync()
         m_fast_sync_tcp_quota_remaining = 0;
         m_fast_sync_udp_quota_remaining = std::max(1, m_fast_sync_udp_quota_remaining);
     }
-    if (udp_cooling && !force_probe) {
-        m_fast_sync_udp_quota_remaining = 0;
-    }
+    bool verified_udp_peer = false;
     bool verified_lan_udp_peer = false;
     for (const QString& host : std::as_const(m_udp_fast_sync_peer_hosts)) {
         QHostAddress address;
-        if (isUdpFastSyncHostVerified(host) && address.setAddress(host) &&
-            (isPrivateOrLocalFastSyncAddress(address) || isOnLocalInterfaceSubnet(host))) {
-            verified_lan_udp_peer = true;
-            break;
+        if (isUdpFastSyncHostVerified(host)) {
+            verified_udp_peer = true;
+            if (address.setAddress(host) &&
+                (isPrivateOrLocalFastSyncAddress(address) || isOnLocalInterfaceSubnet(host))) {
+                verified_lan_udp_peer = true;
+                break;
+            }
         }
+    }
+    if (udp_cooling && !force_probe && !verified_udp_peer) {
+        m_fast_sync_udp_quota_remaining = 0;
     }
     const qint64 udp_attempt_interval_ms = verified_lan_udp_peer ? qint64(LAN_FAST_SYNC_MIN_REQUEST_INTERVAL_MS) :
                                                                    qint64(FAST_SYNC_PROTOCOL_UDP_KEEPALIVE_MS);
     const bool udp_due =
-        (!udp_cooling || force_probe) && !m_udp_fast_sync_peer_hosts.isEmpty() &&
+        (!udp_cooling || force_probe || verified_udp_peer) && !m_udp_fast_sync_peer_hosts.isEmpty() &&
         (m_fast_sync_last_udp_attempt_ms <= 0 || now - m_fast_sync_last_udp_attempt_ms >= udp_attempt_interval_ms);
     if (udp_due) {
         m_fast_sync_udp_quota_remaining = std::max(1, m_fast_sync_udp_quota_remaining);
@@ -6473,9 +6751,10 @@ int NuRpcService::lanFastSyncLocalInflightCount(const QString& host) const
 {
     if (host.isEmpty())
         return 0;
+    const QString logical_key = fastSyncLogicalPeerKey(host);
     int count = 0;
     for (const LanFastSyncTransfer& transfer : m_lan_fast_sync_transfers_by_id) {
-        if (transfer.host == host) {
+        if (transfer.host == host || (!logical_key.isEmpty() && fastSyncLogicalPeerKey(transfer.host) == logical_key)) {
             ++count;
         }
     }
@@ -7442,6 +7721,7 @@ bool NuRpcService::sendUdpFastSyncProbe(const QString& host, int node_id)
     header.insert(QStringLiteral("version"), 1);
     header.insert(QStringLiteral("capability"), QString::fromLatin1(UDP_FAST_SYNC_CAPABILITY));
     header.insert(QStringLiteral("id"), probe_id);
+    header.insert(QStringLiteral("node_unique_id"), ensureNodeUniqueId());
     header.insert(QStringLiteral("port"), int(LAN_FAST_SYNC_PORT));
     header.insert(QStringLiteral("tip"), m_block_height);
     header.insert(QStringLiteral("node_id"), node_id);
@@ -8054,6 +8334,8 @@ void NuRpcService::handleLanFastSyncDatagrams()
             continue;
         }
         const QString type = header.value(QStringLiteral("type")).toString();
+        rememberPeerNodeUniqueId(
+            sender, header, QStringLiteral("UDP Fast Sync %1").arg(type.isEmpty() ? QStringLiteral("datagram") : type));
         const bool clone_datagram = header.value(QStringLiteral("clone_mode")).toBool(false);
         recordLanFastSyncUdpTraffic(0, datagram_size, clone_datagram);
         if (type == QLatin1String("probe")) {
@@ -8153,6 +8435,7 @@ void NuRpcService::handleLanFastSyncProbe(const QJsonObject& header, const QHost
     ack.insert(QStringLiteral("version"), 1);
     ack.insert(QStringLiteral("capability"), QString::fromLatin1(UDP_FAST_SYNC_CAPABILITY));
     ack.insert(QStringLiteral("id"), request_id);
+    ack.insert(QStringLiteral("node_unique_id"), ensureNodeUniqueId());
     ack.insert(QStringLiteral("port"), int(LAN_FAST_SYNC_PORT));
     ack.insert(QStringLiteral("tip"), m_block_height);
     ack.insert(QStringLiteral("max_datagram"), peer_max_datagram);
@@ -9733,6 +10016,154 @@ void NuRpcService::banPeer(const QString& node_id)
             });
 }
 
+void NuRpcService::tracePeer(const QString& node_id)
+{
+    bool ok = false;
+    const int id = node_id.trimmed().toInt(&ok);
+    if (!ok || id < 0) {
+        Q_EMIT userMessage(QStringLiteral("Traceroute failed"), QStringLiteral("Select one or more peer rows first."));
+        return;
+    }
+
+    const QString host = m_peer_host_by_node_id.value(id).trimmed();
+    if (host.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Traceroute failed"),
+                           QStringLiteral("Nu does not have a current endpoint for that peer."));
+        return;
+    }
+
+    QHostAddress address;
+    const bool is_ipv6 = address.setAddress(host) && address.protocol() == QAbstractSocket::IPv6Protocol;
+    const QString trip = firstExistingExecutable({bundledToolCandidate(QStringLiteral("trip")),
+                                                  QStandardPaths::findExecutable(QStringLiteral("trip")),
+                                                  QStandardPaths::findExecutable(QStringLiteral("trippy")),
+                                                  QStringLiteral("/opt/homebrew/bin/trip"),
+                                                  QStringLiteral("/usr/local/bin/trip"),
+                                                  QStringLiteral("/opt/local/bin/trip")});
+
+    QString program;
+    QStringList args;
+    QString tool_name;
+    if (!trip.isEmpty()) {
+        tool_name = QStringLiteral("Trippy");
+        program = trip;
+        args = {QStringLiteral("-u"),
+                QStringLiteral("--mode"),
+                QStringLiteral("stream"),
+                QStringLiteral("--report-cycles"),
+                QStringLiteral("16"),
+                host};
+    } else {
+#if defined(Q_OS_WIN)
+        tool_name = QStringLiteral("tracert");
+        program = QStringLiteral("tracert");
+        if (is_ipv6)
+            args.push_back(QStringLiteral("-6"));
+        args.push_back(host);
+#else
+        const QString traceroute = firstExistingExecutable(
+            {is_ipv6 ? QStringLiteral("/usr/sbin/traceroute6") : QStringLiteral("/usr/sbin/traceroute"),
+             QStandardPaths::findExecutable(is_ipv6 ? QStringLiteral("traceroute6") : QStringLiteral("traceroute"))});
+        if (traceroute.isEmpty()) {
+            Q_EMIT userMessage(
+                QStringLiteral("Traceroute tool missing"),
+                QStringLiteral("Nu could not find Trippy's trip binary or the system traceroute command."));
+            return;
+        }
+        tool_name = QStringLiteral("system traceroute");
+        program = traceroute;
+        args.push_back(host);
+#endif
+    }
+
+    if (program.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Traceroute failed"),
+                           QStringLiteral("Nu could not find a traceroute program for %1.").arg(host));
+        return;
+    }
+
+    const QString trace_id = QString::number(m_next_peer_trace_id++);
+    const QString title = QStringLiteral("Defcoin peer %1 trace - %2").arg(node_id.trimmed(), host.left(96));
+    const QString command = processCommandForDisplay(program, args);
+    auto* process = new QProcess(this);
+    process->setProgram(program);
+    process->setArguments(args);
+    process->setProcessChannelMode(QProcess::MergedChannels);
+    m_peer_trace_processes.insert(trace_id, process);
+
+    auto emit_trace_output = [this, trace_id, process]() {
+        if (!process)
+            return;
+        QByteArray data = process->readAllStandardOutput();
+        data.append(process->readAllStandardError());
+        if (data.isEmpty())
+            return;
+        Q_EMIT peerTraceOutput(trace_id, stripAnsiControlSequences(QString::fromLocal8Bit(data)));
+    };
+
+    connect(process, &QProcess::readyReadStandardOutput, this, emit_trace_output);
+    connect(process, &QProcess::readyReadStandardError, this, emit_trace_output);
+    connect(process, &QProcess::errorOccurred, this, [this, trace_id, process](QProcess::ProcessError error) {
+        QString reason = process ? process->errorString() : QString();
+        if (reason.isEmpty())
+            reason = QStringLiteral("process error %1").arg(int(error));
+        Q_EMIT peerTraceOutput(trace_id, QStringLiteral("\n[Nu] Trace process error: %1\n").arg(reason));
+    });
+    connect(process,
+            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this,
+            [this, trace_id, process](int exit_code, QProcess::ExitStatus exit_status) {
+                if (process) {
+                    QByteArray data = process->readAllStandardOutput();
+                    data.append(process->readAllStandardError());
+                    if (!data.isEmpty())
+                        Q_EMIT peerTraceOutput(trace_id, stripAnsiControlSequences(QString::fromLocal8Bit(data)));
+                }
+                m_peer_trace_processes.remove(trace_id);
+                const QString status =
+                    exit_status == QProcess::NormalExit ? QStringLiteral("finished") : QStringLiteral("stopped");
+                Q_EMIT peerTraceFinished(trace_id, exit_code, status);
+                if (process)
+                    process->deleteLater();
+            });
+
+    Q_EMIT peerTraceStarted(trace_id, title, host, command);
+    Q_EMIT peerTraceOutput(
+        trace_id, QStringLiteral("[Nu] %1 started for %2\n[Nu] Command: %3\n\n").arg(tool_name, host, command));
+    process->start();
+    if (!process->waitForStarted(500)) {
+        const QString reason = process->errorString();
+        m_peer_trace_processes.remove(trace_id);
+        Q_EMIT peerTraceOutput(trace_id,
+                               QStringLiteral("[Nu] Trace failed to start: %1\n")
+                                   .arg(reason.isEmpty() ? QStringLiteral("unknown error") : reason));
+        Q_EMIT peerTraceFinished(trace_id, -1, QStringLiteral("failed"));
+        process->deleteLater();
+        Q_EMIT userMessage(QStringLiteral("Traceroute failed"),
+                           QStringLiteral("Nu could not start %1 for %2.").arg(tool_name, host));
+        return;
+    }
+
+    if (trip.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Traceroute started"),
+                           QStringLiteral("Trippy was not found, so Nu is streaming %1 for %2.").arg(tool_name, host));
+    } else {
+        Q_EMIT userMessage(QStringLiteral("Trippy started"),
+                           QStringLiteral("Started an embedded Trippy trace for peer %1.").arg(host));
+    }
+}
+
+void NuRpcService::cancelPeerTrace(const QString& trace_id)
+{
+    QPointer<QProcess> process = m_peer_trace_processes.value(trace_id.trimmed());
+    if (!process)
+        return;
+    Q_EMIT peerTraceOutput(trace_id, QStringLiteral("\n[Nu] Trace cancelled by user.\n"));
+    process->terminate();
+    if (!process->waitForFinished(250))
+        process->kill();
+}
+
 void NuRpcService::unbanPeer(const QString& address)
 {
     const QString clean = address.trimmed();
@@ -10333,13 +10764,22 @@ void NuRpcService::rebuildNodeMetrics()
                                             m_sync_state) :
                                    QStringLiteral("%1% | %2").arg(m_sync_progress_percent).arg(m_sync_state);
     const QString data_dir = m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir;
+    const QStringList sync_overview_lines = syncTransportSpeedSummary().split(QLatin1Char('\n'));
+    const QString sync_method_mix = sync_overview_lines.value(0).trimmed();
+    const QString sync_rate_detail = sync_overview_lines.mid(1).join(QStringLiteral(" ")).trimmed().isEmpty() ?
+                                         sync_method_mix :
+                                         sync_overview_lines.mid(1).join(QStringLiteral(" ")).trimmed();
     m_node_metrics = {
         metricRow(QStringLiteral("Syncing"),
                   sync_value,
                   QStringLiteral("Blockchain sync progress and current sync state. Transport-specific rates are shown "
-                                 "in the Core Sync, Fast Sync, and Sync overview rows.")),
-        metricRow(QStringLiteral("Sync overview"),
-                  syncTransportSpeedSummary(),
+                                 "in the Core Sync, Fast Sync, and Sync rate rows.")),
+        metricRow(QStringLiteral("Sync method mix"),
+                  sync_method_mix,
+                  QStringLiteral("Concise view of whether Core/TCP or UDP Fast Sync is doing useful work and what "
+                                 "share of accepted blocks each path has handled.")),
+        metricRow(QStringLiteral("Sync rates"),
+                  sync_rate_detail,
                   QStringLiteral("Combined session-average sync throughput. UDP timing includes failed attempts and "
                                  "cooldown/retry time so failed probes reduce the average instead of being ignored.")),
         metricRow(QStringLiteral("Sync benchmark"),
@@ -19625,17 +20065,22 @@ void NuRpcService::backupWallet()
 {
     if (!ensureCurrentWalletSelected(QStringLiteral("Wallet backup failed")))
         return;
+    const QString wallet_name = m_wallet_name;
+    const QString storage_type =
+        walletStorageTypeForName(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir, wallet_name);
+    const QString default_file = walletBackupDefaultFileName(wallet_name, storage_type);
     const QString path = QFileDialog::getSaveFileName(
-        nullptr, QStringLiteral("Backup Wallet"), QDir(realHomePath()).filePath(QStringLiteral("wallet.dat")));
+        nullptr, QStringLiteral("Backup Active Wallet"), QDir(realHomePath()).filePath(default_file));
     if (path.isEmpty())
         return;
-    const QString wallet_name = m_wallet_name;
     rpcCall(QStringLiteral("backupwallet"), {path}, true, [this, wallet_name](const QJsonValue&, const QString& error) {
         if (wallet_name != m_wallet_name)
             return;
         Q_EMIT userMessage(
             error.isEmpty() ? QStringLiteral("Wallet backup complete") : QStringLiteral("Wallet backup failed"),
-            error.isEmpty() ? QStringLiteral("The wallet backup was written successfully.") : error);
+            error.isEmpty() ? QStringLiteral("The active wallet backup for %1 was written successfully.")
+                                  .arg(walletDisplayName(wallet_name)) :
+                              error);
     });
 }
 
@@ -21589,8 +22034,8 @@ QString NuRpcService::formatCompactBitRate(double bytes_per_second)
         ++unit;
     }
     if (unit == 2 && value >= 999.5)
-        return QStringLiteral("~999+ Mb/s");
-    return QStringLiteral("~%1 %2").arg(qRound(value)).arg(units.at(unit));
+        return QStringLiteral("999+ Mb/s");
+    return QStringLiteral("%1 %2").arg(qRound(value)).arg(units.at(unit));
 }
 
 QString NuRpcService::formatPing(const QJsonValue& seconds)

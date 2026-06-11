@@ -8,9 +8,9 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     endif()
 endif()
 
-project(DefcoinCoreNuQml VERSION 26.6.5 LANGUAGES CXX)
+project(DefcoinCoreNuQml VERSION 26.6.7 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.6.5d" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.6.7a" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -51,10 +51,36 @@ endforeach()
 if(TARGET Qt6::QmlMeta)
     list(APPEND DEFCOIN_NU_QT_LIBRARIES Qt6::QmlMeta)
 endif()
-find_library(QRENCODE_LIBRARY qrencode REQUIRED)
-find_path(QRENCODE_INCLUDE_DIR qrencode.h REQUIRED)
+set(DEFCOIN_NU_QRENCODE_ROOT "" CACHE PATH "Optional target-platform qrencode prefix for Defcoin Core Nu")
+if(WIN32 AND NOT DEFCOIN_NU_QRENCODE_ROOT)
+    get_filename_component(DEFCOIN_NU_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
+    set(DEFCOIN_NU_QRENCODE_CANDIDATES
+        "${DEFCOIN_NU_SOURCE_ROOT}/../../../toolchains/qrencode/win64"
+        "${DEFCOIN_NU_SOURCE_ROOT}/depends/x86_64-w64-mingw32"
+    )
+    foreach(defcoin_nu_qrencode_candidate IN LISTS DEFCOIN_NU_QRENCODE_CANDIDATES)
+        if(EXISTS "${defcoin_nu_qrencode_candidate}/include/qrencode.h"
+           AND EXISTS "${defcoin_nu_qrencode_candidate}/lib/libqrencode.a")
+            set(DEFCOIN_NU_QRENCODE_ROOT "${defcoin_nu_qrencode_candidate}" CACHE PATH "Optional target-platform qrencode prefix for Defcoin Core Nu" FORCE)
+            break()
+        endif()
+    endforeach()
+endif()
+if(DEFCOIN_NU_QRENCODE_ROOT)
+    find_library(QRENCODE_LIBRARY qrencode REQUIRED PATHS "${DEFCOIN_NU_QRENCODE_ROOT}/lib" NO_DEFAULT_PATH)
+    find_path(QRENCODE_INCLUDE_DIR qrencode.h REQUIRED PATHS "${DEFCOIN_NU_QRENCODE_ROOT}/include" NO_DEFAULT_PATH)
+else()
+    find_library(QRENCODE_LIBRARY qrencode REQUIRED)
+    find_path(QRENCODE_INCLUDE_DIR qrencode.h REQUIRED)
+endif()
+if(WIN32 AND QRENCODE_LIBRARY MATCHES "^/opt/homebrew")
+    message(FATAL_ERROR "Windows build resolved host qrencode (${QRENCODE_LIBRARY}); set DEFCOIN_NU_QRENCODE_ROOT to a Windows target qrencode prefix.")
+endif()
 get_filename_component(QRENCODE_LIBRARY_DIR "${QRENCODE_LIBRARY}" DIRECTORY)
-file(GLOB QRENCODE_RUNTIME_LIBRARIES CONFIGURE_DEPENDS "${QRENCODE_LIBRARY_DIR}/libqrencode*.dylib")
+file(GLOB QRENCODE_RUNTIME_LIBRARIES CONFIGURE_DEPENDS
+    "${QRENCODE_LIBRARY_DIR}/libqrencode*.dylib"
+    "${QRENCODE_LIBRARY_DIR}/libqrencode*.dll"
+)
 
 qt_add_executable(DefcoinCoreNu
     MACOSX_BUNDLE
@@ -202,6 +228,7 @@ set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/sync.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/wallet.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/warning.svg"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/licenses/trippy-Apache-2.0-LICENSE.txt"
 )
 
 file(GLOB_RECURSE DEFCOIN_NU_HELP_FILES CONFIGURE_DEPENDS
@@ -221,6 +248,7 @@ set(DEFCOIN_NU_BACKEND_BINARY "" CACHE FILEPATH "Optional defcoind binary to bun
 set(DEFCOIN_NU_CLI_BINARY "" CACHE FILEPATH "Optional defcoin-cli binary to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_TX_BINARY "" CACHE FILEPATH "Optional defcoin-tx binary to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_WALLET_BINARY "" CACHE FILEPATH "Optional defcoin-wallet binary to bundle with Defcoin Core Nu")
+set(DEFCOIN_NU_TRIPPY_BINARY "" CACHE FILEPATH "Optional Trippy trip binary to bundle with Defcoin Core Nu")
 
 if(NOT DEFCOIN_NU_BACKEND_BINARY)
     if(WIN32)
@@ -231,6 +259,30 @@ if(NOT DEFCOIN_NU_BACKEND_BINARY)
     if(EXISTS "${DEFCOIN_NU_BACKEND_AUTO_CANDIDATE}")
         set(DEFCOIN_NU_BACKEND_BINARY "${DEFCOIN_NU_BACKEND_AUTO_CANDIDATE}" CACHE FILEPATH "Optional defcoind binary to bundle with Defcoin Core Nu" FORCE)
         message(STATUS "Auto-detected Defcoin backend for Nu bundle: ${DEFCOIN_NU_BACKEND_BINARY}")
+    endif()
+endif()
+
+if(NOT DEFCOIN_NU_TRIPPY_BINARY AND WIN32)
+    get_filename_component(DEFCOIN_NU_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
+    find_program(DEFCOIN_NU_TRIPPY_AUTO_CANDIDATE
+        NAMES trip.exe trippy.exe
+        PATHS
+            "${DEFCOIN_NU_SOURCE_ROOT}/../../../toolchains/trippy/win64/bin"
+            "${DEFCOIN_NU_SOURCE_ROOT}/depends/x86_64-w64-mingw32/bin"
+        NO_DEFAULT_PATH
+    )
+    if(DEFCOIN_NU_TRIPPY_AUTO_CANDIDATE)
+        set(DEFCOIN_NU_TRIPPY_BINARY "${DEFCOIN_NU_TRIPPY_AUTO_CANDIDATE}" CACHE FILEPATH "Optional Trippy trip binary to bundle with Defcoin Core Nu" FORCE)
+        message(STATUS "Auto-detected target Trippy for Nu peer traceroute: ${DEFCOIN_NU_TRIPPY_BINARY}")
+    endif()
+elseif(NOT DEFCOIN_NU_TRIPPY_BINARY)
+    find_program(DEFCOIN_NU_TRIPPY_AUTO_CANDIDATE
+        NAMES trip trippy
+        PATHS /opt/homebrew/bin /usr/local/bin /opt/local/bin
+    )
+    if(DEFCOIN_NU_TRIPPY_AUTO_CANDIDATE)
+        set(DEFCOIN_NU_TRIPPY_BINARY "${DEFCOIN_NU_TRIPPY_AUTO_CANDIDATE}" CACHE FILEPATH "Optional Trippy trip binary to bundle with Defcoin Core Nu" FORCE)
+        message(STATUS "Auto-detected Trippy for Nu peer traceroute: ${DEFCOIN_NU_TRIPPY_BINARY}")
     endif()
 endif()
 
@@ -328,6 +380,35 @@ add_custom_target(DefcoinCoreExploreResources
 )
 
 add_dependencies(DefcoinCoreExploreResources DefcoinCoreExplore)
+
+if(DEFCOIN_NU_TRIPPY_BINARY)
+    if(WIN32)
+        set(DEFCOIN_NU_TRIPPY_OUTPUT "${DEFCOIN_NU_RESOURCE_DIR}/bin/trip.exe")
+        set(DEFCOIN_NU_EXPLORE_TRIPPY_OUTPUT "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin/trip.exe")
+    else()
+        set(DEFCOIN_NU_TRIPPY_OUTPUT "${DEFCOIN_NU_RESOURCE_DIR}/bin/trip")
+        set(DEFCOIN_NU_EXPLORE_TRIPPY_OUTPUT "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin/trip")
+    endif()
+    if(UNIX)
+        set(DEFCOIN_NU_TRIPPY_CHMOD_COMMAND COMMAND /bin/chmod 755 "${DEFCOIN_NU_TRIPPY_OUTPUT}")
+        set(DEFCOIN_NU_EXPLORE_TRIPPY_CHMOD_COMMAND COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPLORE_TRIPPY_OUTPUT}")
+    else()
+        set(DEFCOIN_NU_TRIPPY_CHMOD_COMMAND)
+        set(DEFCOIN_NU_EXPLORE_TRIPPY_CHMOD_COMMAND)
+    endif()
+    add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_RESOURCE_DIR}/bin"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_TRIPPY_BINARY}" "${DEFCOIN_NU_TRIPPY_OUTPUT}"
+        ${DEFCOIN_NU_TRIPPY_CHMOD_COMMAND}
+        COMMENT "Bundling Trippy route tracer for Nu"
+    )
+    add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_TRIPPY_BINARY}" "${DEFCOIN_NU_EXPLORE_TRIPPY_OUTPUT}"
+        ${DEFCOIN_NU_EXPLORE_TRIPPY_CHMOD_COMMAND}
+        COMMENT "Bundling Trippy route tracer for Explore"
+    )
+endif()
 
 if(APPLE)
     add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD

@@ -459,8 +459,8 @@ public:
         if (!m_splash)
             return;
 
-        m_splash->showMessage(QStringLiteral("%1\nElapsed: %2s").arg(clean, QString::number(elapsedSeconds(), 'f', 1)),
-                              Qt::AlignLeft | Qt::AlignBottom,
+        m_splash->showMessage(QStringLiteral("\n\n%1  |  %2s").arg(clean, QString::number(elapsedSeconds(), 'f', 1)),
+                              Qt::AlignHCenter | Qt::AlignTop,
                               QColor("#f6f6f2"));
         QApplication::processEvents(QEventLoop::AllEvents, 25);
     }

@@ -10,10 +10,12 @@ Item {
     property bool detailsMode: false
     property color receivedColor: NuTokens.dataReceived
     property color sentColor: NuTokens.dataSent
-    property color tcpReceivedColor: "#21a56f"
-    property color tcpSentColor: "#2f80ed"
-    property color udpReceivedColor: "#b74b4b"
-    property color udpSentColor: "#d9a321"
+    property color tcpReceivedColor: "#138a50"
+    property color tcpSentColor: "#2166d1"
+    property color fastSyncUdpReceivedColor: "#3fc47c"
+    property color fastSyncUdpSentColor: "#69a8ff"
+    property color quickCloneReceivedColor: "#0d6b57"
+    property color quickCloneSentColor: "#174ea6"
     property var samples: []
     property real windowStart: 0
     property real windowEnd: 1
@@ -102,11 +104,13 @@ Item {
 
             const receivedComponents = [
                 { key: "tcpReceived", label: "Rec'd TCP", color: root.tcpReceivedColor },
-                { key: "udpReceived", label: "Rec'd UDP", color: root.udpReceivedColor }
+                { key: "fastSyncUdpReceived", label: "Rec'd FS UDP", color: root.fastSyncUdpReceivedColor },
+                { key: "quickCloneReceived", label: "Rec'd QC UDP", color: root.quickCloneReceivedColor }
             ]
             const sentComponents = [
                 { key: "tcpSent", label: "Sent TCP", color: root.tcpSentColor },
-                { key: "udpSent", label: "Sent UDP", color: root.udpSentColor }
+                { key: "fastSyncUdpSent", label: "Sent FS UDP", color: root.fastSyncUdpSentColor },
+                { key: "quickCloneSent", label: "Sent QC UDP", color: root.quickCloneSentColor }
             ]
             const groups = [
                 { label: "Rec'd", components: receivedComponents, totalKey: "received", color: root.receivedColor },
@@ -206,16 +210,36 @@ Item {
                     for (let i = 0; i < visible.length; ++i)
                         baseline[i] += componentRate(visible[i], component.key)
                 }
+                ctx.globalAlpha = 1.0
+                ctx.strokeStyle = group.color
+                ctx.lineWidth = 2.4
+                ctx.beginPath()
+                for (let i = 0; i < visible.length; ++i) {
+                    const x = xFor(visible[i])
+                    const y = yFor(groupTotal(visible[i], group.components))
+                    if (i === 0) ctx.moveTo(x, y)
+                    else ctx.lineTo(x, y)
+                }
+                ctx.stroke()
                 ctx.restore()
             }
-            function shadowLabel(text, x, y) {
+            function peakLabel(text, x, y) {
                 ctx.save()
                 ctx.font = "13px sans-serif"
-                ctx.lineWidth = 3
-                ctx.strokeStyle = "rgba(0, 0, 0, 0.55)"
-                ctx.strokeText(text, x, y)
+                const metrics = ctx.measureText(text)
+                const padX = 5
+                const padY = 4
+                const boxX = Math.max(4, Math.min(width - metrics.width - padX * 2 - 4, x))
+                const boxY = Math.max(4, Math.min(height - 22, y - 14))
+                ctx.fillStyle = "rgba(255, 255, 255, 0.86)"
+                ctx.strokeStyle = "rgba(17, 17, 17, 0.18)"
+                ctx.lineWidth = 1
+                ctx.beginPath()
+                ctx.rect(boxX, boxY, metrics.width + padX * 2, 18 + padY)
+                ctx.fill()
+                ctx.stroke()
                 ctx.fillStyle = NuTokens.textPrimary
-                ctx.fillText(text, x, y)
+                ctx.fillText(text, boxX + padX, boxY + 15)
                 ctx.restore()
             }
             function legendSwatch(x, y, color, label) {
@@ -242,15 +266,17 @@ Item {
             const peakSentValue = root.detailsMode ? groupTotal(peakSent, sentComponents) : safeRate(peakSent.sent)
             const receivedLabelY = Math.max(24, Math.min(height - 48, yFor(peakReceivedValue) - 10))
             const sentLabelY = Math.max(receivedLabelY + 18, Math.min(height - 24, yFor(peakSentValue) + 20))
-            shadowLabel("Peak rec'd " + formatRate(peakReceivedValue), Math.min(width - 170, xFor(peakReceived) + 8), receivedLabelY)
-            shadowLabel("Peak sent " + formatRate(peakSentValue), Math.min(width - 160, xFor(peakSent) + 8), sentLabelY)
+            peakLabel("Peak rec'd " + formatRate(peakReceivedValue), Math.min(width - 170, xFor(peakReceived) + 8), receivedLabelY)
+            peakLabel("Peak sent " + formatRate(peakSentValue), Math.min(width - 160, xFor(peakSent) + 8), sentLabelY)
 
             if (root.detailsMode) {
-                const legendX = Math.max(12, width - 500)
+                const legendX = Math.max(12, width - 560)
                 legendSwatch(legendX, 18, root.tcpReceivedColor, "Rec'd TCP")
-                legendSwatch(legendX + 118, 18, root.udpReceivedColor, "Rec'd UDP")
+                legendSwatch(legendX + 118, 18, root.fastSyncUdpReceivedColor, "Rec'd FS UDP")
+                legendSwatch(legendX + 258, 18, root.quickCloneReceivedColor, "Rec'd QC UDP")
                 legendSwatch(legendX, 38, root.tcpSentColor, "Sent TCP")
-                legendSwatch(legendX + 118, 38, root.udpSentColor, "Sent UDP")
+                legendSwatch(legendX + 118, 38, root.fastSyncUdpSentColor, "Sent FS UDP")
+                legendSwatch(legendX + 258, 38, root.quickCloneSentColor, "Sent QC UDP")
             } else {
                 const legendX = Math.max(12, width - 250)
                 legendSwatch(legendX, 18, root.receivedColor, "Rec'd total")
@@ -307,15 +333,17 @@ Item {
                       ? (root.detailsMode
                          ? (canvas.formatSampleTime(canvas.hoverSample)
                             + "\nRec'd total " + canvas.formatRate(canvas.groupTotal(canvas.hoverSample, [
-                                { key: "tcpReceived" }, { key: "udpReceived" }
+                                { key: "tcpReceived" }, { key: "fastSyncUdpReceived" }, { key: "quickCloneReceived" }
                             ]))
                             + " | TCP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "tcpReceived"))
-                            + " | UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "udpReceived"))
+                            + " | FS UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "fastSyncUdpReceived"))
+                            + " | QC UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "quickCloneReceived"))
                             + "\nSent total " + canvas.formatRate(canvas.groupTotal(canvas.hoverSample, [
-                                { key: "tcpSent" }, { key: "udpSent" }
+                                { key: "tcpSent" }, { key: "fastSyncUdpSent" }, { key: "quickCloneSent" }
                             ]))
                             + " | TCP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "tcpSent"))
-                            + " | UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "udpSent")))
+                            + " | FS UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "fastSyncUdpSent"))
+                            + " | QC UDP " + canvas.formatRate(canvas.componentRate(canvas.hoverSample, "quickCloneSent")))
                          : (canvas.formatSampleTime(canvas.hoverSample)
                             + "\nRec'd total " + canvas.formatRate(canvas.hoverSample.received)
                             + "\nSent total " + canvas.formatRate(canvas.hoverSample.sent)))

@@ -8,6 +8,9 @@ This folder contains local launch gates, test helpers, and protocol support tool
 
 - Tooling must never write wallet secrets, private keys, RPC cookies, or passphrases to logs.
 - Launch/test helpers should make macOS Local Network permission, duplicate-instance, and crash-dialog gates explicit before interpreting UDP results.
+- If a crash dialog is visibly blocking the screen but `System Events` cannot
+  see it, use the visible-button OCR helper and require exact context text
+  before clicking.
 - Server-side tools may share Fast Sync transport behavior, but they must not depend on QML or desktop-only classes.
 - Keep output stable enough for shell scripts and cross-build notes to parse.
 
@@ -26,4 +29,6 @@ This folder contains local launch gates, test helpers, and protocol support tool
 ## Child DOX Index
 
 - `defcoin_fast_syncd.py` - headless UDP Fast Sync responder for server/LAN testing.
+- `macos_click_visible_button.sh` - OCR fallback for exact visible system-dialog
+  button clicks, used by crash-dialog launch gates.
 - `nu_test_launch_gate.sh` - launch guard used by Nu test runs.

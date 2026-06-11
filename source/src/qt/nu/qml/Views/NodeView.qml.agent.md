@@ -17,6 +17,7 @@ Owns the Metrics view: Traffic graph, Status table, Peers table, banned peers, l
 - Peer column arrays must stay length-aligned: labels, types, sort keys, sort meta fields, weights, minimums, maximums, and tooltips.
 - Workstation/LAN cells must remain compact, with LAN icon text integrated into the Seed Source / LAN Workstation Name column.
 - Re-test Fast Sync expects exactly one selected peer row; selection helpers must return stable node IDs.
+- The visible Node column may show `5 (g1)` to indicate a same-node group. Selection, Retest FastSync, Ban, and Trace must still use the real `meta.nodeId`, and hover text must explain the `(gN)` suffix.
 
 ## Verification
 

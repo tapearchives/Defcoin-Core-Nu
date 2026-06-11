@@ -21,6 +21,7 @@ import selectors
 import socket
 import sys
 import time
+import uuid
 from collections import OrderedDict
 
 PREFIX = b"DFCLAN1\n"
@@ -41,6 +42,7 @@ MIN_REQUEST_INTERVAL_SECONDS = 0.25
 MAX_CACHE_BLOCKS = 32
 PEER_ALLOWLIST_REFRESH_SECONDS = 10
 MAX_IGNORED_LOG_INTERVAL_SECONDS = 60
+DEFAULT_NODE_ID_FILE = "/var/lib/defcoin-fast-syncd/node_unique_id"
 
 
 def checksum(data):
@@ -119,6 +121,27 @@ def peer_advertises_fast_sync_service(peer):
     except (TypeError, ValueError):
         return False
     return bool(services_value & FAST_SYNC_SERVICE_BIT)
+
+
+def load_or_create_node_unique_id(path):
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                value = handle.read().strip().lower()
+            if re.match(r"^[0-9a-f]{32}$", value):
+                return value
+        except OSError:
+            pass
+    value = uuid.uuid4().hex
+    if path:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(value + "\n")
+            os.chmod(path, 0o600)
+        except OSError as exc:
+            logging.warning("could not persist node_unique_id at %s: %s", path, exc)
+    return value
 
 
 def chunk_bytes_for_datagram(max_datagram):
@@ -227,12 +250,21 @@ class RpcClient:
 
 
 class FastSyncDaemon:
-    def __init__(self, rpc, bind, port, require_nu_peer=True, allow_loopback=True):
+    def __init__(
+        self,
+        rpc,
+        bind,
+        port,
+        require_nu_peer=True,
+        allow_loopback=True,
+        node_unique_id="",
+    ):
         self.rpc = rpc
         self.bind = bind
         self.port = port
         self.require_nu_peer = require_nu_peer
         self.allow_loopback = allow_loopback
+        self.node_unique_id = node_unique_id
         self.selector = selectors.DefaultSelector()
         self.block_cache = OrderedDict()
         self.last_request_by_host = {}
@@ -351,6 +383,7 @@ class FastSyncDaemon:
             "version": PROTOCOL_VERSION,
             "capability": CAPABILITY,
             "id": request_id,
+            "node_unique_id": self.node_unique_id,
             "port": self.port,
             "tip": tip,
             "max_datagram": peer_max_datagram,
@@ -544,6 +577,11 @@ def main():
         action="store_true",
         help="also require loopback requesters to appear in the Nu TCP peer allowlist",
     )
+    parser.add_argument(
+        "--node-id-file",
+        default=DEFAULT_NODE_ID_FILE,
+        help="path used to persist this responder's stable Nu node_unique_id",
+    )
     args = parser.parse_args()
 
     handlers = []
@@ -559,14 +597,18 @@ def main():
     rpc = RpcClient(args.conf)
     require_nu_peer = not args.allow_unconnected
     allow_loopback = not args.no_loopback_test
+    node_unique_id = load_or_create_node_unique_id(args.node_id_file)
     logging.info(
-        "defcoin-fast-syncd starting rpc=127.0.0.1 port=%s udp=%s require_nu_peer=%s allow_loopback=%s",
+        "defcoin-fast-syncd starting rpc=127.0.0.1 port=%s udp=%s require_nu_peer=%s allow_loopback=%s node_unique_id=%s",
         rpc.port,
         args.port,
         require_nu_peer,
         allow_loopback,
+        node_unique_id[:12],
     )
-    daemon = FastSyncDaemon(rpc, args.bind, args.port, require_nu_peer, allow_loopback)
+    daemon = FastSyncDaemon(
+        rpc, args.bind, args.port, require_nu_peer, allow_loopback, node_unique_id
+    )
     daemon.run()
 
 

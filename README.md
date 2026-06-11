@@ -15,6 +15,8 @@
   ·
   <a href="source/doc/defcoin-core-nu-technical-guide.md">Technical guide</a>
   ·
+  <a href="source/doc/defcoin-nu-architecture.md">Architecture</a>
+  ·
   <a href="source/doc/release-notes/release-notes-26.5.1.md">Release notes</a>
 </p>
 
@@ -115,6 +117,8 @@ blocks normally.
 
 More detailed chain, seed, wallet, and compatibility notes are in the
 [Defcoin Core Nu Technical Guide](source/doc/defcoin-core-nu-technical-guide.md).
+
+👉 [Defcoin Core Nu Architecture & Upstream Litecoin v0.21.5.5 Comparison](source/doc/defcoin-nu-architecture.md)
 
 ## Build From Source
 

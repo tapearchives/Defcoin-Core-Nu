@@ -19,6 +19,7 @@ Rectangle {
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: NuTokens.spaceMd
+        anchors.rightMargin: NuTokens.spaceSm
         spacing: NuTokens.spaceSm
 
         Label {
@@ -30,17 +31,16 @@ Rectangle {
             font.pixelSize: NuTokens.fontBody
         }
 
-        Basic.Button {
+        NuActionButton {
             text: "Copy"
             enabled: root.copyEnabled
-            activeFocusOnTab: true
+            Layout.preferredWidth: 72
+            Layout.maximumWidth: 72
+            implicitHeight: 38
             Accessible.role: Accessible.Button
             Accessible.name: text
             Accessible.description: root.copyEnabled ? "Copy this value." : "No value is available to copy."
             onClicked: root.copyRequested(root.value)
-            Keys.onReturnPressed: clicked()
-            Keys.onEnterPressed: clicked()
-            Keys.onSpacePressed: clicked()
         }
     }
 }

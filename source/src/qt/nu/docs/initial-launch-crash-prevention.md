@@ -205,7 +205,8 @@ state restoration issues only show up in normal app launch.
 When an initial build crashes, diagnose in this order:
 
 1. Confirm the running app path is the new staged bundle.
-2. Check the newest `.crash` file in `~/Library/Logs/DiagnosticReports`.
+2. Check the newest `.ips` or `.crash` file in
+   `~/Library/Logs/DiagnosticReports`.
 3. Launch the binary directly from Terminal to capture Qt loader errors.
 4. Check `otool -L` for local Qt/Homebrew dependency leaks.
 5. Check for missing `Contents/PlugIns/platforms/libqcocoa.dylib`.
@@ -228,3 +229,7 @@ They prove packaging integrity, not runtime viability.
   other product's folder.
 - Preserve the inherited Core client version unless the user explicitly asks to
   change it; use Nu suffixes for UI/package rebuilds.
+- When an automated launch sees a fresh `SIGABRT` DiagnosticReports file, treat
+  the launch as failed. Clear the visible macOS crash dialog by clicking
+  `Ignore`, log the crash report path, and do not continue to Local Network
+  prompt or UDP testing.

@@ -30,6 +30,14 @@ ApplicationWindow {
     property bool recoveryProgressDismissed: false
     property bool recoveryWasActive: false
     property bool syncProgressHiddenThisLaunch: false
+    property bool shutdownInProgress: false
+    property int shutdownStepIndex: 0
+    readonly property var shutdownSteps: [
+        qsTr("Preparing shutdown..."),
+        qsTr("Stopping background network and helper tasks..."),
+        qsTr("Closing wallet and database handles..."),
+        qsTr("Asking the backend to stop cleanly...")
+    ]
     readonly property string releaseCodeName: "Core Memories"
     readonly property string trademarkNotice: "The DEFCON and 'Smiling Jack' wordmarks, design marks, and associated logos are registered trademarks of Def Con Communications, Inc. (Canadian Reg. No. TMA917353; US Reg. No. 4582595). Coin image utilized under a long-standing non-commercial permission agreement. This project is an independent creation and is not affiliated with, sponsored by, or endorsed by Def Con Communications, Inc. Def Con Communications, Inc. reserves all rights to the exclusive use of its registered trademarks and design marks."
     palette.window: NuTokens.panelBase
@@ -45,6 +53,12 @@ ApplicationWindow {
     Component.onCompleted: Qt.callLater(root.refreshSyncProgressWindow)
 
     onClosing: function(close) {
+        if (root.shutdownInProgress) {
+            close.accepted = false
+            root.show()
+            root.raise()
+            return
+        }
         if (!root.quitRequested && NuService.backgroundCloseEnabled && NuPlatform.trayAvailable) {
             close.accepted = false
             root.hide()
@@ -65,8 +79,16 @@ ApplicationWindow {
     }
 
     function requestQuit() {
-        root.quitRequested = true
-        NuPlatform.quitApplication()
+        if (root.shutdownInProgress) {
+            root.show()
+            root.raise()
+            return
+        }
+        root.shutdownInProgress = true
+        root.shutdownStepIndex = 0
+        root.show()
+        root.raise()
+        shutdownTimer.restart()
     }
 
     function refreshSyncProgressWindow() {
@@ -253,6 +275,7 @@ ApplicationWindow {
              + "<li>BIP-0039 mnemonic standard and English word list - BIP39 authors and contributors including Marek Palatinus, Pavol Rusnak, Aaron Voisine, and Sean Bowe - <a href=\"https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki\">BIP-0039</a> | used for phrase validation and recovery workflows.</li>"
              + "<li>libqrencode - Kentaro Fukuchi and contributors - <a href=\"https://fukuchi.org/works/qrencode/\">libqrencode</a> | QR generation inherited through the Core wallet stack.</li>"
              + "<li>Velopack - Velopack project and contributors - <a href=\"https://velopack.io/\">velopack.io</a> | update-package metadata and installer update flow where enabled.</li>"
+             + "<li>Trippy - fujiapple852 and contributors - <a href=\"https://github.com/fujiapple852/trippy\">fujiapple852/trippy</a> | Apache-2.0 licensed route tracing tool used when the <code>trip</code> binary is installed or bundled for peer route inspection.</li>"
              + "<li>Core dependency stack inherited through Litecoin Core depends/build systems - Berkeley DB 4.8 / Sleepycat and Oracle | Boost community | OpenSSL Project | libevent project | SQLite / D. Richard Hipp and contributors | miniupnpc / Thomas Bernard | ZeroMQ community | platform packaging and toolchain contributors.</li>"
              + "</ul>"
              + "<h3>2. Prior Defcoin codebases and ideas directly referenced</h3>"
@@ -272,6 +295,8 @@ ApplicationWindow {
              + "<li>More historical pool credits - Defcoin.us Pool / earlier Defcoin.io - <a href=\"https://defcoin.us/\">defcoin.us</a> | IPTron Pool - <a href=\"http://coin.iptron.net:13370\">coin.iptron.net:13370</a> | Beardpool Defcoin Pool / Acor - <a href=\"https://pool.acor.to\">pool.acor.to</a> | DefcoinPool - <a href=\"http://www.defcoinpool.com/\">defcoinpool.com</a> | Poltergeek's Pool - <a href=\"http://defcoin.cloudapp.net\">defcoin.cloudapp.net</a> | Cryptoheater - <a href=\"http://cryptoheater.com/\">cryptoheater.com</a> | SecDSM Defcoin Pool | Unknown Mining Pool | LAIW.</li>"
              + "<li>Historical utilities and archives - def.coindroids.com | defcointalk.org | defcoin.assmeow.org | defcoin.jculb.com | defcoinfaucet.com | beerwallet.org | wallet.ribbit.me | miningpoolstats.stream/defcoin | InfoConDB entry for The Making of Defcoin.</li>"
              + "</ul>"
+             + "<h3>4. Everyone we forgot</h3>"
+             + "<p>Apologies if we've left anyone out of this list and I am sure there are many. Also thanks to everyone who participated: the project is nothing without the community.</p>"
     }
 
     function openNuBuildDetails() {
@@ -510,6 +535,80 @@ ApplicationWindow {
         onCreateWalletRequested: createWalletDialog.open()
         onCreateRecoveryWalletRequested: createRecoveryWalletDialog.open()
         onRestoreRecoveryWalletRequested: restoreRecoveryWalletDialog.open()
+    }
+
+    Timer {
+        id: shutdownTimer
+        interval: 650
+        repeat: true
+        onTriggered: {
+            if (root.shutdownStepIndex < root.shutdownSteps.length - 1) {
+                root.shutdownStepIndex += 1
+                return
+            }
+            shutdownTimer.stop()
+            root.quitRequested = true
+            NuPlatform.quitApplication()
+        }
+    }
+
+    Rectangle {
+        id: shutdownOverlay
+        anchors.fill: parent
+        visible: root.shutdownInProgress
+        z: 10000
+        color: Qt.rgba(0, 0, 0, 0.38)
+
+        Rectangle {
+            width: Math.min(620, parent.width - NuTokens.spaceXl * 2)
+            height: shutdownLayout.implicitHeight + NuTokens.spaceXl * 2
+            anchors.centerIn: parent
+            radius: NuTokens.radiusLarge
+            color: NuTokens.panelBase
+            border.color: Qt.rgba(0.26, 0.10, 0.42, 0.62)
+            border.width: 1
+
+            ColumnLayout {
+                id: shutdownLayout
+                anchors.fill: parent
+                anchors.margins: NuTokens.spaceXl
+                spacing: NuTokens.spaceMd
+
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("Closing Defcoin Core Nu")
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontBodyLarge
+                    font.weight: Font.DemiBold
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: qsTr("Nu must close wallets, indexes, network services, and database files cleanly to prevent corruption. Do not force quit while shutdown is in progress.")
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontBody
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Basic.ProgressBar {
+                    Layout.fillWidth: true
+                    from: 0
+                    to: Math.max(1, root.shutdownSteps.length - 1)
+                    value: root.shutdownStepIndex
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.shutdownSteps[root.shutdownStepIndex]
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontBody
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                }
+            }
+        }
     }
 
     Connections {

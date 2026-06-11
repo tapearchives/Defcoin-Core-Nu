@@ -30,17 +30,20 @@ ColumnLayout {
     property var statusRows: []
     property var selectedPeerNodeIds: []
     property var selectedBannedPeerKeys: []
+    property var peerDetailRow: ({})
+    property var traceWindows: ({})
+    property int tracePopoutFontSize: 13
     readonly property int trafficMaxChartSeconds: 7 * 24 * 60 * 60
     property var simplePeerColumns: ["Node", "Dir", "IP Address: Port", "Methods", "Ping", "Sent", "Rec'd", "User Agent"]
     property var simplePeerTypes: ["number", "text", "ipport", "center", "duration", "bytes", "bytes", "text"]
     property var simplePeerSortKeys: ["node", "direction", "ip", "transportMethods", "ping", "sent", "received", "userAgent"]
     property var simplePeerWeights: [0.38, 0.24, 1.7, 0.46, 0.42, 0.42, 0.42, 1.35]
-    property var simplePeerMinimums: [48, 34, 132, 66, 52, 58, 58, 92]
-    property var simplePeerMaximums: [64, 42, 390, 92, 74, 82, 82, 280]
+    property var simplePeerMinimums: [58, 34, 132, 66, 52, 58, 58, 92]
+    property var simplePeerMaximums: [86, 42, 390, 92, 74, 82, 82, 280]
     property var simplePeerTooltips: [
-        "Backend peer connection ID for this session.",
+        "Backend peer connection ID for this session. When a suffix like (g1) appears, Nu has grouped that row with another current peer row that appears to be the same running node.",
         "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
-        "Peer endpoint, including IP address and TCP port.",
+        "Peer endpoint, including IP address and TCP port. Port 10332 is the current Nu/Defcoin default P2P port; 1337 is a legacy/alternate Defcoin port often seen on public nodes; high random ports are usually inbound source ports behind NAT.",
         "Transport methods that have successfully exchanged data with this peer during this Nu session: TCP, UDP, or TCP+UDP.",
         "Current round-trip latency reported by the backend. This is Core's P2P ping time, not the same as an ICMP ping command in Terminal; ICMP can differ because it uses a different protocol and may be filtered or prioritized differently.",
         "Total bytes sent to this peer since the connection opened.",
@@ -53,14 +56,14 @@ ColumnLayout {
     property var detailedPeerTypes: ["number", "text", "ipport", "number", "reverseDns", "seedLanSource", "center", "center", "text", "center", "center", "duration", "duration", "bytes", "bytes", "text", "date", "number", "date", "date", "date", "date", "number", "number", "text", "text", "number", "amount"]
     property var detailedPeerSortKeys: ["node", "direction", "ip", "port", "reverseDns", "knownDns", "protocol", "magic", "services", "fastSyncAvailable", "transportMethods", "ping", "minPing", "sent", "received", "userAgent", "connectionTime", "startHeight", "lastSend", "lastRecv", "lastTx", "lastBlock", "syncedHeaders", "syncedBlocks", "connectionType", "network", "addrEntries", "minFeeFilter"]
     property var detailedPeerSortMetaFields: ["", "", "", "", "reverseDnsSort", "knownDnsSort", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]
-    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 1.05, 1.35, 0.5, 0.55, 0.42, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
-    property var detailedPeerMinimums: [44, 34, 128, 46, 90, 164, 62, 74, 54, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
-    property var detailedPeerMaximums: [62, 42, 330, 70, 240, 340, 82, 92, 80, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
+    property var detailedPeerWeights: [0.34, 0.28, 1.05, 0.34, 1.05, 1.35, 0.5, 0.55, 0.48, 0.42, 0.42, 0.46, 0.5, 0.42, 0.42, 1.35, 1.05, 0.55, 1.05, 1.05, 1.05, 1.05, 0.62, 0.62, 0.8, 0.58, 0.62, 0.76]
+    property var detailedPeerMinimums: [58, 34, 128, 46, 90, 164, 62, 74, 68, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
+    property var detailedPeerMaximums: [88, 42, 330, 70, 240, 340, 82, 92, 108, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
     property var detailedPeerTooltips: [
-        "Backend peer connection ID for this session.",
+        "Backend peer connection ID for this session. When a suffix like (g1) appears, Nu has grouped that row with another current peer row that appears to be the same running node.",
         "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
         "Peer IP address without the port. IPv4 values use fixed-width octet spacing so dots align.",
-        "Peer TCP port.",
+        "Peer TCP port. Port 10332 is the current Nu/Defcoin default P2P port; 1337 is a legacy/alternate Defcoin port often seen on public nodes; high random ports are usually inbound source ports behind NAT.",
         "Best-effort reverse DNS name for the peer IP address. Blank means no reverse DNS name has resolved yet.",
         "Configured seed/source domain or confirmed LAN workstation name associated with this peer address. LAN rows show a small local-network icon before the name; hover the cell for the discovery source such as Bonjour, SMB/NetBIOS, host-name resolution, or optional nmap output.",
         "P2P protocol version reported by the peer.",
@@ -159,6 +162,234 @@ ColumnLayout {
 
     function hasSinglePeerRowSelection() {
         return selectedSinglePeerRowId().length > 0
+    }
+
+    function rowCells(row) {
+        if (!row) return []
+        if (row.cells !== undefined && row.cells !== null) return row.cells
+        return row
+    }
+
+    function rowMeta(row) {
+        if (row && row.meta !== undefined && row.meta !== null) return row.meta
+        return ({})
+    }
+
+    function fallbackDetail(value) {
+        const text = String(value === undefined || value === null ? "" : value).trim()
+        return text.length > 0 ? text : "-"
+    }
+
+    function peerDetailHelp(label) {
+        const text = String(label || "")
+        const help = {
+            "Node": "Backend peer connection ID for this Nu session. A suffix like (g1) means Nu has grouped this row with another current peer row that appears to be the same running node.",
+            "Direction": "Inbound means the remote peer opened the connection into this node; outbound means this node opened the connection to the peer.",
+            "Endpoint": "The peer address and TCP port used by Core for the P2P connection.",
+            "Network": "Transport family reported by Core, such as ipv4, ipv6, onion, or i2p.",
+            "Connection type": "Core's connection role for this peer, such as outbound-full-relay, inbound, manual, or block-relay.",
+            "User agent": "Software name and version string reported by the peer during version negotiation.",
+            "LAN status": "Whether Nu currently classifies this peer as a same-LAN peer.",
+            "Source / workstation": "Seed source, DNS source, or LAN workstation name associated with this peer.",
+            "Discovery note": "How Nu learned the LAN workstation/source name, such as Nu LAN beacon, Bonjour, SMB/NetBIOS, or host-name lookup.",
+            "Node unique ID": "Persistent random Nu install ID advertised by current Nu nodes. It helps identify the same running node over IPv4 and IPv6 without exposing a hardware fingerprint.",
+            "Reverse DNS": "Best-effort reverse DNS name for the peer address. Blank means no reverse DNS has resolved yet.",
+            "Association clue": "Shown only when Nu has a strong same-node clue, such as matching node_unique_id or matching LAN workstation name.",
+            "Start height": "Block height the peer reported during version negotiation.",
+            "Synced headers": "Last header height Core currently believes is known in common with this peer.",
+            "Synced blocks": "Last block height Core currently believes is known in common with this peer.",
+            "Fast Sync": "UDP Fast Sync capability state for this peer.",
+            "Transport methods": "Transport methods that have exchanged data during this Nu session.",
+            "Services": "Compact service flags advertised by the peer.",
+            "Service details": "Full service-bit names and meanings decoded from the peer service flags.",
+            "Magic": "Network message-start bytes used on this peer connection.",
+            "Protocol version": "P2P protocol version reported by the peer.",
+            "Sent": "Total bytes sent to this peer since this connection opened.",
+            "Received": "Total bytes received from this peer since this connection opened.",
+            "Ping": "Core's P2P ping round-trip time, not the same as an ICMP ping command in Terminal.",
+            "Min ping": "Best observed Core P2P ping for this connection.",
+            "Connected": "Local time when this peer connection opened.",
+            "Last send": "Local time of the last message sent to this peer.",
+            "Last receive": "Local time of the last message received from this peer.",
+            "Last transaction": "Local time of the last valid transaction received from this peer.",
+            "Last block": "Local time of the last block received from this peer.",
+            "Addr entries": "Cumulative addr/addrv2 relay entries processed from this peer during this connection.",
+            "Min fee filter": "Minimum transaction relay fee rate this peer announced with feefilter."
+        }
+        return help[text] || "Peer field reported by Core getpeerinfo or Nu's LAN discovery layer."
+    }
+
+    function detailField(label, value, mono, help) {
+        return {
+            "label": label,
+            "value": root.fallbackDetail(value),
+            "mono": mono === true,
+            "help": help === undefined || help === null ? root.peerDetailHelp(label) : help
+        }
+    }
+
+    function peerEndpointText(meta) {
+        const host = root.fallbackDetail(meta.peerHost)
+        const port = root.fallbackDetail(meta.peerPort)
+        if (host === "-" && port === "-") return root.fallbackDetail(meta.peerAddress)
+        return port === "-" ? host : host + ":" + port
+    }
+
+    function detailedPeerRowForNodeId(nodeId) {
+        const clean = String(nodeId || "").trim()
+        const detailedRows = root.displayedDetailedPeerRows()
+        for (let i = 0; i < detailedRows.length; ++i) {
+            const meta = root.rowMeta(detailedRows[i])
+            if (String(meta.nodeId || "").trim() === clean) return detailedRows[i]
+        }
+        const simpleRows = NuService.peerRowsSimple || []
+        for (let j = 0; j < simpleRows.length; ++j) {
+            const simpleMeta = root.rowMeta(simpleRows[j])
+            if (String(simpleMeta.nodeId || "").trim() === clean) return simpleRows[j]
+        }
+        return null
+    }
+
+    function inspectPeerRow(row) {
+        const meta = root.rowMeta(row)
+        let candidate = row
+        if (meta.nodeId !== undefined && meta.nodeId !== null) {
+            const detailed = root.detailedPeerRowForNodeId(meta.nodeId)
+            if (detailed) candidate = detailed
+        }
+        root.peerDetailRow = candidate || ({})
+        peerDetailDialog.open()
+    }
+
+    function inspectSelectedPeer() {
+        const id = root.selectedSinglePeerRowId()
+        if (id.length === 0) return
+        const row = root.detailedPeerRowForNodeId(id)
+        if (row) root.inspectPeerRow(row)
+    }
+
+    function traceSelectedPeers() {
+        const ids = root.selectedPeerRowIds()
+        for (let i = 0; i < ids.length; ++i) NuService.tracePeer(ids[i])
+    }
+
+    function createTraceWindow(traceId, title, host, command) {
+        const old = root.traceWindows[traceId]
+        if (old) {
+            old.show()
+            old.raise()
+            return old
+        }
+        const win = traceWindowComponent.createObject(root, {
+            "traceId": traceId,
+            "traceTitle": title,
+            "traceHost": host,
+            "traceCommand": command
+        })
+        if (!win) return null
+        root.traceWindows[traceId] = win
+        win.show()
+        win.raise()
+        return win
+    }
+
+    function appendTraceOutput(traceId, text) {
+        const win = root.traceWindows[traceId]
+        if (!win) return
+        win.appendTrace(text)
+    }
+
+    function finishTraceWindow(traceId, exitCode, status) {
+        const win = root.traceWindows[traceId]
+        if (!win) return
+        win.traceRunning = false
+        win.appendTrace("\n[Nu] Trace " + status + " (exit " + exitCode + ").\n")
+    }
+
+    function associatedPeerSummary(row) {
+        const meta = root.rowMeta(row)
+        const associationKey = String(meta.associationKey || "").trim()
+        if (associationKey.length === 0) return ""
+        const nodeId = String(meta.nodeId || "").trim()
+        const rows = root.displayedDetailedPeerRows()
+        let peers = []
+        for (let i = 0; i < rows.length; ++i) {
+            const other = root.rowMeta(rows[i])
+            const otherId = String(other.nodeId || "").trim()
+            if (otherId.length === 0 || otherId === nodeId) continue
+            if (String(other.associationKey || "").trim() !== associationKey) continue
+            const endpoint = root.peerEndpointText(other)
+            const network = root.fallbackDetail(other.network)
+            peers.push("peer " + otherId + " (" + endpoint + (network === "-" ? "" : ", " + network) + ")")
+        }
+        if (peers.length === 0) return ""
+        const reason = root.fallbackDetail(meta.associationReason)
+        return (reason === "-" ? "Strong same-node clue" : reason) + ": " + peers.slice(0, 5).join(", ")
+                + (peers.length > 5 ? " and " + (peers.length - 5) + " more." : ".")
+    }
+
+    function peerDetailGroups(row) {
+        const meta = root.rowMeta(row)
+        const lanText = meta.isLanPeer ? "LAN peer" : "Not detected as LAN"
+        const source = root.fallbackDetail(meta.seedLanSource)
+        const lanTooltip = root.fallbackDetail(meta.lanTooltip)
+        const nodeUniqueId = root.fallbackDetail(meta.nodeUniqueId)
+        const assoc = root.associatedPeerSummary(row)
+        let lanFields = [
+            root.detailField("LAN status", lanText, false),
+            root.detailField("Source / workstation", source, false),
+            root.detailField("Discovery note", lanTooltip, false),
+            root.detailField("Node unique ID", nodeUniqueId, true),
+            root.detailField("Reverse DNS", meta.reverseDns, false)
+        ]
+        if (assoc.length > 0) lanFields.push(root.detailField("Association clue", assoc, false))
+        return [
+            {
+                "title": "Endpoint",
+                "fields": [
+                    root.detailField("Node", meta.displayNodeId || meta.nodeId, true),
+                    root.detailField("Direction", meta.direction, false),
+                    root.detailField("Endpoint", root.peerEndpointText(meta), true),
+                    root.detailField("Network", meta.network, false),
+                    root.detailField("Connection type", meta.connectionType, false),
+                    root.detailField("User agent", meta.userAgent, false)
+                ]
+            },
+            {
+                "title": "LAN and Source",
+                "fields": lanFields
+            },
+            {
+                "title": "Defcoin Sync and Services",
+                "fields": [
+                    root.detailField("Start height", meta.startHeight, true),
+                    root.detailField("Synced headers", meta.syncedHeaders, true),
+                    root.detailField("Synced blocks", meta.syncedBlocks, true),
+                    root.detailField("Fast Sync", meta.fastSyncAvailable, false),
+                    root.detailField("Transport methods", meta.transportMethods, false),
+                    root.detailField("Services", root.fallbackDetail(meta.services) + " (" + root.fallbackDetail(meta.servicesHex) + ")", true),
+                    root.detailField("Service details", meta.serviceDetails, false),
+                    root.detailField("Magic", meta.magic, true),
+                    root.detailField("Protocol version", meta.protocolVersion, true)
+                ]
+            },
+            {
+                "title": "Traffic and Timing",
+                "fields": [
+                    root.detailField("Sent", meta.sent, true),
+                    root.detailField("Received", meta.received, true),
+                    root.detailField("Ping", meta.ping, true),
+                    root.detailField("Min ping", meta.minPing, true),
+                    root.detailField("Connected", meta.connectionTime, false),
+                    root.detailField("Last send", meta.lastSend, false),
+                    root.detailField("Last receive", meta.lastRecv, false),
+                    root.detailField("Last transaction", meta.lastTx, false),
+                    root.detailField("Last block", meta.lastBlock, false),
+                    root.detailField("Addr entries", meta.addrEntries, true),
+                    root.detailField("Min fee filter", meta.minFeeFilter, true)
+                ]
+            }
+        ]
     }
 
     function applyPeerSortForCurrentView() {
@@ -433,6 +664,15 @@ ColumnLayout {
     Connections {
         target: NuService
         function onNodeMetricsChanged() { root.refreshDisplayedStatusRows() }
+        function onPeerTraceStarted(traceId, title, host, command) {
+            root.createTraceWindow(traceId, title, host, command)
+        }
+        function onPeerTraceOutput(traceId, text) {
+            root.appendTraceOutput(traceId, text)
+        }
+        function onPeerTraceFinished(traceId, exitCode, status) {
+            root.finishTraceWindow(traceId, exitCode, status)
+        }
     }
 
     NuPageHeader {
@@ -524,6 +764,22 @@ ColumnLayout {
                 }
 
                 NuActionButton {
+                    text: "Inspect Peer"
+                    Layout.preferredWidth: 124
+                    enabled: root.hasSinglePeerRowSelection()
+                    helpText: "Open a grouped detail view for the selected peer. You can also double-click a peer row."
+                    onClicked: root.inspectSelectedPeer()
+                }
+
+                NuActionButton {
+                    text: "Traceroute"
+                    Layout.preferredWidth: 118
+                    enabled: root.selectedPeerRowIds().length > 0
+                    helpText: "Open a route trace window for each selected peer. Nu uses Trippy's trip binary when installed or bundled, then falls back to the system traceroute tool."
+                    onClicked: root.traceSelectedPeers()
+                }
+
+                NuActionButton {
                     text: "Retest FastSync"
                     Layout.preferredWidth: 136
                     enabled: root.hasSinglePeerRowSelection()
@@ -564,6 +820,7 @@ ColumnLayout {
                 rows: root.detailsMode ? root.displayedDetailedPeerRows() : NuService.peerRowsSimple
                 emptyText: "Peers hydrate here after the tab renders."
                 onRowSelectionChanged: (keys) => root.selectedPeerNodeIds = keys
+                onRowActivated: (row) => root.inspectPeerRow(row)
                 onSortChanged: (column, ascending, key) => {
                     root.peerSortKey = key
                     root.peerSortAscending = ascending
@@ -686,7 +943,52 @@ ColumnLayout {
                 spacing: NuTokens.spaceMd
 
                 GridLayout {
-                    columns: 4
+                    visible: !root.detailsMode
+                    columns: 2
+                    rowSpacing: 2
+                    columnSpacing: NuTokens.spaceMd
+
+                    Label { text: ""; font.pixelSize: NuTokens.fontTiny }
+                    Label {
+                        text: "Total traffic"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.bold: true
+                        Layout.alignment: Qt.AlignRight
+                    }
+                    Label {
+                        text: "Rec'd (RX):"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                    }
+                    Label {
+                        text: NuService.trafficReceivedTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                        font.bold: true
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
+                    }
+                    Label {
+                        text: "Sent (TX):"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                    }
+                    Label {
+                        text: NuService.trafficSentTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                        font.bold: true
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
+                    }
+                }
+
+                GridLayout {
+                    visible: root.detailsMode
+                    columns: 5
                     rowSpacing: 2
                     columnSpacing: NuTokens.spaceMd
 
@@ -702,15 +1004,26 @@ ColumnLayout {
                         Layout.alignment: Qt.AlignRight
                     }
                     Label {
-                        text: "UDP"
+                        text: "FS UDP"
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontTiny
                         font.bold: true
                         Layout.alignment: Qt.AlignRight
-                        ToolTip.visible: udpHeaderHover.hovered
-                        ToolTip.text: "Fast Sync UDP and Quick Clone UDP combined"
+                        ToolTip.visible: fsUdpHeaderHover.hovered
+                        ToolTip.text: "Fast Sync UDP traffic"
                         ToolTip.delay: NuTokens.tooltipDelay
-                        HoverHandler { id: udpHeaderHover }
+                        HoverHandler { id: fsUdpHeaderHover }
+                    }
+                    Label {
+                        text: "QC UDP"
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.bold: true
+                        Layout.alignment: Qt.AlignRight
+                        ToolTip.visible: qcUdpHeaderHover.hovered
+                        ToolTip.text: "Quick Clone UDP traffic"
+                        ToolTip.delay: NuTokens.tooltipDelay
+                        HoverHandler { id: qcUdpHeaderHover }
                     }
                     Label {
                         text: "Total traffic"
@@ -721,7 +1034,7 @@ ColumnLayout {
                     }
 
                     Label {
-                        text: "Total rec'd:"
+                        text: "Rec'd (RX):"
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontTiny
                     }
@@ -734,7 +1047,15 @@ ColumnLayout {
                         Layout.alignment: Qt.AlignRight
                     }
                     Label {
-                        text: NuService.trafficUdpReceivedTotal
+                        text: NuService.trafficFastSyncUdpReceivedTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
+                    }
+                    Label {
+                        text: NuService.trafficQuickCloneReceivedTotal
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
@@ -752,7 +1073,7 @@ ColumnLayout {
                     }
 
                     Label {
-                        text: "Total sent:"
+                        text: "Sent (TX):"
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontTiny
                     }
@@ -765,7 +1086,15 @@ ColumnLayout {
                         Layout.alignment: Qt.AlignRight
                     }
                     Label {
-                        text: NuService.trafficUdpSentTotal
+                        text: NuService.trafficFastSyncUdpSentTotal
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontTiny
+                        font.family: NuTokens.monoFont
+                        horizontalAlignment: Text.AlignRight
+                        Layout.alignment: Qt.AlignRight
+                    }
+                    Label {
+                        text: NuService.trafficQuickCloneSentTotal
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontTiny
                         font.family: NuTokens.monoFont
@@ -1127,6 +1456,285 @@ ColumnLayout {
                     target: NuService
                     function onConsoleChanged() {
                         consoleOutput.cursorPosition = consoleOutput.text.length
+                    }
+                }
+            }
+        }
+    }
+
+    NuDialog {
+        id: peerDetailDialog
+        title: {
+            const meta = root.rowMeta(root.peerDetailRow)
+            const node = root.fallbackDetail(meta.nodeId)
+            const endpoint = root.peerEndpointText(meta)
+            return "Peer " + node + (endpoint === "-" ? "" : " - " + endpoint)
+        }
+        showCancel: false
+        acceptText: "Close"
+        dialogWidth: 920
+        dialogHeight: 720
+        minimumDialogWidth: 680
+        minimumDialogHeight: 460
+        resizable: true
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: peerDetailHeader.implicitHeight + NuTokens.spaceLg
+            color: NuTokens.backgroundBase
+            border.color: NuTokens.lineSubtle
+            radius: NuTokens.radiusMedium
+
+            ColumnLayout {
+                id: peerDetailHeader
+                anchors.fill: parent
+                anchors.margins: NuTokens.spaceMd
+                spacing: NuTokens.spaceXs
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.peerEndpointText(root.rowMeta(root.peerDetailRow))
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontTitle
+                    font.weight: Font.DemiBold
+                    font.family: NuTokens.monoFont
+                    wrapMode: Text.WrapAnywhere
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: {
+                        const meta = root.rowMeta(root.peerDetailRow)
+                        const bits = []
+                        bits.push(root.fallbackDetail(meta.direction))
+                        bits.push(root.fallbackDetail(meta.network))
+                        bits.push(root.fallbackDetail(meta.connectionType))
+                        if (meta.isLanPeer) bits.push("LAN")
+                        return bits.filter(function(value) { return value !== "-" }).join(" | ")
+                    }
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    wrapMode: Text.WordWrap
+                }
+            }
+        }
+
+        Repeater {
+            model: root.peerDetailGroups(root.peerDetailRow)
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: peerGroupLayout.implicitHeight + NuTokens.spaceMd
+                color: NuTokens.panelBase
+                border.color: NuTokens.lineSubtle
+                radius: NuTokens.radiusMedium
+
+                ColumnLayout {
+                    id: peerGroupLayout
+                    anchors.fill: parent
+                    anchors.margins: NuTokens.spaceSm
+                    spacing: NuTokens.spaceXs
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: modelData.title
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontBodyLarge
+                        font.weight: Font.DemiBold
+                    }
+
+                    Repeater {
+                        model: modelData.fields
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: NuTokens.spaceMd
+                            ToolTip.visible: fieldHover.hovered && String(modelData.help || "").length > 0
+                            ToolTip.text: String(modelData.help || "")
+                            ToolTip.delay: NuTokens.tooltipDelay
+                            HoverHandler { id: fieldHover }
+
+                            Label {
+                                Layout.preferredWidth: 168
+                                text: modelData.label
+                                color: NuTokens.textSecondary
+                                font.pixelSize: NuTokens.fontSmall
+                                verticalAlignment: Text.AlignTop
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.value
+                                textFormat: Text.PlainText
+                                color: NuTokens.textPrimary
+                                font.pixelSize: NuTokens.fontSmall
+                                font.family: modelData.mono ? NuTokens.monoFont : NuTokens.bodyFont
+                                wrapMode: Text.WrapAnywhere
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: traceWindowComponent
+
+        Window {
+            id: traceWindow
+            property string traceId: ""
+            property string traceTitle: "Defcoin peer trace"
+            property string traceHost: ""
+            property string traceCommand: ""
+            property bool traceRunning: true
+            title: traceTitle
+            width: 1040
+            height: 700
+            minimumWidth: 720
+            minimumHeight: 420
+            color: NuTokens.backgroundBase
+
+            function appendTrace(text) {
+                traceOutput.text += String(text || "")
+                traceOutput.cursorPosition = traceOutput.text.length
+            }
+
+            onClosing: {
+                if (traceRunning) NuService.cancelPeerTrace(traceId)
+                const map = root.traceWindows
+                delete map[traceId]
+                root.traceWindows = map
+                destroy(250)
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: NuTokens.spaceLg
+                spacing: NuTokens.spaceSm
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: traceHeaderLayout.implicitHeight + NuTokens.spaceMd
+                    color: NuTokens.panelBase
+                    border.color: NuTokens.lineSubtle
+                    radius: NuTokens.radiusMedium
+
+                    ColumnLayout {
+                        id: traceHeaderLayout
+                        anchors.fill: parent
+                        anchors.margins: NuTokens.spaceSm
+                        spacing: NuTokens.spaceXs
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: NuTokens.spaceMd
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: traceTitle
+                                color: NuTokens.textPrimary
+                                font.pixelSize: NuTokens.fontBodyLarge
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                text: traceRunning ? "running" : "finished"
+                                color: traceRunning ? NuTokens.stateConnected : NuTokens.textSecondary
+                                font.pixelSize: NuTokens.fontSmall
+                                font.family: NuTokens.monoFont
+                            }
+                            NuActionButton {
+                                text: "A-"
+                                Layout.preferredWidth: 44
+                                helpText: "Reduce trace font size."
+                                onClicked: root.tracePopoutFontSize = Math.max(9, root.tracePopoutFontSize - 1)
+                            }
+                            NuActionButton {
+                                text: "A+"
+                                Layout.preferredWidth: 44
+                                helpText: "Increase trace font size."
+                                onClicked: root.tracePopoutFontSize = Math.min(22, root.tracePopoutFontSize + 1)
+                            }
+                            Label { text: "Font"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontSmall }
+                            Basic.Slider {
+                                Layout.preferredWidth: 120
+                                from: 9
+                                to: 22
+                                stepSize: 1
+                                value: root.tracePopoutFontSize
+                                onMoved: root.tracePopoutFontSize = Math.round(value)
+                            }
+                            Label {
+                                text: root.tracePopoutFontSize + " px"
+                                color: NuTokens.textSecondary
+                                font.family: NuTokens.monoFont
+                                font.pixelSize: NuTokens.fontSmall
+                            }
+                            NuActionButton {
+                                text: "Copy"
+                                Layout.preferredWidth: 74
+                                helpText: "Copy the visible trace output."
+                                onClicked: NuService.copyText(traceOutput.selectedText.length > 0 ? traceOutput.selectedText : traceOutput.text)
+                            }
+                            NuActionButton {
+                                text: "Clear"
+                                Layout.preferredWidth: 74
+                                helpText: "Clear this trace window."
+                                onClicked: traceOutput.text = ""
+                            }
+                            NuActionButton {
+                                text: "Stop"
+                                Layout.preferredWidth: 74
+                                enabled: traceRunning
+                                helpText: "Stop this trace process."
+                                onClicked: {
+                                    traceRunning = false
+                                    NuService.cancelPeerTrace(traceId)
+                                }
+                            }
+                            NuActionButton {
+                                text: "Close"
+                                Layout.preferredWidth: 80
+                                onClicked: traceWindow.close()
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: traceHost + " | " + traceCommand
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontTiny
+                            font.family: NuTokens.monoFont
+                            elide: Text.ElideMiddle
+                        }
+                    }
+                }
+
+                TextArea {
+                    id: traceOutput
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    readOnly: true
+                    selectByMouse: true
+                    persistentSelection: true
+                    wrapMode: Text.NoWrap
+                    text: ""
+                    color: "#39ff6a"
+                    selectionColor: "#195c2e"
+                    selectedTextColor: "#d5ffe0"
+                    font.family: NuTokens.monoFont
+                    font.pixelSize: root.tracePopoutFontSize
+                    background: Rectangle {
+                        color: "#020804"
+                        border.color: "#176a31"
+                        radius: NuTokens.radiusSmall
+                    }
+
+                    Shortcut {
+                        sequences: [StandardKey.Copy]
+                        enabled: traceOutput.activeFocus && traceOutput.selectedText.length > 0
+                        onActivated: NuService.copyText(traceOutput.selectedText)
                     }
                 }
             }

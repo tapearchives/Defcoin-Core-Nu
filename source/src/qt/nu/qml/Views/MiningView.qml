@@ -162,6 +162,13 @@ ColumnLayout {
             rewardHashrate.text = root.formatCalculatorValue(minerHashrate)
     }
 
+    function followMinerLogTail() {
+        Qt.callLater(function() {
+            minerLogText.cursorPosition = minerLogText.length
+            minerLogVerticalBar.position = Math.max(0, 1 - minerLogVerticalBar.size)
+        })
+    }
+
     function saveConfig() {
         NuService.saveMinerConfiguration(currentPoolUrl(), currentPayout(), currentPassword(), currentThreads(), currentNice())
     }
@@ -288,6 +295,8 @@ ColumnLayout {
                         "DC903 P2Pool - stratum+tcp://defcoin.dc903.org:13372",
                         "defcoin.io P2Pool - stratum+tcp://135.148.43.189:13372",
                         "defcoin.host - stratum+tcp://135.148.43.188:13371",
+                        "pool.defcoin.fun - stratum+tcp://pool.defcoin.fun:3333",
+                        "pool.defcoin.io - stratum+tcp://pool.defcoin.io:4044",
                         "Custom"
                     ]
                     helpText: "Choose a known pool preset or enter a custom stratum URL below."
@@ -295,6 +304,8 @@ ColumnLayout {
                         if (currentIndex === 0) minerPool.text = "stratum+tcp://defcoin.dc903.org:13372"
                         else if (currentIndex === 1) minerPool.text = "stratum+tcp://135.148.43.189:13372"
                         else if (currentIndex === 2) minerPool.text = "stratum+tcp://135.148.43.188:13371"
+                        else if (currentIndex === 3) minerPool.text = "stratum+tcp://pool.defcoin.fun:3333"
+                        else if (currentIndex === 4) minerPool.text = "stratum+tcp://pool.defcoin.io:4044"
                     }
                 }
 
@@ -476,6 +487,16 @@ ColumnLayout {
                     NuMetricRow { label: "Hashrate"; value: NuService.minerHashrateText }
                     NuMetricRow { label: "Accepted"; value: String(NuService.minerAcceptedShares) }
                     NuMetricRow { label: "Rejected"; value: String(NuService.minerRejectedShares) }
+                    NuCheckBox {
+                        text: "Follow tail"
+                        checked: root.minerLogAutoFollow
+                        helpText: "Keep the newest miner output visible at the bottom of the monitor."
+                        onToggled: {
+                            root.minerLogAutoFollow = checked
+                            if (checked)
+                                root.followMinerLogTail()
+                        }
+                    }
                     NuActionButton {
                         width: 105
                         text: "Copy log"
@@ -537,10 +558,7 @@ ColumnLayout {
                         onTextChanged: {
                             if (!root.minerLogAutoFollow)
                                 return
-                            Qt.callLater(function() {
-                                minerLogText.cursorPosition = minerLogText.length
-                                minerLogVerticalBar.position = Math.max(0, 1 - minerLogVerticalBar.size)
-                            })
+                            root.followMinerLogTail()
                         }
                     }
                 }

@@ -9,6 +9,7 @@
 #include <QJsonValue>
 #include <QObject>
 #include <QPair>
+#include <QPointer>
 #include <QSet>
 #include <QStringList>
 #include <QUrl>
@@ -1023,6 +1024,8 @@ public:
     Q_INVOKABLE void banPeer(const QString& node_id);
     Q_INVOKABLE void unbanPeer(const QString& address);
     Q_INVOKABLE void refreshBannedPeers();
+    Q_INVOKABLE void tracePeer(const QString& node_id);
+    Q_INVOKABLE void cancelPeerTrace(const QString& trace_id);
     Q_INVOKABLE void runRpcCommand(const QString& method, const QString& params_json, bool wallet_scoped);
     Q_INVOKABLE void runRpcConsoleCommand(const QString& command_text, const QString& wallet_name);
     Q_INVOKABLE void clearConsoleOutput();
@@ -1197,6 +1200,9 @@ Q_SIGNALS:
     void explorerWindowRequested(const QString& title, const QString& html);
     void explorerChanged();
     void forensicsChanged();
+    void peerTraceStarted(const QString& trace_id, const QString& title, const QString& host, const QString& command);
+    void peerTraceOutput(const QString& trace_id, const QString& text);
+    void peerTraceFinished(const QString& trace_id, int exit_code, const QString& status);
     void updateAvailable(const QString& version, const QString& message);
     void updateDownloaded(const QString& version, const QString& filePath, const QString& message);
     void recoveryPhrasePreviewReady(const QVariantMap& preview, const QString& message);
@@ -1277,6 +1283,9 @@ private:
     void ensureLanFastSyncSocket();
     void stopLanFastSyncSocket();
     void handleLanFastSyncDatagrams();
+    QString ensureNodeUniqueId();
+    QString fastSyncLogicalPeerKey(const QString& host) const;
+    void rememberPeerNodeUniqueId(const QHostAddress& sender, const QJsonObject& header, const QString& source);
     void sendLanDiscoveryAnnouncement();
     void handleLanDiscoveryAnnouncement(const QJsonObject& message, const QHostAddress& sender, quint16 sender_port);
     void queueLanDiscoveryAddNode(const QString& host, quint16 p2p_port);
@@ -1645,6 +1654,10 @@ private:
     QHash<QString, int> m_peer_domain_alias_priority_by_host;
     QHash<QString, QString> m_peer_lan_name_by_host;
     QHash<QString, QString> m_peer_lan_info_by_host;
+    QHash<QString, QString> m_peer_node_unique_id_by_host;
+    QHash<QString, QString> m_peer_node_unique_source_by_host;
+    QHash<QString, QPointer<QProcess>> m_peer_trace_processes;
+    int m_next_peer_trace_id = 1;
     QSet<QProcess*> m_helper_processes;
     bool m_stopping_helper_processes = false;
     QSet<int> m_host_lookup_ids;
@@ -1654,6 +1667,7 @@ private:
     QSet<QString> m_peer_lan_lookup_attempted;
     QHash<QString, qint64> m_peer_lan_lookup_last_attempt_ms;
     QString m_lan_discovery_node_id;
+    bool m_lan_discovery_node_id_logged = false;
     qint64 m_lan_discovery_last_announce_ms = 0;
     qint64 m_lan_discovery_last_addnode_attempt_ms = 0;
     QSet<QString> m_lan_discovery_added_endpoints;

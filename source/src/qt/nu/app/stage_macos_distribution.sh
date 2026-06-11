@@ -30,7 +30,7 @@ else
 fi
 DEST_APP="$DEST_PLATFORM_DIR/${PRODUCT_NAME}.app"
 DEST_DMG="$DEST_PLATFORM_DIR/${PRODUCT_SLUG}-v${RELEASE_VERSION}-${DMG_SUFFIX}.dmg"
-DEST_DMG_BACKGROUND="$DEST_PLATFORM_DIR/${DEST_DMG_BACKGROUND_BASENAME}"
+LEGACY_DMG_BACKGROUND="$DEST_PLATFORM_DIR/${DEST_DMG_BACKGROUND_BASENAME}"
 RELEASE_DIR="$(dirname "$DEST_PLATFORM_DIR")"
 
 if [ ! -d "$BUILT_APP" ]; then
@@ -39,7 +39,7 @@ if [ ! -d "$BUILT_APP" ]; then
 fi
 
 mkdir -p "$DEST_PLATFORM_DIR"
-rm -rf "$DEST_APP" "$DEST_DMG"
+rm -rf "$DEST_APP" "$DEST_DMG" "$LEGACY_DMG_BACKGROUND"
 
 ditto "$BUILT_APP" "$DEST_APP"
 chmod -R u+w "$DEST_APP"
@@ -172,6 +172,7 @@ codesign --verify --deep --strict --verbose=4 "$DEST_APP"
 
 DMG_STAGE="$(mktemp -d "$DMG_STAGE_TEMPLATE")"
 DMG_SETTINGS="$DMG_STAGE/dmgbuild-settings.py"
+DEST_DMG_BACKGROUND="$DMG_STAGE/background.png"
 cleanup() {
   rm -rf "$DMG_STAGE"
 }
@@ -416,7 +417,6 @@ fi
 
 ditto "$DEST_APP" "$DMG_STAGE/${PRODUCT_NAME}.app"
 ln -s /Applications "$DMG_STAGE/Applications"
-cp -p "$DEST_DMG_BACKGROUND" "$DMG_STAGE/background.png"
 cat > "$DMG_SETTINGS" <<EOF
 format = 'UDZO'
 compression_level = 9
@@ -448,11 +448,11 @@ else
 fi
 hdiutil verify "$DEST_DMG"
 
-touch -ch "$RELEASE_DIR" "$DEST_PLATFORM_DIR" "$DEST_APP" "$DEST_DMG" "$DEST_DMG_BACKGROUND"
+touch -ch "$RELEASE_DIR" "$DEST_PLATFORM_DIR" "$DEST_APP" "$DEST_DMG"
 
 if command -v SetFile >/dev/null 2>&1; then
   FINDER_DATE="$(date '+%m/%d/%Y %H:%M:%S')"
-  for path in "$RELEASE_DIR" "$DEST_PLATFORM_DIR" "$DEST_APP" "$DEST_DMG" "$DEST_DMG_BACKGROUND"; do
+  for path in "$RELEASE_DIR" "$DEST_PLATFORM_DIR" "$DEST_APP" "$DEST_DMG"; do
     SetFile -d "$FINDER_DATE" "$path" >/dev/null 2>&1 || true
     SetFile -m "$FINDER_DATE" "$path" >/dev/null 2>&1 || true
   done
@@ -460,4 +460,3 @@ fi
 
 echo "staged app: $DEST_APP"
 echo "staged dmg: $DEST_DMG"
-echo "dmg background: $DEST_DMG_BACKGROUND"

@@ -16,6 +16,7 @@ EOF
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLICKER="$SCRIPT_DIR/macos_click_lan_allow.sh"
+VISIBLE_BUTTON_CLICKER="$SCRIPT_DIR/macos_click_visible_button.sh"
 DEFAULT_LOG="/Volumes/TB5_4TB/d/litecoincore/Defcoin Core Nu/local-dev-notes/Defcoin Core Nu/nu_launch_allow_debug_log.csv"
 
 APP_PATH=""
@@ -207,6 +208,91 @@ clear_problem_reporters() {
   else
     log_event "problem_reporter_cleared" "" "closed" ""
   fi
+}
+
+latest_sigabrt_crash_report_since() {
+  local since_epoch=${1:-0}
+  local dir="$HOME/Library/Logs/DiagnosticReports"
+  local newest_file=""
+  local newest_mtime=0
+  local file mtime
+
+  [[ -d "$dir" ]] || return 1
+  while IFS= read -r file; do
+    [[ -f "$file" ]] || continue
+    mtime=$(stat -f %m "$file" 2>/dev/null || printf '0')
+    [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+    if (( mtime >= since_epoch && mtime >= newest_mtime )) && grep -Eq '"signal"[[:space:]]*:[[:space:]]*"SIGABRT"' "$file"; then
+      newest_file="$file"
+      newest_mtime="$mtime"
+    fi
+  done < <(find "$dir" -maxdepth 1 -type f \( -name 'DefcoinCoreNu*.ips' -o -name 'Defcoin Core Nu*.ips' \) -print 2>/dev/null)
+
+  [[ -n "$newest_file" ]] || return 1
+  printf '%s\n' "$newest_file"
+}
+
+clear_sigabrt_crash_dialog() {
+  local pid=${1:-}
+  local report=${2:-}
+  local click_result audit
+
+  log_event "sigabrt_crash_detected" "$pid" "crashed" "$report"
+
+  click_result=$("$VISIBLE_BUTTON_CLICKER" \
+    --button "Ignore" \
+    --context "quit unexpectedly" \
+    --timeout 8 \
+    --interval 1 \
+    --save-last-screenshot "/tmp/defcoin-nu-sigabrt-ignore-${BUILD_ID:-unknown}.png" 2>&1 || true)
+  local click_status
+  click_status=$(json_status "$click_result")
+  [[ -n "$click_status" ]] || click_status="unknown"
+  log_event "sigabrt_ignore_click_result" "$pid" "$click_status" "$click_result"
+
+  clear_problem_reporters
+  local cleared
+  cleared=$(clear_blocking_dialogs)
+  if [[ -n "$cleared" ]]; then
+    log_event "blocking_dialog_cleared" "$pid" "cleared_after_sigabrt" "$cleared"
+  fi
+
+  audit=$(dialog_audit)
+  if audit_has_blocking_crash_or_duplicate "$audit"; then
+    log_event "sigabrt_crash_dialog_clear" "$pid" "failed" "$audit"
+    printf 'Launch gate failed: DefcoinCoreNu crashed with SIGABRT and the crash dialog may still be visible.\n' >&2
+    printf 'Crash report: %s\n' "$report" >&2
+    printf '%s\n' "$audit" >&2
+    return 4
+  fi
+
+  log_event "sigabrt_crash_dialog_clear" "$pid" "cleared" "$audit"
+  printf 'Launch gate failed: DefcoinCoreNu crashed with SIGABRT.\n' >&2
+  printf 'Crash report: %s\n' "$report" >&2
+  return 4
+}
+
+wait_for_early_sigabrt_or_exit() {
+  local pid=$1
+  local since_epoch=$2
+  local deadline=$((SECONDS + 10))
+  local report
+
+  while (( SECONDS < deadline )); do
+    if report=$(latest_sigabrt_crash_report_since "$since_epoch"); then
+      printf '%s\n' "$report"
+      return 0
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      if report=$(latest_sigabrt_crash_report_since "$since_epoch"); then
+        printf '%s\n' "$report"
+        return 0
+      fi
+      return 1
+    fi
+    sleep 0.5
+  done
+  return 1
 }
 
 wait_for_pid() {
@@ -462,16 +548,32 @@ if (( ${#APP_ARGS[@]} > 0 )); then
   args_text="${APP_ARGS[*]}"
 fi
 log_event "launch_start" "" "started" "args=$args_text"
+crash_scan_epoch=$(($(date +%s) - 1))
 if (( ${#APP_ARGS[@]} > 0 )); then
   /usr/bin/open "$APP_PATH" --args "${APP_ARGS[@]}"
 else
   /usr/bin/open "$APP_PATH"
 fi
 if ! TARGET_PID=$(wait_for_pid "$APP_PATH"); then
+  if report=$(latest_sigabrt_crash_report_since "$crash_scan_epoch"); then
+    clear_sigabrt_crash_dialog "" "$report" || true
+    log_event "launch_result" "" "sigabrt" "$report"
+    exit 4
+  fi
   log_event "launch_result" "" "pid_not_found" ""
   exit 3
 fi
 log_event "launch_result" "$TARGET_PID" "pid_found" ""
+
+if report=$(wait_for_early_sigabrt_or_exit "$TARGET_PID" "$crash_scan_epoch"); then
+  clear_sigabrt_crash_dialog "$TARGET_PID" "$report" || true
+  log_event "launch_result" "$TARGET_PID" "sigabrt" "$report"
+  exit 4
+fi
+if ! kill -0 "$TARGET_PID" 2>/dev/null; then
+  log_event "launch_result" "$TARGET_PID" "process_exited_before_allow" ""
+  exit 3
+fi
 
 clear_problem_reporters
 cleared=$(clear_blocking_dialogs)

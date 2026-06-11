@@ -522,7 +522,7 @@ Rectangle {
     }
 
     function baseRowHeight() {
-        const base = Math.max(compact ? 24 : 30, Math.ceil(cellFontSize() * 1.75) + (compact ? 4 : 8))
+        const base = Math.max(compact ? 22 : 28, Math.ceil(cellFontSize() * (compact ? 1.35 : 1.5)) + (compact ? 4 : 6))
         return base
     }
 
@@ -545,7 +545,7 @@ Rectangle {
         }
 
         if (lines <= 1) return base
-        return Math.max(base, Math.ceil(cellFontSize() * (1.35 * lines)) + (compact ? 8 : 12))
+        return Math.max(base, Math.ceil(cellFontSize() * (1.28 * lines)) + (compact ? 6 : 10))
     }
 
     function headerNeedsExtraLine(index) {

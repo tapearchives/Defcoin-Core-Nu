@@ -121,6 +121,10 @@ void NuPlatformIntegration::showMainWindow()
 
 void NuPlatformIntegration::quitApplication()
 {
+    if (m_root_object && !m_root_object->property("quitRequested").toBool()) {
+        QMetaObject::invokeMethod(m_root_object, "requestQuit", Qt::QueuedConnection);
+        return;
+    }
     if (m_root_object) {
         m_root_object->setProperty("quitRequested", true);
     }

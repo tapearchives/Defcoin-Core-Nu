@@ -32,6 +32,9 @@ wallet and node, plus the Qt Quick runtime used by the Nu interface.
 - Unbound: BSD-style license when enabled by the dependency environment.
 - QRencode: LGPLv2.1+.
 - zlib, libpng, and related image libraries: zlib/libpng-style licenses.
+- Trippy (`trip`): Apache License 2.0. Nu uses it only when the optional
+  peer traceroute binary is installed or bundled; otherwise Nu falls back to
+  the operating system traceroute utility.
 
 Distribution packages should preserve the license notices required by the
 linked dependency set for that platform.

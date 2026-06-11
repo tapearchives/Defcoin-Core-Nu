@@ -21,6 +21,8 @@ ColumnLayout {
     property bool hideZeroBalanceAddresses: false
     property bool hideZeroBip39RecoveryAddresses: false
     property int addressBookFilterRevision: 0
+    property int addressBookVisibleLimit: 500
+    property bool addressBookShowAll: false
     property int walletListViewMode: 0
     property bool paperImportPublic: true
     property string walletSortKey: ""
@@ -267,6 +269,13 @@ ColumnLayout {
         else NuService.loadWallet(name)
     }
 
+    function walletPanelIndexForTab(tabIndex) {
+        // Panels are kept in their historical declaration order to avoid
+        // churning stateful controls; this map keeps visible tabs honest.
+        const panelOrder = [0, 2, 3, 4, 1, 5, 6]
+        return tabIndex >= 0 && tabIndex < panelOrder.length ? panelOrder[tabIndex] : 0
+    }
+
     function openSelectedWallets() {
         const names = root.selectedWalletNames()
         if (names.length === 1) {
@@ -356,6 +365,7 @@ ColumnLayout {
 
     function addressBookTableRows() {
         const out = []
+        const rowLimit = root.addressBookShowAll ? 2147483647 : root.addressBookVisibleLimit
         for (let i = 0; i < NuService.addressBook.length; ++i) {
             const row = NuService.addressBook[i]
             const label = row.length > 0 ? row[0] : ""
@@ -378,6 +388,8 @@ ColumnLayout {
                 cells: ["", label, address, type, received],
                 meta: { address: address }
             })
+            if (out.length >= rowLimit)
+                break
         }
         return out
     }
@@ -404,7 +416,7 @@ ColumnLayout {
     StackLayout {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        currentIndex: walletTabs.currentIndex
+        currentIndex: root.walletPanelIndexForTab(walletTabs.currentIndex)
 
         NuPanel {
             ColumnLayout {
@@ -471,7 +483,10 @@ ColumnLayout {
                 }
 
                 Flow {
+                    id: walletActionsFlow
                     Layout.fillWidth: true
+                    Layout.preferredHeight: implicitHeight
+                    Layout.minimumHeight: implicitHeight
                     spacing: NuTokens.spaceMd
                     NuActionButton {
                         text: "Create..."
@@ -610,156 +625,165 @@ ColumnLayout {
         }
 
         NuPanel {
-            ColumnLayout {
+            ScrollView {
+                id: walletToolsScroll
                 anchors.fill: parent
-                spacing: NuTokens.spaceLg
+                contentWidth: Math.max(1, availableWidth)
+                clip: true
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-                Label {
-                    Layout.fillWidth: true
-                    text: "Advanced wallet tools"
-                    color: NuTokens.textPrimary
-                    font.pixelSize: NuTokens.fontBodyLarge
-                    font.weight: Font.DemiBold
-                    wrapMode: Text.WordWrap
-                }
+                ColumnLayout {
+                    width: Math.max(1, walletToolsScroll.availableWidth)
+                    spacing: NuTokens.spaceLg
 
-                Label {
-                    Layout.fillWidth: true
-                    text: "Paper wallet generation creates a new address and WIF private key for offline recording. The private key is shown here only and is not imported into the wallet unless you explicitly import it later."
-                    color: NuTokens.textSecondary
-                    font.pixelSize: NuTokens.fontSmall
-                    wrapMode: Text.WordWrap
-                }
-
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: 2
-                    columnSpacing: NuTokens.spaceLg
-                    rowSpacing: NuTokens.spaceMd
-
-                    Label { text: "Paper label"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
-                    NuTextField {
-                        id: paperWalletLabel
-                        Layout.fillWidth: true
-                        placeholderText: "Paper wallet public address"
-                        helpText: "Optional label used only if Nu imports the generated public address as watch-only metadata."
-                    }
-
-                    Label { text: "Public import"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
-                    NuCheckBox {
-                        text: "Add public address as watch-only metadata"
-                        checked: root.paperImportPublic
-                        helpText: "Imports only the public address so Nu can show it in the address list. The private key is not stored."
-                        onToggled: root.paperImportPublic = checked
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: NuTokens.spaceMd
-                    NuActionButton {
-                        text: "Generate Paper Wallet"
-                        primary: true
-                        Layout.preferredWidth: 230
-                        helpText: "Generate a Defcoin address and WIF private key without importing the private key into the wallet."
-                        onClicked: NuService.generatePaperWallet(root.paperImportPublic, paperWalletLabel.text)
-                    }
                     Label {
                         Layout.fillWidth: true
-                        text: NuService.paperWalletStatus
+                        text: "Advanced wallet tools"
+                        color: NuTokens.textPrimary
+                        font.pixelSize: NuTokens.fontBodyLarge
+                        font.weight: Font.DemiBold
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Paper wallet generation creates a new address and WIF private key for offline recording. The private key is shown here only and is not imported into the wallet unless you explicitly import it later."
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontSmall
                         wrapMode: Text.WordWrap
                     }
-                }
 
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: 2
-                    columnSpacing: NuTokens.spaceLg
-                    rowSpacing: NuTokens.spaceSm
-                    visible: NuService.paperWalletReady
-
-                    Label { text: "Address"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
-                    NuCopyField {
+                    GridLayout {
                         Layout.fillWidth: true
-                        value: NuService.paperWalletAddress
-                        copyEnabled: NuService.paperWalletAddress.length > 0
-                        onCopyRequested: (value) => NuService.copyText(value)
+                        columns: 2
+                        columnSpacing: NuTokens.spaceLg
+                        rowSpacing: NuTokens.spaceMd
+
+                        Label { text: "Paper label"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
+                        NuTextField {
+                            id: paperWalletLabel
+                            Layout.fillWidth: true
+                            placeholderText: "Paper wallet public address"
+                            helpText: "Optional label used only if Nu imports the generated public address as watch-only metadata."
+                        }
+
+                        Label { text: "Public import"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
+                        NuCheckBox {
+                            text: "Add public address as watch-only metadata"
+                            checked: root.paperImportPublic
+                            helpText: "Imports only the public address so Nu can show it in the address list. The private key is not stored."
+                            onToggled: root.paperImportPublic = checked
+                        }
                     }
 
-                    Label { text: "Private key"; color: NuTokens.stateWarning; font.pixelSize: NuTokens.fontBody; font.weight: Font.DemiBold }
-                    NuCopyField {
-                        Layout.fillWidth: true
-                        value: NuService.paperWalletWif
-                        copyEnabled: NuService.paperWalletWif.length > 0
-                        onCopyRequested: (value) => NuService.copySensitiveTextAfterWarning(value)
-                    }
-                }
-
-                Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: NuTokens.lineSubtle }
-
-                Label {
-                    Layout.fillWidth: true
-                    text: "Watch-only addresses let a wallet track a public address without private keys. They cannot spend funds."
-                    color: NuTokens.textSecondary
-                    font.pixelSize: NuTokens.fontSmall
-                    wrapMode: Text.WordWrap
-                }
-
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: 2
-                    columnSpacing: NuTokens.spaceLg
-                    rowSpacing: NuTokens.spaceMd
-
-                    Label { text: "Address"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
-                    NuTextField {
-                        id: watchOnlyAddress
-                        Layout.fillWidth: true
-                        placeholderText: "Defcoin address"
-                        helpText: "Public Defcoin address to track. Watch-only imports cannot spend."
-                    }
-
-                    Label { text: "Label"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
-                    NuTextField {
-                        id: watchOnlyLabel
-                        Layout.fillWidth: true
-                        placeholderText: "Watch-only"
-                    }
-
-                    Label { text: "Rescan"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: NuTokens.spaceMd
-                        NuCheckBox {
-                            id: watchOnlyRescan
-                            text: "Scan chain for history"
-                            helpText: "A rescan may take a long time. Leave off to import quickly and track future activity."
+                        NuActionButton {
+                            text: "Generate Paper Wallet"
+                            primary: true
+                            Layout.preferredWidth: 230
+                            helpText: "Generate a Defcoin address and WIF private key without importing the private key into the wallet."
+                            onClicked: NuService.generatePaperWallet(root.paperImportPublic, paperWalletLabel.text)
                         }
-                        NuTextField {
-                            id: watchOnlyStartHeight
-                            Layout.preferredWidth: 140
-                            placeholderText: "start block"
-                            enabled: watchOnlyRescan.checked
-                            inputMethodHints: Qt.ImhDigitsOnly
-                            helpText: "Optional start block for the rescan. Blank starts at block 0."
+                        Label {
+                            Layout.fillWidth: true
+                            text: NuService.paperWalletStatus
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WordWrap
                         }
                     }
-                }
 
-                NuActionButton {
-                    text: "Import Watch-only Address"
-                    Layout.preferredWidth: 240
-                    enabled: NuService.walletSelected
-                    helpText: "Import this public address into the selected wallet without any private key."
-                    onClicked: NuService.importWatchOnlyAddress(watchOnlyAddress.text,
-                                                                 watchOnlyLabel.text,
-                                                                 watchOnlyRescan.checked,
-                                                                 watchOnlyStartHeight.text.length > 0 ? Number(watchOnlyStartHeight.text) : -1)
-                }
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        columnSpacing: NuTokens.spaceLg
+                        rowSpacing: NuTokens.spaceSm
+                        visible: NuService.paperWalletReady
 
-                Item { Layout.fillHeight: true }
+                        Label { text: "Address"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
+                        NuCopyField {
+                            Layout.fillWidth: true
+                            value: NuService.paperWalletAddress
+                            copyEnabled: NuService.paperWalletAddress.length > 0
+                            onCopyRequested: (value) => NuService.copyText(value)
+                        }
+
+                        Label { text: "Private key"; color: NuTokens.stateWarning; font.pixelSize: NuTokens.fontBody; font.weight: Font.DemiBold }
+                        NuCopyField {
+                            Layout.fillWidth: true
+                            value: NuService.paperWalletWif
+                            copyEnabled: NuService.paperWalletWif.length > 0
+                            onCopyRequested: (value) => NuService.copySensitiveTextAfterWarning(value)
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: NuTokens.lineSubtle }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Watch-only addresses let a wallet track a public address without private keys. They cannot spend funds."
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontSmall
+                        wrapMode: Text.WordWrap
+                    }
+
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        columnSpacing: NuTokens.spaceLg
+                        rowSpacing: NuTokens.spaceMd
+
+                        Label { text: "Address"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
+                        NuTextField {
+                            id: watchOnlyAddress
+                            Layout.fillWidth: true
+                            placeholderText: "Defcoin address"
+                            helpText: "Public Defcoin address to track. Watch-only imports cannot spend."
+                        }
+
+                        Label { text: "Label"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
+                        NuTextField {
+                            id: watchOnlyLabel
+                            Layout.fillWidth: true
+                            placeholderText: "Watch-only"
+                        }
+
+                        Label { text: "Rescan"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: NuTokens.spaceMd
+                            NuCheckBox {
+                                id: watchOnlyRescan
+                                text: "Scan chain for history"
+                                helpText: "A rescan may take a long time. Leave off to import quickly and track future activity."
+                            }
+                            NuTextField {
+                                id: watchOnlyStartHeight
+                                Layout.preferredWidth: 140
+                                placeholderText: "start block"
+                                enabled: watchOnlyRescan.checked
+                                inputMethodHints: Qt.ImhDigitsOnly
+                                helpText: "Optional start block for the rescan. Blank starts at block 0."
+                            }
+                        }
+                    }
+
+                    NuActionButton {
+                        text: "Import Watch-only Address"
+                        Layout.preferredWidth: 240
+                        enabled: NuService.walletSelected
+                        helpText: "Import this public address into the selected wallet without any private key."
+                        onClicked: NuService.importWatchOnlyAddress(watchOnlyAddress.text,
+                                                                     watchOnlyLabel.text,
+                                                                     watchOnlyRescan.checked,
+                                                                     watchOnlyStartHeight.text.length > 0 ? Number(watchOnlyStartHeight.text) : -1)
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
             }
         }
 
@@ -914,6 +938,7 @@ ColumnLayout {
                         onToggled: {
                             root.hideZeroBalanceAddresses = checked
                             root.addressBookFilterRevision += 1
+                            root.addressBookShowAll = false
                             addressBookTable.clearRowSelection()
                         }
                     }
@@ -928,6 +953,7 @@ ColumnLayout {
                             if (!root.hideZeroBalanceAddresses) {
                                 root.hideZeroBip39RecoveryAddresses = checked
                                 root.addressBookFilterRevision += 1
+                                root.addressBookShowAll = false
                                 addressBookTable.clearRowSelection()
                             }
                         }
@@ -939,10 +965,48 @@ ColumnLayout {
                         onClicked: {
                             root.hideZeroBip39RecoveryAddresses = true
                             root.addressBookFilterRevision += 1
+                            root.addressBookShowAll = false
                             addressBookTable.clearRowSelection()
                         }
                     }
                     Item { Layout.fillWidth: true }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: NuService.addressBook.length > root.addressBookVisibleLimit
+                    spacing: NuTokens.spaceMd
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: root.addressBookShowAll
+                              ? "Showing all " + NuService.addressBook.length + " address entries."
+                              : "Showing first " + root.addressBookVisibleLimit + " of " + NuService.addressBook.length + " address entries."
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontSmall
+                        elide: Text.ElideRight
+                    }
+
+                    NuActionButton {
+                        text: "Show 500 more"
+                        Layout.preferredWidth: 142
+                        visible: !root.addressBookShowAll
+                        helpText: "Render 500 more address rows. Large wallets stay responsive by not building every hidden row by default."
+                        onClicked: {
+                            root.addressBookVisibleLimit += 500
+                            root.addressBookFilterRevision += 1
+                        }
+                    }
+
+                    NuActionButton {
+                        text: root.addressBookShowAll ? "Limit rows" : "Show all"
+                        Layout.preferredWidth: 112
+                        helpText: "Toggle full address-book rendering. Showing thousands of rows can make older systems slower."
+                        onClicked: {
+                            root.addressBookShowAll = !root.addressBookShowAll
+                            root.addressBookFilterRevision += 1
+                        }
+                    }
                 }
 
                 NuDataTable {
@@ -961,7 +1025,7 @@ ColumnLayout {
                     ]
                     rows: {
                         root.addressBookFilterRevision
-                        root.addressBookTableRows()
+                        walletTabs.currentIndex === 3 ? root.addressBookTableRows() : []
                     }
                     columnWeights: [0.1, 1.4, 3.5, 0.85, 1.1]
                     columnMinimums: [44, 140, 320, 90, 150]
