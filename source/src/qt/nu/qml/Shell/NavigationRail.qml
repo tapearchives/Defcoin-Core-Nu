@@ -153,7 +153,7 @@ Rectangle {
 
         Item {
             id: brandButton
-            Layout.preferredWidth: brandLockup.implicitWidth
+            Layout.fillWidth: true
             Layout.preferredHeight: brandLockup.implicitHeight
             Layout.bottomMargin: NuTokens.spaceLg
             activeFocusOnTab: true
@@ -168,7 +168,7 @@ Rectangle {
 
             NuBrandLockup {
                 id: brandLockup
-                anchors.left: parent.left
+                anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
             }
 

@@ -111,8 +111,8 @@ class NuRpcService final : public QObject
         bool onlyDefcoinUserAgents READ onlyDefcoinUserAgents WRITE setOnlyDefcoinUserAgents NOTIFY settingsChanged)
     Q_PROPERTY(
         bool onlyDefcoinMagicBytes READ onlyDefcoinMagicBytes WRITE setOnlyDefcoinMagicBytes NOTIFY settingsChanged)
-    Q_PROPERTY(bool switchToDefcoinOnlyMagicStartingJuly2026 READ switchToDefcoinOnlyMagicStartingJuly2026 WRITE
-                   setSwitchToDefcoinOnlyMagicStartingJuly2026 NOTIFY settingsChanged)
+    Q_PROPERTY(bool switchToDefcoinOnlyMagicStartingAugust2026 READ switchToDefcoinOnlyMagicStartingAugust2026 WRITE
+                   setSwitchToDefcoinOnlyMagicStartingAugust2026 NOTIFY settingsChanged)
     Q_PROPERTY(bool disallowLanNodeDiscovery READ disallowLanNodeDiscovery WRITE setDisallowLanNodeDiscovery NOTIFY
                    settingsChanged)
     Q_PROPERTY(bool lanNodeDiscoveryEnabled READ lanNodeDiscoveryEnabled WRITE setLanNodeDiscoveryEnabled NOTIFY
@@ -179,7 +179,10 @@ class NuRpcService final : public QObject
     Q_PROPERTY(bool thirdPartyTxUrlsEnabled READ thirdPartyTxUrlsEnabled WRITE setThirdPartyTxUrlsEnabled NOTIFY
                    settingsChanged)
     Q_PROPERTY(QString thirdPartyTxUrl READ thirdPartyTxUrl WRITE setThirdPartyTxUrl NOTIFY settingsChanged)
+    Q_PROPERTY(
+        QString thirdPartyAddressUrl READ thirdPartyAddressUrl WRITE setThirdPartyAddressUrl NOTIFY settingsChanged)
     Q_PROPERTY(QString explorerMode READ explorerMode NOTIFY settingsChanged)
+    Q_PROPERTY(QString shutdownStatus READ shutdownStatus NOTIFY shutdownChanged)
     Q_PROPERTY(QString explorerDatabasePath READ explorerDatabasePath NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerRecentLookups READ explorerRecentLookups NOTIFY explorerChanged)
     Q_PROPERTY(bool explorerIndexing READ explorerIndexing NOTIFY explorerChanged)
@@ -536,9 +539,9 @@ public:
     {
         return m_only_defcoin_magic_bytes;
     }
-    bool switchToDefcoinOnlyMagicStartingJuly2026() const
+    bool switchToDefcoinOnlyMagicStartingAugust2026() const
     {
-        return m_switch_to_defcoin_only_magic_starting_july_2026;
+        return m_switch_to_defcoin_only_magic_starting_august_2026;
     }
     bool disallowLanNodeDiscovery() const
     {
@@ -746,9 +749,17 @@ public:
     {
         return m_third_party_tx_url;
     }
+    QString thirdPartyAddressUrl() const
+    {
+        return m_third_party_address_url;
+    }
     QString explorerMode() const
     {
         return m_explorer_mode;
+    }
+    QString shutdownStatus() const
+    {
+        return m_shutdown_status;
     }
     QString explorerDatabasePath() const;
     QVariantList explorerRecentLookups() const
@@ -1108,6 +1119,7 @@ public:
     Q_INVOKABLE void signMessage(const QString& address, const QString& message);
     Q_INVOKABLE void verifyMessage(const QString& address, const QString& signature, const QString& message);
     Q_INVOKABLE void openDebugLog();
+    Q_INVOKABLE void prepareForApplicationQuit();
     Q_INVOKABLE void saveLaunchLog(const QString& text);
     Q_INVOKABLE void openHelpManual(const QString& page = QString());
     Q_INVOKABLE QString helpManualHtml(const QString& page = QString()) const;
@@ -1210,7 +1222,7 @@ public:
 public Q_SLOTS:
     void setOnlyDefcoinUserAgents(bool enabled);
     void setOnlyDefcoinMagicBytes(bool enabled);
-    void setSwitchToDefcoinOnlyMagicStartingJuly2026(bool enabled);
+    void setSwitchToDefcoinOnlyMagicStartingAugust2026(bool enabled);
     void setDisallowLanNodeDiscovery(bool enabled);
     void setLanNodeDiscoveryEnabled(bool enabled);
     void setLanFastSyncEnabled(bool enabled);
@@ -1231,6 +1243,7 @@ public Q_SLOTS:
     void setMaskBalances(bool enabled);
     void setThirdPartyTxUrlsEnabled(bool enabled);
     void setThirdPartyTxUrl(const QString& url);
+    void setThirdPartyAddressUrl(const QString& url);
     void setExplorerMode(const QString& mode);
 
 Q_SIGNALS:
@@ -1260,6 +1273,7 @@ Q_SIGNALS:
     void recoveryChanged();
     void minerChanged();
     void paperWalletGenerated();
+    void shutdownChanged();
 
 private:
     using RpcCallback = std::function<void(const QJsonValue&, const QString&)>;
@@ -1309,6 +1323,9 @@ private:
                           const QJsonArray& params,
                           const QString& wallet_name,
                           RpcCallback callback);
+    void refillKeypoolAndPrimeChangeAddress(const QString& wallet_name,
+                                            const QString& failure_title,
+                                            const std::function<void()>& retry);
     void rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls, bool wallet_scoped, RpcBatchCallback callback);
     void rpcBatchCallAsSingles(const QVector<QPair<QString, QJsonArray>>& calls,
                                bool wallet_scoped,
@@ -1436,6 +1453,8 @@ private:
                        const QString& message) const;
     QString qrSourceForUri(const QString& uri) const;
     QString normalizedExplorerUrl(const QString& url) const;
+    bool hasValidExternalExplorerTemplates() const;
+    QString explorerPresetAddressUrl(int index) const;
     QString explorerAddressUrlTemplate(const QString& url) const;
     bool usingInternalExplorer() const;
     bool ensureExplorerDatabase(QString* error = nullptr) const;
@@ -1626,7 +1645,7 @@ private:
     bool m_pending_network_active = true;
     bool m_applying_pending_network_active = false;
     bool m_only_defcoin_magic_bytes = false;
-    bool m_switch_to_defcoin_only_magic_starting_july_2026 = true;
+    bool m_switch_to_defcoin_only_magic_starting_august_2026 = true;
     bool m_lan_node_discovery_enabled = false;
     bool m_upnp_connections_enabled = false;
     bool m_lan_node_discovery_notice_acknowledged = false;
@@ -1962,7 +1981,10 @@ private:
     bool m_mask_balances = false;
     bool m_third_party_tx_urls_enabled = false;
     QString m_third_party_tx_url;
+    QString m_third_party_address_url;
     QString m_explorer_mode = QStringLiteral("internal");
+    QString m_shutdown_status = QStringLiteral("Ready to shut down.");
+    bool m_application_shutdown_prepared = false;
     QVariantList m_explorer_recent_lookups;
     QVariantList m_explorer_rich_list;
     QVariantList m_explorer_movements;

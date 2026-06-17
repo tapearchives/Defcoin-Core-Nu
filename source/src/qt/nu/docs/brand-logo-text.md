@@ -64,13 +64,14 @@ The app name is `Defcoin Core Nu Explore`, and the third logo line is set as
 The website prototype and reusable QML lockup are the current construction
 reference. Expressed as ratios of the wordmark font size:
 
-- Coin size: `1.85em` square.
-- Gap between coin and wordmark: `0.46em`, with a practical minimum of the
-  local medium spacing token in QML.
+- Coin size: `2.12em` square, so the coin is just taller than the two-line
+  DEFCOIN / CORE NU text block.
+- Gap between coin and wordmark: `0.32em`, with a practical minimum of the
+  local small spacing token in QML.
 - `DEFCOIN` tracking: `0.04em`.
 - `CORE` and `NU` tracking: `0.042em`.
 - `DEF` to `COIN` join gap: `0.0345em`.
-- Inter-line gap between `DEFCOIN` and `CORE NU`: `0.095em`.
+- Inter-line gap between `DEFCOIN` and `CORE NU`: `0.025em`.
 - The `CORE NU` line is not a normal text string. Draw `CORE` and `NU` as
   separate runs spread across the exact measured width of the `DEFCOIN` line so
   the left edge of `CORE` aligns with `DEFCOIN` and the right edge of `NU`
@@ -86,7 +87,7 @@ Practical PIL reproduction:
 3. Draw `DEF`, then draw `COIN` at `measure("DEF") + 0.0345em`.
 4. Draw `CORE` and `NU` as separate runs at the same x position and at the
    measured right edge of `DEFCOIN`, using `0.042em` tracking.
-5. Place the v26 coin mark left of the wordmark at `1.85em` square.
+5. Place the v26 coin mark left of the wordmark at `2.12em` square.
 
 ## DMG Layout Notes
 

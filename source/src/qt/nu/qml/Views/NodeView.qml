@@ -1562,14 +1562,28 @@ ColumnLayout {
                                 verticalAlignment: Text.AlignTop
                             }
 
-                            Text {
+                            TextEdit {
+                                id: peerDetailValueText
                                 Layout.fillWidth: true
                                 text: modelData.value
                                 textFormat: Text.PlainText
+                                readOnly: true
+                                selectByMouse: true
+                                persistentSelection: true
                                 color: NuTokens.textPrimary
+                                selectedTextColor: NuTokens.textInverse
+                                selectionColor: NuTokens.lineStrong
                                 font.pixelSize: NuTokens.fontSmall
                                 font.family: modelData.mono ? NuTokens.monoFont : NuTokens.bodyFont
                                 wrapMode: Text.WrapAnywhere
+                                activeFocusOnPress: true
+                                padding: 0
+
+                                Shortcut {
+                                    sequences: [StandardKey.Copy]
+                                    enabled: peerDetailValueText.activeFocus && peerDetailValueText.selectedText.length > 0
+                                    onActivated: NuService.copyText(peerDetailValueText.selectedText)
+                                }
                             }
                         }
                     }
@@ -1635,6 +1649,7 @@ ColumnLayout {
                                 text: traceTitle
                                 color: NuTokens.textPrimary
                                 font.pixelSize: NuTokens.fontBodyLarge
+                                font.family: NuTokens.monoFont
                                 font.weight: Font.DemiBold
                                 elide: Text.ElideRight
                             }

@@ -10,7 +10,7 @@ endif()
 
 project(DefcoinCoreNuQml VERSION 26.6.7 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.6.7s" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.6.7u" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -165,6 +165,31 @@ set_source_files_properties(${DEFCOIN_NU_ICON_MACOS} PROPERTIES
 )
 target_sources(DefcoinCoreNu PRIVATE ${DEFCOIN_NU_ICON_MACOS})
 
+if(APPLE)
+    set(DEFCOIN_NU_APP_ICON_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/AppIcon.icon")
+    set(DEFCOIN_NU_APP_ICON_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/AppIconAssets")
+    set(DEFCOIN_NU_APP_ICON_ASSETS_CAR "${DEFCOIN_NU_APP_ICON_BUILD_DIR}/Assets.car")
+    set(DEFCOIN_NU_APP_ICON_ICNS "${DEFCOIN_NU_APP_ICON_BUILD_DIR}/AppIcon.icns")
+    add_custom_command(
+        OUTPUT "${DEFCOIN_NU_APP_ICON_ASSETS_CAR}" "${DEFCOIN_NU_APP_ICON_ICNS}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_APP_ICON_BUILD_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_APP_ICON_BUILD_DIR}"
+        COMMAND /usr/bin/xcrun actool
+            --compile "${DEFCOIN_NU_APP_ICON_BUILD_DIR}"
+            --platform macosx
+            --minimum-deployment-target "${CMAKE_OSX_DEPLOYMENT_TARGET}"
+            --app-icon AppIcon
+            --output-partial-info-plist "${DEFCOIN_NU_APP_ICON_BUILD_DIR}/AppIconPartial.plist"
+            "${DEFCOIN_NU_APP_ICON_SOURCE}"
+        DEPENDS
+            "${DEFCOIN_NU_APP_ICON_SOURCE}/icon.json"
+            "${DEFCOIN_NU_APP_ICON_SOURCE}/Assets/foreground.png"
+        COMMENT "Compiling Defcoin Core Nu Icon Composer app icon"
+        VERBATIM
+    )
+    add_custom_target(DefcoinCoreNuAppIconAssets DEPENDS "${DEFCOIN_NU_APP_ICON_ASSETS_CAR}" "${DEFCOIN_NU_APP_ICON_ICNS}")
+endif()
+
 if(WIN32)
     target_sources(DefcoinCoreNu PRIVATE DefcoinCoreNu.rc)
 endif()
@@ -204,7 +229,7 @@ set_target_properties(DefcoinCoreNu PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinCoreNu
     MACOSX_BUNDLE_BUNDLE_NAME "Defcoin Core Nu"
     MACOSX_BUNDLE_DISPLAY_NAME "Defcoin Core Nu"
-    MACOSX_BUNDLE_ICON_FILE "DefcoinCoreNuNuIcon"
+    MACOSX_BUNDLE_ICON_FILE "AppIcon"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/MacOSXBundleInfo.plist.in"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${DEFCOIN_NU_RELEASE_NAME}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${DEFCOIN_NU_RELEASE_NAME}"
@@ -270,7 +295,7 @@ set_target_properties(DefcoinCoreExplore PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinCoreNuExplore
     MACOSX_BUNDLE_BUNDLE_NAME "Defcoin Core Nu Explore"
     MACOSX_BUNDLE_DISPLAY_NAME "Defcoin Core Nu Explore"
-    MACOSX_BUNDLE_ICON_FILE "DefcoinCoreNuNuIcon"
+    MACOSX_BUNDLE_ICON_FILE "AppIcon"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/MacOSXBundleInfo.plist.in"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${DEFCOIN_NU_RELEASE_NAME}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${DEFCOIN_NU_RELEASE_NAME}"
@@ -439,6 +464,14 @@ add_custom_target(DefcoinCoreNuResources ALL
 )
 
 add_dependencies(DefcoinCoreNuResources DefcoinCoreNu)
+if(APPLE)
+    add_dependencies(DefcoinCoreNuResources DefcoinCoreNuAppIconAssets)
+    add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_APP_ICON_ASSETS_CAR}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/Assets.car"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_APP_ICON_ICNS}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Resources/AppIcon.icns"
+        COMMENT "Installing Defcoin Core Nu compiled app icon"
+    )
+endif()
 
 if(APPLE)
     add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
@@ -506,6 +539,14 @@ add_custom_target(DefcoinCoreExploreResources
 )
 
 add_dependencies(DefcoinCoreExploreResources DefcoinCoreExplore)
+if(APPLE)
+    add_dependencies(DefcoinCoreExploreResources DefcoinCoreNuAppIconAssets)
+    add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_APP_ICON_ASSETS_CAR}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/Assets.car"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_APP_ICON_ICNS}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/AppIcon.icns"
+        COMMENT "Installing Defcoin Core Nu Explore compiled app icon"
+    )
+endif()
 
 if(DEFCOIN_NU_TRIPPY_BINARY)
     if(WIN32)

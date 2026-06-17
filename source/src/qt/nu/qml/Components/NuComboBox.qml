@@ -16,6 +16,13 @@ Basic.ComboBox {
         return root.textFormatter ? root.textFormatter(raw) : raw
     }
 
+    function togglePopup() {
+        if (root.popup.visible)
+            root.popup.close()
+        else
+            root.popup.open()
+    }
+
     font.family: NuTokens.bodyFont
     font.pixelSize: NuTokens.fontBody
     leftPadding: NuTokens.spaceMd
@@ -62,7 +69,7 @@ Basic.ComboBox {
             cursorShape: Qt.PointingHandCursor
             onClicked: {
                 root.forceActiveFocus()
-                root.popup.open()
+                root.togglePopup()
             }
         }
     }
@@ -113,7 +120,7 @@ Basic.ComboBox {
             cursorShape: Qt.PointingHandCursor
             onClicked: {
                 root.forceActiveFocus()
-                root.popup.open()
+                root.togglePopup()
             }
         }
     }
@@ -172,6 +179,7 @@ Basic.ComboBox {
         y: root.height + 2
         width: Math.max(root.width, 420)
         implicitHeight: Math.min(contentItem.implicitHeight, 340)
+        closePolicy: Basic.Popup.CloseOnEscape | Basic.Popup.CloseOnPressOutsideParent
         padding: 1
         contentItem: ListView {
             id: popupList

@@ -20,13 +20,17 @@ ColumnLayout {
         return index >= 0 && index < values.length ? values[index] : "tsv"
     }
     function explorerModeIndex(mode) {
-        const values = ["internal", "dc903", "legacy", "custom"]
+        const values = ["internal", "dc903", "legacy", "fun", "custom"]
         const index = values.indexOf(String(mode).toLowerCase())
         return index >= 0 ? index : 0
     }
     function explorerModeAt(index) {
-        const values = ["internal", "dc903", "legacy", "custom"]
+        const values = ["internal", "dc903", "legacy", "fun", "custom"]
         return index >= 0 && index < values.length ? values[index] : "internal"
+    }
+    function customExplorerTemplatesValid() {
+        return String(NuService.thirdPartyTxUrl || "").indexOf("%s") >= 0
+               && String(NuService.thirdPartyAddressUrl || "").indexOf("%s") >= 0
     }
     NuPageHeader {
         Layout.fillWidth: true
@@ -121,10 +125,10 @@ ColumnLayout {
                         }
 
                         NuCheckBox {
-                            text: "Switch to Defcoin-only magic starting July 1, 2026"
-                            checked: NuService.switchToDefcoinOnlyMagicStartingJuly2026
-                            helpText: "Recommended. On or after July 1, 2026, Nu automatically enables Defcoin-only magic before networking starts. Unchecking keeps legacy dual-magic available longer, which can help old wallets but may add peer pollution; pool and seed servers can usually provide that bridge."
-                            onToggled: NuService.switchToDefcoinOnlyMagicStartingJuly2026 = checked
+                            text: "Switch to Defcoin-only magic starting August 1, 2026"
+                            checked: NuService.switchToDefcoinOnlyMagicStartingAugust2026
+                            helpText: "Recommended. On or after August 1, 2026, Nu automatically enables Defcoin-only magic before networking starts. Unchecking keeps legacy dual-magic available longer, which can help old wallets but may add peer pollution; pool and seed servers can usually provide that bridge."
+                            onToggled: NuService.switchToDefcoinOnlyMagicStartingAugust2026 = checked
                         }
                     }
 
@@ -341,7 +345,7 @@ ColumnLayout {
                         NuComboBox {
                             id: explorerMode
                             Layout.fillWidth: true
-                            model: ["Nu Explore app", "External: DC903 Explorer", "External: Legacy Explorer", "External: Custom URL"]
+                            model: ["Nu Explore app", "External: DC903 Explorer", "External: Legacy Explorer", "External: explorer.defcoin.fun", "External: Custom URLs"]
                             currentIndex: root.explorerModeIndex(NuService.explorerMode)
                             helpText: "Nu Explore is the default local lookup target. It opens the adjunct Defcoin Core Nu Explore app for address, transaction, and block details. External choices open a browser."
                             onActivated: function(index) {
@@ -369,9 +373,29 @@ ColumnLayout {
                             Layout.preferredHeight: visible ? implicitHeight : 0
                             text: NuService.thirdPartyTxUrl
                             placeholderText: "https://example.invalid/tx/%s"
-                            helpText: "Use %s where the transaction ID should be inserted. Address links are derived from the same template."
+                            helpText: "Use %s where the transaction ID should be inserted."
                             onEditingFinished: {
                                 NuService.thirdPartyTxUrl = text
+                                NuService.setExplorerMode("custom")
+                            }
+                        }
+                        Label {
+                            text: "External address URL"
+                            visible: NuService.explorerMode === "custom"
+                            Layout.preferredHeight: visible ? implicitHeight : 0
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontBody
+                        }
+                        NuTextField {
+                            id: explorerAddressUrl
+                            Layout.fillWidth: true
+                            visible: NuService.explorerMode === "custom"
+                            Layout.preferredHeight: visible ? implicitHeight : 0
+                            text: NuService.thirdPartyAddressUrl
+                            placeholderText: "https://example.invalid/address/%s"
+                            helpText: "Use %s where the wallet address should be inserted."
+                            onEditingFinished: {
+                                NuService.thirdPartyAddressUrl = text
                                 NuService.setExplorerMode("custom")
                             }
                         }
@@ -381,10 +405,10 @@ ColumnLayout {
                         Layout.fillWidth: true
                         text: NuService.explorerMode === "internal"
                               ? "Nu Explore lookups stay local, open in the separate Explore app, and use the local SQLite cache at: " + NuService.explorerDatabasePath
-                              : (NuService.thirdPartyTxUrl.indexOf("%s") < 0
-                                 ? "External explorer links need a URL template containing %s."
+                              : (!root.customExplorerTemplatesValid()
+                                 ? "External explorer links need transaction and address URL templates containing %s."
                                  : "External explorer links open in the system browser.")
-                        color: NuService.explorerMode !== "internal" && NuService.thirdPartyTxUrl.indexOf("%s") < 0 ? NuTokens.stateWarning : NuTokens.textSecondary
+                        color: NuService.explorerMode !== "internal" && !root.customExplorerTemplatesValid() ? NuTokens.stateWarning : NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontSmall
                         wrapMode: Text.WordWrap
                     }

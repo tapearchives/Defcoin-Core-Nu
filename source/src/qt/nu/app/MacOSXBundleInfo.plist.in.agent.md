@@ -7,6 +7,9 @@ Template for macOS bundle metadata: bundle id, display name, icon, version, docu
 ## Nu Risk
 
 - Affects macOS app identity, Local Network privacy behavior, Finder kind, window restoration prompts, icon display, and version/about metadata.
+- `CFBundleIconFile` and `CFBundleIconName` intentionally point at the same
+  `AppIcon` asset so Finder can use the modern asset catalog icon and older
+  APIs can fall back to `AppIcon.icns`.
 
 ## Do Not Break
 
@@ -14,6 +17,8 @@ Template for macOS bundle metadata: bundle id, display name, icon, version, docu
 - Keep window-restoration suppression keys so macOS does not prompt to reopen old Nu windows after a crash.
 - Keep app category/platform metadata appropriate for a macOS desktop app, not iOS.
 - Keep help-book keys synchronized with `set_macos_help_plist.sh` and `remove_macos_help_plist.sh`.
+- Keep `CFBundleIconFile` and `CFBundleIconName` synchronized with
+  `CMakeLists.txt` Apple icon outputs.
 
 ## Verification
 

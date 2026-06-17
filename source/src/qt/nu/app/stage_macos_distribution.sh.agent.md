@@ -8,6 +8,8 @@ Stages macOS Nu distribution bundles, deploys backend/Qt runtime dependencies, s
 
 - Owns the final user-facing macOS app package and DMG presentation.
 - DMG layout has repeatedly regressed around icon text backing, coin artwork placement, arrow alignment, and title/logo text.
+- Copies source QML into staged bundles, then prunes source-only `.agent.md`
+  companions. The wallet app also prunes Explore-only QML routes.
 
 ## Do Not Break
 
@@ -19,6 +21,7 @@ Stages macOS Nu distribution bundles, deploys backend/Qt runtime dependencies, s
   plugins loads two Qt runtimes and aborts at launch.
 - DMG background artwork should be visually verified; generated gradients must fully fade out before image edges.
 - Do not treat successful packaging as proof of runtime launch; smoke-test launch separately.
+- Do not ship source-only `.agent.md` companions in staged app bundles.
 
 ## Verification
 

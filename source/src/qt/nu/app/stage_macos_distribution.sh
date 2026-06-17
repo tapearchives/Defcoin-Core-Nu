@@ -48,6 +48,14 @@ mkdir -p "$NU_RESOURCE_DIR"
 rm -rf "$NU_RESOURCE_DIR/qml" "$NU_RESOURCE_DIR/assets"
 ditto "$SCRIPT_DIR/../qml" "$NU_RESOURCE_DIR/qml"
 ditto "$SCRIPT_DIR/../assets" "$NU_RESOURCE_DIR/assets"
+find "$NU_RESOURCE_DIR/qml" -type f -name '*.agent.md' -delete 2>/dev/null || true
+if [ "$PRODUCT_NAME" = "Defcoin Core Nu" ]; then
+  rm -f "$NU_RESOURCE_DIR/qml/ExploreMain.qml"
+  rm -f "$NU_RESOURCE_DIR/qml/Shell/ExploreFrame.qml"
+  rm -f "$NU_RESOURCE_DIR/qml/Shell/ExploreNavigationRail.qml"
+  rm -f "$NU_RESOURCE_DIR/qml/Views/ExplorerView.qml"
+  rm -f "$NU_RESOURCE_DIR/qml/Views/ForensicsView.qml"
+fi
 APP_PLIST="$DEST_APP/Contents/Info.plist"
 if [ -f "$APP_PLIST" ]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleName $PRODUCT_NAME" "$APP_PLIST" 2>/dev/null \

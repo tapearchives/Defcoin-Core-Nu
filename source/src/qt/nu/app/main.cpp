@@ -264,24 +264,10 @@ void drawNuBrandSplash(QPixmap& pixmap, const QString& resourceRoot)
 
     const QPixmap coinMark(resourceRoot + "/assets/brand/defcoin-v26-coin.png");
     const int brandTextSize = 58;
-    const int logoCoinSize = qRound(brandTextSize * 1.85);
-    const int lockupGap = 30;
-    const QRect logoCoinRect(124, 118, logoCoinSize, logoCoinSize);
-    if (!coinMark.isNull()) {
-        painter.setOpacity(0.96);
-        painter.drawPixmap(logoCoinRect, coinMark);
-        painter.setOpacity(1.0);
-    }
-
     QFont brandFont(QStringLiteral("Avenir Next Condensed"));
     brandFont.setPixelSize(brandTextSize);
     brandFont.setWeight(QFont::ExtraBold);
     brandFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
-    painter.setFont(brandFont);
-    painter.setPen(QColor("#f6f6f2"));
-
-    const int wordX = logoCoinRect.right() + lockupGap;
-    const int wordY = logoCoinRect.top() + (kExploreApp ? 8 : 16);
     const double defcoinTracking = brandTextSize * 0.04;
     const double coreNuTracking = brandTextSize * 0.042;
     const double fcJoinGap = brandTextSize * 0.0345;
@@ -313,13 +299,30 @@ void drawNuBrandSplash(QPixmap& pixmap, const QString& resourceRoot)
             }
         };
     const int targetWidth = trackedTextWidth(brandFont, QStringLiteral("DEFCOIN"), defcoinTracking, fcJoinGap);
-    const int lineHeight = 66;
-    const int lineGap = qRound(brandTextSize * 0.095);
+    const int logoCoinSize = qRound(brandTextSize * 2.12);
+    const int lockupGap = qRound(brandTextSize * 0.32);
+    const int lockupWidth = logoCoinSize + lockupGap + targetWidth;
+    const QRect logoCoinRect(qMax(42, (panel.width() - lockupWidth) / 2), 118, logoCoinSize, logoCoinSize);
+    if (!coinMark.isNull()) {
+        painter.setOpacity(0.96);
+        painter.drawPixmap(logoCoinRect, coinMark);
+        painter.setOpacity(1.0);
+    }
+
+    painter.setFont(brandFont);
+    painter.setPen(QColor("#f6f6f2"));
+
+    const int wordX = logoCoinRect.right() + lockupGap;
+    const int lineHeight = qRound(brandTextSize * 0.90);
+    const int lineGap = qMax(0, qRound(brandTextSize * 0.025));
+    const int wordmarkLines = kExploreApp ? 3 : 2;
+    const int wordmarkHeight = (lineHeight * wordmarkLines) + (lineGap * (wordmarkLines - 1));
+    const int wordY = logoCoinRect.top() + qRound((logoCoinRect.height() - wordmarkHeight) / 2.0);
     const int defcoinBaseline = wordY + QFontMetrics(brandFont).ascent() + 3;
     drawTrackedText(wordX, defcoinBaseline, brandFont, QStringLiteral("DEFCOIN"), defcoinTracking, fcJoinGap);
     QFont coreFont = brandFont;
     coreFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
-    const int coreY = wordY + lineHeight + lineGap - 14;
+    const int coreY = wordY + lineHeight + lineGap;
     const int coreBaseline = coreY + QFontMetrics(coreFont).ascent() + 3;
     const int coreWidth = trackedTextWidth(coreFont, QStringLiteral("CORE"), coreNuTracking, 0.0);
     Q_UNUSED(coreWidth);
@@ -334,7 +337,7 @@ void drawNuBrandSplash(QPixmap& pixmap, const QString& resourceRoot)
             exploreText.size() > 1 ?
                 qMax(0.0, static_cast<double>(targetWidth - baseWidth) / static_cast<double>(exploreText.size() - 1)) :
                 1.15;
-        const int exploreY = coreY + lineHeight + lineGap - 14;
+        const int exploreY = coreY + lineHeight + lineGap;
         const int exploreBaseline = exploreY + QFontMetrics(exploreFont).ascent() + 3;
         drawTrackedText(wordX, exploreBaseline, exploreFont, exploreText, fittedSpacing, 0.0);
     }

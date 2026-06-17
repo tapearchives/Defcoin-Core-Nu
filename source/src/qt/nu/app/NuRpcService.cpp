@@ -41,6 +41,7 @@
 #include <QPrintDialog>
 #include <QPrinter>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -156,6 +157,7 @@ constexpr int LAN_FAST_SYNC_MIN_REQUEST_INTERVAL_MS = 50;
 constexpr int LAN_FAST_SYNC_TIMER_INTERVAL_MS = 500;
 constexpr int QUICK_CLONE_RESERVATION_BACKOFF_MS = 5000;
 constexpr int BACKEND_GRACEFUL_SHUTDOWN_MS = 60000;
+constexpr int SEND_KEYPOOL_REFILL_SIZE = 1000;
 constexpr int FAST_SYNC_PROTOCOL_MAX_WINDOW = 32;
 constexpr int FAST_SYNC_PROTOCOL_PROBE_INTERVAL_MS = 30000;
 constexpr int FAST_SYNC_PROTOCOL_MIN_UDP_PROBES = 4;
@@ -189,6 +191,13 @@ const QStringList EXPLORER_TOP100_COLORS = {QStringLiteral("#48b7ff"),
                                             QStringLiteral("#8c7ae6")};
 
 QString encodeBase58Check(const QByteArray& payload);
+
+bool isChangeAddressKeypoolError(const QString& error)
+{
+    const QString lower = error.toLower();
+    return lower.contains(QStringLiteral("transaction needs a change address")) &&
+           lower.contains(QStringLiteral("keypoolrefill"));
+}
 
 QByteArray doubleSha256(const QByteArray& bytes)
 {
@@ -2203,10 +2212,11 @@ QString peerLanWorkstationSourceTooltip(const QString& host,
 QStringList configuredSeedDomains()
 {
     return {QStringLiteral("seed.defcoin.io"),
-            QStringLiteral("seed.defcoin.mikej.tech"),
+            QStringLiteral("defcoin.dc903.org"),
             QStringLiteral("seed.defcoin.dc903.org"),
             QStringLiteral("seed.defcoincore.org"),
-            QStringLiteral("seed.defcoin-ng.org")};
+            QStringLiteral("seed.defcoin-ng.org"),
+            QStringLiteral("seed.defcoin.mikej.tech")};
 }
 
 QHash<QString, QString> configuredSeedAddressAliases()
@@ -2215,6 +2225,8 @@ QHash<QString, QString> configuredSeedAddressAliases()
     aliases.insert(QStringLiteral("66.42.91.225"), QStringLiteral("defcoin.io"));
     aliases.insert(QStringLiteral("135.148.43.188"), QStringLiteral("defcoin.host"));
     aliases.insert(QStringLiteral("135.148.43.189"), QStringLiteral("defcoin.host"));
+    aliases.insert(QStringLiteral("50.116.19.40"), QStringLiteral("defcoin.dc903.org"));
+    aliases.insert(QStringLiteral("2600:3c00::f03c:92ff:fe17:805d"), QStringLiteral("defcoin.dc903.org"));
     return aliases;
 }
 
@@ -2782,7 +2794,7 @@ QJsonValue consoleTokenToJsonValue(const QString& token)
     return trimmed;
 }
 
-QString rpcPromptForDisplay(const QString& method, const QString& params_json);
+QString rpcPromptForDisplay(const QString& method, const QJsonArray& params);
 
 struct ParsedConsoleCommand {
     QString method;
@@ -2863,7 +2875,7 @@ bool parseConsoleCommandForRpc(QString command, QString params_json, ParsedConso
     if (parsed) {
         parsed->method = command;
         parsed->params = params;
-        parsed->prompt = rpcPromptForDisplay(command, paramsJsonForPrompt(params));
+        parsed->prompt = rpcPromptForDisplay(command, params);
     }
     return true;
 }
@@ -2925,10 +2937,17 @@ bool rpcMethodTakesSensitiveInput(const QString& method)
                                                  QStringLiteral("importmulti"),
                                                  QStringLiteral("importprivkey"),
                                                  QStringLiteral("importwallet"),
+                                                 QStringLiteral("scantxoutset"),
                                                  QStringLiteral("sethdseed"),
+                                                 QStringLiteral("signmessage"),
+                                                 QStringLiteral("signrawtransactionwithkey"),
+                                                 QStringLiteral("signrawtransactionwithwallet"),
                                                  QStringLiteral("signmessagewithprivkey"),
+                                                 QStringLiteral("utxoupdatepsbt"),
                                                  QStringLiteral("walletpassphrase"),
                                                  QStringLiteral("walletpassphrasechange")};
+    if (lower == QLatin1String("walletprocesspsbt"))
+        return true;
     return sensitive_methods.contains(lower) || lower.contains(QStringLiteral("passphrase")) ||
            lower.contains(QStringLiteral("privkey"));
 }
@@ -2941,11 +2960,37 @@ bool rpcMethodReturnsSensitiveOutput(const QString& method)
     return sensitive_methods.contains(lower) || lower.contains(QStringLiteral("privkey"));
 }
 
-QString rpcPromptForDisplay(const QString& method, const QString& params_json)
+bool rpcCreateWalletParamsIncludePassphrase(const QJsonArray& params)
 {
+    if (params.size() <= 3)
+        return false;
+    const QJsonValue passphrase = params.at(3);
+    if (passphrase.isUndefined() || passphrase.isNull())
+        return false;
+    if (passphrase.isString())
+        return !passphrase.toString().isEmpty();
+    return true;
+}
+
+bool rpcCommandTakesSensitiveInput(const QString& method, const QJsonArray& params)
+{
+    const QString lower = method.toLower();
+    if (rpcMethodTakesSensitiveInput(lower))
+        return true;
+    return lower == QLatin1String("createwallet") && rpcCreateWalletParamsIncludePassphrase(params);
+}
+
+bool rpcConsoleCommandRequiresLocalRpc(const QString& method, const QJsonArray& params)
+{
+    return rpcCommandTakesSensitiveInput(method, params) || rpcMethodReturnsSensitiveOutput(method);
+}
+
+QString rpcPromptForDisplay(const QString& method, const QJsonArray& params)
+{
+    const QString params_json = paramsJsonForPrompt(params);
     if (params_json.isEmpty())
         return method;
-    if (rpcMethodTakesSensitiveInput(method))
+    if (rpcCommandTakesSensitiveInput(method, params))
         return method + QStringLiteral(" [params redacted]");
     return method + QStringLiteral(" ") + params_json;
 }
@@ -3254,12 +3299,36 @@ NuRpcService::NuRpcService(QObject* parent)
 
 NuRpcService::~NuRpcService()
 {
+    prepareForApplicationQuit();
+}
+
+void NuRpcService::prepareForApplicationQuit()
+{
+    if (m_application_shutdown_prepared)
+        return;
+    m_application_shutdown_prepared = true;
+
+    auto set_shutdown_status = [this](const QString& status) {
+        m_shutdown_status = status;
+        Q_EMIT shutdownChanged();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+    };
+
+    set_shutdown_status(QStringLiteral("Stopping mining and local helper tasks."));
     stopMiner();
     stopLanFastSyncSocket();
     stopExplorerTop100Timeline();
+
+    set_shutdown_status(QStringLiteral("Stopping route traces, host lookups, and child helper processes."));
     stopHelperProcesses();
+
+    set_shutdown_status(QStringLiteral("Releasing local explorer database locks."));
     releaseExplorerWriterLock();
+
+    set_shutdown_status(QStringLiteral("Asking the managed Defcoin backend to stop cleanly."));
     stopOwnedBackend();
+
+    set_shutdown_status(QStringLiteral("Backend stopped; closing Defcoin Core Nu."));
 }
 
 void NuRpcService::loadLocalSettings()
@@ -3275,9 +3344,12 @@ void NuRpcService::loadLocalSettings()
                                      .value(QStringLiteral("OnlyDefcoinMagicBytes"),
                                             !nu_settings.value(QStringLiteral("LegacyMagicEnabled"), true).toBool())
                                      .toBool();
-    m_switch_to_defcoin_only_magic_starting_july_2026 =
-        nu_settings.value(QStringLiteral("SwitchToDefcoinOnlyMagicStarting20260701"), true).toBool();
-    if (m_switch_to_defcoin_only_magic_starting_july_2026 && QDate::currentDate() >= QDate(2026, 7, 1)) {
+    m_switch_to_defcoin_only_magic_starting_august_2026 =
+        nu_settings
+            .value(QStringLiteral("SwitchToDefcoinOnlyMagicStarting20260801"),
+                   nu_settings.value(QStringLiteral("SwitchToDefcoinOnlyMagicStarting20260701"), true))
+            .toBool();
+    if (m_switch_to_defcoin_only_magic_starting_august_2026 && QDate::currentDate() >= QDate(2026, 8, 1)) {
         m_only_defcoin_magic_bytes = true;
         nu_settings.setValue(QStringLiteral("OnlyDefcoinMagicBytes"), true);
     }
@@ -3342,10 +3414,17 @@ void NuRpcService::loadLocalSettings()
     m_third_party_tx_urls_enabled = nu_settings.value(QStringLiteral("ThirdPartyTxUrlsEnabled"), false).toBool();
     m_third_party_tx_url =
         normalizedExplorerUrl(nu_settings.value(QStringLiteral("ThirdPartyTxUrl"), legacy_explorer_url).toString());
+    m_third_party_address_url =
+        normalizedExplorerUrl(nu_settings.value(QStringLiteral("ThirdPartyAddressUrl"), QString()).toString());
+    if (m_third_party_address_url.isEmpty() && !m_third_party_tx_url.isEmpty())
+        m_third_party_address_url = explorerAddressUrlTemplate(m_third_party_tx_url);
     m_explorer_mode =
         nu_settings.value(QStringLiteral("ExplorerMode"), QStringLiteral("internal")).toString().trimmed().toLower();
-    if (!QStringList{
-            QStringLiteral("internal"), QStringLiteral("dc903"), QStringLiteral("legacy"), QStringLiteral("custom")}
+    if (!QStringList{QStringLiteral("internal"),
+                     QStringLiteral("dc903"),
+                     QStringLiteral("legacy"),
+                     QStringLiteral("fun"),
+                     QStringLiteral("custom")}
              .contains(m_explorer_mode)) {
         m_explorer_mode = QStringLiteral("internal");
     }
@@ -3357,7 +3436,16 @@ void NuRpcService::loadLocalSettings()
             m_third_party_tx_url = explorerPresetUrl(1);
         if (m_explorer_mode == QLatin1String("legacy"))
             m_third_party_tx_url = explorerPresetUrl(2);
-        if (m_explorer_mode == QLatin1String("custom") && m_third_party_tx_url.isEmpty()) {
+        if (m_explorer_mode == QLatin1String("fun"))
+            m_third_party_tx_url = explorerPresetUrl(3);
+        if (m_explorer_mode != QLatin1String("custom"))
+            m_third_party_address_url = explorerPresetAddressUrl(m_explorer_mode == QLatin1String("dc903")  ? 1 :
+                                                                 m_explorer_mode == QLatin1String("legacy") ? 2 :
+                                                                 m_explorer_mode == QLatin1String("fun")    ? 3 :
+                                                                                                              0);
+        if (m_third_party_address_url.isEmpty() && !m_third_party_tx_url.isEmpty())
+            m_third_party_address_url = explorerAddressUrlTemplate(m_third_party_tx_url);
+        if (m_explorer_mode == QLatin1String("custom") && !hasValidExternalExplorerTemplates()) {
             m_explorer_mode = QStringLiteral("internal");
             m_third_party_tx_urls_enabled = false;
         }
@@ -3755,9 +3843,9 @@ bool NuRpcService::ensureBackendStarted()
                            "avoiding the Local Network permission prompt on first launch."));
     }
 
-    args << QStringLiteral("-seednode=seed.defcoin.io") << QStringLiteral("-seednode=seed.defcoin.mikej.tech")
+    args << QStringLiteral("-seednode=seed.defcoin.io") << QStringLiteral("-seednode=defcoin.dc903.org:10332")
          << QStringLiteral("-seednode=seed.defcoin.dc903.org:10332") << QStringLiteral("-seednode=seed.defcoincore.org")
-         << QStringLiteral("-seednode=seed.defcoin-ng.org");
+         << QStringLiteral("-seednode=seed.defcoin-ng.org") << QStringLiteral("-seednode=seed.defcoin.mikej.tech");
 
     if (m_backend_process == nullptr) {
         m_backend_process = new QProcess(this);
@@ -4097,6 +4185,51 @@ void NuRpcService::rpcCallForWallet(const QString& method,
     m_pending.insert(id, PendingCall{method, std::move(callback)});
     QNetworkReply* reply = m_network->post(request, QJsonDocument(request_obj).toJson(QJsonDocument::Compact));
     reply->setProperty("nuRpcId", id);
+}
+
+void NuRpcService::refillKeypoolAndPrimeChangeAddress(const QString& wallet_name,
+                                                      const QString& failure_title,
+                                                      const std::function<void()>& retry)
+{
+    if (wallet_name != m_wallet_name)
+        return;
+
+    QJsonArray refill_params;
+    refill_params.push_back(SEND_KEYPOOL_REFILL_SIZE);
+    rpcCall(QStringLiteral("keypoolrefill"),
+            refill_params,
+            true,
+            [this, wallet_name, failure_title, retry](const QJsonValue&, const QString& refill_error) {
+                if (wallet_name != m_wallet_name)
+                    return;
+                if (!refill_error.isEmpty()) {
+                    Q_EMIT userMessage(
+                        failure_title,
+                        QStringLiteral("The wallet needed a fresh change address, so Nu tried to refill the wallet "
+                                       "keypool automatically. The backend still could not refill it:\n\n%1\n\nIf "
+                                       "this wallet is encrypted, unlock it first and try the payment again.")
+                            .arg(refill_error));
+                    return;
+                }
+
+                rpcCall(QStringLiteral("getrawchangeaddress"),
+                        {},
+                        true,
+                        [this, wallet_name, failure_title, retry](const QJsonValue&, const QString& change_error) {
+                            if (wallet_name != m_wallet_name)
+                                return;
+                            if (!change_error.isEmpty()) {
+                                Q_EMIT userMessage(
+                                    failure_title,
+                                    QStringLiteral("Nu refilled the wallet keypool, but the backend still could not "
+                                                   "create a change address:\n\n%1")
+                                        .arg(change_error));
+                                refreshWallet();
+                                return;
+                            }
+                            retry();
+                        });
+            });
 }
 
 void NuRpcService::rpcBatchCall(const QVector<QPair<QString, QJsonArray>>& calls,
@@ -9640,6 +9773,8 @@ void NuRpcService::importPaperWalletPrivateKey(const QString& private_key, bool 
                            QStringLiteral("Enter the paper wallet private key first."));
         return;
     }
+    if (!requireLocalRpcConnection(QStringLiteral("Paper wallet not imported")))
+        return;
 
     const QString clean_label = label.trimmed().isEmpty() ? QStringLiteral("Paper wallet import") : label.trimmed();
     const QString wallet_name = m_wallet_name;
@@ -9789,13 +9924,29 @@ void NuRpcService::sendCoins(const QString& address,
         params.push_back(mode == QLatin1String("custom") ? QJsonValue(fee_rate) : QJsonValue(QJsonValue::Null));
         params.push_back(options);
 
-        rpcCall(QStringLiteral("send"),
+        auto send_attempt = std::make_shared<std::function<void(bool)>>();
+        std::weak_ptr<std::function<void(bool)>> weak_send_attempt = send_attempt;
+        *send_attempt = [this, wallet_name, recipient, effective_label, params, weak_send_attempt](
+                            bool keypool_retried) {
+            auto keep_attempt_alive = weak_send_attempt.lock();
+            rpcCall(
+                QStringLiteral("send"),
                 params,
                 true,
-                [this, wallet_name, recipient, effective_label](const QJsonValue& result, const QString& error) {
+                [this, wallet_name, recipient, effective_label, weak_send_attempt, keep_attempt_alive, keypool_retried](
+                    const QJsonValue& result, const QString& error) {
+                    Q_UNUSED(keep_attempt_alive);
                     if (wallet_name != m_wallet_name)
                         return;
                     if (!error.isEmpty()) {
+                        if (!keypool_retried && isChangeAddressKeypoolError(error)) {
+                            if (auto retry_attempt = weak_send_attempt.lock()) {
+                                refillKeypoolAndPrimeChangeAddress(wallet_name,
+                                                                   QStringLiteral("Payment failed"),
+                                                                   [retry_attempt] { (*retry_attempt)(true); });
+                                return;
+                            }
+                        }
                         Q_EMIT userMessage(QStringLiteral("Payment failed"), error);
                         return;
                     }
@@ -9806,6 +9957,8 @@ void NuRpcService::sendCoins(const QString& address,
                     Q_EMIT userMessage(QStringLiteral("Payment sent"), QStringLiteral("Transaction ID: %1").arg(txid));
                     refreshWallet();
                 });
+        };
+        (*send_attempt)(false);
         return;
     }
 
@@ -9834,23 +9987,39 @@ void NuRpcService::sendCoins(const QString& address,
     }
     params.push_back(false);
 
-    rpcCall(QStringLiteral("sendtoaddress"),
-            params,
-            true,
-            [this, wallet_name, recipient, effective_label](const QJsonValue& result, const QString& error) {
-                if (wallet_name != m_wallet_name)
-                    return;
-                if (!error.isEmpty()) {
-                    Q_EMIT userMessage(QStringLiteral("Payment failed"), error);
-                    return;
-                }
-                if (!effective_label.isEmpty()) {
-                    setAddressLabel(recipient, effective_label);
-                }
-                Q_EMIT userMessage(QStringLiteral("Payment sent"),
-                                   QStringLiteral("Transaction ID: %1").arg(result.toString()));
-                refreshWallet();
-            });
+    auto send_attempt = std::make_shared<std::function<void(bool)>>();
+    std::weak_ptr<std::function<void(bool)>> weak_send_attempt = send_attempt;
+    *send_attempt = [this, wallet_name, recipient, effective_label, params, weak_send_attempt](bool keypool_retried) {
+        auto keep_attempt_alive = weak_send_attempt.lock();
+        rpcCall(QStringLiteral("sendtoaddress"),
+                params,
+                true,
+                [this, wallet_name, recipient, effective_label, weak_send_attempt, keep_attempt_alive, keypool_retried](
+                    const QJsonValue& result, const QString& error) {
+                    Q_UNUSED(keep_attempt_alive);
+                    if (wallet_name != m_wallet_name)
+                        return;
+                    if (!error.isEmpty()) {
+                        if (!keypool_retried && isChangeAddressKeypoolError(error)) {
+                            if (auto retry_attempt = weak_send_attempt.lock()) {
+                                refillKeypoolAndPrimeChangeAddress(wallet_name,
+                                                                   QStringLiteral("Payment failed"),
+                                                                   [retry_attempt] { (*retry_attempt)(true); });
+                                return;
+                            }
+                        }
+                        Q_EMIT userMessage(QStringLiteral("Payment failed"), error);
+                        return;
+                    }
+                    if (!effective_label.isEmpty()) {
+                        setAddressLabel(recipient, effective_label);
+                    }
+                    Q_EMIT userMessage(QStringLiteral("Payment sent"),
+                                       QStringLiteral("Transaction ID: %1").arg(result.toString()));
+                    refreshWallet();
+                });
+    };
+    (*send_attempt)(false);
 }
 
 void NuRpcService::createPsbt(const QString& address,
@@ -9937,13 +10106,28 @@ void NuRpcService::createPsbt(const QString& address,
     params.push_back(true);
 
     const QString wallet_name = m_wallet_name;
-    rpcCall(QStringLiteral("walletcreatefundedpsbt"),
+    auto psbt_attempt = std::make_shared<std::function<void(bool)>>();
+    std::weak_ptr<std::function<void(bool)>> weak_psbt_attempt = psbt_attempt;
+    *psbt_attempt = [this, wallet_name, recipient, effective_label, params, weak_psbt_attempt](bool keypool_retried) {
+        auto keep_attempt_alive = weak_psbt_attempt.lock();
+        rpcCall(
+            QStringLiteral("walletcreatefundedpsbt"),
             params,
             true,
-            [this, wallet_name, recipient, effective_label](const QJsonValue& result, const QString& error) {
+            [this, wallet_name, recipient, effective_label, weak_psbt_attempt, keep_attempt_alive, keypool_retried](
+                const QJsonValue& result, const QString& error) {
+                Q_UNUSED(keep_attempt_alive);
                 if (wallet_name != m_wallet_name)
                     return;
                 if (!error.isEmpty()) {
+                    if (!keypool_retried && isChangeAddressKeypoolError(error)) {
+                        if (auto retry_attempt = weak_psbt_attempt.lock()) {
+                            refillKeypoolAndPrimeChangeAddress(wallet_name,
+                                                               QStringLiteral("PSBT creation failed"),
+                                                               [retry_attempt] { (*retry_attempt)(true); });
+                            return;
+                        }
+                    }
                     Q_EMIT userMessage(QStringLiteral("PSBT creation failed"), error);
                     return;
                 }
@@ -9967,6 +10151,8 @@ void NuRpcService::createPsbt(const QString& address,
                     QStringLiteral("PSBT created"),
                     QStringLiteral("Review, copy, save, sign, or finalize the PSBT in Send > Advanced send options."));
             });
+    };
+    (*psbt_attempt)(false);
 }
 
 void NuRpcService::setAddressLabel(const QString& address, const QString& label)
@@ -10586,6 +10772,9 @@ void NuRpcService::tracePeer(const QString& node_id)
         args = {QStringLiteral("-u"),
                 QStringLiteral("--mode"),
                 QStringLiteral("stream"),
+                QStringLiteral("--tui-preserve-screen"),
+                QStringLiteral("--tui-custom-columns"),
+                QStringLiteral("holsravbwdt"),
                 QStringLiteral("--report-cycles"),
                 QStringLiteral("16"),
                 host};
@@ -10625,6 +10814,14 @@ void NuRpcService::tracePeer(const QString& node_id)
     process->setProgram(program);
     process->setArguments(args);
     process->setProcessChannelMode(QProcess::MergedChannels);
+    if (!trip.isEmpty()) {
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        if (env.value(QStringLiteral("TERM")).isEmpty())
+            env.insert(QStringLiteral("TERM"), QStringLiteral("xterm-256color"));
+        env.insert(QStringLiteral("COLUMNS"), QStringLiteral("160"));
+        env.insert(QStringLiteral("LINES"), QStringLiteral("48"));
+        process->setProcessEnvironment(env);
+    }
     m_peer_trace_processes.insert(trace_id, process);
 
     auto emit_trace_output = [this, trace_id, process]() {
@@ -10813,6 +11010,18 @@ void NuRpcService::runRpcCommand(const QString& method, const QString& params_js
         if (index >= parsed_commands->size())
             return;
         const ParsedConsoleCommand command = parsed_commands->at(index);
+        if (rpcConsoleCommandRequiresLocalRpc(command.method, command.params) &&
+            !requireLocalRpcConnection(QStringLiteral("RPC console command blocked"))) {
+            if (m_console_output.startsWith(QStringLiteral("Enter an RPC method"))) {
+                m_console_output.clear();
+            }
+            m_console_output +=
+                QStringLiteral("%1> %2\nBlocked: this RPC method can transmit or reveal wallet secrets, so Nu only "
+                               "allows it with a local backend RPC connection.")
+                    .arg(m_console_output.isEmpty() ? QString() : QStringLiteral("\n\n"), command.prompt);
+            Q_EMIT consoleChanged();
+            return;
+        }
         rpcCall(command.method,
                 command.params,
                 wallet_scoped,
@@ -10914,6 +11123,19 @@ void NuRpcService::runRpcConsoleCommand(const QString& command_text, const QStri
         if (index >= parsed_commands->size())
             return;
         const ParsedConsoleCommand command = parsed_commands->at(index);
+        if (rpcConsoleCommandRequiresLocalRpc(command.method, command.params) &&
+            !requireLocalRpcConnection(QStringLiteral("RPC console command blocked"))) {
+            if (m_console_output.startsWith(QStringLiteral("Welcome to the Defcoin Core Nu RPC console."))) {
+                m_console_output.clear();
+            }
+            const QString now = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
+            m_console_output +=
+                QStringLiteral("%1%2  > %3\n%4  ! Blocked: this RPC method can transmit or reveal wallet secrets, so "
+                               "Nu only allows it with a local backend RPC connection.")
+                    .arg(m_console_output.isEmpty() ? QString() : QStringLiteral("\n\n"), now, command.prompt, now);
+            Q_EMIT consoleChanged();
+            return;
+        }
         const auto callback = [this, command, run_next, index](const QJsonValue& result, const QString& error) {
             QString rendered;
             const QString icon = error.isEmpty() ? QStringLiteral("<") : QStringLiteral("!");
@@ -13100,14 +13322,15 @@ void NuRpcService::setOnlyDefcoinMagicBytes(bool enabled)
         });
 }
 
-void NuRpcService::setSwitchToDefcoinOnlyMagicStartingJuly2026(bool enabled)
+void NuRpcService::setSwitchToDefcoinOnlyMagicStartingAugust2026(bool enabled)
 {
-    if (m_switch_to_defcoin_only_magic_starting_july_2026 == enabled)
+    if (m_switch_to_defcoin_only_magic_starting_august_2026 == enabled)
         return;
-    m_switch_to_defcoin_only_magic_starting_july_2026 = enabled;
+    m_switch_to_defcoin_only_magic_starting_august_2026 = enabled;
     QSettings settings;
-    settings.setValue(QStringLiteral("SwitchToDefcoinOnlyMagicStarting20260701"), enabled);
-    if (enabled && QDate::currentDate() >= QDate(2026, 7, 1) && !m_only_defcoin_magic_bytes) {
+    settings.setValue(QStringLiteral("SwitchToDefcoinOnlyMagicStarting20260801"), enabled);
+    settings.remove(QStringLiteral("SwitchToDefcoinOnlyMagicStarting20260701"));
+    if (enabled && QDate::currentDate() >= QDate(2026, 8, 1) && !m_only_defcoin_magic_bytes) {
         m_only_defcoin_magic_bytes = true;
         settings.setValue(QStringLiteral("OnlyDefcoinMagicBytes"), true);
         if (!m_rpc_connected) {
@@ -13827,7 +14050,7 @@ bool NuRpcService::requireLocalRpcConnection(const QString& operation)
     Q_EMIT userMessage(
         operation,
         QStringLiteral("This operation is allowed only with a local Defcoin backend RPC connection. Current RPC host "
-                       "is '%1'. Switch back to localhost before previewing or restoring from a phrase.")
+                       "is '%1'. Switch back to localhost before using wallet secrets or private-key signing.")
             .arg(host.isEmpty() ? QStringLiteral("(empty)") : host));
     return false;
 }
@@ -15391,25 +15614,50 @@ void NuRpcService::setThirdPartyTxUrl(const QString& url)
     }
     if (m_third_party_tx_url == normalized)
         return;
+    const QString previous_derived_address_url = explorerAddressUrlTemplate(m_third_party_tx_url);
     m_third_party_tx_url = normalized;
+    if ((m_third_party_address_url.isEmpty() || m_third_party_address_url == previous_derived_address_url) &&
+        !normalized.isEmpty()) {
+        m_third_party_address_url = explorerAddressUrlTemplate(normalized);
+    }
     QSettings settings;
     settings.setValue(QStringLiteral("ThirdPartyTxUrl"), normalized);
+    settings.setValue(QStringLiteral("ThirdPartyAddressUrl"), m_third_party_address_url);
     QSettings(QStringLiteral("Defcoin"), QStringLiteral("Defcoin-Qt"))
         .setValue(QStringLiteral("strThirdPartyTxUrls"), normalized);
+    Q_EMIT settingsChanged();
+}
+
+void NuRpcService::setThirdPartyAddressUrl(const QString& url)
+{
+    const QString normalized = normalizedExplorerUrl(url);
+    if (!url.trimmed().isEmpty() && normalized.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Explorer address URL not saved"),
+                           QStringLiteral("Explorer address URL must be a valid http:// or https:// template with one "
+                                          "%s placeholder and no embedded credentials."));
+        return;
+    }
+    if (m_third_party_address_url == normalized)
+        return;
+    m_third_party_address_url = normalized;
+    QSettings().setValue(QStringLiteral("ThirdPartyAddressUrl"), normalized);
     Q_EMIT settingsChanged();
 }
 
 void NuRpcService::setExplorerMode(const QString& mode)
 {
     QString clean = mode.trimmed().toLower();
-    if (!QStringList{
-            QStringLiteral("internal"), QStringLiteral("dc903"), QStringLiteral("legacy"), QStringLiteral("custom")}
+    if (!QStringList{QStringLiteral("internal"),
+                     QStringLiteral("dc903"),
+                     QStringLiteral("legacy"),
+                     QStringLiteral("fun"),
+                     QStringLiteral("custom")}
              .contains(clean)) {
         clean = QStringLiteral("internal");
     }
-    if (clean == QLatin1String("custom") && normalizedExplorerUrl(m_third_party_tx_url).isEmpty()) {
+    if (clean == QLatin1String("custom") && !hasValidExternalExplorerTemplates()) {
         Q_EMIT userMessage(QStringLiteral("Explorer URL required"),
-                           QStringLiteral("Enter a valid http:// or https:// explorer URL template with one %s "
+                           QStringLiteral("Enter valid transaction and address explorer URL templates with one %s "
                                           "placeholder before switching to Custom."));
         clean = QStringLiteral("internal");
     }
@@ -15424,12 +15672,23 @@ void NuRpcService::setExplorerMode(const QString& mode)
             m_third_party_tx_url = explorerPresetUrl(1);
         if (clean == QLatin1String("legacy"))
             m_third_party_tx_url = explorerPresetUrl(2);
+        if (clean == QLatin1String("fun"))
+            m_third_party_tx_url = explorerPresetUrl(3);
+        if (clean != QLatin1String("custom")) {
+            const int preset_index = clean == QLatin1String("dc903")  ? 1 :
+                                     clean == QLatin1String("legacy") ? 2 :
+                                     clean == QLatin1String("fun")    ? 3 :
+                                                                        0;
+            m_third_party_address_url = explorerPresetAddressUrl(preset_index);
+        }
     }
     QSettings settings;
     settings.setValue(QStringLiteral("ExplorerMode"), m_explorer_mode);
     settings.setValue(QStringLiteral("ThirdPartyTxUrlsEnabled"), m_third_party_tx_urls_enabled);
-    if (clean != QLatin1String("custom"))
+    if (clean != QLatin1String("custom")) {
         settings.setValue(QStringLiteral("ThirdPartyTxUrl"), m_third_party_tx_url);
+        settings.setValue(QStringLiteral("ThirdPartyAddressUrl"), m_third_party_address_url);
+    }
     Q_EMIT settingsChanged();
 }
 
@@ -15456,12 +15715,31 @@ QString NuRpcService::normalizedExplorerUrl(const QString& url) const
     return clean;
 }
 
+bool NuRpcService::hasValidExternalExplorerTemplates() const
+{
+    return !normalizedExplorerUrl(m_third_party_tx_url).isEmpty() &&
+           !normalizedExplorerUrl(m_third_party_address_url).isEmpty();
+}
+
 QString NuRpcService::explorerPresetUrl(int index) const
 {
     if (index == 1)
         return QStringLiteral("https://defcoin.dc903.org/explorer/tx/%s");
     if (index == 2)
         return QStringLiteral("https://defcoin.dc903.org/legacyexplorer/tx/%s");
+    if (index == 3)
+        return QStringLiteral("https://explorer.defcoin.fun/tx/%s");
+    return QString();
+}
+
+QString NuRpcService::explorerPresetAddressUrl(int index) const
+{
+    if (index == 1)
+        return QStringLiteral("https://defcoin.dc903.org/explorer/address/%s");
+    if (index == 2)
+        return QStringLiteral("https://defcoin.dc903.org/legacyexplorer/address/%s");
+    if (index == 3)
+        return QStringLiteral("https://explorer.defcoin.fun/address/%s");
     return QString();
 }
 
@@ -21658,10 +21936,10 @@ QString NuRpcService::explorerUrlForTransaction(const QString& txid) const
 QString NuRpcService::explorerUrlForAddress(const QString& address) const
 {
     if (!m_third_party_tx_urls_enabled || address.trimmed().isEmpty() ||
-        !m_third_party_tx_url.contains(QStringLiteral("%s"))) {
+        !m_third_party_address_url.contains(QStringLiteral("%s"))) {
         return QString();
     }
-    QString out = explorerAddressUrlTemplate(m_third_party_tx_url);
+    QString out = m_third_party_address_url;
     out.replace(QStringLiteral("%s"), QString::fromLatin1(QUrl::toPercentEncoding(address.trimmed())));
     return out;
 }
@@ -22266,6 +22544,8 @@ void NuRpcService::createWallet(const QString& name,
                                           "it will not contain private keys."));
         return;
     }
+    if (encrypt && !requireLocalRpcConnection(QStringLiteral("Wallet not created")))
+        return;
 
     QJsonArray params;
     params << wallet_name << disable_private_keys << blank << (encrypt ? QJsonValue(clean_passphrase) : QJsonValue())
@@ -23173,6 +23453,8 @@ void NuRpcService::encryptWallet(const QString& passphrase)
                            QStringLiteral("Enter a passphrase of at least 8 characters."));
         return;
     }
+    if (!requireLocalRpcConnection(QStringLiteral("Wallet not encrypted")))
+        return;
     const QString wallet_name = m_wallet_name;
     rpcCall(
         QStringLiteral("encryptwallet"),
@@ -23211,6 +23493,8 @@ void NuRpcService::changeWalletPassphrase(const QString& old_passphrase, const Q
                            QStringLiteral("Enter a new passphrase of at least 8 characters."));
         return;
     }
+    if (!requireLocalRpcConnection(QStringLiteral("Passphrase not changed")))
+        return;
     const QString wallet_name = m_wallet_name;
     rpcCall(QStringLiteral("walletpassphrasechange"),
             {old_passphrase, new_passphrase},
@@ -23237,6 +23521,8 @@ void NuRpcService::signMessage(const QString& address, const QString& message)
         Q_EMIT userMessage(QStringLiteral("Message not signed"), QStringLiteral("Enter an address and message."));
         return;
     }
+    if (!requireLocalRpcConnection(QStringLiteral("Message not signed")))
+        return;
     const QString wallet_name = m_wallet_name;
     rpcCall(QStringLiteral("signmessage"),
             {address.trimmed(), message},
@@ -23453,7 +23739,8 @@ void NuRpcService::requestTransactionDetails(const QString& txid)
                         address_links.push_back(qMakePair(address_url, address));
                 }
                 if (!tx_url.isEmpty() || !address_links.isEmpty()) {
-                    const QString host = QUrl(m_third_party_tx_url, QUrl::StrictMode).host();
+                    const QString host =
+                        QUrl(!tx_url.isEmpty() ? tx_url : address_links.first().first, QUrl::StrictMode).host();
                     html += QStringLiteral("<h3>Explorer links</h3><p>Use %1 block explorer to open:</p><ul>")
                                 .arg(host.toHtmlEscaped());
                     if (!tx_url.isEmpty()) {
@@ -23817,6 +24104,8 @@ void NuRpcService::signCurrentPsbt()
         return;
     }
     if (!ensureCurrentWalletSelected(QStringLiteral("PSBT signing failed")))
+        return;
+    if (!requireLocalRpcConnection(QStringLiteral("PSBT signing failed")))
         return;
     const QString wallet_name = m_wallet_name;
     rpcCall(QStringLiteral("walletprocesspsbt"),

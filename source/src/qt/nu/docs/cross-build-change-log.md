@@ -52,6 +52,173 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.7u - 2026-06-17 - Finder icon, shutdown, send retry, and release polish
+
+Big picture:
+- Tahoe moves the visible candidate label from `26.6.7t` to `26.6.7u` for a
+  publish-candidate rebuild that fixes the Finder app icon, restored Debug Log
+  location, explorer presets, shutdown behavior, send keypool recovery, seed
+  attribution, and the August 2026 Defcoin-only magic schedule.
+- The macOS app icon now uses an Icon Composer `.icon` source compiled with
+  `actool` into both `AppIcon.icns` and `Assets.car`, with
+  `CFBundleIconFile` and `CFBundleIconName` both set to `AppIcon`.
+- Send and PSBT creation retry once after Core reports an empty-keypool change
+  address failure by wallet-scoping `keypoolrefill`, priming
+  `getrawchangeaddress`, and re-running the original wallet RPC.
+
+Porting notes:
+- Port the August 1, 2026 Defcoin-only magic schedule to Lion and Windows and
+  migrate any saved July 1 key only as a compatibility read.
+- Port separate transaction/address explorer URL templates and the
+  `explorer.defcoin.fun` preset.
+- Port the seed-source display behavior so configured DNS seed names are kept
+  for IPv6 results and `seed.defcoin.mikej.tech` remains the fallback display
+  source when a duplicate address also maps to a more specific configured name.
+- Port the send/PSBT keypool recovery sequence exactly; do not create frontend
+  keys or retry indefinitely.
+
+Changed behavior:
+- Paper Wallet design selector closes when the arrow is clicked again or the
+  selected design is clicked again.
+- Closing Nu shows shutdown progress while Nu stops helper processes, sockets,
+  and its managed backend before asking the platform to quit.
+- Quick Clone receive permission defaults on for new settings.
+- Peers > Traceroute uses the bundled mono font and larger single-page trippy
+  output dimensions.
+- Peer Inspection values are selectable/copyable.
+- RPC Console now has `RPC Console` and `Debug Log` tabs; Debug Log keeps the
+  previous line-number/filter/copy/save/open-log behavior under the new
+  location.
+- Splash, About, Home, and rail branding use the updated centered coin +
+  two-line wordmark ratios.
+- The staging script now prunes source-only `.agent.md` companions and
+  wallet-app Explore-only QML from final macOS bundles.
+
+Changed files and important details:
+- `src/qt/nu/app/CMakeLists.txt`,
+  `src/qt/nu/app/MacOSXBundleInfo.plist.in`, and
+  `src/qt/nu/assets/brand/AppIcon.icon/`: own the modern macOS icon pipeline.
+- `src/qt/nu/app/NuRpcService.cpp` and `.h`: own the August magic setting,
+  explorer templates, keypool refill/change-address retry, shutdown status,
+  seed attribution, trippy environment, and Debug Log service bindings.
+- `src/qt/nu/qml/Components/NuDebugLogPanel.qml` and
+  `src/qt/nu/qml/Views/RpcConsoleView.qml`: restore Debug Log under RPC
+  Console.
+- `src/qt/nu/qml/Components/NuComboBox.qml`: fixes selected-item and arrow
+  popup toggling.
+- `src/qt/nu/app/stage_macos_distribution.sh`: prunes source-only companions
+  from staged packages.
+
+Compatibility notes:
+- OpenSSL was checked after `brew update`; Homebrew reports `openssl@3` stable
+  3.6.2, and the staged app bundles `libcrypto.3.dylib` with embedded string
+  `OpenSSL 3.6.2 7 Apr 2026`.
+- Homebrew notes OpenSSL 3.6 support ends 2026-11-01 and the formula may move
+  to OpenSSL 3.5 LTS later; future public release builds should re-check the
+  formula immediately before packaging.
+
+Build/package notes:
+- Tahoe Apple Silicon staging output:
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.7u-20260617/apple-silicon/`.
+- DMG:
+  `Defcoin-Core-Nu-v26.6.7u-macOS-AppleSilicon.dmg`.
+- SHA-256:
+  `174b40d94297732795111771874703bce745244a2ef13c7ca9315756df28274a`.
+
+Verification performed:
+- `brew update` and `brew outdated openssl@3` showed `openssl@3` is current;
+  `brew info openssl@3` reports stable/installed `3.6.2`.
+- `git diff --check` passed.
+- `/usr/bin/xcrun clang-format --dry-run --Werror
+  src/qt/nu/app/NuRpcService.cpp src/qt/nu/app/NuRpcService.h
+  src/qt/nu/app/main.cpp` passed after formatting.
+- `make -j8 src/defcoind src/defcoin-cli src/defcoin-tx src/defcoin-wallet`
+  completed; bundled backend tools report `v26.6.7u`.
+- `cmake --build build/nu-qml-arm64-26.6.7u --target DefcoinCoreNu -j 8`
+  passed.
+- `cmake --build build/nu-qml-arm64-26.6.7u --target DefcoinCoreNuResources
+  -j 1` passed and verified the built app signature.
+- Built and staged app UI self-tests passed with backend autostart disabled,
+  writing screenshots under `/tmp/defcoin-nu-26.6.7u-ui-self-test-final/` and
+  `/tmp/defcoin-nu-26.6.7u-staged-ui-self-test/`.
+- The staged app Finder icon rendered through `NSWorkspace.icon(forFile:)`
+  measured `824x824+100+100` for the colored coin foreground, matching the
+  Chrome-width comparison path.
+- `stage_macos_distribution.sh ... 26.6.7u macOS-AppleSilicon` staged, signed,
+  and created the DMG; `hdiutil verify` passed.
+- `codesign --verify --deep --strict --verbose=2` passed for the staged app.
+- The staged app contains no `.agent.md` files and no wallet-app Explore-only
+  QML routes.
+
+Risks / follow-up:
+- The send keypool recovery path is built and reviewed, but it was not exercised
+  against a live empty-keypool wallet in this pass.
+- Export-control advice still needs project-owner/legal confirmation before
+  public distribution language is finalized.
+
+### 26.6.7t - 2026-06-17 - Local-only wallet secret RPC hardening
+
+Big picture:
+- Tahoe blocks Nu UI paths that transmit paper-wallet WIFs, wallet
+  passphrases, or private-key-backed signing requests when the configured RPC
+  host is not loopback.
+- The RPC console now blocks methods that take or return wallet secrets before
+  dispatching to a non-loopback RPC endpoint, including
+  `signmessage`, raw-transaction/PSBT signing calls, descriptor-bearing
+  scan/PSBT update calls, and encrypted `createwallet` calls.
+- The candidate label advances from `26.6.7s` to `26.6.7t` because this is a
+  source/security change and the rebuilt artifact must not reuse the prior
+  visible label.
+
+Porting notes:
+- Port the same local-RPC gates to Lion and Windows for paper-wallet private
+  key import, encrypted wallet creation, wallet encryption/passphrase changes,
+  message signing, PSBT signing, and sensitive RPC console commands.
+- Keep remote RPC override behavior for non-secret operations unchanged unless
+  a platform-specific security review expands the policy.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: adds `requireLocalRpcConnection()` guards
+  around paper-wallet WIF import, wallet passphrase RPCs, and UI signing
+  operations; blocks secret-bearing/secret-returning RPC console methods on
+  non-loopback RPC, with parameter-aware handling for `createwallet`
+  passphrases; updates the local-RPC gate message so it applies beyond recovery.
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: move the visible
+  candidate label to `26.6.7t`.
+- `src/qt/nu/app/NuRpcService.cpp.agent.md`: records the local-only secret RPC
+  contract for future edits.
+
+Build/package notes:
+- Rebuild backend targets before staging so bundled CLI tools report
+  `v26.6.7t` instead of the earlier `v26.6.7p` binaries found in the
+  `26.6.7s` staging check.
+
+Verification performed:
+- Updated roborev from `v0.57.1` to `v0.58.0`, reran maximum-reasoning
+  security review, and resolved the reported remote-RPC wallet-secret findings.
+  Final dirty security review `job 9` completed with no issues found.
+- `/usr/bin/xcrun clang-format --dry-run --Werror src/qt/nu/app/NuRpcService.cpp`
+  passed.
+- `git diff --check` passed.
+- `make -j6 src/defcoind src/defcoin-cli src/defcoin-tx src/defcoin-wallet`
+  completed; bundled tools in the staged app report `v26.6.7t`.
+- `cmake --build build/nu-qml-arm64-26.6.7t --target DefcoinCoreNu -j 8`
+  passed.
+- `cmake --build build/nu-qml-arm64-26.6.7t --target DefcoinCoreNuResources -j 1`
+  passed.
+- `src/qt/nu/app/stage_macos_distribution.sh ... 26.6.7t macOS-AppleSilicon`
+  staged, signed, and created the Tahoe Apple Silicon DMG under
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.7t-20260617/apple-silicon/`.
+- `codesign --verify --deep --strict --verbose=2` passed for the staged app.
+- `hdiutil verify` passed for
+  `Defcoin-Core-Nu-v26.6.7t-macOS-AppleSilicon.dmg`; SHA-256:
+  `b01ca6b13311c474daa02c41dc419077c5cb8971f742a04e3a29cff5e01a8706`.
+- Staged app UI self-test passed with backend autostart disabled, writing route
+  and dialog screenshots under `/tmp/defcoin-nu-26.6.7t-ui-self-test/screenshots`.
+- Paper-wallet print rendering passed from the staged app. Design 1 was checked
+  as the release-enabled design; Designs 2-5 were forced via the internal
+  render-only form selector only for regression coverage.
+
 ### 26.6.7s - 2026-06-17 - Paper Wallet generation and preview tightening
 
 Big picture:

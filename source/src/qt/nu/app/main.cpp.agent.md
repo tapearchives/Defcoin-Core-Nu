@@ -13,6 +13,10 @@ Initializes the Nu QML app, command-line switches, backend/service objects, sing
   Atkinson Hyperlegible Mono is available to QML and C++ paper-wallet rendering
   without depending on system font installs.
 - Shows launch progress on the splash screen with one centered top status line so loading text does not collide with the logo/title artwork.
+- The splash coin + wordmark lockup mirrors the QML brand lockup ratios:
+  centered as a group, coin slightly taller than the two text lines, and tight
+  line spacing. Update `docs/brand-logo-text.md` and `NuBrandLockup.qml` when
+  these ratios change.
 - Provides an internal `--ui-self-test` route/dialog/menu walk. It disables
   backend autostart, skips the single-instance guard, opens Nu and Explore
   route surfaces, exercises menu-backed dialogs, and can capture screenshots via
@@ -37,6 +41,8 @@ Initializes the Nu QML app, command-line switches, backend/service objects, sing
 - Keep bundled font loading early and non-fatal. Missing fonts may warn, but
   must not block startup or paper-wallet key safety behavior.
 - Keep splash status text short; long wrapped splash text can collide with branding and makes slow startup look broken.
+- Keep splash logo measurements grouped around the combined coin + wordmark
+  width, not just the text width, so the lockup stays centered.
 - Keep `--ui-self-test` inert for normal launches and avoid generating real
   wallet/private-key material in that path.
 - Keep `DEFCOIN_NU_PAPER_WALLET_PDF` limited to UI self-test placeholder data;

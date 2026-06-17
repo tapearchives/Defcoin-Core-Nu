@@ -11,6 +11,9 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 - Tracks TCP totals from Core `getnettotals`, UDP totals from Nu Fast Sync/Quick Clone sockets, and Quick Clone as a subset of UDP for diagnostics/CSV.
 - Implements Quick Clone user prompt/status scaffolding as trusted LAN public-chain copy only; wallet/private/config data must never be copied.
 - Provides the standalone Nu RPC Console parser, peer table enrichment, workstation discovery display, Explore paper wallet generation/printing, watch-only import, and selectable diagnostic output.
+- Restores the Debug Log surface as a reusable QML panel under RPC Console while
+  keeping the existing backend log buffer, line-number data, font sizing, find,
+  copy, save, and open-log service APIs in this file.
 - Generates paper-wallet keys and current Defcoin P2PKH addresses locally through Core-compatible secp256k1, SHA256, RIPEMD160, and Base58Check code; optional watch-only import sends only the public address to RPC.
 - Paper-wallet secret material must mix user-provided QML entropy with
   OpenSSL/platform cryptographic randomness and domain-separated SHA512 rounds.
@@ -77,6 +80,22 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 - Throttles in-app miner log UI updates so high-volume miner output does not force continuous QML text re-rendering.
 - On Windows, assigns Nu-owned backend, miner, traceroute, and helper child processes to a kill-on-close job object so crash paths do not leave mining/backend processes running unattended.
 - Seed/source attribution may include protocol-verified fixed address aliases for public Defcoin operators. These aliases affect peer display only and must not silently become Core bootstrap seeds.
+- Seed/source attribution for configured DNS seeds must survive IPv6 DNS
+  resolution and duplicate addresses. If `seed.defcoin.mikej.tech` and another
+  configured name resolve to the same address, show the non-mikej configured
+  name first because the mikej seed is the broad fallback source.
+- The scheduled Defcoin-only magic-byte switch is August 1, 2026. Settings may
+  migrate the older July 1 key, but runtime enforcement and user-facing labels
+  must use the August date.
+- External explorer presets can have separate transaction and address URL
+  templates. Custom explorer mode must validate both templates when address
+  links are enabled.
+- Send and PSBT creation paths may retry once after Core reports that a change
+  address cannot be generated because the keypool is empty. The retry must call
+  wallet-scoped `keypoolrefill`, prime a change address with
+  `getrawchangeaddress`, and then re-run the original wallet RPC.
+- App shutdown owns a user-visible status string and should stop Nu-managed
+  sockets, helper processes, and the managed backend before the frontend exits.
 - Backs up the active wallet selected in Nu. The default backup filename must include the active wallet display/storage identity (`wallet_<name>.dat` for BDB, `wallet_<name>.sqlite` for SQL) rather than blindly offering `wallet.dat`.
 - Installs placeholder paper-wallet data for `--ui-self-test` only. This path
   is gated by `DEFCOIN_NU_UI_SELF_TEST_ACTIVE`, uses clearly fake key/address
@@ -86,11 +105,17 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   public addresses and positive DFC amounts before using wallet-scoped
   `sendmany`. This path never receives or sends generated private keys.
 - Imports paper-wallet private keys through `importPaperWalletPrivateKey()`.
-  The bridge sends the WIF directly to wallet-scoped Core RPC `importprivkey`
-  with a rescan request, refreshes wallet state, and emits user-facing guidance.
+  The bridge requires a loopback RPC connection before sending the WIF directly
+  to wallet-scoped Core RPC `importprivkey` with a rescan request, refreshes
+  wallet state, and emits user-facing guidance.
   The current sweep option is conservative: it imports/rescans first and tells
   the user to move confirmed funds after the balance is visible rather than
   constructing an automatic sweep transaction in the same call.
+- Wallet passphrase RPCs and UI-triggered private-key signing operations must
+  require a loopback RPC connection even when `DEFCOIN_NU_ALLOW_REMOTE_RPC=1`.
+- RPC console methods that take or return wallet secrets must also require a
+  loopback RPC connection before dispatch; prompt/result redaction is not a
+  substitute for blocking remote cleartext transport.
 
 ## Do Not Break
 
@@ -108,6 +133,12 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   enables the weak-phrase override in the Paper Wallet view.
 - Keep paper-wallet private-key QR images in memory; do not route WIF QR generation through temp files or external URLs.
 - Do not enable remote RPC by default or silently send RPC credentials/private wallet material to non-loopback hosts.
+- Do not let the RPC console bypass local-only checks for methods such as
+  `importprivkey`, `walletpassphrase`, `sethdseed`, `importdescriptors`,
+  `dumpprivkey`, `signmessage`, `signmessagewithprivkey`,
+  `signrawtransactionwithkey`, `signrawtransactionwithwallet`,
+  `walletprocesspsbt`, descriptor-bearing `scantxoutset`/`utxoupdatepsbt`, or
+  encrypted `createwallet` calls with a passphrase argument.
 - Do not auto-install GitHub release fallback packages unless the update trust model is redesigned; use Velopack for managed updates.
 - Do not copy wallets, keys, passphrases, configs, peers, bans, address books, or RPC cookies in Quick Clone code.
 - When `node_unique_id` identifies two host paths as the same Nu install, Fast Sync/Quick Clone should count them as one logical in-flight source; the alternate host is fallback, not a second independent sender.
@@ -116,6 +147,15 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 - Keep Windows child-process job containment on every Nu-owned `QProcess` start path.
 - During Tahoe UDP testing, macOS Local Network "Allow" is a hard external gate; failed probes before Allow are not code evidence.
 - Do not make backup UI imply a different wallet than the active one. If wallet naming/storage detection changes, update `walletBackupDefaultFileName()` and smoke-test both BDB and SQL wallet names.
+- Do not move the Defcoin-only magic schedule back to July 1, 2026; August 1,
+  2026 is the active Tahoe schedule and enforcement date.
+- Do not merge transaction and address explorer templates back into one custom
+  field. Some explorers use different `/tx/` and `/address/` paths.
+- Do not retry change-address failures by inventing frontend keys. The only
+  supported automatic recovery is wallet-scoped Core keypool refill, change
+  address priming, and one original-RPC retry.
+- Do not treat `seed.defcoin.mikej.tech` as the preferred display source when
+  the same address also matches a more specific configured seed name.
 - Peer table grouping is display-only: the visible Node cell may append `(gN)` when multiple current rows appear to be the same running Nu node, but row metadata and peer actions must keep Core's real numeric peer id.
 - Do not let paper-wallet self-test placeholders run outside
   `DEFCOIN_NU_UI_SELF_TEST_ACTIVE`.
@@ -131,7 +171,8 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 - Keep paper-wallet funding public-address-only and wallet-scoped. Do not add a
   QML-side spending path that bypasses Core wallet transaction creation.
 - Keep paper-wallet private-key import local, wallet-scoped, and transient. Do
-  not log the WIF, store it in settings, or pass it through QML funding paths.
+  not log the WIF, store it in settings, transmit it to a non-loopback RPC
+  endpoint, or pass it through QML funding paths.
 
 ## Cross-Build Notes
 
@@ -147,4 +188,7 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   `DEFCOIN_NU_PAPER_WALLET_PDF` or the preview data-URL path and inspect the
   rasterized page before treating the layout as done.
 - Smoke-test the touched QML/RPC path.
+- Smoke-test send/PSBT changes against an empty-keypool wallet when possible,
+  or review the exact wallet-scoped RPC sequence when no test wallet is
+  available.
 - For Fast Sync changes, confirm probe ack, reservation, chunk receipt, checksum, `submitblock`, and accepted-block counters in logs.

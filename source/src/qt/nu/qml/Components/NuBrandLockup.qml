@@ -5,16 +5,16 @@ import "../Theme"
 Item {
     id: root
 
-    property int coinWidth: Math.round(root.wordmarkSize * 1.85)
+    property int coinWidth: Math.round(root.wordmarkSize * 2.12)
     property int coinHeight: root.coinWidth
-    property int gap: Math.max(NuTokens.spaceMd, Math.round(root.wordmarkSize * 0.46))
+    property int gap: Math.max(NuTokens.spaceSm, Math.round(root.wordmarkSize * 0.32))
     property int wordmarkSize: 24
     property int wordmarkWeight: Font.ExtraBold
     property real wordmarkTracking: Math.max(1.0, root.wordmarkSize * 0.04)
     property real coreNuTracking: Math.max(1.0, root.wordmarkSize * 0.042)
     property real fcGapAdjust: root.wordmarkSize * 0.0345
     property bool fitThirdLineToWordmark: true
-    property int lineSpacing: Math.round(root.wordmarkSize * 0.095)
+    property int lineSpacing: Math.max(0, Math.round(root.wordmarkSize * 0.025))
     property color textColor: NuTokens.textInverse
     property url coinSource: "../../assets/brand/defcoin-v26-coin.png"
     property string thirdLine: ""

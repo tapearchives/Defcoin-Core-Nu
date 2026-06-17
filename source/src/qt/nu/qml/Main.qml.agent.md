@@ -14,6 +14,9 @@ Owns the top-level Nu QML window, global dialogs, menus, wallet selector helpers
   menu-backed dialogs without relying on manual clicks.
 - Provides `uiSelfTestOpenPaperWalletTab()` so the C++ self-test can capture
   the Wallet > Paper Wallet surface directly.
+- Shows the shutdown overlay while Nu starts service cleanup. The overlay text
+  should surface `NuService.shutdownStatus` so users understand which backend
+  process or helper is still closing.
 
 ## Do Not Break
 
@@ -24,6 +27,8 @@ Owns the top-level Nu QML window, global dialogs, menus, wallet selector helpers
 - Do not make Advanced tools visible by default for new users unless that product decision changes.
 - Keep UI self-test hooks deterministic and free of real wallet/private-key
   generation.
+- Keep shutdown overlay behavior wired to `NuService.prepareForApplicationQuit()`
+  before calling the platform quit path.
 
 ## Verification
 

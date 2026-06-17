@@ -8,6 +8,9 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
 
 - Exposes traffic totals split into TCP, UDP, total, and Quick Clone subset counters.
 - Exposes Metrics rows, peer data, Quick Clone settings/status, Explore paper-wallet/watch-only actions, and Fast Sync diagnostic state to QML.
+- Exposes shutdown status, the August 2026 Defcoin-only magic setting, separate
+  transaction/address explorer templates, and backend log metadata used by the
+  restored Debug Log panel.
 - Exposes Paper Wallet state as both first-entry convenience properties and a
   `paperWalletEntries` list for multi-address print sheets.
 - Owns service-side in-memory paper-wallet secrets so regenerated sheets can
@@ -42,6 +45,9 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
 - Keep preview-page invokables read-only. They may construct placeholder
   display entries in memory, but must not generate or persist private keys.
 - Preserve the miner-log throttle members when changing miner properties; QML must not be signaled once per miner output chunk.
+- Keep transaction and address explorer template properties distinct.
+- Keep `prepareForApplicationQuit()` available to QML so the shutdown overlay
+  can start backend/process cleanup before the app disappears.
 
 ## Verification
 
@@ -50,3 +56,5 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
 - Re-render at least one paper-wallet preview page after print/preview bridge
   changes.
 - Open Metrics and any touched wallet view to confirm bindings update.
+- Open RPC Console > Debug Log after property additions that affect log or
+  explorer settings.

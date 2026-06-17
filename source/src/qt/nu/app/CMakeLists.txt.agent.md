@@ -9,6 +9,9 @@ Defines the Tahoe Nu Qt Quick app targets, bundle metadata, release label, Qt mo
 - Builds `DefcoinCoreNu` and optional `DefcoinCoreExplore` from the same Nu QML/C++ source base.
 - Owns the visible Nu release label through `DEFCOIN_NU_RELEASE_NAME`.
 - Sets macOS bundle identifiers, icon files, Info.plist, Qt module list, runtime assets, help assets, and Velopack update URL.
+- On Apple builds, compiles `assets/brand/AppIcon.icon` with `actool` and
+  bundles both `AppIcon.icns` and `Assets.car` so Finder uses the modern icon
+  stack while older icon consumers still have an ICNS fallback.
 - Bundles Atkinson Hyperlegible Mono TTFs and license text as runtime assets so
   paper-wallet key strings and mono UI fields render consistently without a
   host-system font dependency.
@@ -27,6 +30,9 @@ Defines the Tahoe Nu Qt Quick app targets, bundle metadata, release label, Qt mo
 - Do not drop bundled font files from `DEFCOIN_NU_RUNTIME_ASSET_FILES` unless
   `main.cpp` font registration and QML font tokens are updated at the same time.
 - Do not ship source-only `.agent.md` companions or Explore-only routes in the Nu wallet app bundle.
+- Do not regress the Apple icon pipeline back to a raw scaled ICNS only. Finder
+  app icons must keep `CFBundleIconFile=AppIcon`, `CFBundleIconName=AppIcon`,
+  `AppIcon.icns`, and `Assets.car` in sync.
 - Do not let paper-wallet generation silently build without local secp256k1 support; if the library is missing, the app path must fail closed and the build output should make the missing dependency obvious.
 - Do not allow Windows builds to fall back to host OpenSSL. If `DEFCOIN_NU_OPENSSL_ROOT` is missing, build a MinGW OpenSSL prefix first.
 
@@ -35,3 +41,6 @@ Defines the Tahoe Nu Qt Quick app targets, bundle metadata, release label, Qt mo
 - `git diff --check`
 - Configure and build the Nu app after build-graph edits.
 - Check macOS Finder "Kind", bundle id, icon, and about/splash version after release metadata changes.
+- Render the built `.app` through `NSWorkspace.icon(forFile:)` when validating
+  icon scale; measuring only the source PNG or raw ICNS can miss Finder's chosen
+  bundle icon.

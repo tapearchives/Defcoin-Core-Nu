@@ -89,6 +89,7 @@ ApplicationWindow {
         root.show()
         root.raise()
         shutdownTimer.restart()
+        shutdownKickoffTimer.restart()
     }
 
     function refreshSyncProgressWindow() {
@@ -598,7 +599,17 @@ ApplicationWindow {
                 root.shutdownStepIndex += 1
                 return
             }
+        }
+    }
+
+    Timer {
+        id: shutdownKickoffTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            NuService.prepareForApplicationQuit()
             shutdownTimer.stop()
+            root.shutdownStepIndex = root.shutdownSteps.length - 1
             root.quitRequested = true
             NuPlatform.quitApplication()
         }
@@ -653,7 +664,7 @@ ApplicationWindow {
 
                 Label {
                     Layout.fillWidth: true
-                    text: root.shutdownSteps[root.shutdownStepIndex]
+                    text: NuService.shutdownStatus.length > 0 ? NuService.shutdownStatus : root.shutdownSteps[root.shutdownStepIndex]
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontBody
                     horizontalAlignment: Text.AlignHCenter
