@@ -21,6 +21,7 @@ Basic.Button {
     property bool selected: false
     property string helpText: ""
     property bool suppressToolTip: false
+    readonly property color hoverBorderColor: Qt.rgba(0.34, 0.12, 0.55, 0.70)
 
     scale: pressed ? 0.988 : 1.0
     Behavior on scale { NumberAnimation { duration: NuTokens.motionFast; easing.type: Easing.OutCubic } }
@@ -83,10 +84,11 @@ Basic.Button {
                : (root.hovered ? Qt.rgba(1, 1, 1, 0.08) : "transparent")
         border.color: root.activeFocus
                       ? NuTokens.accentSky
-                      : (root.selected ? NuTokens.panelBase : Qt.rgba(1, 1, 1, 0.16))
-        border.width: root.activeFocus ? 2 : 1
+                      : (root.hovered ? root.hoverBorderColor : (root.selected ? NuTokens.panelBase : Qt.rgba(1, 1, 1, 0.16)))
+        border.width: (root.activeFocus || root.hovered) ? 2 : 1
         Behavior on color { ColorAnimation { duration: NuTokens.motionFast } }
         Behavior on border.color { ColorAnimation { duration: NuTokens.motionFast } }
+        Behavior on border.width { NumberAnimation { duration: NuTokens.motionFast; easing.type: Easing.OutCubic } }
 
         Rectangle {
             width: 3

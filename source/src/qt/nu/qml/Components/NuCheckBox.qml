@@ -14,6 +14,9 @@ Basic.CheckBox {
     property string helpText: ""
     property bool suppressToolTip: false
     property bool inverse: false
+    property color checkedColor: NuTokens.accentSky
+    property color checkedBorderColor: NuTokens.lineStrong
+    property color checkMarkColor: NuTokens.textInverse
 
     Accessible.role: Accessible.CheckBox
     Accessible.name: text
@@ -36,8 +39,8 @@ Basic.CheckBox {
         x: root.leftPadding
         y: root.topPadding + (root.availableHeight - height) / 2
         radius: NuTokens.radiusSmall
-        color: root.checked ? NuTokens.accentSky : "transparent"
-        border.color: root.checked ? NuTokens.accentSky : (root.inverse ? Qt.rgba(255, 255, 255, 0.72) : NuTokens.lineStrong)
+        color: root.checked ? root.checkedColor : "transparent"
+        border.color: root.checked ? root.checkedBorderColor : (root.inverse ? Qt.rgba(255, 255, 255, 0.72) : NuTokens.lineStrong)
         border.width: root.activeFocus ? 2 : 1
 
         Canvas {
@@ -48,7 +51,7 @@ Basic.CheckBox {
             onPaint: {
                 var ctx = getContext("2d")
                 ctx.reset()
-                ctx.strokeStyle = root.inverse ? NuTokens.inverseBase : NuTokens.checkMarkGreen
+                ctx.strokeStyle = root.checkMarkColor
                 ctx.lineWidth = 2.2
                 ctx.lineCap = "round"
                 ctx.lineJoin = "round"

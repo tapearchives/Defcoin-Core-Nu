@@ -18,6 +18,8 @@ backend, modern Nu frontend, shared protocol docs, and Windows build staging.
 
 - Preserve wallet data and secrets. Source/build work must not delete wallets,
   keys, configs, peers, bans, RPC cookies, or address books.
+- Version constants, CMake release names, package labels, user agents, and
+  release notes must follow `src/qt/nu/docs/defcoin-core-versioning.md`.
 - Keep Tahoe, Lion, and Windows protocol behavior in parity unless a platform
   limitation is documented in the matching release notes.
 - Apply Nu-local formatting only to Nu-owned code. Do not reformat inherited

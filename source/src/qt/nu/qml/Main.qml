@@ -71,7 +71,7 @@ ApplicationWindow {
 
     function openPreferences() {
         NuService.advancedToolsVisible = true
-        frame.currentRoute = "settings"
+        frame.requestRoute("settings")
     }
 
     function closeMainWindow() {
@@ -196,12 +196,12 @@ ApplicationWindow {
 
     function openNode() {
         NuService.advancedToolsVisible = true
-        frame.currentRoute = "node"
+        frame.requestRoute("node")
     }
 
     function openRpcConsole() {
         NuService.advancedToolsVisible = true
-        frame.currentRoute = "rpc"
+        frame.requestRoute("rpc")
     }
 
     function basicAboutText() {
@@ -274,6 +274,8 @@ ApplicationWindow {
              + "<li>Qt and Qt Quick - The Qt Company and Qt Project - <a href=\"https://www.qt.io/\">qt.io</a> | QML, dialogs, table UI, native window integration, networking helpers, and application framework pieces used by Nu.</li>"
              + "<li>BIP-0039 mnemonic standard and English word list - BIP39 authors and contributors including Marek Palatinus, Pavol Rusnak, Aaron Voisine, and Sean Bowe - <a href=\"https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki\">BIP-0039</a> | used for phrase validation and recovery workflows.</li>"
              + "<li>libqrencode - Kentaro Fukuchi and contributors - <a href=\"https://fukuchi.org/works/qrencode/\">libqrencode</a> | QR generation inherited through the Core wallet stack.</li>"
+             + "<li>liteaddress.org / bitaddress.org paper-wallet layout model - litecoin-project and bitaddress.org contributors - <a href=\"https://github.com/litecoin-project/liteaddress.org\">litecoin-project/liteaddress.org</a> | MIT-licensed paper-wallet controls and foldable print-layout reference adapted for Nu's native Defcoin key generation.</li>"
+             + "<li>Defcoin Bulk paper wallet - @sibios - <a href=\"https://github.com/sibios/defcoin-bulk\">sibios/defcoin-bulk</a> | historical Defcoin two-page paper-wallet artwork and layout reference used by Nu Paper Wallet Design 5; Nu keeps key generation and QR creation in native Core/Nu code.</li>"
              + "<li>Velopack - Velopack project and contributors - <a href=\"https://velopack.io/\">velopack.io</a> | update-package metadata and installer update flow where enabled.</li>"
              + "<li>Trippy - fujiapple852 and contributors - <a href=\"https://github.com/fujiapple852/trippy\">fujiapple852/trippy</a> | Apache-2.0 licensed route tracing tool used when the <code>trip</code> binary is installed or bundled for peer route inspection.</li>"
              + "<li>Core dependency stack inherited through Litecoin Core depends/build systems - Berkeley DB 4.8 / Sleepycat and Oracle | Boost community | OpenSSL Project | libevent project | SQLite / D. Richard Hipp and contributors | miniupnpc / Thomas Bernard | ZeroMQ community | platform packaging and toolchain contributors.</li>"
@@ -385,6 +387,56 @@ ApplicationWindow {
         }
     }
 
+    function uiSelfTestClosePopups() {
+        messageDialog.close()
+        quickClonePromptDialog.close()
+        mnemonicClipboardWarningDialog.close()
+        transactionDetailsDialog.close()
+        openUriDialog.close()
+        createWalletDialog.close()
+        createRecoveryWalletDialog.close()
+        restoreRecoveryWalletDialog.close()
+        closeWalletDialog.close()
+        closeAllWalletsDialog.close()
+        deleteWalletDialog.close()
+        signDialog.close()
+        verifyDialog.close()
+        updateAvailableDialog.close()
+        updateProgressDialog.close()
+        updateReadyDialog.close()
+        aboutDialog.close()
+        recoveryProgressDialog.hide()
+        syncProgressWindow.hide()
+        helpWindow.close()
+    }
+
+    function uiSelfTestOpenMenuDialog(name) {
+        var target = String(name)
+        if (target === "about") {
+            root.openAboutSummary()
+        } else if (target === "build-notes") {
+            root.openDetailedAbout()
+        } else if (target === "help") {
+            root.openHelpManual()
+        } else if (target === "create-wallet") {
+            createWalletDialog.open()
+        } else if (target === "create-recovery-wallet") {
+            createRecoveryWalletDialog.open()
+        } else if (target === "restore-recovery-wallet") {
+            restoreRecoveryWalletDialog.open()
+        } else if (target === "open-uri") {
+            openUriDialog.open()
+        } else if (target === "sign-message") {
+            signDialog.open()
+        } else if (target === "verify-message") {
+            verifyDialog.open()
+        }
+    }
+
+    function uiSelfTestOpenPaperWalletTab() {
+        frame.uiSelfTestOpenPaperWalletTab()
+    }
+
     menuBar: MenuBar {
         Menu {
             id: fileMenu
@@ -449,11 +501,11 @@ ApplicationWindow {
 
         Menu {
             title: qsTr("View")
-            NuMenuItem { text: qsTr("Home"); shortcut: Qt.platform.os === "osx" ? "Meta+1" : "Ctrl+1"; onTriggered: frame.currentRoute = "home" }
-            NuMenuItem { text: qsTr("Send"); shortcut: Qt.platform.os === "osx" ? "Meta+2" : "Ctrl+2"; onTriggered: frame.currentRoute = "send" }
-            NuMenuItem { text: qsTr("Receive"); shortcut: Qt.platform.os === "osx" ? "Meta+3" : "Ctrl+3"; onTriggered: frame.currentRoute = "receive" }
-            NuMenuItem { text: qsTr("Transactions"); shortcut: Qt.platform.os === "osx" ? "Meta+4" : "Ctrl+4"; onTriggered: frame.currentRoute = "activity" }
-            NuMenuItem { text: qsTr("Wallet"); shortcut: Qt.platform.os === "osx" ? "Meta+5" : "Ctrl+5"; onTriggered: frame.currentRoute = "wallet" }
+            NuMenuItem { text: qsTr("Home"); shortcut: Qt.platform.os === "osx" ? "Meta+1" : "Ctrl+1"; onTriggered: frame.requestRoute("home") }
+            NuMenuItem { text: qsTr("Send"); shortcut: Qt.platform.os === "osx" ? "Meta+2" : "Ctrl+2"; onTriggered: frame.requestRoute("send") }
+            NuMenuItem { text: qsTr("Receive"); shortcut: Qt.platform.os === "osx" ? "Meta+3" : "Ctrl+3"; onTriggered: frame.requestRoute("receive") }
+            NuMenuItem { text: qsTr("Transactions"); shortcut: Qt.platform.os === "osx" ? "Meta+4" : "Ctrl+4"; onTriggered: frame.requestRoute("activity") }
+            NuMenuItem { text: qsTr("Wallet"); shortcut: Qt.platform.os === "osx" ? "Meta+5" : "Ctrl+5"; onTriggered: frame.requestRoute("wallet") }
             NuMenuItem {
                 text: qsTr("Mining")
                 shortcut: Qt.platform.os === "osx" ? "Meta+6" : "Ctrl+6"
@@ -461,7 +513,7 @@ ApplicationWindow {
                 implicitHeight: visible ? Math.max(contentItem.implicitHeight + 14, 34) : 0
                 onTriggered: {
                     NuService.advancedToolsVisible = true
-                    frame.currentRoute = "mining"
+                    frame.requestRoute("mining")
                 }
             }
             NuMenuItem {

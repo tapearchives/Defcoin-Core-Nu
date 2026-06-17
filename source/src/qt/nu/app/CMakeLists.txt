@@ -10,10 +10,11 @@ endif()
 
 project(DefcoinCoreNuQml VERSION 26.6.7 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.6.7a" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.6.7s" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
+set(DEFCOIN_NU_OPENSSL_ROOT "" CACHE PATH "Optional target-platform OpenSSL prefix for paper-wallet entropy, cleansing, and BIP38")
 
 if(APPLE)
     enable_language(OBJCXX)
@@ -29,6 +30,7 @@ set(DEFCOIN_NU_QT_COMPONENTS
     Gui
     Network
     OpenGL
+    PrintSupport
     Qml
     QmlModels
     QmlWorkerScript
@@ -43,6 +45,41 @@ set(DEFCOIN_NU_QT_COMPONENTS
 
 find_package(Qt6 REQUIRED COMPONENTS ${DEFCOIN_NU_QT_COMPONENTS})
 find_package(Qt6 QUIET COMPONENTS QmlMeta)
+if(WIN32 AND NOT DEFCOIN_NU_OPENSSL_ROOT)
+    get_filename_component(DEFCOIN_NU_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
+    set(DEFCOIN_NU_OPENSSL_CANDIDATES
+        "${DEFCOIN_NU_SOURCE_ROOT}/../../../toolchains/openssl/win64"
+        "${DEFCOIN_NU_SOURCE_ROOT}/depends/x86_64-w64-mingw32"
+    )
+    foreach(defcoin_nu_openssl_candidate IN LISTS DEFCOIN_NU_OPENSSL_CANDIDATES)
+        if(EXISTS "${defcoin_nu_openssl_candidate}/include/openssl/rand.h"
+           AND EXISTS "${defcoin_nu_openssl_candidate}/include/openssl/evp.h"
+           AND (EXISTS "${defcoin_nu_openssl_candidate}/lib/libcrypto.a"
+                OR EXISTS "${defcoin_nu_openssl_candidate}/lib64/libcrypto.a"))
+            set(DEFCOIN_NU_OPENSSL_ROOT "${defcoin_nu_openssl_candidate}" CACHE PATH "Optional target-platform OpenSSL prefix for paper-wallet entropy, cleansing, and BIP38" FORCE)
+            break()
+        endif()
+    endforeach()
+endif()
+if(WIN32 AND NOT DEFCOIN_NU_OPENSSL_ROOT)
+    message(FATAL_ERROR "Windows Nu builds require DEFCOIN_NU_OPENSSL_ROOT to point at a MinGW OpenSSL prefix; refusing to link host OpenSSL.")
+endif()
+if(DEFCOIN_NU_OPENSSL_ROOT)
+    set(OPENSSL_ROOT_DIR "${DEFCOIN_NU_OPENSSL_ROOT}")
+    set(OPENSSL_USE_STATIC_LIBS TRUE)
+endif()
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+if(WIN32)
+    get_target_property(DEFCOIN_NU_OPENSSL_CRYPTO_LIBRARY OpenSSL::Crypto IMPORTED_LOCATION)
+    if(NOT DEFCOIN_NU_OPENSSL_CRYPTO_LIBRARY)
+        get_target_property(DEFCOIN_NU_OPENSSL_CRYPTO_LIBRARY OpenSSL::Crypto IMPORTED_LOCATION_RELEASE)
+    endif()
+    if(DEFCOIN_NU_OPENSSL_CRYPTO_LIBRARY MATCHES "^/opt/homebrew|^/usr/local")
+        message(FATAL_ERROR "Windows Nu build resolved host OpenSSL (${DEFCOIN_NU_OPENSSL_CRYPTO_LIBRARY}); set DEFCOIN_NU_OPENSSL_ROOT to a Windows target OpenSSL prefix.")
+    endif()
+endif()
+
+get_filename_component(DEFCOIN_NU_CORE_SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 
 set(DEFCOIN_NU_QT_LIBRARIES)
 foreach(defcoin_nu_qt_component IN LISTS DEFCOIN_NU_QT_COMPONENTS)
@@ -82,6 +119,34 @@ file(GLOB QRENCODE_RUNTIME_LIBRARIES CONFIGURE_DEPENDS
     "${QRENCODE_LIBRARY_DIR}/libqrencode*.dll"
 )
 
+set(DEFCOIN_NU_SECP256K1_ROOT "" CACHE PATH "Optional libsecp256k1 prefix for local paper-wallet address derivation")
+set(DEFCOIN_NU_SECP256K1_LIBRARY "" CACHE FILEPATH "Optional libsecp256k1 static library for local paper-wallet address derivation")
+if(NOT DEFCOIN_NU_SECP256K1_ROOT)
+    set(DEFCOIN_NU_SECP256K1_ROOT "${DEFCOIN_NU_CORE_SRC_DIR}/secp256k1-zkp" CACHE PATH "Optional libsecp256k1 prefix for local paper-wallet address derivation" FORCE)
+endif()
+set(DEFCOIN_NU_SECP256K1_DEFAULT_LIBRARY "${DEFCOIN_NU_SECP256K1_ROOT}/.libs/libsecp256k1.a")
+if(EXISTS "${DEFCOIN_NU_SECP256K1_DEFAULT_LIBRARY}")
+    set(DEFCOIN_NU_SECP256K1_LIBRARY "${DEFCOIN_NU_SECP256K1_DEFAULT_LIBRARY}" CACHE FILEPATH "Optional libsecp256k1 static library for local paper-wallet address derivation" FORCE)
+endif()
+if(NOT DEFCOIN_NU_SECP256K1_LIBRARY OR DEFCOIN_NU_SECP256K1_LIBRARY MATCHES "NOTFOUND")
+    find_library(DEFCOIN_NU_SECP256K1_LIBRARY
+        NAMES secp256k1 libsecp256k1
+        PATHS
+            "${DEFCOIN_NU_SECP256K1_ROOT}/.libs"
+            "${DEFCOIN_NU_SECP256K1_ROOT}/lib"
+            "${DEFCOIN_NU_CORE_SRC_DIR}/../depends/x86_64-w64-mingw32/lib"
+        NO_DEFAULT_PATH
+    )
+endif()
+set(DEFCOIN_NU_SECP256K1_INCLUDE_DIR "${DEFCOIN_NU_SECP256K1_ROOT}/include")
+set(DEFCOIN_NU_HAS_LOCAL_SECP256K1 OFF)
+if(DEFCOIN_NU_SECP256K1_LIBRARY AND EXISTS "${DEFCOIN_NU_SECP256K1_INCLUDE_DIR}/secp256k1.h")
+    set(DEFCOIN_NU_HAS_LOCAL_SECP256K1 ON)
+    message(STATUS "Using local libsecp256k1 for Nu paper-wallet address derivation: ${DEFCOIN_NU_SECP256K1_LIBRARY}")
+else()
+    message(WARNING "Nu paper-wallet generation will fail closed until libsecp256k1 is available. Build Core first or set DEFCOIN_NU_SECP256K1_ROOT.")
+endif()
+
 qt_add_executable(DefcoinCoreNu
     MACOSX_BUNDLE
     main.cpp
@@ -91,6 +156,7 @@ qt_add_executable(DefcoinCoreNu
     NuRpcService.h
     NuVelopackUpdater.cpp
     NuVelopackUpdater.h
+    "${DEFCOIN_NU_CORE_SRC_DIR}/crypto/ripemd160.cpp"
 )
 
 set(DEFCOIN_NU_ICON_MACOS "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/DefcoinCoreNuNuIcon.icns")
@@ -117,13 +183,22 @@ target_link_libraries(DefcoinCoreNu
     PRIVATE
         ${DEFCOIN_NU_QT_LIBRARIES}
         ${QRENCODE_LIBRARY}
+        OpenSSL::Crypto
 )
+if(DEFCOIN_NU_HAS_LOCAL_SECP256K1)
+    target_link_libraries(DefcoinCoreNu PRIVATE ${DEFCOIN_NU_SECP256K1_LIBRARY})
+    target_compile_definitions(DefcoinCoreNu PRIVATE DEFCOIN_NU_HAS_LOCAL_SECP256K1=1)
+endif()
 
 if(APPLE)
     target_link_libraries(DefcoinCoreNu PRIVATE ${COCOA_LIBRARY} ${CARBON_LIBRARY})
 endif()
 
-target_include_directories(DefcoinCoreNu PRIVATE ${QRENCODE_INCLUDE_DIR})
+target_include_directories(DefcoinCoreNu PRIVATE
+    ${QRENCODE_INCLUDE_DIR}
+    "${DEFCOIN_NU_CORE_SRC_DIR}"
+    "${DEFCOIN_NU_SECP256K1_INCLUDE_DIR}"
+)
 
 set_target_properties(DefcoinCoreNu PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinCoreNu
@@ -146,6 +221,7 @@ target_compile_definitions(DefcoinCoreNu PRIVATE
     DEFCOIN_NU_HELP_ENABLED=${DEFCOIN_NU_HELP_ENABLED_VALUE}
     DEFCOIN_NU_VELOPACK_UPDATE_URL="${DEFCOIN_NU_VELOPACK_UPDATE_URL}"
     DEFCOIN_NU_EXPLORE_APP=0
+    DEFCOIN_NU_HAS_OPENSSL_CRYPTO=1
 )
 
 qt_add_executable(DefcoinCoreExplore
@@ -157,6 +233,7 @@ qt_add_executable(DefcoinCoreExplore
     NuRpcService.h
     NuVelopackUpdater.cpp
     NuVelopackUpdater.h
+    "${DEFCOIN_NU_CORE_SRC_DIR}/crypto/ripemd160.cpp"
 )
 
 target_sources(DefcoinCoreExplore PRIVATE ${DEFCOIN_NU_ICON_MACOS})
@@ -175,9 +252,18 @@ target_link_libraries(DefcoinCoreExplore
     PRIVATE
         ${DEFCOIN_NU_QT_LIBRARIES}
         ${QRENCODE_LIBRARY}
+        OpenSSL::Crypto
 )
+if(DEFCOIN_NU_HAS_LOCAL_SECP256K1)
+    target_link_libraries(DefcoinCoreExplore PRIVATE ${DEFCOIN_NU_SECP256K1_LIBRARY})
+    target_compile_definitions(DefcoinCoreExplore PRIVATE DEFCOIN_NU_HAS_LOCAL_SECP256K1=1)
+endif()
 
-target_include_directories(DefcoinCoreExplore PRIVATE ${QRENCODE_INCLUDE_DIR})
+target_include_directories(DefcoinCoreExplore PRIVATE
+    ${QRENCODE_INCLUDE_DIR}
+    "${DEFCOIN_NU_CORE_SRC_DIR}"
+    "${DEFCOIN_NU_SECP256K1_INCLUDE_DIR}"
+)
 
 set_target_properties(DefcoinCoreExplore PROPERTIES
     EXCLUDE_FROM_ALL TRUE
@@ -195,6 +281,7 @@ target_compile_definitions(DefcoinCoreExplore PRIVATE
     DEFCOIN_NU_HELP_ENABLED=${DEFCOIN_NU_HELP_ENABLED_VALUE}
     DEFCOIN_NU_VELOPACK_UPDATE_URL="${DEFCOIN_NU_VELOPACK_UPDATE_URL}"
     DEFCOIN_NU_EXPLORE_APP=1
+    DEFCOIN_NU_HAS_OPENSSL_CRYPTO=1
 )
 
 file(GLOB_RECURSE DEFCOIN_NU_QML_FILES CONFIGURE_DEPENDS
@@ -202,14 +289,32 @@ file(GLOB_RECURSE DEFCOIN_NU_QML_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/../qml/qmldir"
 )
 
+file(GLOB_RECURSE DEFCOIN_NU_QML_AGENT_NOTE_FILES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/../qml/*.agent.md"
+)
+
+set(DEFCOIN_NU_EXPLORE_ONLY_QML_PATHS
+    "ExploreMain.qml"
+    "Shell/ExploreFrame.qml"
+    "Shell/ExploreNavigationRail.qml"
+    "Views/ExplorerView.qml"
+    "Views/ForensicsView.qml"
+)
+
 set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/DefcoinCoreNu.ico"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/bip39/english.txt"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-coin-stack-hires.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-icon-1024.png"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-v26-coin.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/data/coindroids_dc25_chain_forensics.json"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/data/defcoin_reddit_timeline.json"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/docs/coindroids_defcoin_forensics_story_report_v6.pdf"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/AtkinsonHyperlegibleMono-Bold.ttf"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/AtkinsonHyperlegibleMono-BoldItalic.ttf"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/AtkinsonHyperlegibleMono-Italic.ttf"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/AtkinsonHyperlegibleMono-OFL.txt"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/AtkinsonHyperlegibleMono-Regular.ttf"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/activity.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/copy.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/external-link.svg"
@@ -229,6 +334,10 @@ set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/wallet.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/warning.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/licenses/trippy-Apache-2.0-LICENSE.txt"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/licenses/defcoin-bulk-NOTICE.txt"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/paperwallet/defcoin-bulk/defcoin-front-300dpi.png"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/paperwallet/defcoin-bulk/defcoin-back-300dpi.png"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/paperwallet/defcoin-bulk/brainsilo_logo.png"
 )
 
 file(GLOB_RECURSE DEFCOIN_NU_HELP_FILES CONFIGURE_DEPENDS
@@ -294,6 +403,21 @@ else()
     set(DEFCOIN_NU_HELP_DIR "${DEFCOIN_NU_RESOURCE_DIR}/help/DefcoinCoreNu.help")
 endif()
 
+set(DEFCOIN_NU_QML_AGENT_NOTE_REMOVE_COMMANDS)
+foreach(nu_agent_note IN LISTS DEFCOIN_NU_QML_AGENT_NOTE_FILES)
+    file(RELATIVE_PATH nu_agent_note_rel "${CMAKE_CURRENT_LIST_DIR}/../qml" "${nu_agent_note}")
+    list(APPEND DEFCOIN_NU_QML_AGENT_NOTE_REMOVE_COMMANDS
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${DEFCOIN_NU_RESOURCE_DIR}/qml/${nu_agent_note_rel}"
+    )
+endforeach()
+
+set(DEFCOIN_NU_EXPLORE_ONLY_QML_REMOVE_COMMANDS)
+foreach(nu_explore_qml IN LISTS DEFCOIN_NU_EXPLORE_ONLY_QML_PATHS)
+    list(APPEND DEFCOIN_NU_EXPLORE_ONLY_QML_REMOVE_COMMANDS
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${DEFCOIN_NU_RESOURCE_DIR}/qml/${nu_explore_qml}"
+    )
+endforeach()
+
 set(DEFCOIN_NU_ASSET_COPY_COMMANDS)
 foreach(nu_asset IN LISTS DEFCOIN_NU_RUNTIME_ASSET_FILES)
     file(RELATIVE_PATH nu_asset_rel "${CMAKE_CURRENT_LIST_DIR}/../assets" "${nu_asset}")
@@ -309,6 +433,8 @@ add_custom_target(DefcoinCoreNuResources ALL
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_RESOURCE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_RESOURCE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_LIST_DIR}/../qml" "${DEFCOIN_NU_RESOURCE_DIR}/qml"
+    ${DEFCOIN_NU_QML_AGENT_NOTE_REMOVE_COMMANDS}
+    ${DEFCOIN_NU_EXPLORE_ONLY_QML_REMOVE_COMMANDS}
     ${DEFCOIN_NU_ASSET_COPY_COMMANDS}
 )
 
@@ -567,6 +693,7 @@ if(WIN32)
         Qt6::Gui
         Qt6::Network
         Qt6::OpenGL
+        Qt6::PrintSupport
         Qt6::Qml
         Qt6::QmlMeta
         Qt6::QmlModels

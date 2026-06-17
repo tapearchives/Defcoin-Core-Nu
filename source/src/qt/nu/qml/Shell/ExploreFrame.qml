@@ -13,6 +13,7 @@ Item {
     property int peerInitialView: 0
     property bool forensicsLoaded: false
     property bool explorerLoaded: true
+    property bool paperLoaded: false
     property string explorerSearchText: ""
     property int explorerSearchNonce: 0
     property string explorerResultTitle: ""
@@ -26,6 +27,8 @@ Item {
     onCurrentRouteChanged: {
         if (currentRoute === "explorer" || currentRoute === "pulse" || currentRoute === "holders" || currentRoute === "movements" || currentRoute === "coindroids" || currentRoute === "reddit" || currentRoute === "indexing")
             explorerLoaded = true
+        else if (currentRoute === "paper")
+            paperLoaded = true
         else
             forensicsLoaded = true
     }
@@ -40,6 +43,8 @@ Item {
         case "reddit":
         case "indexing":
             return 1
+        case "paper":
+            return 2
         default: return 0
         }
     }
@@ -52,6 +57,10 @@ Item {
                || root.currentRoute === "coindroids"
                || root.currentRoute === "reddit"
                || root.currentRoute === "indexing"
+    }
+
+    function paperRouteActive() {
+        return root.currentRoute === "paper"
     }
 
     function forensicsPreferredTab(route) {
@@ -128,6 +137,20 @@ Item {
         root.explorerResultNonce += 1
     }
 
+    function openPaperWalletPopoutForUiSelfTest() {
+        root.currentRoute = "paper"
+        root.paperLoaded = true
+        Qt.callLater(function() {
+            if (paperLoader.item && paperLoader.item.openPreviewPopoutForUiSelfTest)
+                paperLoader.item.openPreviewPopoutForUiSelfTest()
+        })
+    }
+
+    function closePaperWalletPopoutForUiSelfTest() {
+        if (paperLoader.item && paperLoader.item.closePreviewPopoutForUiSelfTest)
+            paperLoader.item.closePreviewPopoutForUiSelfTest()
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -162,6 +185,7 @@ Item {
                     currentIndex: root.routeIndex(root.currentRoute)
 
                     Loader {
+                        id: forensicsLoader
                         active: root.forensicsLoaded
                         asynchronous: true
                         sourceComponent: ForensicsView {
@@ -173,6 +197,7 @@ Item {
                     }
 
                     Loader {
+                        id: explorerLoader
                         active: root.explorerLoaded
                         asynchronous: true
                         sourceComponent: ExplorerView {
@@ -185,6 +210,15 @@ Item {
                             explorerResultTitle: root.explorerResultTitle
                             explorerResultHtml: root.explorerResultHtml
                             explorerResultNonce: root.explorerResultNonce
+                        }
+                    }
+
+                    Loader {
+                        id: paperLoader
+                        active: root.paperLoaded
+                        asynchronous: true
+                        sourceComponent: PaperWalletView {
+                            active: root.paperRouteActive()
                         }
                     }
                 }

@@ -1,6 +1,9 @@
 import QtQuick 2.15
+import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import Defcoin.Nu 1.0
 
+import "../Components"
 import "../Theme"
 import "../Views"
 
@@ -8,6 +11,7 @@ Item {
     id: root
 
     property string currentRoute: "home"
+    property string pendingRoute: ""
     property int nodeInitialTab: 0
     property int peerInitialView: 0
     readonly property int pageMargin: width < 1280 ? NuTokens.spaceLg : NuTokens.spaceXl
@@ -37,6 +41,22 @@ Item {
         sendView.loadUri(uri)
     }
 
+    function uiSelfTestOpenPaperWalletTab() {
+        root.currentRoute = "wallet"
+        walletView.requestWalletTab(1)
+    }
+
+    function requestRoute(route) {
+        if (route === root.currentRoute)
+            return
+        if (NuService.paperWalletReady) {
+            root.pendingRoute = route
+            leavePaperWalletKeysDialog.open()
+            return
+        }
+        root.currentRoute = route
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -46,7 +66,7 @@ Item {
             Layout.preferredWidth: root.railWidth
             Layout.fillHeight: true
             currentRoute: root.currentRoute
-            onRouteRequested: (route) => root.currentRoute = route
+            onRouteRequested: (route) => root.requestRoute(route)
             onAboutRequested: root.aboutRequested()
         }
 
@@ -71,7 +91,7 @@ Item {
                     currentIndex: root.routeIndex(root.currentRoute)
 
                     HomeView {
-                        onNavigateRequested: (route) => root.currentRoute = route
+                        onNavigateRequested: (route) => root.requestRoute(route)
                     }
                     SendView {
                         id: sendView
@@ -79,6 +99,7 @@ Item {
                     ReceiveView {}
                     ActivityView {}
                     WalletView {
+                        id: walletView
                         onCreateWalletRequested: root.createWalletRequested()
                         onCreateRecoveryWalletRequested: root.createRecoveryWalletRequested()
                         onRestoreRecoveryWalletRequested: root.restoreRecoveryWalletRequested()
@@ -92,6 +113,41 @@ Item {
                     SettingsView {}
                 }
             }
+        }
+    }
+
+    NuDialog {
+        id: leavePaperWalletKeysDialog
+        title: "Leave Paper Wallet?"
+        acceptText: "Erase Keys and Leave"
+        cancelText: "Return to Paper Wallet"
+        dialogWidth: 660
+
+        Label {
+            Layout.fillWidth: true
+            text: "Generated paper-wallet private keys are still in memory. If you leave now, Nu will clear them and they cannot be printed or recovered from this session."
+            color: NuTokens.textPrimary
+            font.pixelSize: NuTokens.fontBody
+            wrapMode: Text.WordWrap
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: "Cancel if you still need to print, fund, or review these paper wallets."
+            color: NuTokens.stateWarning
+            font.pixelSize: NuTokens.fontSmall
+            wrapMode: Text.WordWrap
+        }
+
+        onAccepted: {
+            NuService.clearPaperWallet()
+            if (root.pendingRoute.length > 0)
+                root.currentRoute = root.pendingRoute
+            root.pendingRoute = ""
+        }
+        onRejected: {
+            root.pendingRoute = ""
+            root.currentRoute = "wallet"
         }
     }
 }

@@ -13,6 +13,10 @@ Stages macOS Nu distribution bundles, deploys backend/Qt runtime dependencies, s
 
 - Do not copy wallet/datadir content into distributions.
 - Keep staged app version, bundle metadata, icon, backend binary, Qt runtime, and signing steps synchronized.
+- Do not skip Qt deployment merely because `Contents/Frameworks` exists; the
+  app executable must also resolve Qt through bundled `@rpath` or
+  `@executable_path` install names. A Homebrew-linked executable plus bundled
+  plugins loads two Qt runtimes and aborts at launch.
 - DMG background artwork should be visually verified; generated gradients must fully fade out before image edges.
 - Do not treat successful packaging as proof of runtime launch; smoke-test launch separately.
 

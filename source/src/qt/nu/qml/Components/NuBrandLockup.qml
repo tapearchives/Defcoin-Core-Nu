@@ -5,20 +5,21 @@ import "../Theme"
 Item {
     id: root
 
-    property int coinWidth: 48
-    property int coinHeight: 68
-    property int gap: NuTokens.spaceMd
+    property int coinWidth: Math.round(root.wordmarkSize * 1.85)
+    property int coinHeight: root.coinWidth
+    property int gap: Math.max(NuTokens.spaceMd, Math.round(root.wordmarkSize * 0.46))
     property int wordmarkSize: 24
     property int wordmarkWeight: Font.ExtraBold
-    property real wordmarkTracking: 1.0
-    property real fcGapAdjust: 1.0
+    property real wordmarkTracking: Math.max(1.0, root.wordmarkSize * 0.04)
+    property real coreNuTracking: Math.max(1.0, root.wordmarkSize * 0.042)
+    property real fcGapAdjust: root.wordmarkSize * 0.0345
     property bool fitThirdLineToWordmark: true
-    property int lineSpacing: -8
+    property int lineSpacing: Math.round(root.wordmarkSize * 0.095)
     property color textColor: NuTokens.textInverse
-    property url coinSource: "../../assets/brand/defcoin-nu-coin-stack-hires.png"
+    property url coinSource: "../../assets/brand/defcoin-v26-coin.png"
     property string thirdLine: ""
     readonly property string displayFont: Qt.platform.os === "windows" ? "Bahnschrift Condensed" : "Avenir Next Condensed"
-    readonly property real wordmarkTargetWidth: Math.max(defcoinLine.implicitWidth, coreText.implicitWidth)
+    readonly property real wordmarkTargetWidth: defcoinLine.implicitWidth
     readonly property real thirdLineTracking: {
         if (!fitThirdLineToWordmark || root.thirdLine.length <= 1)
             return root.wordmarkTracking
@@ -45,8 +46,8 @@ Item {
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
         source: root.coinSource
-        sourceSize.width: 692
-        sourceSize.height: 978
+        sourceSize.width: 1254
+        sourceSize.height: 1254
         fillMode: Image.PreserveAspectFit
         smooth: true
         mipmap: true
@@ -61,35 +62,59 @@ Item {
 
         Row {
             id: defcoinLine
-            spacing: root.fcGapAdjust
+            spacing: root.wordmarkTracking
 
-            Text {
-                text: "DEF"
-                color: root.textColor
-                font.family: root.displayFont
-                font.pixelSize: root.wordmarkSize
-                font.weight: root.wordmarkWeight
-                font.letterSpacing: root.wordmarkTracking
-            }
+            Repeater {
+                model: ["D", "E", "F", "C", "O", "I", "N"]
 
-            Text {
-                text: "COIN"
-                color: root.textColor
-                font.family: root.displayFont
-                font.pixelSize: root.wordmarkSize
-                font.weight: root.wordmarkWeight
-                font.letterSpacing: root.wordmarkTracking
+                Row {
+                    spacing: 0
+
+                    Item {
+                        width: index === 3 ? root.fcGapAdjust : 0
+                        height: 1
+                    }
+
+                    Text {
+                        text: modelData
+                        color: root.textColor
+                        font.family: root.displayFont
+                        font.pixelSize: root.wordmarkSize
+                        font.weight: root.wordmarkWeight
+                        font.letterSpacing: 0
+                    }
+                }
             }
         }
 
-        Text {
-            id: coreText
-            text: "CORE NU"
-            color: root.textColor
-            font.family: root.displayFont
-            font.pixelSize: root.wordmarkSize
-            font.weight: root.wordmarkWeight
-            font.letterSpacing: root.wordmarkTracking
+        Row {
+            id: coreLine
+            width: root.wordmarkTargetWidth
+
+            Text {
+                id: coreRun
+                text: "CORE"
+                color: root.textColor
+                font.family: root.displayFont
+                font.pixelSize: root.wordmarkSize
+                font.weight: root.wordmarkWeight
+                font.letterSpacing: root.coreNuTracking
+            }
+
+            Item {
+                width: Math.max(0, coreLine.width - coreRun.implicitWidth - nuRun.implicitWidth)
+                height: 1
+            }
+
+            Text {
+                id: nuRun
+                text: "NU"
+                color: root.textColor
+                font.family: root.displayFont
+                font.pixelSize: root.wordmarkSize
+                font.weight: root.wordmarkWeight
+                font.letterSpacing: root.coreNuTracking
+            }
         }
 
         Text {

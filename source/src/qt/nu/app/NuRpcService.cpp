@@ -3,12 +3,14 @@
 
 #include <QAbstractSocket>
 #include <QApplication>
+#include <QBuffer>
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDate>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QDialog>
 #include <QDir>
 #include <QDnsLookup>
 #include <QEventLoop>
@@ -20,6 +22,8 @@
 #include <QFontMetrics>
 #include <QHostAddress>
 #include <QHostInfo>
+#include <QIODevice>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -31,8 +35,11 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPair>
 #include <QPointer>
+#include <QPrintDialog>
+#include <QPrinter>
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QRegularExpression>
@@ -44,6 +51,7 @@
 #include <QSqlQuery>
 #include <QStandardPaths>
 #include <QSysInfo>
+#include <QTextDocument>
 #include <QTextStream>
 #include <QThread>
 #include <QTimeZone>
@@ -54,7 +62,17 @@
 #include <QVector>
 #include <QVersionNumber>
 
+#include <crypto/ripemd160.h>
 #include <qrencode.h>
+#if defined(DEFCOIN_NU_HAS_OPENSSL_CRYPTO)
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/opensslv.h>
+#include <openssl/rand.h>
+#endif
+#if defined(DEFCOIN_NU_HAS_LOCAL_SECP256K1)
+#include <secp256k1.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -149,8 +167,10 @@ constexpr int AUTO_DBCACHE_MIN_MIB = 450;
 constexpr int AUTO_DBCACHE_64BIT_MAX_MIB = 32768;
 constexpr int AUTO_DBCACHE_32BIT_MAX_MIB = 1024;
 constexpr char UDP_FAST_SYNC_CAPABILITY[] = "defcoin-nu-udp-fast-sync-v1";
+constexpr unsigned char DEFCOIN_CURRENT_P2PKH_PREFIX = 30; // mainnet P2PKH, D...
 constexpr unsigned char DEFCOIN_CURRENT_WIF_PREFIX = 0xb0; // Defcoin v1.0.0+ private keys render as T...
 constexpr unsigned char DEFCOIN_LEGACY_WIF_PREFIX = 0x9e;  // Defcoin v0.22/Ian Coleman legacy entry renders as Q...
+constexpr int PAPER_WALLET_MIN_BIP38_PASSPHRASE_CHARS = 12;
 constexpr char BASE58_ALPHABET[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const QStringList EXPLORER_TOP100_COLORS = {QStringLiteral("#48b7ff"),
                                             QStringLiteral("#f3d447"),
@@ -167,6 +187,8 @@ const QStringList EXPLORER_TOP100_COLORS = {QStringLiteral("#48b7ff"),
                                             QStringLiteral("#e84118"),
                                             QStringLiteral("#4cd137"),
                                             QStringLiteral("#8c7ae6")};
+
+QString encodeBase58Check(const QByteArray& payload);
 
 QByteArray doubleSha256(const QByteArray& bytes)
 {
@@ -1136,6 +1158,336 @@ bool isValidSecp256k1Secret(const QByteArray& secret)
     return non_zero && compareUnsignedBytes(secret, order) < 0;
 }
 
+void secureClear(QByteArray* bytes);
+
+bool systemRandomBytes(QByteArray* out, int size)
+{
+    if (!out || size <= 0)
+        return false;
+    out->resize(size);
+#if defined(DEFCOIN_NU_HAS_OPENSSL_CRYPTO)
+#if OPENSSL_VERSION_NUMBER >= 0x10101000L
+    const int random_ok = RAND_priv_bytes(reinterpret_cast<unsigned char*>(out->data()), size);
+#else
+    const int random_ok = RAND_bytes(reinterpret_cast<unsigned char*>(out->data()), size);
+#endif
+    if (random_ok != 1) {
+        OPENSSL_cleanse(out->data(), size_t(out->size()));
+        return false;
+    }
+#else
+    for (int i = 0; i < size; ++i)
+        (*out)[i] = char(QRandomGenerator::system()->generate() & 0xff);
+#endif
+    bool non_zero = false;
+    for (const char byte : *out) {
+        if (byte != 0) {
+            non_zero = true;
+            break;
+        }
+    }
+    if (!non_zero)
+        secureClear(out);
+    return non_zero;
+}
+
+void secureClear(QByteArray* bytes)
+{
+    if (!bytes || bytes->isEmpty())
+        return;
+#if defined(DEFCOIN_NU_HAS_OPENSSL_CRYPTO)
+    OPENSSL_cleanse(bytes->data(), size_t(bytes->size()));
+#else
+    volatile unsigned char* cursor = reinterpret_cast<volatile unsigned char*>(bytes->data());
+    for (int i = 0; i < bytes->size(); ++i)
+        cursor[i] = 0;
+#endif
+    bytes->clear();
+}
+
+QByteArray paperWalletSecretFromEntropy(const QString& user_entropy)
+{
+    QByteArray initial_random;
+    QByteArray final_random;
+    if (!systemRandomBytes(&initial_random, 128) || !systemRandomBytes(&final_random, 64)) {
+        secureClear(&initial_random);
+        secureClear(&final_random);
+        return QByteArray();
+    }
+
+    QByteArray seed;
+    seed.reserve(384 + qMin(user_entropy.size(), 32768));
+    seed.append(QByteArrayLiteral("Defcoin Core Nu paper wallet secret v2\n"));
+    seed.append(initial_random);
+    seed.append(user_entropy.left(32768).toUtf8());
+    seed.append(QByteArray::number(QDateTime::currentMSecsSinceEpoch()));
+    seed.append(QByteArray::number(QCoreApplication::applicationPid()));
+    seed.append(QUuid::createUuid().toByteArray());
+    seed.append(final_random);
+    secureClear(&initial_random);
+    secureClear(&final_random);
+
+    QByteArray digest = QCryptographicHash::hash(seed, QCryptographicHash::Sha512);
+    for (int round = 0; round < 8; ++round) {
+        QByteArray round_material;
+        round_material.reserve(digest.size() + seed.size() + 16);
+        round_material.append(QByteArrayLiteral("paper-wallet-round="));
+        round_material.append(QByteArray::number(round));
+        round_material.append(digest);
+        round_material.append(seed);
+        digest = QCryptographicHash::hash(round_material, QCryptographicHash::Sha512);
+        secureClear(&round_material);
+    }
+    secureClear(&seed);
+    for (int counter = 0; counter < 1024; ++counter) {
+        QByteArray secret = digest.left(32);
+        if (isValidSecp256k1Secret(secret)) {
+            secureClear(&digest);
+            return secret;
+        }
+        digest.append(QByteArray::number(counter));
+        QByteArray counter_random;
+        if (!systemRandomBytes(&counter_random, 16)) {
+            secureClear(&digest);
+            return QByteArray();
+        }
+        digest.append(counter_random);
+        secureClear(&counter_random);
+        digest = QCryptographicHash::hash(digest, QCryptographicHash::Sha512);
+    }
+    secureClear(&digest);
+    return QByteArray();
+}
+
+QByteArray hash160Bytes(const QByteArray& data)
+{
+    const QByteArray sha = sha256Bytes(data);
+    QByteArray out(CRIPEMD160::OUTPUT_SIZE, char(0));
+    CRIPEMD160()
+        .Write(reinterpret_cast<const unsigned char*>(sha.constData()), size_t(sha.size()))
+        .Finalize(reinterpret_cast<unsigned char*>(out.data()));
+    return out;
+}
+
+QString defcoinP2pkhAddressFromSecret(const QByteArray& secret)
+{
+    if (!isValidSecp256k1Secret(secret))
+        return QString();
+#if defined(DEFCOIN_NU_HAS_LOCAL_SECP256K1)
+    secp256k1_context* context = secp256k1_context_create(SECP256K1_CONTEXT_SIGN);
+    if (!context)
+        return QString();
+
+    secp256k1_pubkey public_key;
+    unsigned char secret_bytes[32];
+    std::memcpy(secret_bytes, secret.constData(), sizeof(secret_bytes));
+    const bool ok = secp256k1_ec_seckey_verify(context, secret_bytes) == 1 &&
+                    secp256k1_ec_pubkey_create(context, &public_key, secret_bytes) == 1;
+#if defined(DEFCOIN_NU_HAS_OPENSSL_CRYPTO)
+    OPENSSL_cleanse(secret_bytes, sizeof(secret_bytes));
+#else
+    volatile unsigned char* secret_cursor = secret_bytes;
+    for (size_t i = 0; i < sizeof(secret_bytes); ++i)
+        secret_cursor[i] = 0;
+#endif
+    if (!ok) {
+        secp256k1_context_destroy(context);
+        return QString();
+    }
+
+    unsigned char serialized[33];
+    size_t serialized_len = sizeof(serialized);
+    const bool serialized_ok =
+        secp256k1_ec_pubkey_serialize(context, serialized, &serialized_len, &public_key, SECP256K1_EC_COMPRESSED) == 1;
+    secp256k1_context_destroy(context);
+    if (!serialized_ok || serialized_len != sizeof(serialized))
+        return QString();
+
+    const QByteArray pubkey(reinterpret_cast<const char*>(serialized), int(serialized_len));
+    QByteArray payload;
+    payload.append(char(DEFCOIN_CURRENT_P2PKH_PREFIX));
+    payload.append(hash160Bytes(pubkey));
+    return encodeBase58Check(payload);
+#else
+    return QString();
+#endif
+}
+
+QString defcoinWifFromSecret(const QByteArray& secret)
+{
+    if (!isValidSecp256k1Secret(secret))
+        return QString();
+    QByteArray payload;
+    payload.append(char(DEFCOIN_CURRENT_WIF_PREFIX));
+    payload.append(secret);
+    payload.append(char(1)); // compressed key marker
+    const QString wif = encodeBase58Check(payload);
+    secureClear(&payload);
+    return wif;
+}
+
+QByteArray aes256EcbEncryptBlock(const QByteArray& key, const QByteArray& block)
+{
+#if defined(DEFCOIN_NU_HAS_OPENSSL_CRYPTO)
+    if (key.size() != 32 || block.size() != 16)
+        return QByteArray();
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx)
+        return QByteArray();
+
+    QByteArray out(32, char(0));
+    int out_len_1 = 0;
+    int out_len_2 = 0;
+    const bool ok =
+        EVP_EncryptInit_ex(
+            ctx, EVP_aes_256_ecb(), nullptr, reinterpret_cast<const unsigned char*>(key.constData()), nullptr) == 1 &&
+        EVP_CIPHER_CTX_set_padding(ctx, 0) == 1 &&
+        EVP_EncryptUpdate(ctx,
+                          reinterpret_cast<unsigned char*>(out.data()),
+                          &out_len_1,
+                          reinterpret_cast<const unsigned char*>(block.constData()),
+                          block.size()) == 1 &&
+        EVP_EncryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(out.data()) + out_len_1, &out_len_2) == 1;
+    EVP_CIPHER_CTX_free(ctx);
+
+    if (!ok || out_len_1 + out_len_2 != 16) {
+        secureClear(&out);
+        return QByteArray();
+    }
+    out.truncate(16);
+    return out;
+#else
+    Q_UNUSED(key);
+    Q_UNUSED(block);
+    return QByteArray();
+#endif
+}
+
+QString bip38EncryptSecret(const QByteArray& secret,
+                           const QString& address,
+                           const QString& passphrase,
+                           bool allow_weak_passphrase)
+{
+#if defined(DEFCOIN_NU_HAS_OPENSSL_CRYPTO)
+    if (!isValidSecp256k1Secret(secret) || address.isEmpty() ||
+        (!allow_weak_passphrase && passphrase.trimmed().size() < PAPER_WALLET_MIN_BIP38_PASSPHRASE_CHARS)) {
+        return QString();
+    }
+
+    const QByteArray address_hash = hash256Bytes(address.toLatin1()).left(4);
+    QByteArray passphrase_utf8 = passphrase.toUtf8();
+    QByteArray derived(64, char(0));
+    const int scrypt_ok = EVP_PBE_scrypt(passphrase_utf8.constData(),
+                                         size_t(passphrase_utf8.size()),
+                                         reinterpret_cast<const unsigned char*>(address_hash.constData()),
+                                         size_t(address_hash.size()),
+                                         16384,
+                                         8,
+                                         8,
+                                         0,
+                                         reinterpret_cast<unsigned char*>(derived.data()),
+                                         size_t(derived.size()));
+    OPENSSL_cleanse(passphrase_utf8.data(), size_t(passphrase_utf8.size()));
+    if (scrypt_ok != 1) {
+        secureClear(&derived);
+        return QString();
+    }
+
+    QByteArray derived_half_1 = derived.left(32);
+    QByteArray derived_half_2 = derived.mid(32, 32);
+    QByteArray block_1(16, char(0));
+    QByteArray block_2(16, char(0));
+    for (int i = 0; i < 16; ++i) {
+        block_1[i] = char(static_cast<unsigned char>(secret.at(i)) ^ static_cast<unsigned char>(derived_half_1.at(i)));
+        block_2[i] =
+            char(static_cast<unsigned char>(secret.at(i + 16)) ^ static_cast<unsigned char>(derived_half_1.at(i + 16)));
+    }
+
+    const QByteArray encrypted_1 = aes256EcbEncryptBlock(derived_half_2, block_1);
+    const QByteArray encrypted_2 = aes256EcbEncryptBlock(derived_half_2, block_2);
+    secureClear(&block_1);
+    secureClear(&block_2);
+    secureClear(&derived_half_1);
+    secureClear(&derived_half_2);
+    secureClear(&derived);
+    if (encrypted_1.size() != 16 || encrypted_2.size() != 16)
+        return QString();
+
+    QByteArray payload;
+    payload.append(char(0x01));
+    payload.append(char(0x42));
+    payload.append(char(0xe0)); // non-EC-multiply, compressed public key
+    payload.append(address_hash);
+    payload.append(encrypted_1);
+    payload.append(encrypted_2);
+    const QString encrypted = encodeBase58Check(payload);
+    secureClear(&payload);
+    return encrypted;
+#else
+    Q_UNUSED(secret);
+    Q_UNUSED(address);
+    Q_UNUSED(passphrase);
+    return QString();
+#endif
+}
+
+QImage qrImageForText(const QString& text, QRecLevel error_correction, int quiet_zone_px = 24)
+{
+    if (text.trimmed().isEmpty())
+        return QImage();
+    const QByteArray encoded = text.toUtf8();
+    QRcode* code = QRcode_encodeString(encoded.constData(), 0, error_correction, QR_MODE_8, 1);
+    if (!code)
+        return QImage();
+
+    QImage qr(code->width, code->width, QImage::Format_RGB32);
+    qr.fill(Qt::white);
+    unsigned char* p = code->data;
+    for (int y = 0; y < code->width; ++y) {
+        for (int x = 0; x < code->width; ++x) {
+            qr.setPixel(x, y, ((*p & 1) ? 0x000000 : 0xffffff));
+            ++p;
+        }
+    }
+    QRcode_free(code);
+
+    QImage out(QR_IMAGE_SIZE, QR_IMAGE_SIZE, QImage::Format_RGB32);
+    out.fill(Qt::white);
+    {
+        QPainter painter(&out);
+        const int quiet = qBound(0, quiet_zone_px, QR_IMAGE_SIZE / 3);
+        painter.drawImage(out.rect().adjusted(quiet, quiet, -quiet, -quiet), qr);
+    }
+    return out;
+}
+
+QString qrPngDataUrlForText(const QString& text)
+{
+    const QImage qr = qrImageForText(text, QR_ECLEVEL_M);
+    if (qr.isNull())
+        return QString();
+    QByteArray png;
+    QBuffer buffer(&png);
+    if (!buffer.open(QIODevice::WriteOnly) || !qr.save(&buffer, "PNG"))
+        return QString();
+    return QStringLiteral("data:image/png;base64,%1").arg(QString::fromLatin1(png.toBase64()));
+}
+
+QString paperWalletKeyLabel(bool bip38_encrypted)
+{
+    return bip38_encrypted ? QStringLiteral("Encrypted Private Key (BIP38 secret text phrase is also required)") :
+                             QStringLiteral("Private key (WIF)");
+}
+
+QString pngFileDataUrl(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+    return QStringLiteral("data:image/png;base64,%1").arg(QString::fromLatin1(file.readAll().toBase64()));
+}
+
 QString encodeBase58Check(const QByteArray& payload)
 {
     static constexpr char alphabet[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -1857,6 +2209,15 @@ QStringList configuredSeedDomains()
             QStringLiteral("seed.defcoin-ng.org")};
 }
 
+QHash<QString, QString> configuredSeedAddressAliases()
+{
+    QHash<QString, QString> aliases;
+    aliases.insert(QStringLiteral("66.42.91.225"), QStringLiteral("defcoin.io"));
+    aliases.insert(QStringLiteral("135.148.43.188"), QStringLiteral("defcoin.host"));
+    aliases.insert(QStringLiteral("135.148.43.189"), QStringLiteral("defcoin.host"));
+    return aliases;
+}
+
 int seedDomainPriority(const QString& domain)
 {
     const QStringList domains = configuredSeedDomains();
@@ -2557,7 +2918,9 @@ QStringList splitConsolePasteCommands(const QString& text, QString* error)
 bool rpcMethodTakesSensitiveInput(const QString& method)
 {
     const QString lower = method.toLower();
-    static const QSet<QString> sensitive_methods{QStringLiteral("encryptwallet"),
+    static const QSet<QString> sensitive_methods{QStringLiteral("deriveaddresses"),
+                                                 QStringLiteral("encryptwallet"),
+                                                 QStringLiteral("getdescriptorinfo"),
                                                  QStringLiteral("importdescriptors"),
                                                  QStringLiteral("importmulti"),
                                                  QStringLiteral("importprivkey"),
@@ -2570,6 +2933,14 @@ bool rpcMethodTakesSensitiveInput(const QString& method)
            lower.contains(QStringLiteral("privkey"));
 }
 
+bool rpcMethodReturnsSensitiveOutput(const QString& method)
+{
+    const QString lower = method.toLower();
+    static const QSet<QString> sensitive_methods{
+        QStringLiteral("dumpprivkey"), QStringLiteral("dumpwallet"), QStringLiteral("listdescriptors")};
+    return sensitive_methods.contains(lower) || lower.contains(QStringLiteral("privkey"));
+}
+
 QString rpcPromptForDisplay(const QString& method, const QString& params_json)
 {
     if (params_json.isEmpty())
@@ -2577,6 +2948,47 @@ QString rpcPromptForDisplay(const QString& method, const QString& params_json)
     if (rpcMethodTakesSensitiveInput(method))
         return method + QStringLiteral(" [params redacted]");
     return method + QStringLiteral(" ") + params_json;
+}
+
+QString renderRpcResultForConsole(const QString& method, const QJsonValue& result)
+{
+    if (rpcMethodReturnsSensitiveOutput(method)) {
+        return QStringLiteral(
+            "[sensitive result redacted]\nThis RPC method can expose wallet metadata or private-key material. Use "
+            "defcoin-cli directly if you intentionally need the raw result.");
+    }
+    QJsonDocument out_doc;
+    if (result.isObject()) {
+        out_doc = QJsonDocument(result.toObject());
+    } else if (result.isArray()) {
+        out_doc = QJsonDocument(result.toArray());
+    }
+    if (!out_doc.isNull()) {
+        return QString::fromUtf8(out_doc.toJson(QJsonDocument::Indented));
+    }
+    if (result.isString())
+        return result.toString();
+    if (result.isBool())
+        return result.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+    if (result.isDouble())
+        return QString::number(result.toDouble(), 'f', 8);
+    if (result.isNull())
+        return QStringLiteral("null");
+    return QStringLiteral("(empty result)");
+}
+
+QString csvCell(QString text)
+{
+    if (!text.isEmpty()) {
+        const QChar first = text.at(0);
+        if (first == QLatin1Char('=') || first == QLatin1Char('+') || first == QLatin1Char('-') ||
+            first == QLatin1Char('@') || first == QLatin1Char('\t') || first == QLatin1Char('\r') ||
+            first == QLatin1Char('\n')) {
+            text.prepend(QLatin1Char('\''));
+        }
+    }
+    text.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+    return QStringLiteral("\"%1\"").arg(text);
 }
 
 QString processCommandForDisplayRedacted(const QString& program, const QStringList& args)
@@ -2667,6 +3079,23 @@ bool isSafeHttpUrl(const QUrl& url)
            !url.host().isEmpty() && url.userInfo().isEmpty();
 }
 
+bool isLoopbackRpcHost(const QString& host)
+{
+    const QString clean = host.trimmed();
+    if (clean.isEmpty())
+        return false;
+    if (clean.compare(QStringLiteral("localhost"), Qt::CaseInsensitive) == 0)
+        return true;
+    QHostAddress address;
+    return address.setAddress(clean) && address.isLoopback();
+}
+
+bool remoteRpcExplicitlyAllowed()
+{
+    const QString value = QString::fromLocal8Bit(qgetenv("DEFCOIN_NU_ALLOW_REMOTE_RPC")).trimmed().toLower();
+    return value == QLatin1String("1") || value == QLatin1String("true") || value == QLatin1String("yes");
+}
+
 QString stripAnsiControlSequences(QString text)
 {
     static const QRegularExpression ansi_re(QStringLiteral(R"(\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]))"));
@@ -2699,6 +3128,45 @@ QString resolvedCpuminerExecutable(const QString& selected_path, QString* note)
     }
     return selected_path;
 }
+
+#if defined(Q_OS_WIN)
+HANDLE nuChildProcessJob()
+{
+    static HANDLE job = [] {
+        HANDLE handle = CreateJobObjectW(nullptr, nullptr);
+        if (!handle)
+            return HANDLE(nullptr);
+
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION info{};
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
+            CloseHandle(handle);
+            return HANDLE(nullptr);
+        }
+        return handle;
+    }();
+    return job;
+}
+
+void assignProcessToNuJobObject(QProcess* process)
+{
+    if (!process || process->processId() <= 0)
+        return;
+
+    HANDLE job = nuChildProcessJob();
+    if (!job)
+        return;
+
+    HANDLE child = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, DWORD(process->processId()));
+    if (!child)
+        return;
+
+    AssignProcessToJobObject(job, child);
+    CloseHandle(child);
+}
+#else
+void assignProcessToNuJobObject(QProcess*) {}
+#endif
 } // namespace
 
 NuRpcService::NuRpcService(QObject* parent)
@@ -2769,6 +3237,11 @@ NuRpcService::NuRpcService(QObject* parent)
     m_lan_fast_sync_timer->setInterval(LAN_FAST_SYNC_TIMER_INTERVAL_MS);
     connect(m_lan_fast_sync_timer, &QTimer::timeout, this, &NuRpcService::lanFastSyncTick);
     m_lan_fast_sync_timer->start();
+
+    m_miner_signal_timer = new QTimer(this);
+    m_miner_signal_timer->setSingleShot(true);
+    m_miner_signal_timer->setInterval(250);
+    connect(m_miner_signal_timer, &QTimer::timeout, this, &NuRpcService::emitPendingMinerChanged);
 
     QTimer::singleShot(0, this, &NuRpcService::refresh);
     QTimer::singleShot(250, this, &NuRpcService::sampleTraffic);
@@ -2850,6 +3323,8 @@ void NuRpcService::loadLocalSettings()
     m_forensics_accept_bip141_as_regular =
         nu_settings.value(QStringLiteral("ForensicsAcceptBip141AsRegular"), true).toBool();
     m_background_close_enabled = nu_settings.value(QStringLiteral("KeepRunningWhenClosedEnabled"), false).toBool();
+    m_show_startup_splash_status_indicator =
+        nu_settings.value(QStringLiteral("ShowStartupSplashStatusIndicator"), false).toBool();
     m_miner_executable =
         singleLineLimited(nu_settings.value(QStringLiteral("MinerExecutable"), QString()).toString(), 1024);
     m_miner_pool_url =
@@ -3317,6 +3792,8 @@ bool NuRpcService::ensureBackendStarted()
     appendLaunchDiagnostic(QStringLiteral("Backend launch arguments: %1").arg(args.join(QLatin1Char(' '))));
     m_backend_process->start();
     const bool started = m_backend_process->waitForStarted(5000);
+    if (started && qEnvironmentVariableIsEmpty("DEFCOIN_NU_KEEP_BACKEND_RUNNING"))
+        assignProcessToNuJobObject(m_backend_process);
     const qint64 pid = started ? m_backend_process->processId() : 0;
     m_backend_start_attempted = true;
 
@@ -3362,6 +3839,12 @@ bool NuRpcService::loadRpcSettings()
     m_rpc_password = QString::fromLocal8Bit(qgetenv("DEFCOIN_RPC_PASSWORD"));
 
     readDefcoinConf(QDir(m_data_dir).filePath(QStringLiteral("defcoin.conf")));
+    if (!isLoopbackRpcHost(m_rpc_host) && !remoteRpcExplicitlyAllowed()) {
+        setError(QStringLiteral("Nu refused to send RPC credentials to non-local host '%1'. Use a local backend, or "
+                                "set DEFCOIN_NU_ALLOW_REMOTE_RPC=1 only for a trusted, secured remote RPC endpoint.")
+                     .arg(m_rpc_host.isEmpty() ? QStringLiteral("(empty)") : m_rpc_host));
+        return false;
+    }
     loadReceiveRequests();
     if ((m_rpc_user.isEmpty() || m_rpc_password.isEmpty()) && !readCookie()) {
         if (ensureBackendStarted()) {
@@ -4368,6 +4851,7 @@ ipv4=$(/usr/sbin/arp -an 2>/dev/null |
                 this,
                 [finish](int, QProcess::ExitStatus) { finish(); });
         connect(process, &QProcess::errorOccurred, this, [finish](QProcess::ProcessError) { finish(); });
+        connect(process, &QProcess::started, this, [process] { assignProcessToNuJobObject(process); });
 
         process->start(command.program, command.arguments);
         timeout->start(command.program == QLatin1String("/bin/sh") ? 4500 : 2500);
@@ -4381,6 +4865,13 @@ void NuRpcService::scheduleConfiguredSeedAliasLookups()
     if (m_seed_alias_lookups_started)
         return;
     m_seed_alias_lookups_started = true;
+
+    const QHash<QString, QString> address_aliases = configuredSeedAddressAliases();
+    for (auto alias = address_aliases.constBegin(); alias != address_aliases.constEnd(); ++alias) {
+        const QString key = normalizedPeerHost(alias.key());
+        m_peer_domain_alias_by_host.insert(key, alias.value());
+        m_peer_domain_alias_priority_by_host.insert(key, -1);
+    }
 
     for (const QString& domain : configuredSeedDomains()) {
         auto seed_lookup_id = std::make_shared<int>(-1);
@@ -9138,6 +9629,51 @@ void NuRpcService::requestNewAddress(const QString& label, const QString& amount
             });
 }
 
+void NuRpcService::importPaperWalletPrivateKey(const QString& private_key, bool sweep, const QString& label)
+{
+    if (!ensureCurrentWalletSelected(QStringLiteral("Paper wallet not imported")))
+        return;
+
+    const QString clean_key = private_key.trimmed();
+    if (clean_key.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Paper wallet not imported"),
+                           QStringLiteral("Enter the paper wallet private key first."));
+        return;
+    }
+
+    const QString clean_label = label.trimmed().isEmpty() ? QStringLiteral("Paper wallet import") : label.trimmed();
+    const QString wallet_name = m_wallet_name;
+    QJsonArray params;
+    params.push_back(clean_key);
+    params.push_back(clean_label);
+    params.push_back(true);
+    rpcCall(QStringLiteral("importprivkey"),
+            params,
+            true,
+            [this, wallet_name, sweep](const QJsonValue&, const QString& error) {
+                if (wallet_name != m_wallet_name)
+                    return;
+                if (!error.isEmpty()) {
+                    Q_EMIT userMessage(QStringLiteral("Paper wallet import failed"), error);
+                    return;
+                }
+                refreshWallet();
+                if (sweep) {
+                    Q_EMIT userMessage(
+                        QStringLiteral("Paper wallet imported"),
+                        QStringLiteral("The private key was imported and the wallet is rescanning. Sweep is selected, "
+                                       "but automatic sweep needs a confirmed imported balance before Nu can create "
+                                       "a safe spend transaction. After the rescan completes, use Send to move the "
+                                       "funds to a fresh wallet address."));
+                    return;
+                }
+                Q_EMIT userMessage(
+                    QStringLiteral("Paper wallet imported"),
+                    QStringLiteral(
+                        "The private key was imported into the active wallet. The wallet is rescanning for funds."));
+            });
+}
+
 void NuRpcService::deleteReceiveRequest(const QString& address)
 {
     QVariantList addresses;
@@ -10103,6 +10639,7 @@ void NuRpcService::tracePeer(const QString& node_id)
 
     connect(process, &QProcess::readyReadStandardOutput, this, emit_trace_output);
     connect(process, &QProcess::readyReadStandardError, this, emit_trace_output);
+    connect(process, &QProcess::started, this, [process] { assignProcessToNuJobObject(process); });
     connect(process, &QProcess::errorOccurred, this, [this, trace_id, process](QProcess::ProcessError error) {
         QString reason = process ? process->errorString() : QString();
         if (reason.isEmpty())
@@ -10284,25 +10821,7 @@ void NuRpcService::runRpcCommand(const QString& method, const QString& params_js
                     if (!error.isEmpty()) {
                         rendered = QStringLiteral("%1 failed:\n%2").arg(command.method, error);
                     } else {
-                        QJsonDocument out_doc;
-                        if (result.isObject()) {
-                            out_doc = QJsonDocument(result.toObject());
-                        } else if (result.isArray()) {
-                            out_doc = QJsonDocument(result.toArray());
-                        }
-                        if (!out_doc.isNull()) {
-                            rendered = QString::fromUtf8(out_doc.toJson(QJsonDocument::Indented));
-                        } else if (result.isString()) {
-                            rendered = result.toString();
-                        } else if (result.isBool()) {
-                            rendered = result.toBool() ? QStringLiteral("true") : QStringLiteral("false");
-                        } else if (result.isDouble()) {
-                            rendered = QString::number(result.toDouble(), 'f', 8);
-                        } else if (result.isNull()) {
-                            rendered = QStringLiteral("null");
-                        } else {
-                            rendered = QStringLiteral("(empty result)");
-                        }
+                        rendered = renderRpcResultForConsole(command.method, result);
                     }
                     if (m_console_output.startsWith(QStringLiteral("Enter an RPC method"))) {
                         m_console_output.clear();
@@ -10401,25 +10920,7 @@ void NuRpcService::runRpcConsoleCommand(const QString& command_text, const QStri
             if (!error.isEmpty()) {
                 rendered = QStringLiteral("%1 failed:\n%2").arg(command.method, error);
             } else {
-                QJsonDocument out_doc;
-                if (result.isObject()) {
-                    out_doc = QJsonDocument(result.toObject());
-                } else if (result.isArray()) {
-                    out_doc = QJsonDocument(result.toArray());
-                }
-                if (!out_doc.isNull()) {
-                    rendered = QString::fromUtf8(out_doc.toJson(QJsonDocument::Indented));
-                } else if (result.isString()) {
-                    rendered = result.toString();
-                } else if (result.isBool()) {
-                    rendered = result.toBool() ? QStringLiteral("true") : QStringLiteral("false");
-                } else if (result.isDouble()) {
-                    rendered = QString::number(result.toDouble(), 'f', 8);
-                } else if (result.isNull()) {
-                    rendered = QStringLiteral("null");
-                } else {
-                    rendered = QStringLiteral("(empty result)");
-                }
+                rendered = renderRpcResultForConsole(command.method, result);
             }
             if (m_console_output.startsWith(QStringLiteral("Welcome to the Defcoin Core Nu RPC console."))) {
                 m_console_output.clear();
@@ -10458,93 +10959,1719 @@ void NuRpcService::clearConsoleOutput()
     Q_EMIT consoleChanged();
 }
 
-void NuRpcService::generatePaperWallet(bool import_public_address, const QString& label)
+void NuRpcService::generatePaperWallet(bool import_public_address, const QString& label, const QString& user_entropy)
 {
-    if (!m_rpc_connected) {
-        Q_EMIT userMessage(QStringLiteral("Paper wallet not generated"),
-                           QStringLiteral("Connect to the local backend before generating a paper wallet."));
+    generatePaperWallets(1, 1, false, false, QString(), false, user_entropy);
+    if (import_public_address) {
+        if (!m_paper_wallet_address.isEmpty()) {
+            importWatchOnlyAddress(m_paper_wallet_address,
+                                   label.trimmed().isEmpty() ? QStringLiteral("Paper wallet public address") : label,
+                                   false,
+                                   -1);
+        }
+    }
+}
+
+void NuRpcService::generatePaperWallets(int count,
+                                        int addresses_per_page,
+                                        bool hide_art,
+                                        bool bip38_encrypt,
+                                        const QString& passphrase,
+                                        bool allow_weak_bip38_passphrase,
+                                        const QString& user_entropy,
+                                        const QString& display_amount,
+                                        int print_form)
+{
+    const int bounded_count = qBound(1, count, 100);
+    const int bounded_per_page = qBound(1, addresses_per_page, 6);
+    const int bounded_print_form = qBound(0, print_form, 4);
+    const QString clean_display_amount = display_amount.trimmed().left(80);
+    if (bip38_encrypt && !allow_weak_bip38_passphrase &&
+        passphrase.trimmed().size() < PAPER_WALLET_MIN_BIP38_PASSPHRASE_CHARS) {
+        Q_EMIT userMessage(
+            QStringLiteral("Paper wallets not generated"),
+            QStringLiteral(
+                "Use a BIP38 passphrase of at least 12 characters before generating encrypted paper wallets."));
         return;
     }
 
-    QByteArray secret(32, char(0));
-    do {
-        for (int i = 0; i < secret.size(); ++i) {
-            secret[i] = char(QRandomGenerator::system()->generate() & 0xff);
+    QVariantList entries;
+    entries.reserve(bounded_count);
+    QVector<QByteArray> next_secrets;
+    next_secrets.reserve(bounded_count);
+    auto clearSecrets = [](QVector<QByteArray>* secrets) {
+        if (!secrets)
+            return;
+        for (QByteArray& secret : *secrets)
+            secureClear(&secret);
+        secrets->clear();
+    };
+    QString first_address;
+    QString first_key;
+    QString first_address_qr;
+    QString first_key_qr;
+    QString first_status_key_type =
+        bip38_encrypt ? QStringLiteral("BIP38 encrypted private keys") : QStringLiteral("WIF private keys");
+
+    for (int i = 0; i < bounded_count; ++i) {
+        const QString entry_entropy =
+            QStringLiteral("%1|paper-wallet-entry=%2|%3")
+                .arg(user_entropy.left(32768), QString::number(i + 1), QUuid::createUuid().toString());
+        QByteArray secret;
+        if (i < m_paper_wallet_secrets.size() && isValidSecp256k1Secret(m_paper_wallet_secrets.at(i))) {
+            secret = m_paper_wallet_secrets.at(i);
+        } else {
+            secret = paperWalletSecretFromEntropy(entry_entropy);
         }
-    } while (!isValidSecp256k1Secret(secret));
+        if (secret.isEmpty()) {
+            entries.clear();
+            clearSecrets(&next_secrets);
+            Q_EMIT userMessage(QStringLiteral("Paper wallets not generated"),
+                               QStringLiteral("Secure private-key material was not produced."));
+            return;
+        }
 
-    QByteArray wif_payload;
-    wif_payload.append(char(DEFCOIN_CURRENT_WIF_PREFIX));
-    wif_payload.append(secret);
-    wif_payload.append(char(1)); // compressed key marker
-    const QString wif = encodeBase58Check(wif_payload);
-    secret.fill(0);
-    wif_payload.fill(0);
+        const QString address = defcoinP2pkhAddressFromSecret(secret);
+        if (!isLikelyBase58AddressText(address)) {
+            secureClear(&secret);
+            entries.clear();
+            clearSecrets(&next_secrets);
+            Q_EMIT userMessage(
+                QStringLiteral("Paper wallets not generated"),
+                QStringLiteral("Nu could not derive Defcoin public addresses locally. Rebuild Nu with local secp256k1 "
+                               "support before generating paper wallets."));
+            return;
+        }
 
-    m_paper_wallet_address.clear();
-    m_paper_wallet_wif = wif;
+        QString key = defcoinWifFromSecret(secret);
+        if (bip38_encrypt) {
+            key = bip38EncryptSecret(secret, address, passphrase, allow_weak_bip38_passphrase);
+            if (key.isEmpty()) {
+                secureClear(&secret);
+                entries.clear();
+                clearSecrets(&next_secrets);
+                Q_EMIT userMessage(QStringLiteral("Paper wallets not generated"),
+                                   QStringLiteral("BIP38 encryption failed. No unencrypted print sheet was created."));
+                return;
+            }
+        }
+        next_secrets.append(secret);
+        secureClear(&secret);
+
+        QVariantMap entry;
+        entry.insert(QStringLiteral("index"), i + 1);
+        entry.insert(QStringLiteral("address"), address);
+        entry.insert(QStringLiteral("key"), key);
+        entry.insert(QStringLiteral("addressQr"), qrPngDataUrlForText(address));
+        entry.insert(QStringLiteral("keyQr"), qrPngDataUrlForText(key));
+        entry.insert(QStringLiteral("amount"), clean_display_amount);
+        entry.insert(QStringLiteral("keyLabel"), paperWalletKeyLabel(bip38_encrypt));
+        entry.insert(QStringLiteral("bip38"), bip38_encrypt);
+        entries.append(entry);
+
+        if (i == 0) {
+            first_address = address;
+            first_key = key;
+            first_address_qr = entry.value(QStringLiteral("addressQr")).toString();
+            first_key_qr = entry.value(QStringLiteral("keyQr")).toString();
+        }
+    }
+
+    m_paper_wallet_address = first_address;
+    m_paper_wallet_wif = first_key;
+    m_paper_wallet_address_qr_source = first_address_qr;
+    m_paper_wallet_wif_qr_source = first_key_qr;
+    m_paper_wallet_entries = entries;
+    clearSecrets(&m_paper_wallet_secrets);
+    m_paper_wallet_secrets.swap(next_secrets);
+    clearSecrets(&next_secrets);
+    m_paper_wallet_hide_art = hide_art;
+    m_paper_wallet_bip38_encrypted = bip38_encrypt;
+    m_paper_wallet_addresses_per_page = bounded_per_page;
+    m_paper_wallet_print_form = bounded_print_form;
+    m_paper_wallet_display_amount = clean_display_amount;
     m_paper_wallet_status =
-        QStringLiteral("Generated private key; deriving Defcoin address through Core descriptor code.");
+        QStringLiteral("Generated %1 paper wallet%2 locally with %3. Print or record keys offline; Nu has not "
+                       "imported or stored the private keys.")
+            .arg(QString::number(entries.size()),
+                 entries.size() == 1 ? QString() : QStringLiteral("s"),
+                 first_status_key_type);
     Q_EMIT walletChanged();
+    Q_EMIT paperWalletGenerated();
+}
 
-    const QString descriptor = QStringLiteral("pkh(%1)").arg(wif);
-    rpcCall(
-        QStringLiteral("getdescriptorinfo"),
-        {descriptor},
-        false,
-        [this, wif, import_public_address, label](const QJsonValue& descriptor_result,
-                                                  const QString& descriptor_error) {
-            if (!descriptor_error.isEmpty()) {
-                m_paper_wallet_status =
-                    QStringLiteral("Paper wallet address derivation failed: %1").arg(descriptor_error);
-                Q_EMIT walletChanged();
-                Q_EMIT userMessage(QStringLiteral("Paper wallet address not derived"), m_paper_wallet_status);
+void NuRpcService::fundPaperWallets(const QVariantList& outputs)
+{
+    if (!ensureCurrentWalletSelected(QStringLiteral("Paper wallets not funded")))
+        return;
+    if (outputs.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Paper wallets not funded"),
+                           QStringLiteral("Enter at least one paper-wallet funding amount."));
+        return;
+    }
+
+    QJsonObject recipients;
+    QSet<QString> seen_addresses;
+    double total_amount = 0.0;
+    int funded_count = 0;
+    for (const QVariant& value : outputs) {
+        const QVariantMap row = value.toMap();
+        const QString address = row.value(QStringLiteral("address")).toString().trimmed();
+        const QString amount_text = row.value(QStringLiteral("amount")).toString().trimmed();
+        if (address.isEmpty() && amount_text.isEmpty())
+            continue;
+        if (!isLikelyBase58AddressText(address)) {
+            Q_EMIT userMessage(QStringLiteral("Paper wallets not funded"),
+                               QStringLiteral("Generated paper-wallet address is not a valid Defcoin address."));
+            return;
+        }
+        bool amount_ok = false;
+        const double amount = amount_text.toDouble(&amount_ok);
+        if (!amount_ok || amount <= 0.0) {
+            Q_EMIT userMessage(QStringLiteral("Paper wallets not funded"),
+                               QStringLiteral("Each funded paper wallet needs a positive DFC amount."));
+            return;
+        }
+        if (seen_addresses.contains(address)) {
+            Q_EMIT userMessage(QStringLiteral("Paper wallets not funded"),
+                               QStringLiteral("Duplicate paper-wallet recipient found. Funding was not sent."));
+            return;
+        }
+        seen_addresses.insert(address);
+        recipients.insert(address, amount);
+        total_amount += amount;
+        ++funded_count;
+        if (funded_count > 100) {
+            Q_EMIT userMessage(QStringLiteral("Paper wallets not funded"),
+                               QStringLiteral("A single funding transaction is limited to 100 paper-wallet outputs."));
+            return;
+        }
+    }
+
+    if (recipients.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Paper wallets not funded"),
+                           QStringLiteral("Enter at least one paper-wallet funding amount."));
+        return;
+    }
+
+    const QString wallet_name = m_wallet_name;
+    QJsonArray params;
+    params.push_back(QString());
+    params.push_back(recipients);
+    params.push_back(1);
+    params.push_back(QStringLiteral("Defcoin Core Nu paper-wallet funding"));
+    rpcCall(QStringLiteral("sendmany"),
+            params,
+            true,
+            [this, wallet_name, funded_count, total_amount](const QJsonValue& result, const QString& error) {
+                if (wallet_name != m_wallet_name)
+                    return;
+                if (!error.isEmpty()) {
+                    Q_EMIT userMessage(QStringLiteral("Paper wallet funding failed"), error);
+                    return;
+                }
+                Q_EMIT userMessage(QStringLiteral("Paper wallets funded"),
+                                   QStringLiteral("Sent %1 DFC to %2 paper-wallet address%3.\n\nTransaction ID: %4")
+                                       .arg(QString::number(total_amount, 'f', 8),
+                                            QString::number(funded_count),
+                                            funded_count == 1 ? QString() : QStringLiteral("es"),
+                                            result.toString()));
+                refreshWallet();
+            });
+}
+
+void NuRpcService::clearPaperWallet()
+{
+    for (QByteArray& secret : m_paper_wallet_secrets)
+        secureClear(&secret);
+    m_paper_wallet_secrets.clear();
+    m_paper_wallet_address.clear();
+    m_paper_wallet_wif.clear();
+    m_paper_wallet_address_qr_source.clear();
+    m_paper_wallet_wif_qr_source.clear();
+    m_paper_wallet_entries.clear();
+    m_paper_wallet_hide_art = false;
+    m_paper_wallet_bip38_encrypted = false;
+    m_paper_wallet_addresses_per_page = 3;
+    m_paper_wallet_print_form = 0;
+    m_paper_wallet_display_amount.clear();
+    m_paper_wallet_status = QStringLiteral("Paper wallet cleared from this session.");
+    Q_EMIT walletChanged();
+}
+
+void NuRpcService::installPaperWalletSelfTestData()
+{
+    if (qEnvironmentVariableIsEmpty("DEFCOIN_NU_UI_SELF_TEST_ACTIVE"))
+        return;
+
+    for (QByteArray& secret : m_paper_wallet_secrets)
+        secureClear(&secret);
+    m_paper_wallet_secrets.clear();
+
+    const QString address = QStringLiteral("paper-wallet-self-test-public-address-not-for-funds");
+    const QString wif = QStringLiteral("paper-wallet-self-test-private-key-placeholder-not-a-real-wif");
+    m_paper_wallet_address = address;
+    m_paper_wallet_wif = wif;
+    m_paper_wallet_address_qr_source = qrPngDataUrlForText(address);
+    m_paper_wallet_wif_qr_source = qrPngDataUrlForText(wif);
+    bool entry_count_ok = false;
+    const int requested_entry_count =
+        qEnvironmentVariableIntValue("DEFCOIN_NU_PAPER_WALLET_SELF_TEST_COUNT", &entry_count_ok);
+    const int entry_count = entry_count_ok ? qBound(1, requested_entry_count, 6) : 3;
+
+    QVariantList entries;
+    for (int i = 1; i <= entry_count; ++i) {
+        const QString entry_address = QStringLiteral("paper-wallet-self-test-public-address-%1-not-for-funds").arg(i);
+        const QString entry_wif = QStringLiteral("paper-wallet-self-test-private-key-%1-not-a-real-wif").arg(i);
+        QVariantMap entry;
+        entry.insert(QStringLiteral("index"), i);
+        entry.insert(QStringLiteral("address"), entry_address);
+        entry.insert(QStringLiteral("key"), entry_wif);
+        entry.insert(QStringLiteral("addressQr"), qrPngDataUrlForText(entry_address));
+        entry.insert(QStringLiteral("keyQr"), qrPngDataUrlForText(entry_wif));
+        entry.insert(QStringLiteral("amount"), QStringLiteral("self-test"));
+        entry.insert(QStringLiteral("keyLabel"), QStringLiteral("Private key (WIF)"));
+        entry.insert(QStringLiteral("bip38"), false);
+        entries.append(entry);
+    }
+    m_paper_wallet_entries = entries;
+    m_paper_wallet_status = QStringLiteral(
+        "UI self-test placeholder loaded. This is not a generated private key and is not usable for funds.");
+    Q_EMIT walletChanged();
+}
+
+QString NuRpcService::paperWalletPrintHtml() const
+{
+    const QString logo_url =
+        pngFileDataUrl(QDir(nuResourceRoot()).filePath(QStringLiteral("assets/brand/defcoin-v26-coin.png")));
+    QVariantList entries = m_paper_wallet_entries;
+    if (entries.isEmpty() && paperWalletReady()) {
+        QVariantMap fallback;
+        fallback.insert(QStringLiteral("index"), 1);
+        fallback.insert(QStringLiteral("address"), m_paper_wallet_address);
+        fallback.insert(QStringLiteral("key"), m_paper_wallet_wif);
+        fallback.insert(QStringLiteral("addressQr"), m_paper_wallet_address_qr_source);
+        fallback.insert(QStringLiteral("keyQr"), m_paper_wallet_wif_qr_source);
+        fallback.insert(QStringLiteral("amount"), m_paper_wallet_display_amount);
+        fallback.insert(QStringLiteral("keyLabel"), paperWalletKeyLabel(m_paper_wallet_bip38_encrypted));
+        entries.append(fallback);
+    }
+
+    const QString coin_img =
+        logo_url.isEmpty() ?
+            QStringLiteral("<div class=\"coinFallback\">DFC</div>") :
+            QStringLiteral("<img class=\"coin\" src=\"%1\" width=\"86\" height=\"86\" alt=\"Defcoin coin\" />")
+                .arg(logo_url.toHtmlEscaped());
+
+    QString pages;
+    QString current_rows;
+    const int per_page = qBound(1, m_paper_wallet_addresses_per_page, 6);
+    for (int i = 0; i < entries.size(); ++i) {
+        const QVariantMap entry = entries.at(i).toMap();
+        const QString address = entry.value(QStringLiteral("address")).toString().toHtmlEscaped();
+        const QString key = entry.value(QStringLiteral("key")).toString().toHtmlEscaped();
+        const QString address_qr = entry.value(QStringLiteral("addressQr")).toString().toHtmlEscaped();
+        const QString key_qr = entry.value(QStringLiteral("keyQr")).toString().toHtmlEscaped();
+        const QString key_label = entry.value(QStringLiteral("keyLabel")).toString().toHtmlEscaped();
+        const QString art_class = m_paper_wallet_hide_art ? QStringLiteral(" strip hideArt") : QStringLiteral(" strip");
+        const QString center_art =
+            m_paper_wallet_hide_art ?
+                QStringLiteral("<div class=\"plainCenter\"><div class=\"defcoinLogoText\">DEFCOIN</div><div "
+                               "class=\"amount\">amount:</div></div>") :
+                QStringLiteral("<div class=\"centerArt\">%1<div class=\"defcoinLogoText\">DEFCOIN</div><div "
+                               "class=\"amount\">amount:</div></div>")
+                    .arg(coin_img);
+        current_rows += QStringLiteral(R"HTML(
+<div class="%1">
+  <div class="publicQr panel">
+    <div class="cornerMark">DFC</div>
+    <img src="%2" width="92" height="92" alt="Defcoin address QR" />
+    <div class="qrCaption">Load/verify</div>
+  </div>
+  <div class="addressPanel panel">
+    <div class="verticalLabel">DEFCOIN ADDRESS</div>
+    <div class="verticalValue">%3</div>
+  </div>
+  <div class="foldLine"></div>
+  <div class="centerPanel panel">%4</div>
+  <div class="tearLine"></div>
+  <div class="privatePanel panel">
+    <div class="verticalLabel privateLabel">%5</div>
+    <div class="verticalValue privateValue">%6</div>
+  </div>
+  <div class="privateQr panel">
+    <div class="cornerMark topRight">DFC</div>
+    <img src="%7" width="92" height="92" alt="Private key QR" />
+    <div class="qrCaption">Spend</div>
+  </div>
+</div>
+)HTML")
+                            .arg(art_class, address_qr, address, center_art, key_label, key, key_qr);
+
+        const bool flush_page = ((i + 1) % per_page == 0) || i == entries.size() - 1;
+        if (flush_page) {
+            pages += QStringLiteral("<section class=\"sheet\">%1</section>").arg(current_rows);
+            if (i != entries.size() - 1)
+                pages += QStringLiteral("<div class=\"pageBreak\"></div>");
+            current_rows.clear();
+        }
+    }
+
+    return QStringLiteral(R"HTML(
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@page { size: Letter portrait; margin: 0.25in; }
+* { box-sizing: border-box; }
+body { margin: 0; color: #1f2630; font-family: "Helvetica Neue", Arial, sans-serif; background: #fff; }
+.sheet { width: 8.0in; min-height: 10.35in; overflow: hidden; page-break-inside: avoid; }
+.pageBreak { page-break-after: always; }
+.strip {
+  position: relative; width: 7.72in; height: 3.22in; margin: 0.08in auto 0;
+  border: 1px solid #93bdd7; display: table; table-layout: fixed;
+  background: #f7fbfd;
+}
+.strip:nth-child(2n) { background: #fbfdff; }
+.panel { display: table-cell; vertical-align: middle; height: 3.2in; position: relative; overflow: hidden; }
+.publicQr { width: 1.25in; text-align: center; background: repeating-linear-gradient(135deg, #e9f7ff 0, #e9f7ff 8px, #f8fcff 8px, #f8fcff 18px); }
+.addressPanel { width: .88in; background: rgba(255,255,255,.72); border-left: 1px solid #d2eaf7; border-right: 1px dotted #1f2630; }
+.centerPanel { width: 2.34in; text-align: center; background: radial-gradient(circle at center, rgba(51,51,51,.10), rgba(255,255,255,.12) 58%, rgba(130,190,222,.18)); }
+.privatePanel { width: .9in; background: rgba(255,255,255,.82); border-left: 2px dotted #64cdf7; }
+.privateQr { width: 1.35in; text-align: center; background: repeating-linear-gradient(90deg, #e7f8ff 0, #e7f8ff 10px, #f9fdff 10px, #f9fdff 20px); }
+.foldLine, .tearLine { display: table-cell; width: 0.03in; border-left: 1px dotted #2c2c2c; }
+.tearLine { border-left: 2px dotted #62d2ff; }
+.cornerMark { position: absolute; left: 0.08in; bottom: 0.08in; color: #31424f; font-size: 20pt; font-weight: 500; }
+.topRight { left: auto; right: .08in; top: .06in; bottom: auto; }
+.publicQr img, .privateQr img { display: block; width: .96in; height: .96in; margin: .54in auto .04in; background: white; border: 1px solid #d0d0d0; padding: .03in; }
+.qrCaption { color: #1e3340; font-size: 11pt; font-weight: 600; }
+.verticalLabel, .verticalValue {
+  position: absolute; white-space: nowrap; transform: rotate(-90deg); transform-origin: left top;
+  font-family: Arial, sans-serif;
+}
+.verticalLabel { left: .18in; bottom: .26in; color: #20252b; font-size: 7.4pt; font-weight: 700; letter-spacing: .5pt; }
+.verticalValue { left: .42in; bottom: .17in; color: #111; font-family: Menlo, Consolas, monospace; font-size: 6.8pt; }
+.privateLabel { color: #16344a; }
+.privateValue { color: #111; }
+.coin { width: .9in; height: .9in; margin: .36in auto .08in; display: block; }
+.coinFallback { margin: .42in auto .1in; width: .86in; height: .86in; border-radius: 50%; background: #d8af45; color: #fff; font-size: 18pt; line-height: .86in; }
+.defcoinLogoText { color: rgba(40,40,40,.38); font-size: 20pt; line-height: 1; font-weight: 800; letter-spacing: .8pt; }
+.amount { position: absolute; left: .18in; bottom: .08in; color: #747474; font-size: 8pt; text-align: left; }
+.plainCenter { height: 100%; padding-top: 1.1in; }
+.hideArt .centerPanel { background: #fff; }
+.hideArt .publicQr, .hideArt .privateQr { background: #fff; }
+</style>
+</head>
+<body>%1</body>
+</html>
+)HTML")
+        .arg(pages);
+}
+
+QVariantList NuRpcService::paperWalletPreviewEntries(int wallet_count, const QString& display_amount) const
+{
+    QVariantList entries = m_paper_wallet_entries;
+    if (entries.isEmpty() && paperWalletReady()) {
+        QVariantMap fallback;
+        fallback.insert(QStringLiteral("index"), 1);
+        fallback.insert(QStringLiteral("address"), m_paper_wallet_address);
+        fallback.insert(QStringLiteral("key"), m_paper_wallet_wif);
+        fallback.insert(QStringLiteral("addressQr"), m_paper_wallet_address_qr_source);
+        fallback.insert(QStringLiteral("keyQr"), m_paper_wallet_wif_qr_source);
+        fallback.insert(QStringLiteral("amount"), m_paper_wallet_display_amount);
+        fallback.insert(QStringLiteral("keyLabel"), paperWalletKeyLabel(m_paper_wallet_bip38_encrypted));
+        entries.append(fallback);
+    }
+
+    if (!entries.isEmpty())
+        return entries;
+
+    const int count = qBound(1, wallet_count, 100);
+    const QString placeholder = QStringLiteral("Key not yet generated. Entropy input still required.");
+    QVariantList placeholder_entries;
+    for (int i = 0; i < count; ++i) {
+        QVariantMap entry;
+        entry.insert(QStringLiteral("index"), i + 1);
+        entry.insert(QStringLiteral("address"), placeholder);
+        entry.insert(QStringLiteral("key"), placeholder);
+        entry.insert(QStringLiteral("addressQr"), QString());
+        entry.insert(QStringLiteral("keyQr"), QString());
+        entry.insert(QStringLiteral("amount"), display_amount.trimmed());
+        entry.insert(QStringLiteral("keyLabel"), QStringLiteral("Private key (WIF)"));
+        entry.insert(QStringLiteral("placeholder"), true);
+        placeholder_entries.append(entry);
+    }
+    return placeholder_entries;
+}
+
+QStringList NuRpcService::paperWalletPreviewPageSources(
+    int print_form, int wallet_count, int addresses_per_page, bool hide_art, const QString& display_amount) const
+{
+    int requested_print_form = print_form;
+    if (requested_print_form == 5)
+        requested_print_form = 4;
+    const int selected_print_form = qBound(0, requested_print_form, 4);
+    const bool avery_5011_form = selected_print_form == 2;
+    const bool simple_qr_card_form = selected_print_form == 3;
+    const bool defcoin_bulk_form = selected_print_form == 4;
+    const bool double_sided = avery_5011_form || defcoin_bulk_form;
+    const int per_page =
+        avery_5011_form ?
+            6 :
+            (defcoin_bulk_form ?
+                 2 :
+                 (simple_qr_card_form ? 1 : (selected_print_form == 1 ? 3 : qBound(1, addresses_per_page, 6))));
+
+    QVariantList all_entries = paperWalletPreviewEntries(wallet_count, display_amount);
+    QVariantList preview_entries;
+    const int preview_count = qMin(per_page, all_entries.size());
+    for (int i = 0; i < preview_count; ++i)
+        preview_entries.append(all_entries.at(i));
+
+    const QSize logical_page = (defcoin_bulk_form || selected_print_form == 1) ? QSize(792, 612) : QSize(612, 792);
+    const int scale = 2;
+    QVector<QImage> pages;
+    pages.append(
+        QImage(logical_page.width() * scale, logical_page.height() * scale, QImage::Format_ARGB32_Premultiplied));
+    pages.last().fill(Qt::white);
+
+    QPainter painter(&pages.last());
+    painter.scale(scale, scale);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+
+    auto begin_page = [&]() {
+        painter.end();
+        pages.append(
+            QImage(logical_page.width() * scale, logical_page.height() * scale, QImage::Format_ARGB32_Premultiplied));
+        pages.last().fill(Qt::white);
+        painter.begin(&pages.last());
+        painter.scale(scale, scale);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.setRenderHint(QPainter::TextAntialiasing, true);
+        return true;
+    };
+
+    const QRectF page(0, 0, logical_page.width(), logical_page.height());
+    if (!renderPaperWalletPages(painter,
+                                page,
+                                preview_entries,
+                                selected_print_form,
+                                hide_art,
+                                qBound(1, addresses_per_page, 6),
+                                display_amount,
+                                begin_page)) {
+        painter.end();
+        return {};
+    }
+    painter.end();
+
+    QStringList sources;
+    const int max_pages = double_sided ? 2 : 1;
+    for (int i = 0; i < qMin(max_pages, pages.size()); ++i) {
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        pages.at(i).save(&buffer, "PNG");
+        sources.append(QStringLiteral("data:image/png;base64,%1").arg(QString::fromLatin1(png.toBase64())));
+    }
+    return sources;
+}
+
+bool NuRpcService::renderPaperWalletPages(QPainter& painter,
+                                          const QRectF& page,
+                                          const QVariantList& entries,
+                                          int selected_print_form,
+                                          bool hide_art,
+                                          int addresses_per_page,
+                                          const QString& display_amount,
+                                          const std::function<bool()>& new_page) const
+{
+    Q_UNUSED(display_amount);
+    const bool tri_fold_form = selected_print_form == 1;
+    const bool avery_5011_form = selected_print_form == 2;
+    const bool simple_qr_card_form = selected_print_form == 3;
+    const bool defcoin_bulk_form = selected_print_form == 4;
+    const qreal page_margin_x = defcoin_bulk_form ? 18.0 : (tri_fold_form ? 8.0 : 36.0);
+    const qreal page_margin_y = defcoin_bulk_form ? 18.0 : (tri_fold_form ? 10.0 : 16.0);
+    const qreal strip_gap = defcoin_bulk_form ? 8.0 : (tri_fold_form ? 6.0 : 4.0);
+    const int per_page =
+        avery_5011_form ?
+            6 :
+            (defcoin_bulk_form ? 2 :
+                                 (simple_qr_card_form ? 1 : (tri_fold_form ? 3 : qBound(1, addresses_per_page, 6))));
+    const qreal liteaddress_width = 486.0;
+    const qreal liteaddress_height = 261.0;
+    const qreal defcoin_bulk_width = 972.0;
+    const qreal defcoin_bulk_height = 319.0;
+    const qreal design_width = defcoin_bulk_form ? defcoin_bulk_width : liteaddress_width;
+    const qreal design_height = defcoin_bulk_form ? defcoin_bulk_height : liteaddress_height;
+    const qreal available_width = qMax<qreal>(1.0, page.width() - page_margin_x * 2.0);
+    const qreal available_height = qMax<qreal>(1.0, page.height() - page_margin_y * 2.0 - strip_gap * (per_page - 1));
+    const qreal strip_height =
+        tri_fold_form ? available_height / per_page :
+                        qMin<qreal>(available_height / per_page, available_width * design_height / design_width);
+    const qreal strip_width = tri_fold_form ? available_width : strip_height * design_width / design_height;
+    const qreal strip_x = page.left() + (page.width() - strip_width) / 2.0;
+    const qreal strip_y = page.top() + (page.height() - (strip_height * per_page + strip_gap * (per_page - 1))) / 2.0;
+    const QImage coin(QDir(nuResourceRoot()).filePath(QStringLiteral("assets/brand/defcoin-v26-coin.png")));
+    const QImage defcoin_bulk_front(
+        QDir(nuResourceRoot()).filePath(QStringLiteral("assets/paperwallet/defcoin-bulk/defcoin-front-300dpi.png")));
+    const QImage defcoin_bulk_back(
+        QDir(nuResourceRoot()).filePath(QStringLiteral("assets/paperwallet/defcoin-bulk/defcoin-back-300dpi.png")));
+    const QImage brainsilo_logo(
+        QDir(nuResourceRoot()).filePath(QStringLiteral("assets/paperwallet/defcoin-bulk/brainsilo_logo.png")));
+    const bool placeholder_sheet = std::any_of(entries.begin(), entries.end(), [](const QVariant& value) {
+        return value.toMap().value(QStringLiteral("placeholder")).toBool();
+    });
+
+    auto drawRotatedText =
+        [&painter](const QPointF& origin, const QString& text, const QFont& font, const QColor& color, qreal width) {
+            painter.save();
+            painter.translate(origin);
+            painter.rotate(-90);
+            painter.setPen(color);
+            painter.setFont(font);
+            const qreal text_height = font.pixelSize() > 0 ? qreal(font.pixelSize()) : font.pointSizeF();
+            painter.drawText(
+                QRectF(0, -text_height, width, text_height * 1.35), Qt::AlignLeft | Qt::AlignVCenter, text);
+            painter.restore();
+        };
+
+    auto drawRotatedGroupedText = [&painter](const QPointF& origin,
+                                             const QString& text,
+                                             const QFont& font,
+                                             const QColor& color,
+                                             qreal width,
+                                             int group_size = 6) {
+        painter.save();
+        painter.translate(origin);
+        painter.rotate(-90);
+        const qreal text_height = font.pixelSize() > 0 ? qreal(font.pixelSize()) : font.pointSizeF();
+        const QRectF lane(0, -text_height * 1.08, width, text_height * 1.60);
+        painter.setFont(font);
+        const QFontMetricsF metrics(font);
+        const QColor guide_colors[] = {
+            QColor("#d8a13b"),
+            QColor("#4c8bee"),
+            QColor("#4dc48e"),
+        };
+        painter.save();
+        painter.setClipRect(lane.adjusted(-2, -2, 2, 2));
+        for (int pos = group_size, guide = 0; pos < text.size(); pos += group_size, ++guide) {
+            const qreal x = metrics.horizontalAdvance(text.left(pos));
+            if (x <= 0 || x >= lane.width())
+                continue;
+            QColor line_color = guide_colors[guide % 3];
+            line_color.setAlpha(48);
+            QColor dot_color = guide_colors[guide % 3];
+            dot_color.setAlpha(148);
+            painter.setPen(QPen(line_color, 0.7));
+            painter.drawLine(QPointF(x, lane.top() + 2), QPointF(x, lane.bottom() - 2));
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(dot_color);
+            painter.drawEllipse(QPointF(x, lane.top() + 2.4), 1.2, 1.2);
+            painter.drawEllipse(QPointF(x, lane.bottom() - 2.4), 1.2, 1.2);
+        }
+        painter.restore();
+        painter.setPen(color);
+        painter.setFont(font);
+        painter.drawText(QRectF(0, -text_height, width, text_height * 1.35), Qt::AlignLeft | Qt::AlignVCenter, text);
+        painter.restore();
+    };
+
+    auto sheetFont = [](const QString& family, int pixel_size, int weight = QFont::Normal) {
+        QFont font(family, -1, weight);
+        font.setPixelSize(pixel_size);
+        return font;
+    };
+
+    auto drawNotReadyWarning = [&]() {
+        if (!placeholder_sheet)
+            return;
+        painter.save();
+        const QRectF bottom_banner(page.left() + 18, page.bottom() - 34, page.width() - 36, 24);
+        const QString warning = QStringLiteral("TEST / ALIGNMENT PRINT ONLY - entropy and keys are not complete. This "
+                                               "paper wallet is not usable until keys are generated.");
+        painter.setPen(QPen(QColor("#b35a00"), 1.0));
+        painter.setBrush(QColor(255, 247, 224, 238));
+        painter.drawRect(bottom_banner);
+        painter.setPen(QColor("#7a3600"));
+        painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 9, QFont::DemiBold));
+        painter.drawText(bottom_banner.adjusted(6, 0, -6, 0), Qt::AlignCenter | Qt::AlignVCenter, warning);
+        painter.restore();
+    };
+
+    auto drawCheckerPattern = [&painter](const QRectF& area, const QColor& a, const QColor& b, qreal cell) {
+        painter.save();
+        painter.setClipRect(area);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(a);
+        painter.drawRect(area);
+        painter.setBrush(b);
+        const int columns = int(std::ceil(area.width() / cell));
+        const int rows = int(std::ceil(area.height() / cell));
+        for (int y = 0; y < rows; ++y) {
+            for (int x = 0; x < columns; ++x) {
+                if ((x + y) % 2 == 0)
+                    painter.drawRect(QRectF(area.left() + x * cell, area.top() + y * cell, cell, cell));
+            }
+        }
+        painter.restore();
+    };
+
+    auto drawMicroSquarePattern = [&painter](const QRectF& area, const QColor& color, qreal cell) {
+        painter.save();
+        painter.setClipRect(area);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(color);
+        for (qreal y = area.top() + cell * 0.4; y < area.bottom(); y += cell * 2.0) {
+            for (qreal x = area.left() + cell * 0.4; x < area.right(); x += cell * 2.0) {
+                const int ix = int((x - area.left()) / cell);
+                const int iy = int((y - area.top()) / cell);
+                if ((ix + iy) % 3 != 1)
+                    painter.drawRect(QRectF(x, y, cell * 0.62, cell * 0.62));
+            }
+        }
+        painter.restore();
+    };
+
+    auto drawDiagonalSecurityPattern = [&painter](
+                                           const QRectF& area, const QColor& line_color, qreal spacing, qreal width) {
+        painter.save();
+        painter.setClipRect(area);
+        painter.setPen(QPen(line_color, width));
+        for (qreal x = area.left() - area.height(); x < area.right() + area.height(); x += spacing) {
+            painter.drawLine(QPointF(x, area.bottom()), QPointF(x + area.height(), area.top()));
+        }
+        painter.restore();
+    };
+
+    auto drawWaveSecurityPattern = [&painter](const QRectF& area, qreal line_opacity = 1.0) {
+        painter.save();
+        painter.setClipRect(area);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.fillRect(area, QColor(250, 248, 255, 248));
+        const QColor theme_purple(49, 24, 76, 86);
+        const QColor graph_green(77, 196, 142, 62);
+        const QColor graph_blue(76, 139, 238, 58);
+        for (int pass = 0; pass < 5; ++pass) {
+            const QColor base_color =
+                pass == 0 ? theme_purple :
+                pass == 1 ? QColor(theme_purple.red(), theme_purple.green(), theme_purple.blue(), 58) :
+                pass == 2 ? graph_green :
+                pass == 3 ? graph_blue :
+                            QColor(30, 20, 48, 36);
+            const qreal step_y = pass % 2 == 0 ? 3.8 : 4.6;
+            const qreal amplitude = pass < 2 ? 10.5 : 7.0;
+            const qreal period = pass % 2 == 0 ? 28.0 : 39.0;
+            const qreal phase = pass * 19.0;
+            const int prime_wave_cycle[] = {3, 5, 7, 5, 3, 5, 7, 5};
+            int wave_index = 0;
+            for (qreal y = area.top() - 24.0; y <= area.bottom() + 24.0; y += step_y, ++wave_index) {
+                QColor color = base_color;
+                const int prime = prime_wave_cycle[(wave_index / 9 + pass) % 8];
+                const bool accent_line = prime > 0 && wave_index % prime == 0;
+                const qreal accent = accent_line ? (prime == 7 ? 1.46 : prime == 5 ? 1.34 : 1.24) : 1.0;
+                color.setAlpha(qBound(0, int(std::round(color.alpha() * line_opacity * accent)), 255));
+                painter.setPen(QPen(color, (pass < 2 ? 0.58 : 0.48) + (accent_line ? 0.08 : 0.0)));
+                QVector<QPointF> points;
+                for (qreal x = area.left() - 5.0; x <= area.right() + 5.0; x += 1.6) {
+                    const qreal wave_a = std::sin((x + y * 0.42 + phase) / period) * amplitude;
+                    const qreal wave_b = std::sin((x * 1.7 - y * 0.22 + phase) / (period * 0.74)) * (amplitude * 0.32);
+                    const qreal slope = pass < 2 ? (x - area.center().x()) * 0.018 : -(x - area.center().x()) * 0.015;
+                    points.append(QPointF(x, y + wave_a + wave_b + slope));
+                }
+                painter.drawPolyline(points.constData(), points.size());
+            }
+        }
+        painter.restore();
+    };
+
+    auto drawQrOrPlaceholder = [&painter, &sheetFont](const QRectF& qr,
+                                                      const QString& payload,
+                                                      QRecLevel error_correction,
+                                                      int quiet_zone_px,
+                                                      bool placeholder) {
+        if (!placeholder) {
+            QRcode* code = QRcode_encodeString(payload.toUtf8().constData(), 0, error_correction, QR_MODE_8, 1);
+            if (!code) {
+                painter.fillRect(qr, Qt::white);
                 return;
             }
-            const QString checked_descriptor =
-                descriptor_result.toObject().value(QStringLiteral("descriptor")).toString();
-            if (checked_descriptor.isEmpty()) {
-                m_paper_wallet_status =
-                    QStringLiteral("Paper wallet address derivation failed: Core returned no descriptor.");
-                Q_EMIT walletChanged();
-                Q_EMIT userMessage(QStringLiteral("Paper wallet address not derived"), m_paper_wallet_status);
-                return;
+            painter.save();
+            painter.setRenderHint(QPainter::Antialiasing, false);
+            painter.setPen(Qt::NoPen);
+            painter.fillRect(qr, Qt::white);
+            const int quiet = qBound(0, quiet_zone_px, 12);
+            const int module_count = code->width + quiet * 2;
+            const qreal module = qMin(qr.width(), qr.height()) / qreal(module_count);
+            const QRectF drawn(qr.center().x() - (module * module_count) / 2.0,
+                               qr.center().y() - (module * module_count) / 2.0,
+                               module * module_count,
+                               module * module_count);
+            painter.setBrush(Qt::black);
+            unsigned char* p = code->data;
+            for (int y = 0; y < code->width; ++y) {
+                for (int x = 0; x < code->width; ++x) {
+                    if (*p & 1) {
+                        painter.drawRect(QRectF(drawn.left() + (x + quiet) * module,
+                                                drawn.top() + (y + quiet) * module,
+                                                module + 0.02,
+                                                module + 0.02));
+                    }
+                    ++p;
+                }
             }
-            rpcCall(
-                QStringLiteral("deriveaddresses"),
-                {checked_descriptor},
-                false,
-                [this, wif, import_public_address, label](const QJsonValue& result, const QString& error) {
-                    if (!error.isEmpty() || !result.isArray() || result.toArray().isEmpty()) {
-                        m_paper_wallet_status =
-                            QStringLiteral("Paper wallet address derivation failed: %1")
-                                .arg(error.isEmpty() ? QStringLiteral("Core returned no address.") : error);
-                        Q_EMIT walletChanged();
-                        Q_EMIT userMessage(QStringLiteral("Paper wallet address not derived"), m_paper_wallet_status);
-                        return;
-                    }
-                    const QString address = result.toArray().at(0).toString().trimmed();
-                    if (!isLikelyBase58AddressText(address)) {
-                        m_paper_wallet_status = QStringLiteral(
-                            "Paper wallet address derivation failed: Core returned an unexpected address.");
-                        Q_EMIT walletChanged();
-                        Q_EMIT userMessage(QStringLiteral("Paper wallet address not derived"), m_paper_wallet_status);
-                        return;
-                    }
-                    m_paper_wallet_wif = wif;
-                    m_paper_wallet_address = address;
-                    m_paper_wallet_status = QStringLiteral("Paper wallet generated. Print or record the private key "
-                                                           "offline; Nu has not imported the private key.");
-                    Q_EMIT walletChanged();
-                    if (import_public_address) {
-                        importWatchOnlyAddress(
-                            address,
-                            label.trimmed().isEmpty() ? QStringLiteral("Paper wallet public address") : label,
-                            false,
-                            -1);
-                    }
-                });
+            painter.restore();
+            QRcode_free(code);
+            return;
+        }
+
+        painter.save();
+        painter.setPen(QPen(QColor("#a8bac5"), 0.9));
+        painter.setBrush(QColor(255, 255, 255, 245));
+        painter.drawRect(qr);
+        painter.setPen(QColor("#7b8a93"));
+        painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), qMax(5, int(qr.height() / 14.0)), QFont::DemiBold));
+        painter.drawText(qr.adjusted(5, 5, -5, -5),
+                         Qt::AlignCenter | Qt::TextWordWrap,
+                         QStringLiteral("Key not yet generated.\nEntropy input still required."));
+        painter.restore();
+    };
+
+    auto drawDefcoinBulkWallet = [&](const QRectF& strip, const QVariantMap& entry, bool back_page) {
+        const QString address = entry.value(QStringLiteral("address")).toString();
+        const QString key = entry.value(QStringLiteral("key")).toString();
+        const bool encrypted =
+            entry.value(QStringLiteral("keyLabel")).toString().startsWith(QStringLiteral("Encrypted"));
+        const bool placeholder = entry.value(QStringLiteral("placeholder")).toBool();
+
+        painter.save();
+        painter.translate(strip.topLeft());
+        painter.scale(strip.width() / defcoin_bulk_width, strip.height() / defcoin_bulk_height);
+
+        const QRectF art_rect(0, 0, defcoin_bulk_width, defcoin_bulk_height);
+        const QImage& art = back_page ? defcoin_bulk_back : defcoin_bulk_front;
+        if (hide_art) {
+            painter.fillRect(art_rect, QColor("#fbfbfb"));
+
+            auto drawArtCrop = [&](const QRectF& logical_rect) {
+                if (art.isNull()) {
+                    return;
+                }
+                const qreal sx = art.width() / defcoin_bulk_width;
+                const qreal sy = art.height() / defcoin_bulk_height;
+                const QRectF source(logical_rect.left() * sx,
+                                    logical_rect.top() * sy,
+                                    logical_rect.width() * sx,
+                                    logical_rect.height() * sy);
+                painter.drawImage(logical_rect, art, source);
+            };
+
+            // Hide Art removes the ink-heavy purple illustration and coins, but
+            // intentionally keeps the original static/noise blocks. The
+            // memorial mark is redrawn as low-ink text plus the BrainSilo logo.
+            if (back_page) {
+                drawArtCrop(QRectF(0, 0, 125, 319));
+            } else {
+                drawArtCrop(QRectF(618, 102, 102, 102));
+            }
+            if (!back_page) {
+                QPainterPath cut_outline;
+                cut_outline.moveTo(0, 0);
+                cut_outline.lineTo(610, 0);
+                cut_outline.lineTo(610, 74);
+                cut_outline.cubicTo(660, 84, 720, 84, 776, 74);
+                cut_outline.lineTo(776, 42);
+                cut_outline.lineTo(972, 0);
+                cut_outline.lineTo(972, 319);
+                cut_outline.lineTo(776, 277);
+                cut_outline.lineTo(776, 245);
+                cut_outline.cubicTo(720, 235, 660, 235, 610, 245);
+                cut_outline.lineTo(610, 319);
+                cut_outline.lineTo(0, 319);
+                cut_outline.closeSubpath();
+                painter.setBrush(Qt::NoBrush);
+                painter.setPen(QPen(QColor("#242129"), 2.2));
+                painter.drawPath(cut_outline);
+                painter.setPen(QPen(QColor("#7c5eb5"), 1.0));
+                painter.drawPath(cut_outline);
+            }
+            auto drawBrainsiloMemorial = [&](const QRectF& mark_area) {
+                painter.save();
+                painter.translate(mark_area.center());
+                painter.rotate(-90);
+                const QRectF local(
+                    -mark_area.height() / 2.0, -mark_area.width() / 2.0, mark_area.height(), mark_area.width());
+                painter.setPen(QColor("#25242a"));
+                painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 10, QFont::DemiBold));
+                painter.drawText(QRectF(local.left(), local.top() + 2, local.width(), 16),
+                                 Qt::AlignCenter,
+                                 QStringLiteral("portland's hackerspace"));
+                const qreal logo_h = qMin<qreal>(36.0, local.height() * 0.30);
+                const qreal logo_w =
+                    brainsilo_logo.isNull() ? logo_h : logo_h * brainsilo_logo.width() / brainsilo_logo.height();
+                const QRectF logo_rect(local.center().x() - logo_w / 2.0, local.top() + 21, logo_w, logo_h);
+                if (!brainsilo_logo.isNull()) {
+                    painter.drawImage(logo_rect, brainsilo_logo);
+                } else {
+                    painter.setFont(sheetFont(QStringLiteral("Avenir Next Condensed"), 18, QFont::ExtraBold));
+                    painter.drawText(logo_rect, Qt::AlignCenter, QStringLiteral("BS"));
+                }
+                painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 9, QFont::DemiBold));
+                painter.drawText(QRectF(local.left(), logo_rect.bottom() + 5, local.width(), 13),
+                                 Qt::AlignCenter,
+                                 QStringLiteral("In Loving Memory"));
+                painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 8, QFont::Normal));
+                painter.drawText(QRectF(local.left(), logo_rect.bottom() + 19, local.width(), 13),
+                                 Qt::AlignCenter,
+                                 QStringLiteral("January 2010 - February 2015"));
+                painter.restore();
+            };
+            if (!back_page)
+                drawBrainsiloMemorial(QRectF(382, 72, 116, 184));
+            painter.setPen(QColor("#c69a32"));
+            painter.setFont(sheetFont(QStringLiteral("Avenir Next Condensed"), 34, QFont::ExtraBold));
+            painter.drawText(QRectF(190, 118, 170, 56), Qt::AlignCenter, QStringLiteral("DEFCOIN"));
+            painter.setFont(sheetFont(QStringLiteral("Avenir Next Condensed"), 22, QFont::ExtraBold));
+            painter.drawText(QRectF(846, 142, 92, 36), Qt::AlignCenter, QStringLiteral("DFC"));
+            painter.setPen(QPen(QColor("#d7d7d7"), 1.0));
+            painter.drawRect(art_rect.adjusted(0.5, 0.5, -0.5, -0.5));
+        } else if (!art.isNull()) {
+            painter.drawImage(art_rect, art);
+        } else {
+            painter.fillRect(art_rect, QColor("#f7fbff"));
+            painter.setPen(QPen(QColor("#7c5eb5"), 1.0));
+            painter.drawRect(art_rect.adjusted(0.5, 0.5, -0.5, -0.5));
+        }
+
+        if (back_page) {
+            painter.restore();
+            return;
+        }
+
+        auto drawBulkQr = [&](const QRectF& box, const QString& payload, qreal qr_size) {
+            Q_UNUSED(qr_size);
+            painter.save();
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(Qt::white);
+            painter.drawRect(box);
+            const qreal side = qMin(box.width(), box.height());
+            const QRectF qr(box.center().x() - side / 2.0, box.center().y() - side / 2.0, side, side);
+            drawQrOrPlaceholder(qr, payload, QR_ECLEVEL_H, 0, placeholder);
+            painter.restore();
+        };
+
+        auto drawBulkText = [&](const QRectF& lane, const QString& text, bool upside_down, Qt::Alignment alignment) {
+            const bool dark_lane = upside_down;
+            painter.save();
+            const QFont text_font = sheetFont(QStringLiteral("Atkinson Hyperlegible Mono"), 10, QFont::Normal);
+            const QFontMetricsF text_metrics(text_font);
+            const qreal text_width = qMin<qreal>(lane.width(), std::ceil(text_metrics.horizontalAdvance(text)) + 10.0);
+            const QRectF text_lane =
+                upside_down ? (alignment & Qt::AlignHCenter ?
+                                   QRectF(lane.center().x() - text_width / 2.0, lane.top(), text_width, lane.height()) :
+                                   QRectF(lane.right() - text_width, lane.top(), text_width, lane.height())) :
+                              (alignment & Qt::AlignHCenter ?
+                                   QRectF(lane.center().x() - text_width / 2.0, lane.top(), text_width, lane.height()) :
+                                   QRectF(lane.left(), lane.top(), text_width, lane.height()));
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(dark_lane ? QColor(13, 28, 39, 236) : QColor(255, 255, 255, 242));
+            painter.drawRect(text_lane.adjusted(-3, -2, 3, 2));
+            painter.setClipRect(text_lane.adjusted(-3, -2, 3, 2));
+            painter.setPen(dark_lane ? QColor("#f5fbff") : QColor("#5d3d88"));
+            painter.setFont(text_font);
+            if (upside_down) {
+                painter.translate(text_lane.center());
+                painter.rotate(180);
+                painter.drawText(
+                    QRectF(-text_lane.width() / 2.0, -text_lane.height() / 2.0, text_lane.width(), text_lane.height()),
+                    alignment | Qt::AlignVCenter,
+                    text);
+            } else {
+                painter.drawText(text_lane, alignment | Qt::AlignVCenter, text);
+            }
+            painter.restore();
+        };
+
+        // Coordinates ported from sibios/defcoin-bulk index.htm:
+        // .qrcode_public top 117 left 40; .qrcode_private top 104 left 798;
+        // .btcaddress top 240/75 left 40; .btcprivwif top 230/80 left 610.
+        // Upstream renders two addresses per landscape page, followed by a
+        // backing page for flip-on-short-edge duplex printing.
+        drawBulkQr(QRectF(40, 117, 93, 90), address, 83);
+        drawBulkQr(QRectF(798, 104, 113, 110), key, 103);
+        const QRectF public_text(24, 238, 374, 18);
+        const QRectF public_text_inverted(24, 62, 374, 18);
+        const QRectF private_text(encrypted ? 562 : 574, 228, encrypted ? 402 : 390, 18);
+        const QRectF private_text_inverted(encrypted ? 562 : 574, 70, encrypted ? 402 : 390, 18);
+        drawBulkText(public_text, address, false, Qt::AlignLeft);
+        drawBulkText(public_text_inverted, address, true, Qt::AlignLeft);
+        drawBulkText(private_text, key, false, Qt::AlignHCenter);
+        drawBulkText(private_text_inverted, key, true, Qt::AlignHCenter);
+        painter.restore();
+    };
+
+    auto drawPaperStrip = [&](const QRectF& strip, const QVariantMap& entry, int form) {
+        const bool tri_fold = form == 1;
+        const QString address = entry.value(QStringLiteral("address")).toString();
+        const QString key = entry.value(QStringLiteral("key")).toString();
+        const QString key_label = entry.value(QStringLiteral("keyLabel")).toString();
+        const QString amount = entry.value(QStringLiteral("amount")).toString().trimmed();
+        const bool placeholder = entry.value(QStringLiteral("placeholder")).toBool();
+        const bool encrypted_key = key_label.startsWith(QStringLiteral("Encrypted"));
+
+        painter.save();
+        painter.translate(strip.topLeft());
+        painter.scale(strip.width() / liteaddress_width, strip.height() / liteaddress_height);
+
+        // Ported from liteaddress.org's artistic paper wallet coordinate model:
+        // base strip 486x261, public QR near 17/52, private QR near 360/104,
+        // address/key lanes rotated, and dotted fold/tear guides.
+        const QRectF base(0, 0, liteaddress_width, liteaddress_height);
+        const QRectF public_security(1, 1, 113, 259);
+        const QRectF public_qr(6, 32, 105, 105);
+        const QRectF private_security(366, 1, 119, 259);
+        const QRectF private_qr(private_security.center().x() - 53, 28, 106, 106);
+        const QRectF address_panel(112, 0, 48, liteaddress_height);
+        const QRectF center_panel(160, 0, 172, liteaddress_height);
+        const QRectF private_panel(334, 0, 26, liteaddress_height);
+
+        painter.setPen(QPen(QColor("#7c5eb5"), 1));
+        painter.setBrush(QColor("#fbf8ff"));
+        painter.drawRect(base.adjusted(0.5, 0.5, -0.5, -0.5));
+
+        if (hide_art) {
+            painter.fillRect(base.adjusted(1, 1, -1, -1), Qt::white);
+        } else {
+            QLinearGradient left_bg(0, 0, 105, 261);
+            left_bg.setColorAt(0, QColor("#eee6ff"));
+            left_bg.setColorAt(0.48, QColor("#fbf8ff"));
+            left_bg.setColorAt(1, QColor("#f0eaff"));
+            painter.fillRect(public_security, left_bg);
+            drawWaveSecurityPattern(public_security.adjusted(0.5, 0.5, -0.5, -0.5), 0.46);
+            drawCheckerPattern(public_security.adjusted(0.5, 0.5, -0.5, -0.5),
+                               QColor(255, 255, 255, 118),
+                               QColor(181, 158, 220, 132),
+                               10.0);
+            drawMicroSquarePattern(public_security.adjusted(2, 2, -2, -2), QColor(126, 93, 182, 55), 8.0);
+            drawDiagonalSecurityPattern(
+                public_security.adjusted(0.5, 0.5, -0.5, -0.5), QColor(118, 82, 174, 88), 14.0, 1.0);
+
+            QLinearGradient right_bg(360, 0, 486, 261);
+            right_bg.setColorAt(0, QColor("#fbf8ff"));
+            right_bg.setColorAt(1, QColor("#eee6ff"));
+            painter.fillRect(private_security, right_bg);
+            drawWaveSecurityPattern(private_security.adjusted(0.5, 0.5, -0.5, -0.5), 0.46);
+            drawCheckerPattern(private_security.adjusted(0.5, 0.5, -0.5, -0.5),
+                               QColor(255, 255, 255, 118),
+                               QColor(181, 158, 220, 136),
+                               9.0);
+            drawMicroSquarePattern(private_security.adjusted(2, 2, -2, -2), QColor(126, 93, 182, 58), 7.0);
+            drawDiagonalSecurityPattern(
+                private_security.adjusted(0.5, 0.5, -0.5, -0.5), QColor(118, 82, 174, 82), 15.0, 1.0);
+
+            drawWaveSecurityPattern(center_panel);
+        }
+
+        painter.fillRect(address_panel, QColor(255, 255, 255, 190));
+        painter.fillRect(QRectF(334, 0, 34, liteaddress_height), QColor(255, 255, 255, 235));
+        painter.setPen(QPen(QColor(60, 60, 60, 190), 1, Qt::DotLine));
+        painter.drawLine(QPointF(154, 1), QPointF(154, 260)); // fold guide
+        painter.drawLine(QPointF(160, 1), QPointF(160, 260)); // trim/fold lane edge
+        painter.setPen(QPen(QColor("#8e68cc"), 1.5, Qt::DotLine));
+        painter.drawLine(QPointF(334, 1), QPointF(334, 260)); // fold guide
+        painter.setPen(QPen(QColor("#7b5db2"), 1.0));
+        painter.drawLine(QPointF(private_security.left(), 1),
+                         QPointF(private_security.left(), 260)); // private QR panel edge
+        painter.drawLine(QPointF(private_security.right(), 1),
+                         QPointF(private_security.right(), 260)); // private security edge
+
+        painter.setPen(QColor("#263542"));
+        QFont caption_font = sheetFont(QStringLiteral("Helvetica Neue"), 10, QFont::DemiBold);
+        QFont mark_font = sheetFont(QStringLiteral("Helvetica Neue"), 15, QFont::DemiBold);
+        painter.setPen(QPen(QColor(214, 224, 228), 0.8));
+        painter.setBrush(Qt::white);
+        painter.drawRect(public_qr);
+        drawQrOrPlaceholder(public_qr, address, QR_ECLEVEL_M, 0, placeholder);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(public_qr);
+        painter.setBrush(Qt::white);
+        painter.drawRect(private_qr);
+        drawQrOrPlaceholder(private_qr, key, QR_ECLEVEL_M, 0, placeholder);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(private_qr);
+        painter.setPen(QColor("#1e3340"));
+        painter.setFont(caption_font);
+        painter.drawText(QRectF(2, 148, 110, 14), Qt::AlignCenter, QStringLiteral("Load/verify"));
+        painter.drawText(
+            QRectF(private_qr.left(), 137, private_qr.width(), 14), Qt::AlignCenter, QStringLiteral("Spend"));
+
+        const QString private_warning_text =
+            (encrypted_key ? QStringLiteral("Encrypted Private Key (BIP38 secret text phrase is also required).\n\n") :
+                             QString()) +
+            QStringLiteral("Fold this flap inside the paper wallet; optionally tape it shut.\n\n"
+                           "Do not expose the private key. The private key gives complete access to funds on this "
+                           "wallet. Keep it offline, away from cameras, and out of sight.");
+        QFont private_warning_font = sheetFont(QStringLiteral("Helvetica Neue"), 6, QFont::DemiBold);
+        QFontMetricsF private_warning_metrics(private_warning_font);
+        const qreal private_warning_width = 108.0;
+        const QRectF private_warning_measure(0, 0, private_warning_width - 8.0, 120.0);
+        const qreal private_warning_height = qMin<qreal>(
+            96.0,
+            std::ceil(private_warning_metrics
+                          .boundingRect(private_warning_measure, Qt::AlignLeft | Qt::TextWordWrap, private_warning_text)
+                          .height()) +
+                8.0);
+        const QRectF private_warning(private_security.center().x() - private_warning_width / 2.0,
+                                     158,
+                                     private_warning_width,
+                                     private_warning_height);
+        painter.setPen(QPen(QColor(214, 224, 228), 0.6));
+        painter.setBrush(QColor(255, 255, 255, 228));
+        painter.drawRect(private_warning);
+        painter.setFont(private_warning_font);
+        painter.setPen(QColor("#263542"));
+        painter.drawText(private_warning.adjusted(4, 3, -4, -3),
+                         Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
+                         private_warning_text);
+
+        QFont label_font = sheetFont(QStringLiteral("Helvetica Neue"), 8, QFont::Bold);
+        QFont value_font = sheetFont(QStringLiteral("Atkinson Hyperlegible Mono"), tri_fold ? 13 : 9, QFont::Normal);
+        drawRotatedText(QPointF(126, 239), QStringLiteral("DEFCOIN ADDRESS"), label_font, QColor("#20252b"), 135);
+        drawRotatedGroupedText(QPointF(142, 239), address, value_font, QColor("#111111"), 215);
+        drawRotatedText(QPointF(344, 236),
+                        encrypted_key ? QStringLiteral("ENCRYPTED PRIVATE KEY") : key_label,
+                        label_font,
+                        QColor("#16344a"),
+                        135);
+        drawRotatedGroupedText(QPointF(359, 236), key, value_font, QColor("#111111"), 215);
+
+        if (!hide_art) {
+            if (!coin.isNull()) {
+                const qreal coin_size = tri_fold ? 84 : 94;
+                painter.drawImage(QRectF(200, tri_fold ? 20 : 18, coin_size, coin_size), coin);
+            }
+        }
+
+        QFont logo_font = sheetFont(QStringLiteral("Avenir Next Condensed"), tri_fold ? 18 : 28, QFont::ExtraBold);
+        painter.setPen(QColor("#111111"));
+        painter.setFont(logo_font);
+        if (tri_fold) {
+            painter.drawText(QRectF(178, 116, 136, 21), Qt::AlignCenter, QStringLiteral("DEFCOIN"));
+            painter.drawText(QRectF(178, 141, 136, 21), Qt::AlignCenter, QStringLiteral("PAPER"));
+            painter.drawText(QRectF(178, 162, 136, 21), Qt::AlignCenter, QStringLiteral("WALLET"));
+        } else {
+            painter.drawText(QRectF(170, 121, 152, 30), Qt::AlignCenter, QStringLiteral("DEFCOIN"));
+            painter.setFont(sheetFont(QStringLiteral("Avenir Next Condensed"), 20, QFont::ExtraBold));
+            painter.drawText(QRectF(178, 161, 136, 20), Qt::AlignCenter, QStringLiteral("PAPER"));
+            painter.drawText(QRectF(178, 180, 136, 20), Qt::AlignCenter, QStringLiteral("WALLET"));
+        }
+        QFont amount_font = sheetFont(QStringLiteral("Helvetica Neue"), 8);
+        painter.setFont(amount_font);
+        const QRectF amount_box(171, 221, 143, 27);
+        const QRectF amount_label(171, 221, 50, 27);
+        painter.setPen(QPen(QColor("#a8b0b5"), 0.7));
+        painter.setBrush(QColor(255, 255, 255, 165));
+        painter.drawRect(amount_box);
+        painter.setPen(QColor("#5f676d"));
+        painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 10));
+        painter.drawText(
+            amount_label.adjusted(5, 0, -2, 0), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Amount:"));
+        if (!amount.isEmpty()) {
+            painter.setPen(QColor("#263542"));
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 12, QFont::DemiBold));
+            painter.drawText(
+                amount_box.adjusted(amount_label.width() + 6, 0, -4, 0), Qt::AlignLeft | Qt::AlignVCenter, amount);
+        }
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(QColor("#7c5eb5"), 1.25));
+        painter.drawRect(public_security.adjusted(0.6, 0.6, -0.6, -0.6));
+        painter.drawRect(private_security.adjusted(0.6, 0.6, -0.6, -0.6));
+        painter.drawRect(base.adjusted(0.6, 0.6, -0.6, -0.6));
+        painter.restore();
+    };
+
+    auto drawAveryGuides = [&](const QRectF& card_area) {
+        const qreal card_gap = 18.0;
+        const qreal card_width = (card_area.width() - card_gap) / 2.0;
+        const QRectF left(card_area.left(), card_area.top(), card_width, card_area.height());
+        const QRectF right(left.right() + card_gap, card_area.top(), card_width, card_area.height());
+
+        painter.save();
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(QColor("#555555"), 0.8));
+        painter.drawRect(left);
+        painter.drawRect(right);
+        painter.setPen(QPen(QColor("#777777"), 0.6));
+        painter.drawLine(QPointF(left.left(), left.center().y()), QPointF(left.right(), left.center().y()));
+        painter.drawLine(QPointF(right.left(), right.center().y()), QPointF(right.right(), right.center().y()));
+        painter.restore();
+    };
+
+    auto drawTriFoldStrip = [&](const QRectF& strip, const QVariantMap& entry) {
+        const QString address = entry.value(QStringLiteral("address")).toString();
+        const QString key = entry.value(QStringLiteral("key")).toString();
+        const QString key_label = entry.value(QStringLiteral("keyLabel")).toString();
+        const QString amount = entry.value(QStringLiteral("amount")).toString().trimmed();
+        const bool placeholder = entry.value(QStringLiteral("placeholder")).toBool();
+
+        const qreal panel_w = strip.width() / 3.0;
+        const QRectF public_panel(strip.left(), strip.top(), panel_w, strip.height());
+        const QRectF center_panel(public_panel.right(), strip.top(), panel_w, strip.height());
+        const QRectF private_panel(center_panel.right(), strip.top(), panel_w, strip.height());
+
+        painter.save();
+        painter.setPen(QPen(QColor("#7c5eb5"), 0.8));
+        painter.setBrush(QColor("#fbf8ff"));
+        painter.drawRect(strip.adjusted(0.5, 0.5, -0.5, -0.5));
+        if (hide_art) {
+            painter.fillRect(strip.adjusted(1, 1, -1, -1), Qt::white);
+        } else {
+            drawWaveSecurityPattern(strip.adjusted(1, 1, -1, -1), 0.75);
+            drawCheckerPattern(
+                public_panel.adjusted(2, 2, -2, -2), QColor(255, 255, 255, 118), QColor(181, 158, 220, 126), 11.0);
+            drawCheckerPattern(
+                private_panel.adjusted(2, 2, -2, -2), QColor(255, 255, 255, 118), QColor(181, 158, 220, 128), 11.0);
+            drawDiagonalSecurityPattern(public_panel.adjusted(2, 2, -2, -2), QColor(118, 82, 174, 80), 13.0, 0.9);
+            drawDiagonalSecurityPattern(private_panel.adjusted(2, 2, -2, -2), QColor(118, 82, 174, 80), 13.0, 0.9);
+        }
+
+        painter.setPen(QPen(QColor(60, 60, 60, 185), 1, Qt::DotLine));
+        painter.drawLine(QPointF(center_panel.left(), strip.top()), QPointF(center_panel.left(), strip.bottom()));
+        painter.drawLine(QPointF(private_panel.left(), strip.top()), QPointF(private_panel.left(), strip.bottom()));
+
+        auto withPanel = [&](const QRectF& panel, const std::function<void(const QRectF&)>& draw) {
+            painter.save();
+            painter.translate(panel.topLeft());
+            draw(QRectF(0, 0, panel.width(), panel.height()));
+            painter.restore();
+        };
+
+        auto drawLandscapeQrPanel = [&](const QRectF& local,
+                                        const QString& heading,
+                                        const QString& caption,
+                                        const QString& payload,
+                                        const QString& value,
+                                        bool private_side) {
+            Q_UNUSED(value);
+            const QRectF panel_frame = local.adjusted(6, 8, -6, -8);
+            const QRectF top_key(panel_frame.left(), panel_frame.top(), panel_frame.width(), 16);
+            const QRectF bottom_key(panel_frame.left(), panel_frame.bottom() - 16, panel_frame.width(), 16);
+            const QRectF heading_box(panel_frame.left(), top_key.bottom() + 4, panel_frame.width(), 18);
+            const qreal qr_size = qMin(panel_frame.height() * 0.54, panel_frame.width() * 0.74);
+            const QRectF qr(
+                panel_frame.center().x() - qr_size / 2.0, panel_frame.center().y() - qr_size / 2.0, qr_size, qr_size);
+            auto fitMonoFont = [&](qreal width, const QString& text) {
+                int px = 8;
+                for (; px > 4; --px) {
+                    QFont candidate = sheetFont(QStringLiteral("Atkinson Hyperlegible Mono"), px, QFont::Normal);
+                    if (QFontMetricsF(candidate).horizontalAdvance(text) <= width - 10)
+                        return candidate;
+                }
+                return sheetFont(QStringLiteral("Atkinson Hyperlegible Mono"), 4, QFont::Normal);
+            };
+            auto drawKeyLane = [&](const QRectF& lane, bool inverted) {
+                painter.save();
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(inverted ? QColor("#17212a") : QColor(255, 255, 255, 242));
+                painter.drawRect(lane);
+                painter.setPen(inverted ? QColor("#ffffff") : QColor("#151a20"));
+                painter.setFont(fitMonoFont(lane.width(), payload));
+                painter.drawText(lane.adjusted(5, 0, -5, 0), Qt::AlignCenter | Qt::AlignVCenter, payload);
+                painter.restore();
+            };
+            drawKeyLane(top_key, false);
+            drawKeyLane(bottom_key, true);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(255, 255, 255, 236));
+            painter.drawRect(heading_box);
+            painter.setPen(private_side ? QColor("#16344a") : QColor("#20252b"));
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 9, QFont::Bold));
+            painter.drawText(heading_box.adjusted(4, 0, -4, 0), Qt::AlignCenter | Qt::AlignVCenter, heading);
+            painter.setPen(QPen(QColor(214, 224, 228), 0.8));
+            painter.setBrush(Qt::white);
+            painter.drawRect(qr.adjusted(-3, -3, 3, 3));
+            drawQrOrPlaceholder(qr, payload, QR_ECLEVEL_M, 2, placeholder);
+            const QRectF caption_box(qr.left() - 3, qMin(qr.bottom() + 3, bottom_key.top() - 18), qr.width() + 6, 16);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(255, 255, 255, 245));
+            painter.drawRect(caption_box);
+            painter.setPen(QColor("#1e3340"));
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 10, QFont::DemiBold));
+            painter.drawText(caption_box, Qt::AlignCenter, caption);
+        };
+
+        withPanel(public_panel, [&](const QRectF& local) {
+            drawLandscapeQrPanel(
+                local, QStringLiteral("DEFCOIN ADDRESS"), QStringLiteral("Load/verify"), address, address, false);
         });
+        withPanel(private_panel, [&](const QRectF& local) {
+            drawLandscapeQrPanel(local, key_label, QStringLiteral("Spend"), key, key, true);
+        });
+
+        withPanel(center_panel, [&](const QRectF& local) {
+            const qreal coin_size = qMin(local.height() * 0.48, local.width() * 0.40);
+            if (!hide_art && !coin.isNull()) {
+                painter.drawImage(QRectF(local.left() + 12, local.top() + local.height() * 0.14, coin_size, coin_size),
+                                  coin);
+            }
+            painter.setPen(QColor("#111111"));
+            painter.setFont(sheetFont(QStringLiteral("Avenir Next Condensed"), 24, QFont::ExtraBold));
+            const QRectF title_rect(
+                local.left() + local.width() * 0.44, local.top() + local.height() * 0.18, local.width() * 0.50, 28);
+            painter.drawText(title_rect, Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("DEFCOIN"));
+            painter.setFont(sheetFont(QStringLiteral("Avenir Next Condensed"), 17, QFont::ExtraBold));
+            painter.drawText(QRectF(title_rect.left(), title_rect.bottom() + 2, title_rect.width(), 22),
+                             Qt::AlignLeft | Qt::AlignVCenter,
+                             QStringLiteral("PAPER WALLET"));
+
+            const QRectF amount_box(local.left() + local.width() * 0.18, local.bottom() - 30, local.width() * 0.70, 22);
+            const QRectF amount_label(amount_box.left(), amount_box.top(), 52, amount_box.height());
+            painter.setPen(QPen(QColor("#a8b0b5"), 0.7));
+            painter.setBrush(QColor(255, 255, 255, 168));
+            painter.drawRect(amount_box);
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 9));
+            painter.setPen(QColor("#5f676d"));
+            painter.drawText(
+                amount_label.adjusted(5, 0, -2, 0), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Amount:"));
+            if (!amount.isEmpty()) {
+                painter.setPen(QColor("#263542"));
+                painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 9, QFont::DemiBold));
+                painter.drawText(
+                    amount_box.adjusted(amount_label.width() + 8, 0, -5, 0), Qt::AlignLeft | Qt::AlignVCenter, amount);
+            }
+        });
+        painter.restore();
+    };
+
+    auto drawAvery5011Wallet = [&](const QRectF& card_area, const QVariantMap& entry, bool back_side) {
+        const QString address = entry.value(QStringLiteral("address")).toString();
+        const QString key = entry.value(QStringLiteral("key")).toString();
+        const QString key_label = entry.value(QStringLiteral("keyLabel")).toString();
+        const QString amount = entry.value(QStringLiteral("amount")).toString().trimmed();
+        const bool placeholder = entry.value(QStringLiteral("placeholder")).toBool();
+
+        const QRectF paint_area = card_area.adjusted(-8.0, -8.0, 8.0, 8.0);
+        const QRectF top_face(card_area.left(), card_area.top(), card_area.width(), card_area.height() / 2.0);
+        const QRectF bottom_face(card_area.left(), card_area.center().y(), card_area.width(), card_area.height() / 2.0);
+
+        auto fillFace = [&](const QRectF& face, qreal opacity) {
+            painter.fillRect(face, hide_art ? Qt::white : QColor("#fbf8ff"));
+            if (!hide_art) {
+                drawWaveSecurityPattern(face.adjusted(1, 1, -1, -1), opacity);
+                drawCheckerPattern(
+                    face.adjusted(2, 2, -2, -2), QColor(255, 255, 255, 108), QColor(181, 158, 220, 116), 9.0);
+                drawDiagonalSecurityPattern(face.adjusted(2, 2, -2, -2), QColor(118, 82, 174, 70), 12.0, 0.8);
+            }
+        };
+
+        painter.save();
+        fillFace(QRectF(paint_area.left(), paint_area.top(), paint_area.width(), paint_area.height() / 2.0 + 2.0),
+                 0.38);
+        fillFace(QRectF(paint_area.left(), card_area.center().y(), paint_area.width(), paint_area.height() / 2.0 + 2.0),
+                 0.5);
+
+        painter.setPen(QPen(QColor("#777777"), 0.6));
+        painter.drawLine(QPointF(card_area.left(), card_area.center().y()),
+                         QPointF(card_area.right(), card_area.center().y()));
+
+        auto drawQrFace = [&](const QRectF& face,
+                              const QString& title,
+                              const QString& payload,
+                              const QString& value,
+                              const QString& caption,
+                              bool upside_down,
+                              bool show_amount_box) {
+            painter.save();
+            if (upside_down) {
+                painter.translate(face.center());
+                painter.rotate(180);
+                painter.translate(-face.center());
+            }
+            const QRectF body = face.adjusted(8, 7, -8, -7);
+            const qreal qr_size = qMin(body.height() - 16.0, body.width() * 0.34);
+            const QRectF qr(body.left(), body.top(), qr_size, qr_size);
+            painter.setPen(QPen(QColor(214, 224, 228), 0.8));
+            painter.setBrush(Qt::white);
+            painter.drawRect(qr);
+            drawQrOrPlaceholder(qr.adjusted(1, 1, -1, -1), payload, QR_ECLEVEL_M, 1, placeholder);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(255, 255, 255, 215));
+            const QRectF caption_box(qr.left(), qr.bottom() + 2, qr.width(), 13);
+            painter.drawRect(caption_box);
+            painter.setPen(QColor("#1e3340"));
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 9, QFont::DemiBold));
+            painter.drawText(caption_box, Qt::AlignCenter, caption);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(255, 255, 255, 218));
+            const qreal right_x = qr.right() + 8;
+            const qreal right_w = body.right() - right_x;
+            const QRectF title_box(right_x, body.top(), right_w, 14);
+            const QRectF key_lane_a(right_x, title_box.bottom() + 2, right_w, 10);
+            const QRectF key_lane_b(right_x, key_lane_a.bottom() + 1, right_w, 10);
+            const QRectF amount_box(right_x, key_lane_b.bottom() + 4, right_w, body.bottom() - key_lane_b.bottom() - 4);
+            painter.drawRect(title_box);
+            painter.setPen(QColor("#20252b"));
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 7, QFont::Bold));
+            painter.drawText(title_box.adjusted(3, 0, -3, 0), Qt::AlignLeft | Qt::AlignVCenter, title);
+
+            auto fitMonoFont = [&](qreal width, const QString& text) {
+                int px = 5;
+                for (; px > 3; --px) {
+                    QFont candidate = sheetFont(QStringLiteral("Atkinson Hyperlegible Mono"), px, QFont::Normal);
+                    if (QFontMetricsF(candidate).horizontalAdvance(text) <= width - 8)
+                        return candidate;
+                }
+                return sheetFont(QStringLiteral("Atkinson Hyperlegible Mono"), 3, QFont::Normal);
+            };
+            auto drawLane = [&](const QRectF& lane, bool inverted) {
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(inverted ? QColor("#17212a") : QColor(255, 255, 255, 238));
+                painter.drawRect(lane);
+                painter.setPen(inverted ? QColor("#ffffff") : QColor("#111111"));
+                painter.setFont(fitMonoFont(lane.width(), value));
+                painter.drawText(lane.adjusted(4, 0, -4, 0), Qt::AlignLeft | Qt::AlignVCenter, value);
+            };
+            drawLane(key_lane_a, true);
+            drawLane(key_lane_b, false);
+
+            if (show_amount_box) {
+                painter.setPen(QPen(QColor("#a8b0b5"), 0.7));
+                painter.setBrush(QColor(255, 255, 255, 225));
+                painter.drawRect(amount_box);
+                painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 8));
+                painter.setPen(QColor("#5f676d"));
+                painter.drawText(QRectF(amount_box.left() + 5, amount_box.top(), 66, amount_box.height()),
+                                 Qt::AlignLeft | Qt::AlignVCenter,
+                                 QStringLiteral("Notes/Amount:"));
+                if (!amount.isEmpty()) {
+                    painter.setPen(QColor("#263542"));
+                    painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 8, QFont::DemiBold));
+                    painter.drawText(amount_box.adjusted(72, 0, -4, 0), Qt::AlignLeft | Qt::AlignVCenter, amount);
+                }
+            }
+            painter.restore();
+        };
+
+        auto drawInstructionsFace = [&](const QRectF& face) {
+            painter.save();
+            const QRectF box = face.adjusted(12, 10, -12, -10);
+            painter.setPen(QPen(Qt::white, 2.0));
+            painter.setBrush(QColor(255, 255, 255, 224));
+            painter.drawRect(box);
+
+            painter.setPen(QColor("#1e3340"));
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 11, QFont::DemiBold));
+            QRectF title_box = box.adjusted(8, 5, -8, -box.height() + 24);
+            painter.drawText(title_box, Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Instructions"));
+
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 6, QFont::Normal));
+            const QString text = QStringLiteral(
+                "A Defcoin wallet is a private key (for spending, keep secret) and a corresponding public address (for "
+                "depositing, can be shared)\n"
+                "\u2022 Deposit funds to this wallet by sending Defcoin (DFC) to the Public\n"
+                "\u2022 Verify funds and check balance by entering the Public Address in a Defcoin Explorer\n"
+                "\u2022 Retrieve funds from this wallet by scanning the Private Key with a QR code reader and pasting "
+                "the code into Defcoin Core Nu wallet.");
+            painter.drawText(box.adjusted(8, 28, -8, -6), Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, text);
+            painter.restore();
+        };
+
+        if (back_side) {
+            drawQrFace(top_face, key_label, key, key, QStringLiteral("Spend"), false, false);
+
+            drawInstructionsFace(bottom_face);
+        } else {
+            drawQrFace(top_face,
+                       QStringLiteral("DEFCOIN ADDRESS"),
+                       address,
+                       address,
+                       QStringLiteral("Load/verify"),
+                       true,
+                       true);
+
+            const qreal brand_coin = qMin(bottom_face.height() * 0.72, bottom_face.width() * 0.24);
+            if (!hide_art && !coin.isNull()) {
+                painter.drawImage(
+                    QRectF(
+                        bottom_face.left() + 12, bottom_face.center().y() - brand_coin / 2.0, brand_coin, brand_coin),
+                    coin);
+            }
+            const QRectF brand_text_box(bottom_face.left() + 14 + brand_coin + 12,
+                                        bottom_face.top() + 17,
+                                        bottom_face.width() - brand_coin - 40,
+                                        bottom_face.height() - 34);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(255, 255, 255, 188));
+            painter.drawRect(brand_text_box);
+            painter.setFont(sheetFont(QStringLiteral("Avenir Next Condensed"), 22, QFont::ExtraBold));
+            painter.setPen(QColor("#263542"));
+            painter.drawText(QRectF(brand_text_box.left() + 5,
+                                    brand_text_box.top() + 3,
+                                    brand_text_box.width() - 10,
+                                    brand_text_box.height() / 2.0 - 3),
+                             Qt::AlignLeft | Qt::AlignVCenter,
+                             QStringLiteral("DEFCOIN"));
+            painter.drawText(QRectF(brand_text_box.left() + 5,
+                                    brand_text_box.center().y() - 1,
+                                    brand_text_box.width() - 10,
+                                    brand_text_box.height() / 2.0 - 3),
+                             Qt::AlignLeft | Qt::AlignVCenter,
+                             QStringLiteral("PAPER WALLET"));
+        }
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(QColor("#7c5eb5"), 0.8));
+        painter.drawLine(QPointF(card_area.left(), card_area.center().y()),
+                         QPointF(card_area.right(), card_area.center().y()));
+        painter.restore();
+    };
+
+    // Avery 5011 place cards: six near-square tent cards per Letter sheet,
+    // folded horizontally through the center of each card. Coordinates are
+    // proportional to the official 612x792-point template so printer/PDF
+    // device-pixel scaling does not shift the card grid.
+    const qreal avery_card_width = page.width() * (272.0 / 612.0);
+    const qreal avery_card_height = page.height() * (208.0 / 792.0);
+    const qreal avery_column_gap = page.width() * (24.0 / 612.0);
+    const qreal avery_row_gap = page.height() * (9.0 / 792.0);
+    const qreal avery_x = page.left() + page.width() * (22.0 / 612.0);
+    const qreal avery_y = page.top() + page.height() * (107.0 / 792.0);
+
+    auto averyCardRect = [&](int slot) {
+        const int card_col = slot % 2;
+        const int card_row = slot / 2;
+        return QRectF(avery_x + card_col * (avery_card_width + avery_column_gap),
+                      avery_y + card_row * (avery_card_height + avery_row_gap),
+                      avery_card_width,
+                      avery_card_height);
+    };
+
+    auto averyBackSlotForDuplex = [](int slot) {
+        const int card_col = slot % 2;
+        const int card_row = slot / 2;
+        return card_row * 2 + (1 - card_col);
+    };
+
+    auto drawSimpleQrCard = [&](const QRectF& area, const QVariantMap& entry) {
+        const QString address = entry.value(QStringLiteral("address")).toString();
+        const QString key = entry.value(QStringLiteral("key")).toString();
+        const QString key_label = entry.value(QStringLiteral("keyLabel")).toString();
+        const QString amount = entry.value(QStringLiteral("amount")).toString().trimmed();
+        const bool placeholder = entry.value(QStringLiteral("placeholder")).toBool();
+        const QRectF title(area.left(), area.top(), area.width(), 42);
+        const qreal gap = 24.0;
+        const QRectF content(area.left(), title.bottom() + 20, area.width(), area.height() - 62);
+        const QRectF public_panel(content.left(), content.top(), (content.width() - gap) / 2.0, content.height());
+        const QRectF private_panel(public_panel.right() + gap, content.top(), public_panel.width(), content.height());
+
+        painter.save();
+        painter.fillRect(page, Qt::white);
+        painter.setPen(QColor("#263542"));
+        painter.setFont(sheetFont(QStringLiteral("Avenir Next Condensed"), 30, QFont::ExtraBold));
+        painter.drawText(title, Qt::AlignCenter, QStringLiteral("DEFCOIN PAPER WALLET"));
+
+        auto drawPanel = [&](const QRectF& panel,
+                             const QString& heading,
+                             const QString& payload,
+                             const QString& caption,
+                             bool private_side) {
+            painter.save();
+            QPainterPath panel_path;
+            panel_path.addRoundedRect(panel, 8, 8);
+            painter.setClipPath(panel_path);
+            painter.fillPath(panel_path, Qt::white);
+            if (!hide_art)
+                drawWaveSecurityPattern(panel.adjusted(1, 1, -1, -1), 0.42);
+            painter.restore();
+
+            painter.save();
+            painter.setPen(QPen(private_side ? QColor("#d8a13b") : QColor("#7c5eb5"), 1.2));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRoundedRect(panel, 8, 8);
+            const qreal qr_size = qMin(panel.width() * 0.72, panel.height() * 0.46);
+            const QRectF qr(panel.center().x() - qr_size / 2.0, panel.top() + 74, qr_size, qr_size);
+            painter.setPen(QPen(QColor(214, 224, 228), 1.0));
+            painter.setBrush(Qt::white);
+            painter.drawRect(qr.adjusted(-8, -8, 8, 8));
+            drawQrOrPlaceholder(qr, payload, QR_ECLEVEL_H, 4, placeholder);
+            painter.setPen(QColor("#263542"));
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 15, QFont::DemiBold));
+            painter.drawText(
+                QRectF(panel.left() + 18, panel.top() + 18, panel.width() - 36, 24), Qt::AlignCenter, heading);
+            painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 12, QFont::DemiBold));
+            painter.drawText(QRectF(qr.left(), qr.bottom() + 10, qr.width(), 18), Qt::AlignCenter, caption);
+            painter.setFont(sheetFont(QStringLiteral("Atkinson Hyperlegible Mono"), 7, QFont::Normal));
+            painter.drawText(QRectF(panel.left() + 18, qr.bottom() + 38, panel.width() - 36, 96),
+                             Qt::AlignCenter | Qt::AlignTop | Qt::TextWordWrap,
+                             payload);
+            if (!private_side && !amount.isEmpty()) {
+                painter.setFont(sheetFont(QStringLiteral("Helvetica Neue"), 12, QFont::DemiBold));
+                painter.drawText(QRectF(panel.left() + 18, panel.bottom() - 42, panel.width() - 36, 22),
+                                 Qt::AlignCenter,
+                                 QStringLiteral("Amount: %1").arg(amount));
+            }
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(private_side ? QColor("#d8a13b") : QColor("#7c5eb5"), 1.2));
+            painter.drawRoundedRect(panel.adjusted(0.8, 0.8, -0.8, -0.8), 8, 8);
+            painter.restore();
+        };
+
+        drawPanel(
+            public_panel, QStringLiteral("Public Defcoin Address"), address, QStringLiteral("Load / Verify"), false);
+        drawPanel(private_panel, key_label, key, QStringLiteral("Spend"), true);
+        painter.restore();
+    };
+
+    if (defcoin_bulk_form) {
+        for (int start = 0; start < entries.size(); start += per_page) {
+            if (start > 0)
+                new_page();
+            const int batch_count = qMin(per_page, entries.size() - start);
+            for (int row = 0; row < batch_count; ++row) {
+                const QRectF strip(strip_x, strip_y + row * (strip_height + strip_gap), strip_width, strip_height);
+                drawDefcoinBulkWallet(strip, entries.at(start + row).toMap(), false);
+            }
+            drawNotReadyWarning();
+
+            new_page();
+            for (int row = 0; row < batch_count; ++row) {
+                const QRectF strip(strip_x, strip_y + row * (strip_height + strip_gap), strip_width, strip_height);
+                drawDefcoinBulkWallet(strip, entries.at(start + row).toMap(), true);
+            }
+            drawNotReadyWarning();
+        }
+
+        return true;
+    }
+
+    if (avery_5011_form) {
+        for (int start = 0; start < entries.size(); start += per_page) {
+            if (start > 0)
+                new_page();
+            const int batch_count = qMin(per_page, entries.size() - start);
+            for (int slot = 0; slot < batch_count; ++slot) {
+                drawAvery5011Wallet(averyCardRect(slot), entries.at(start + slot).toMap(), false);
+            }
+            drawNotReadyWarning();
+            new_page();
+            for (int slot = 0; slot < batch_count; ++slot) {
+                drawAvery5011Wallet(
+                    averyCardRect(averyBackSlotForDuplex(slot)), entries.at(start + slot).toMap(), true);
+            }
+            drawNotReadyWarning();
+        }
+
+        return true;
+    }
+
+    for (int i = 0; i < entries.size(); ++i) {
+        if (simple_qr_card_form) {
+            if (i > 0)
+                new_page();
+            drawSimpleQrCard(page.adjusted(54, 54, -54, -54), entries.at(i).toMap());
+            drawNotReadyWarning();
+            continue;
+        }
+        if (i > 0 && i % per_page == 0) {
+            drawNotReadyWarning();
+            new_page();
+        }
+        const int row = i % per_page;
+        if (tri_fold_form) {
+            const QRectF strip(strip_x, strip_y + row * (strip_height + strip_gap), strip_width, strip_height);
+            drawTriFoldStrip(strip, entries.at(i).toMap());
+        } else {
+            const QRectF strip(strip_x, strip_y + row * (strip_height + strip_gap), strip_width, strip_height);
+            drawPaperStrip(strip, entries.at(i).toMap(), selected_print_form);
+        }
+    }
+
+    if (!simple_qr_card_form)
+        drawNotReadyWarning();
+
+    return true;
+}
+
+void NuRpcService::printPaperWallet(
+    int print_form, int wallet_count, int addresses_per_page, bool hide_art, const QString& display_amount)
+{
+    bool env_print_form_ok = false;
+    int requested_print_form = qEnvironmentVariableIntValue("DEFCOIN_NU_PAPER_WALLET_FORM", &env_print_form_ok);
+    if (!env_print_form_ok)
+        requested_print_form = print_form;
+    // Keep env override 5 accepted for review scripts while QML uses zero-based
+    // index 4 for the user-facing "Design 5".
+    if (requested_print_form == 5)
+        requested_print_form = 4;
+    const int selected_print_form = qBound(0, requested_print_form, 4);
+    const bool defcoin_bulk_form = selected_print_form == 4;
+
+    QPrinter printer(QPrinter::ScreenResolution);
+    printer.setResolution(72);
+    printer.setPageSize(QPageSize(QPageSize::Letter));
+    if (defcoin_bulk_form || selected_print_form == 1)
+        printer.setPageOrientation(QPageLayout::Landscape);
+    printer.setFullPage(true);
+    printer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout::Point);
+    printer.setDocName(QStringLiteral("Defcoin Paper Wallet"));
+    const QString test_pdf_output = qEnvironmentVariable("DEFCOIN_NU_PAPER_WALLET_PDF").trimmed();
+    if (!test_pdf_output.isEmpty()) {
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(test_pdf_output);
+    } else {
+        QPrintDialog dialog(&printer);
+        dialog.setWindowTitle(QStringLiteral("Print Defcoin Paper Wallet"));
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+    }
+
+    QVariantList entries =
+        paperWalletReady() ? m_paper_wallet_entries : paperWalletPreviewEntries(wallet_count, display_amount);
+    if (paperWalletReady() && entries.isEmpty()) {
+        QVariantMap fallback;
+        fallback.insert(QStringLiteral("index"), 1);
+        fallback.insert(QStringLiteral("address"), m_paper_wallet_address);
+        fallback.insert(QStringLiteral("key"), m_paper_wallet_wif);
+        fallback.insert(QStringLiteral("amount"), m_paper_wallet_display_amount);
+        fallback.insert(QStringLiteral("keyLabel"), paperWalletKeyLabel(m_paper_wallet_bip38_encrypted));
+        entries.append(fallback);
+    }
+
+    QPainter painter(&printer);
+    if (!painter.isActive()) {
+        Q_EMIT userMessage(QStringLiteral("Paper wallet not printed"),
+                           QStringLiteral("The selected printer did not accept the paper-wallet job."));
+        return;
+    }
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+
+    const QRectF page = printer.pageRect(QPrinter::DevicePixel);
+    const bool test_pdf_render = !test_pdf_output.isEmpty();
+    const bool rendered = renderPaperWalletPages(
+        painter,
+        page,
+        entries,
+        selected_print_form,
+        test_pdf_render ? hide_art : (paperWalletReady() ? m_paper_wallet_hide_art : hide_art),
+        paperWalletReady() ? m_paper_wallet_addresses_per_page : qBound(1, addresses_per_page, 6),
+        paperWalletReady() ? m_paper_wallet_display_amount : display_amount,
+        [&printer]() { return printer.newPage(); });
+    if (!rendered) {
+        Q_EMIT userMessage(QStringLiteral("Paper wallet not printed"),
+                           QStringLiteral("The paper-wallet page renderer failed."));
+        return;
+    }
+
+    if (!test_pdf_output.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Paper wallet PDF written"), test_pdf_output);
+    }
 }
 
 void NuRpcService::importWatchOnlyAddress(const QString& address, const QString& label, bool rescan, int start_height)
@@ -11296,6 +13423,15 @@ void NuRpcService::setBackgroundCloseEnabled(bool enabled)
     Q_EMIT settingsChanged();
 }
 
+void NuRpcService::setShowStartupSplashStatusIndicator(bool enabled)
+{
+    if (m_show_startup_splash_status_indicator == enabled)
+        return;
+    m_show_startup_splash_status_indicator = enabled;
+    QSettings().setValue(QStringLiteral("ShowStartupSplashStatusIndicator"), enabled);
+    Q_EMIT settingsChanged();
+}
+
 QString NuRpcService::currentNuVersion() const
 {
     return QStringLiteral(DEFCOIN_NU_VERSION);
@@ -11505,14 +13641,14 @@ bool NuRpcService::validateMnemonic(const QString& phrase, QString* normalized, 
         if (bits.at(entropy_bits + i) != bitAt(checksum, i)) {
             if (error)
                 *error = QStringLiteral("The words are in the BIP39 list, but the checksum does not match.");
-            entropy.fill(0);
+            secureClear(&entropy);
             return false;
         }
     }
 
     if (normalized)
         *normalized = parts.join(QLatin1Char(' '));
-    entropy.fill(0);
+    secureClear(&entropy);
     return true;
 }
 
@@ -11555,8 +13691,8 @@ QString NuRpcService::generateRecoveryPhrase()
         return QString();
 
     QByteArray entropy(16, char(0));
-    for (int i = 0; i < entropy.size(); ++i)
-        entropy[i] = char(QRandomGenerator::system()->generate() & 0xff);
+    if (!systemRandomBytes(&entropy, entropy.size()))
+        return QString();
     const QByteArray checksum = sha256Bytes(entropy);
 
     QVector<bool> bits;
@@ -11574,7 +13710,7 @@ QString NuRpcService::generateRecoveryPhrase()
         }
         phrase.push_back(words.at(index));
     }
-    entropy.fill(0);
+    secureClear(&entropy);
     return phrase.join(QLatin1Char(' '));
 }
 
@@ -11592,9 +13728,9 @@ bool NuRpcService::mnemonicMaterial(
     if (!isValidSecp256k1Secret(secret)) {
         if (error)
             *error = QStringLiteral("The recovery phrase produced an invalid BIP32 master key.");
-        master.fill(0);
-        seed.fill(0);
-        secret.fill(0);
+        secureClear(&master);
+        secureClear(&seed);
+        secureClear(&secret);
         return false;
     }
 
@@ -11618,11 +13754,11 @@ bool NuRpcService::mnemonicMaterial(
         *xprv = encodeBase58Check(xprv_payload);
 
     if (!wif_payload.isEmpty())
-        wif_payload.fill(0);
-    xprv_payload.fill(0);
-    master.fill(0);
-    seed.fill(0);
-    secret.fill(0);
+        secureClear(&wif_payload);
+    secureClear(&xprv_payload);
+    secureClear(&master);
+    secureClear(&seed);
+    secureClear(&secret);
     return true;
 }
 
@@ -11656,7 +13792,7 @@ QString NuRpcService::descriptorForRecoveryPath(const QString& xprv,
     return QStringLiteral("pkh(%1%2)").arg(xprv, suffix);
 }
 
-bool NuRpcService::requireLocalRecoveryRpc(const QString& operation)
+bool NuRpcService::requireLocalRpcConnection(const QString& operation)
 {
     if (!loadRpcSettings()) {
         Q_EMIT userMessage(operation, m_last_error);
@@ -11664,19 +13800,20 @@ bool NuRpcService::requireLocalRecoveryRpc(const QString& operation)
     }
 
     const QString host = m_rpc_host.trimmed();
-    QHostAddress address;
-    const bool loopback_address = address.setAddress(host) && address.isLoopback();
-    const bool loopback_name = host.compare(QStringLiteral("localhost"), Qt::CaseInsensitive) == 0;
-    if (loopback_address || loopback_name)
+    if (isLoopbackRpcHost(host))
         return true;
 
     Q_EMIT userMessage(
         operation,
-        QStringLiteral(
-            "Recovery phrase operations are allowed only with a local Defcoin backend RPC connection. Current RPC host "
-            "is '%1'. Switch back to localhost before previewing or restoring from a phrase.")
+        QStringLiteral("This operation is allowed only with a local Defcoin backend RPC connection. Current RPC host "
+                       "is '%1'. Switch back to localhost before previewing or restoring from a phrase.")
             .arg(host.isEmpty() ? QStringLiteral("(empty)") : host));
     return false;
+}
+
+bool NuRpcService::requireLocalRecoveryRpc(const QString& operation)
+{
+    return requireLocalRpcConnection(operation);
 }
 
 bool NuRpcService::minerRunning() const
@@ -11812,9 +13949,28 @@ void NuRpcService::appendMinerLog(const QString& line)
     m_miner_log += clean;
     if (!m_miner_log.endsWith(QLatin1Char('\n')))
         m_miner_log += QLatin1Char('\n');
-    constexpr int max_chars = 2 * 1024 * 1024;
+    constexpr int max_chars = 256 * 1024;
     if (m_miner_log.size() > max_chars)
         m_miner_log = m_miner_log.right(max_chars);
+    scheduleMinerChanged();
+}
+
+void NuRpcService::scheduleMinerChanged()
+{
+    m_miner_signal_pending = true;
+    if (!m_miner_signal_timer) {
+        emitPendingMinerChanged();
+        return;
+    }
+    if (!m_miner_signal_timer->isActive())
+        m_miner_signal_timer->start();
+}
+
+void NuRpcService::emitPendingMinerChanged()
+{
+    if (!m_miner_signal_pending)
+        return;
+    m_miner_signal_pending = false;
     Q_EMIT minerChanged();
 }
 
@@ -12712,6 +14868,7 @@ void NuRpcService::startConfiguredMiner()
         Q_EMIT userMessage(QStringLiteral("Miner not started"), start_error);
         return;
     }
+    assignProcessToNuJobObject(m_miner_process);
     m_miner_status = QStringLiteral("Miner running.");
     Q_EMIT minerChanged();
 }
@@ -12965,9 +15122,10 @@ void NuRpcService::handleUpdateReleaseReply(QNetworkReply* reply)
 
     const QString size =
         m_pending_update.assetSize > 0 ? formatBytes(m_pending_update.assetSize) : QStringLiteral("unknown size");
-    const QString message = QStringLiteral("Defcoin Core Nu %1 is available.\n\nCurrent version: %2\nPackage: %3 "
-                                           "(%4)\n\nDownload and verify this update now?")
-                                .arg(m_pending_update.version, currentNuVersion(), m_pending_update.assetName, size);
+    const QString message =
+        QStringLiteral("Defcoin Core Nu %1 is available.\n\nCurrent version: %2\nPackage: %3 (%4)\n\nNu will open "
+                       "the GitHub release page for manual download unless this installation is managed by Velopack.")
+            .arg(m_pending_update.version, currentNuVersion(), m_pending_update.assetName, size);
     setUpdateStatus(QStringLiteral("Defcoin Core Nu %1 is available.").arg(m_pending_update.version), 0);
     Q_EMIT updateAvailable(m_pending_update.version, message);
     finish();
@@ -13024,47 +15182,16 @@ void NuRpcService::downloadPendingUpdate()
         thread->start();
         return;
     }
-    if (m_pending_update.checksumUrl.isEmpty()) {
-        Q_EMIT userMessage(QStringLiteral("Update cannot be verified"),
-                           QStringLiteral("The GitHub release does not include SHA256SUMS.txt, so Nu will not "
-                                          "auto-install it. Download from GitHub manually instead."));
+    if (!m_pending_update.velopackManaged) {
+        const QUrl release_url(m_pending_update.releaseUrl.isEmpty() ?
+                                   QStringLiteral("https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest") :
+                                   m_pending_update.releaseUrl);
+        QDesktopServices::openUrl(release_url);
+        Q_EMIT userMessage(QStringLiteral("Manual update required"),
+                           QStringLiteral("Nu opened the GitHub release page. Automatic install is limited to "
+                                          "Velopack-managed updates."));
         return;
     }
-
-    QDir dir(updateDownloadDirectory());
-    if (!dir.exists())
-        dir.mkpath(QStringLiteral("."));
-    const QString target_path = dir.filePath(m_pending_update.assetName);
-    if (QFileInfo::exists(target_path))
-        QFile::remove(target_path);
-
-    clearPendingUpdateDownload();
-    m_update_download_file = new QFile(target_path, this);
-    if (!m_update_download_file->open(QIODevice::WriteOnly)) {
-        const QString message = QStringLiteral("Could not write update package to %1.").arg(target_path);
-        clearPendingUpdateDownload();
-        Q_EMIT userMessage(QStringLiteral("Download failed"), message);
-        setUpdateStatus(message);
-        return;
-    }
-
-    m_pending_update.filePath = target_path;
-    m_update_download_in_progress = true;
-    setUpdateStatus(QStringLiteral("Downloading %1...").arg(m_pending_update.assetName), 0);
-
-    QNetworkRequest request(QUrl(m_pending_update.assetUrl));
-    request.setRawHeader("User-Agent", "DefcoinCoreNu/" DEFCOIN_NU_VERSION);
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    QNetworkReply* reply = m_update_network->get(request);
-    connect(reply, &QNetworkReply::readyRead, this, [this, reply] {
-        if (m_update_download_file)
-            m_update_download_file->write(reply->readAll());
-    });
-    connect(reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
-        const int progress = total > 0 ? qBound(0, int((received * 100) / total), 100) : 0;
-        setUpdateStatus(QStringLiteral("Downloading %1...").arg(m_pending_update.assetName), progress);
-    });
-    connect(reply, &QNetworkReply::finished, this, [this, reply] { handleUpdateAssetReply(reply); });
 }
 
 void NuRpcService::handleUpdateAssetReply(QNetworkReply* reply)
@@ -21500,9 +23627,7 @@ void NuRpcService::exportTransactionsCsv()
             fields.removeFirst();
         QStringList escaped;
         for (const QVariant& field : fields) {
-            QString text = field.toString();
-            text.replace("\"", "\"\"");
-            escaped.push_back("\"" + text + "\"");
+            escaped.push_back(csvCell(field.toString()));
         }
         out << escaped.join(',') << '\n';
     }
@@ -21566,11 +23691,6 @@ void NuRpcService::exportForensicsIrregularMessagesCsv()
         return;
     }
 
-    auto csv_escape = [](QString text) {
-        text.replace(QLatin1Char('"'), QStringLiteral("\"\""));
-        return QStringLiteral("\"%1\"").arg(text);
-    };
-
     QTextStream out(&file);
     out << "Block Height,Transaction ID,BIP141 Definition,Burned Defcoin Amount,Decoded Text Message,Flag,Script "
            "Prefix 4,Payload Prefix 4,Script Hex,Payload Hex\n";
@@ -21579,12 +23699,12 @@ void NuRpcService::exportForensicsIrregularMessagesCsv()
         const QVariantMap meta = row_value.toMap().value(QStringLiteral("meta")).toMap();
         QStringList escaped;
         for (int i = 0; i < 6; ++i) {
-            escaped << csv_escape(i < cells.size() ? cells.at(i).toString() : QString());
+            escaped << csvCell(i < cells.size() ? cells.at(i).toString() : QString());
         }
-        escaped << csv_escape(meta.value(QStringLiteral("scriptPrefix4")).toString())
-                << csv_escape(meta.value(QStringLiteral("payloadPrefix4")).toString())
-                << csv_escape(meta.value(QStringLiteral("scriptHex")).toString())
-                << csv_escape(meta.value(QStringLiteral("payloadHex")).toString());
+        escaped << csvCell(meta.value(QStringLiteral("scriptPrefix4")).toString())
+                << csvCell(meta.value(QStringLiteral("payloadPrefix4")).toString())
+                << csvCell(meta.value(QStringLiteral("scriptHex")).toString())
+                << csvCell(meta.value(QStringLiteral("payloadHex")).toString());
         out << escaped.join(QLatin1Char(',')) << '\n';
     }
     Q_EMIT userMessage(QStringLiteral("Export complete"),
@@ -21956,34 +24076,7 @@ QString NuRpcService::defcoinUri(const QString& address,
 
 QString NuRpcService::qrSourceForUri(const QString& uri) const
 {
-    if (uri.trimmed().isEmpty())
-        return QString();
-    QRcode* code = QRcode_encodeString(uri.toUtf8().constData(), 0, QR_ECLEVEL_L, QR_MODE_8, 1);
-    if (!code)
-        return QString();
-
-    QImage qr(code->width + 8, code->width + 8, QImage::Format_RGB32);
-    qr.fill(Qt::white);
-    unsigned char* p = code->data;
-    for (int y = 0; y < code->width; ++y) {
-        for (int x = 0; x < code->width; ++x) {
-            qr.setPixel(x + 4, y + 4, ((*p & 1) ? 0x000000 : 0xffffff));
-            ++p;
-        }
-    }
-    QRcode_free(code);
-
-    QImage out(QR_IMAGE_SIZE, QR_IMAGE_SIZE, QImage::Format_RGB32);
-    out.fill(Qt::white);
-    {
-        QPainter painter(&out);
-        painter.drawImage(out.rect().adjusted(24, 24, -24, -24), qr);
-    }
-    const QString hash =
-        QString::fromLatin1(QCryptographicHash::hash(uri.toUtf8(), QCryptographicHash::Sha1).toHex().left(16));
-    const QString qr_path = QDir::temp().filePath(QStringLiteral("defcoin-core-nu-qr-%1.png").arg(hash));
-    out.save(qr_path);
-    return QUrl::fromLocalFile(qr_path).toString();
+    return qrPngDataUrlForText(uri);
 }
 
 QString NuRpcService::receiveRequestQrSource(const QString& uri) const

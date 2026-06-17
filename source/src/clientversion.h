@@ -30,7 +30,7 @@
 
 //! Public Defcoin release identity. Keep this separate from CLIENT_VERSION,
 //! which is still the protocol/client integer used for wire compatibility.
-#define DEFCOIN_RELEASE_VERSION_STR "26.6.7a"
+#define DEFCOIN_RELEASE_VERSION_STR "26.6.7s"
 #define DEFCOIN_RELEASE_CODENAME_STR "Core Memories"
 #if ENABLE_DEFCOIN_FUN_UI
 #define DEFCOIN_PRODUCT_NAME_STR "Defcoin Core Nu DC34 Edition"

@@ -31,4 +31,12 @@ This folder contains local launch gates, test helpers, and protocol support tool
 - `defcoin_fast_syncd.py` - headless UDP Fast Sync responder for server/LAN testing.
 - `macos_click_visible_button.sh` - OCR fallback for exact visible system-dialog
   button clicks, used by crash-dialog launch gates.
+- `mock_paper_wallet_entropy.py` - standalone SVG/PNG mockup renderer for
+  iterating Paper Wallet entropy UI layout before rebuilding the full app.
 - `nu_test_launch_gate.sh` - launch guard used by Nu test runs.
+- `render_paper_wallet_previews.sh` - self-test renderer that writes actual
+  paper-wallet design PDFs and PNG pages for fast layout review; supports
+  selected-design and hide-art arguments so layout can be checked without a
+  full UI route/menu self-test. When run against a raw Homebrew-Qt-linked
+  `.app` from the build tree, it may temporarily isolate bundled Qt
+  `Frameworks`/`PlugIns` during render and restore them before exit.

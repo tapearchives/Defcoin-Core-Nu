@@ -28,7 +28,9 @@ class QFile;
 class QHostAddress;
 class QJsonObject;
 class QLockFile;
+class QPainter;
 class QProcess;
+class QRectF;
 class QTimer;
 class QUdpSocket;
 class NuVelopackUpdater;
@@ -95,6 +97,9 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString consoleOutput READ consoleOutput NOTIFY consoleChanged)
     Q_PROPERTY(QString paperWalletAddress READ paperWalletAddress NOTIFY walletChanged)
     Q_PROPERTY(QString paperWalletWif READ paperWalletWif NOTIFY walletChanged)
+    Q_PROPERTY(QString paperWalletAddressQrSource READ paperWalletAddressQrSource NOTIFY walletChanged)
+    Q_PROPERTY(QString paperWalletWifQrSource READ paperWalletWifQrSource NOTIFY walletChanged)
+    Q_PROPERTY(QVariantList paperWalletEntries READ paperWalletEntries NOTIFY walletChanged)
     Q_PROPERTY(QString paperWalletStatus READ paperWalletStatus NOTIFY walletChanged)
     Q_PROPERTY(bool paperWalletReady READ paperWalletReady NOTIFY walletChanged)
     Q_PROPERTY(bool feeEstimateAvailable READ feeEstimateAvailable NOTIFY feeEstimateChanged)
@@ -138,6 +143,8 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString logRemovePattern READ logRemovePattern WRITE setLogRemovePattern NOTIFY settingsChanged)
     Q_PROPERTY(
         bool backgroundCloseEnabled READ backgroundCloseEnabled WRITE setBackgroundCloseEnabled NOTIFY settingsChanged)
+    Q_PROPERTY(bool showStartupSplashStatusIndicator READ showStartupSplashStatusIndicator WRITE
+                   setShowStartupSplashStatusIndicator NOTIFY settingsChanged)
     Q_PROPERTY(QString updateStatus READ updateStatus NOTIFY updateStatusChanged)
     Q_PROPERTY(int updateDownloadProgress READ updateDownloadProgress NOTIFY updateStatusChanged)
     Q_PROPERTY(bool recoveryActive READ recoveryActive NOTIFY recoveryChanged)
@@ -481,6 +488,18 @@ public:
     {
         return m_paper_wallet_wif;
     }
+    QString paperWalletAddressQrSource() const
+    {
+        return m_paper_wallet_address_qr_source;
+    }
+    QString paperWalletWifQrSource() const
+    {
+        return m_paper_wallet_wif_qr_source;
+    }
+    QVariantList paperWalletEntries() const
+    {
+        return m_paper_wallet_entries;
+    }
     QString paperWalletStatus() const
     {
         return m_paper_wallet_status;
@@ -604,6 +623,10 @@ public:
     bool backgroundCloseEnabled() const
     {
         return m_background_close_enabled;
+    }
+    bool showStartupSplashStatusIndicator() const
+    {
+        return m_show_startup_splash_status_indicator;
     }
     QString updateStatus() const
     {
@@ -993,6 +1016,9 @@ public:
     Q_INVOKABLE void requestNewAddress(const QString& label = QString(),
                                        const QString& amount = QString(),
                                        const QString& message = QString());
+    Q_INVOKABLE void importPaperWalletPrivateKey(const QString& private_key,
+                                                 bool sweep,
+                                                 const QString& label = QStringLiteral("Paper wallet import"));
     Q_INVOKABLE void deleteReceiveRequest(const QString& address);
     Q_INVOKABLE void deleteReceiveRequests(const QVariantList& addresses);
     Q_INVOKABLE void sendCoins(const QString& address,
@@ -1029,7 +1055,31 @@ public:
     Q_INVOKABLE void runRpcCommand(const QString& method, const QString& params_json, bool wallet_scoped);
     Q_INVOKABLE void runRpcConsoleCommand(const QString& command_text, const QString& wallet_name);
     Q_INVOKABLE void clearConsoleOutput();
-    Q_INVOKABLE void generatePaperWallet(bool import_public_address = false, const QString& label = QString());
+    Q_INVOKABLE void generatePaperWallet(bool import_public_address = false,
+                                         const QString& label = QString(),
+                                         const QString& user_entropy = QString());
+    Q_INVOKABLE void generatePaperWallets(int count,
+                                          int addresses_per_page,
+                                          bool hide_art,
+                                          bool bip38_encrypt,
+                                          const QString& passphrase,
+                                          bool allow_weak_bip38_passphrase = false,
+                                          const QString& user_entropy = QString(),
+                                          const QString& display_amount = QString(),
+                                          int print_form = 0);
+    Q_INVOKABLE void fundPaperWallets(const QVariantList& outputs);
+    Q_INVOKABLE void clearPaperWallet();
+    Q_INVOKABLE void installPaperWalletSelfTestData();
+    Q_INVOKABLE QStringList paperWalletPreviewPageSources(int print_form,
+                                                          int wallet_count,
+                                                          int addresses_per_page,
+                                                          bool hide_art,
+                                                          const QString& display_amount = QString()) const;
+    Q_INVOKABLE void printPaperWallet(int print_form = 0,
+                                      int wallet_count = 1,
+                                      int addresses_per_page = 3,
+                                      bool hide_art = false,
+                                      const QString& display_amount = QString());
     Q_INVOKABLE void importWatchOnlyAddress(const QString& address,
                                             const QString& label,
                                             bool rescan = false,
@@ -1177,6 +1227,7 @@ public Q_SLOTS:
     void setLogRemovePattern(const QString& pattern);
     void setForensicsAcceptBip141AsRegular(bool enabled);
     void setBackgroundCloseEnabled(bool enabled);
+    void setShowStartupSplashStatusIndicator(bool enabled);
     void setMaskBalances(bool enabled);
     void setThirdPartyTxUrlsEnabled(bool enabled);
     void setThirdPartyTxUrl(const QString& url);
@@ -1208,6 +1259,7 @@ Q_SIGNALS:
     void recoveryPhrasePreviewReady(const QVariantMap& preview, const QString& message);
     void recoveryChanged();
     void minerChanged();
+    void paperWalletGenerated();
 
 private:
     using RpcCallback = std::function<void(const QJsonValue&, const QString&)>;
@@ -1235,11 +1287,14 @@ private:
     QString defaultDataDir() const;
     void readDefcoinConf(const QString& conf_path);
     bool readCookie();
+    bool requireLocalRpcConnection(const QString& operation);
     QString backendBinaryPath() const;
     QString debugLogPath() const;
     bool ensureBackendStarted();
     void stopHelperProcesses();
     void stopOwnedBackend();
+    void scheduleMinerChanged();
+    void emitPendingMinerChanged();
     void appendLaunchDiagnostic(const QString& message);
     int appendDebugLogLineFromNu(const QString& message);
     void beginBackendDebugLogSection(bool write_to_debug_log);
@@ -1491,6 +1546,16 @@ private:
     QString selectedUpdateAssetNeedle() const;
     QString updateDownloadDirectory() const;
     QString nuResourceRoot() const;
+    QString paperWalletPrintHtml() const;
+    QVariantList paperWalletPreviewEntries(int wallet_count, const QString& display_amount) const;
+    bool renderPaperWalletPages(QPainter& painter,
+                                const QRectF& page,
+                                const QVariantList& entries,
+                                int selected_print_form,
+                                bool hide_art,
+                                int addresses_per_page,
+                                const QString& display_amount,
+                                const std::function<bool()>& new_page) const;
     QStringList loadBip39Words() const;
     bool validateMnemonic(const QString& phrase, QString* normalized = nullptr, QString* error = nullptr) const;
     bool looksLikeRecoveryPhraseText(const QString& text) const;
@@ -1552,6 +1617,8 @@ private:
     QString m_miner_status = QStringLiteral("Miner not configured.");
     QString m_miner_log;
     QString m_miner_parse_buffer;
+    QTimer* m_miner_signal_timer = nullptr;
+    bool m_miner_signal_pending = false;
     QString m_miner_hashrate_text = QStringLiteral("-");
     int m_miner_accepted_shares = 0;
     int m_miner_rejected_shares = 0;
@@ -1571,6 +1638,7 @@ private:
     QString m_log_last_search_pattern;
     QString m_log_remove_pattern;
     bool m_background_close_enabled = false;
+    bool m_show_startup_splash_status_indicator = false;
     bool m_update_check_in_progress = false;
     bool m_update_download_in_progress = false;
     bool m_rpc_ready_logged = false;
@@ -1788,6 +1856,15 @@ private:
         "method name when needed.\n\nWARNING: Do not paste commands from strangers into this console.");
     QString m_paper_wallet_address;
     QString m_paper_wallet_wif;
+    QString m_paper_wallet_address_qr_source;
+    QString m_paper_wallet_wif_qr_source;
+    QVariantList m_paper_wallet_entries;
+    QVector<QByteArray> m_paper_wallet_secrets;
+    bool m_paper_wallet_hide_art = false;
+    bool m_paper_wallet_bip38_encrypted = false;
+    int m_paper_wallet_addresses_per_page = 3;
+    int m_paper_wallet_print_form = 0;
+    QString m_paper_wallet_display_amount;
     QString m_paper_wallet_status = QStringLiteral("No paper wallet generated in this session.");
     bool m_fee_estimate_available = false;
     QString m_fee_estimate_status = QStringLiteral("Fee estimate hydrates after RPC connects.");

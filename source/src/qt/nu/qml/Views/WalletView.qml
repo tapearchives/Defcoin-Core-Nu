@@ -24,13 +24,13 @@ ColumnLayout {
     property int addressBookVisibleLimit: 500
     property bool addressBookShowAll: false
     property int walletListViewMode: 0
-    property bool paperImportPublic: true
     property string walletSortKey: ""
     property bool walletSortAscending: true
     property string walletSimpleSortKey: ""
     property bool walletSimpleSortAscending: true
     property string walletDetailedSortKey: ""
     property bool walletDetailedSortAscending: true
+    property int pendingWalletTab: -1
 
     Component.onCompleted: NuService.refreshWalletStats()
     onVisibleChanged: if (visible) NuService.refreshWalletStats()
@@ -272,8 +272,19 @@ ColumnLayout {
     function walletPanelIndexForTab(tabIndex) {
         // Panels are kept in their historical declaration order to avoid
         // churning stateful controls; this map keeps visible tabs honest.
-        const panelOrder = [0, 2, 3, 4, 1, 5, 6]
+        const panelOrder = [0, 7, 2, 3, 4, 1, 5, 6]
         return tabIndex >= 0 && tabIndex < panelOrder.length ? panelOrder[tabIndex] : 0
+    }
+
+    function requestWalletTab(tabIndex) {
+        if (tabIndex === walletTabs.currentIndex)
+            return
+        if (walletTabs.currentIndex === 1 && NuService.paperWalletReady) {
+            root.pendingWalletTab = tabIndex
+            leavePaperWalletTabDialog.open()
+            return
+        }
+        walletTabs.currentIndex = tabIndex
     }
 
     function openSelectedWallets() {
@@ -404,13 +415,14 @@ ColumnLayout {
     NuTabBar {
         id: walletTabs
         Layout.fillWidth: true
-        NuTabButton { text: "Files" }
-        NuTabButton { text: "Recovery" }
-        NuTabButton { text: "Security" }
-        NuTabButton { text: "Addresses" }
-        NuTabButton { text: "Tools" }
-        NuTabButton { text: "Messages" }
-        NuTabButton { text: "Compatibility" }
+        NuTabButton { text: "Files"; onClicked: root.requestWalletTab(0) }
+        NuTabButton { text: "Paper Wallet"; onClicked: root.requestWalletTab(1) }
+        NuTabButton { text: "Recovery"; onClicked: root.requestWalletTab(2) }
+        NuTabButton { text: "Security"; onClicked: root.requestWalletTab(3) }
+        NuTabButton { text: "Addresses"; onClicked: root.requestWalletTab(4) }
+        NuTabButton { text: "Tools"; onClicked: root.requestWalletTab(5) }
+        NuTabButton { text: "Messages"; onClicked: root.requestWalletTab(6) }
+        NuTabButton { text: "Compatibility"; onClicked: root.requestWalletTab(7) }
     }
 
     StackLayout {
@@ -645,82 +657,6 @@ ColumnLayout {
                         font.weight: Font.DemiBold
                         wrapMode: Text.WordWrap
                     }
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: "Paper wallet generation creates a new address and WIF private key for offline recording. The private key is shown here only and is not imported into the wallet unless you explicitly import it later."
-                        color: NuTokens.textSecondary
-                        font.pixelSize: NuTokens.fontSmall
-                        wrapMode: Text.WordWrap
-                    }
-
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 2
-                        columnSpacing: NuTokens.spaceLg
-                        rowSpacing: NuTokens.spaceMd
-
-                        Label { text: "Paper label"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
-                        NuTextField {
-                            id: paperWalletLabel
-                            Layout.fillWidth: true
-                            placeholderText: "Paper wallet public address"
-                            helpText: "Optional label used only if Nu imports the generated public address as watch-only metadata."
-                        }
-
-                        Label { text: "Public import"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
-                        NuCheckBox {
-                            text: "Add public address as watch-only metadata"
-                            checked: root.paperImportPublic
-                            helpText: "Imports only the public address so Nu can show it in the address list. The private key is not stored."
-                            onToggled: root.paperImportPublic = checked
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: NuTokens.spaceMd
-                        NuActionButton {
-                            text: "Generate Paper Wallet"
-                            primary: true
-                            Layout.preferredWidth: 230
-                            helpText: "Generate a Defcoin address and WIF private key without importing the private key into the wallet."
-                            onClicked: NuService.generatePaperWallet(root.paperImportPublic, paperWalletLabel.text)
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: NuService.paperWalletStatus
-                            color: NuTokens.textSecondary
-                            font.pixelSize: NuTokens.fontSmall
-                            wrapMode: Text.WordWrap
-                        }
-                    }
-
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 2
-                        columnSpacing: NuTokens.spaceLg
-                        rowSpacing: NuTokens.spaceSm
-                        visible: NuService.paperWalletReady
-
-                        Label { text: "Address"; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontBody }
-                        NuCopyField {
-                            Layout.fillWidth: true
-                            value: NuService.paperWalletAddress
-                            copyEnabled: NuService.paperWalletAddress.length > 0
-                            onCopyRequested: (value) => NuService.copyText(value)
-                        }
-
-                        Label { text: "Private key"; color: NuTokens.stateWarning; font.pixelSize: NuTokens.fontBody; font.weight: Font.DemiBold }
-                        NuCopyField {
-                            Layout.fillWidth: true
-                            value: NuService.paperWalletWif
-                            copyEnabled: NuService.paperWalletWif.length > 0
-                            onCopyRequested: (value) => NuService.copySensitiveTextAfterWarning(value)
-                        }
-                    }
-
-                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: NuTokens.lineSubtle }
 
                     Label {
                         Layout.fillWidth: true
@@ -1025,7 +961,7 @@ ColumnLayout {
                     ]
                     rows: {
                         root.addressBookFilterRevision
-                        walletTabs.currentIndex === 3 ? root.addressBookTableRows() : []
+                        walletTabs.currentIndex === 4 ? root.addressBookTableRows() : []
                     }
                     columnWeights: [0.1, 1.4, 3.5, 0.85, 1.1]
                     columnMinimums: [44, 140, 320, 90, 150]
@@ -1123,6 +1059,43 @@ ColumnLayout {
                 }
             }
         }
+
+        PaperWalletView {
+            embedded: true
+            active: walletTabs.currentIndex === 1
+        }
+    }
+
+    NuDialog {
+        id: leavePaperWalletTabDialog
+        title: "Leave Paper Wallet?"
+        acceptText: "Erase Keys and Leave"
+        cancelText: "Return to Paper Wallet"
+        dialogWidth: 660
+
+        Label {
+            Layout.fillWidth: true
+            text: "Generated paper-wallet private keys are still in memory. If you leave this tab, Nu will clear them and they cannot be printed or recovered from this session."
+            color: NuTokens.textPrimary
+            font.pixelSize: NuTokens.fontBody
+            wrapMode: Text.WordWrap
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: "Cancel if you still need to print, fund, or review these paper wallets."
+            color: NuTokens.stateWarning
+            font.pixelSize: NuTokens.fontSmall
+            wrapMode: Text.WordWrap
+        }
+
+        onAccepted: {
+            NuService.clearPaperWallet()
+            if (root.pendingWalletTab >= 0)
+                walletTabs.currentIndex = root.pendingWalletTab
+            root.pendingWalletTab = -1
+        }
+        onRejected: root.pendingWalletTab = -1
     }
 
     NuDialog {

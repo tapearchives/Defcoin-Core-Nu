@@ -27,8 +27,8 @@ ColumnLayout {
         Layout.preferredHeight: root.heroHeight
         Layout.minimumHeight: 130
 
-        readonly property int brandCoinWidth: Math.round(Math.min(width * 0.27, height * 0.72 * 692 / 978, 218))
         readonly property int brandWordmarkSize: Math.round(Math.max(30, Math.min(58, width * 0.074, height * 0.145)))
+        readonly property int brandCoinWidth: Math.round(brandWordmarkSize * 1.85)
 
         Rectangle {
             anchors.fill: parent
@@ -91,11 +91,8 @@ ColumnLayout {
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: root.showOverlayText ? -24 : 0
             coinWidth: hero.brandCoinWidth
-            coinHeight: Math.round(hero.brandCoinWidth * 978 / 692)
+            coinHeight: hero.brandCoinWidth
             wordmarkSize: hero.brandWordmarkSize
-            wordmarkTracking: 1.15
-            fcGapAdjust: 2
-            lineSpacing: -Math.round(hero.brandWordmarkSize * 0.34)
             gap: 30
         }
 

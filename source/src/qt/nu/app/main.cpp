@@ -14,6 +14,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QHash>
 #include <QIODevice>
@@ -32,12 +33,14 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QScreen>
+#include <QSettings>
 #include <QSplashScreen>
 #include <QStyleHints>
 #include <QTextStream>
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
+#include <QVariant>
 #include <QWidget>
 #include <QWindow>
 #include <QtQml/qqml.h>
@@ -81,6 +84,24 @@ void writeLaunchLogLine(const QString& message)
         << message.trimmed() << '\n';
     out.flush();
     gLaunchLogFile->flush();
+}
+
+void loadBundledNuFonts(const QString& resourceRoot)
+{
+    const QStringList fontFiles{
+        QStringLiteral("AtkinsonHyperlegibleMono-Regular.ttf"),
+        QStringLiteral("AtkinsonHyperlegibleMono-Bold.ttf"),
+        QStringLiteral("AtkinsonHyperlegibleMono-Italic.ttf"),
+        QStringLiteral("AtkinsonHyperlegibleMono-BoldItalic.ttf"),
+    };
+
+    for (const QString& fontFile : fontFiles) {
+        const QString fontPath = QDir(resourceRoot).filePath(QStringLiteral("assets/fonts/%1").arg(fontFile));
+        const int fontId = QFontDatabase::addApplicationFont(fontPath);
+        if (fontId < 0) {
+            qWarning() << "Unable to load bundled Nu font" << fontPath;
+        }
+    }
 }
 
 void nuQtMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& message)
@@ -241,46 +262,81 @@ void drawNuBrandSplash(QPixmap& pixmap, const QString& resourceRoot)
         painter.drawLine(x, panel.top(), x, panel.bottom());
     }
 
-    const QPixmap coinStack(resourceRoot + "/assets/brand/defcoin-nu-coin-stack-hires.png");
-    const QRect logoCoinRect(112, 48, 216, 305);
-    if (!coinStack.isNull()) {
+    const QPixmap coinMark(resourceRoot + "/assets/brand/defcoin-v26-coin.png");
+    const int brandTextSize = 58;
+    const int logoCoinSize = qRound(brandTextSize * 1.85);
+    const int lockupGap = 30;
+    const QRect logoCoinRect(124, 118, logoCoinSize, logoCoinSize);
+    if (!coinMark.isNull()) {
         painter.setOpacity(0.96);
-        painter.drawPixmap(logoCoinRect, coinStack);
+        painter.drawPixmap(logoCoinRect, coinMark);
         painter.setOpacity(1.0);
     }
 
     QFont brandFont(QStringLiteral("Avenir Next Condensed"));
-    brandFont.setPixelSize(58);
+    brandFont.setPixelSize(brandTextSize);
     brandFont.setWeight(QFont::ExtraBold);
-    brandFont.setLetterSpacing(QFont::AbsoluteSpacing, 1.15);
+    brandFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
     painter.setFont(brandFont);
     painter.setPen(QColor("#f6f6f2"));
 
-    const int wordX = logoCoinRect.right() + 30;
-    const int wordY = logoCoinRect.top() + (kExploreApp ? 52 : 78);
-    const int wordW = panel.right() - wordX - 44;
-    QFontMetrics brandMetrics(brandFont);
-    painter.drawText(QRect(wordX, wordY, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("DEF"));
-    painter.drawText(QRect(wordX + brandMetrics.horizontalAdvance(QStringLiteral("DEF")) + 2, wordY, wordW, 66),
-                     Qt::AlignLeft | Qt::AlignVCenter,
-                     QStringLiteral("COIN"));
-    painter.drawText(QRect(wordX, wordY + 50, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("CORE NU"));
+    const int wordX = logoCoinRect.right() + lockupGap;
+    const int wordY = logoCoinRect.top() + (kExploreApp ? 8 : 16);
+    const double defcoinTracking = brandTextSize * 0.04;
+    const double coreNuTracking = brandTextSize * 0.042;
+    const double fcJoinGap = brandTextSize * 0.0345;
+    const auto trackedTextWidth = [](const QFont& font, const QString& text, double tracking, double fcAdjust) {
+        QFontMetrics metrics(font);
+        double width = 0.0;
+        for (int i = 0; i < text.size(); ++i) {
+            if (i > 0)
+                width += tracking;
+            if (text == QStringLiteral("DEFCOIN") && i == 3)
+                width += fcAdjust;
+            width += metrics.horizontalAdvance(QString(text.at(i)));
+        }
+        return qRound(width);
+    };
+    const auto drawTrackedText =
+        [&painter](int x, int baselineY, const QFont& font, const QString& text, double tracking, double fcAdjust) {
+            QFontMetrics metrics(font);
+            painter.setFont(font);
+            double cursor = x;
+            for (int i = 0; i < text.size(); ++i) {
+                if (i > 0)
+                    cursor += tracking;
+                if (text == QStringLiteral("DEFCOIN") && i == 3)
+                    cursor += fcAdjust;
+                const QString ch(text.at(i));
+                painter.drawText(QPointF(cursor, baselineY), ch);
+                cursor += metrics.horizontalAdvance(ch);
+            }
+        };
+    const int targetWidth = trackedTextWidth(brandFont, QStringLiteral("DEFCOIN"), defcoinTracking, fcJoinGap);
+    const int lineHeight = 66;
+    const int lineGap = qRound(brandTextSize * 0.095);
+    const int defcoinBaseline = wordY + QFontMetrics(brandFont).ascent() + 3;
+    drawTrackedText(wordX, defcoinBaseline, brandFont, QStringLiteral("DEFCOIN"), defcoinTracking, fcJoinGap);
+    QFont coreFont = brandFont;
+    coreFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
+    const int coreY = wordY + lineHeight + lineGap - 14;
+    const int coreBaseline = coreY + QFontMetrics(coreFont).ascent() + 3;
+    const int coreWidth = trackedTextWidth(coreFont, QStringLiteral("CORE"), coreNuTracking, 0.0);
+    Q_UNUSED(coreWidth);
+    const int nuWidth = trackedTextWidth(coreFont, QStringLiteral("NU"), coreNuTracking, 0.0);
+    drawTrackedText(wordX, coreBaseline, coreFont, QStringLiteral("CORE"), coreNuTracking, 0.0);
+    drawTrackedText(wordX + targetWidth - nuWidth, coreBaseline, coreFont, QStringLiteral("NU"), coreNuTracking, 0.0);
     if (kExploreApp) {
-        const int targetWidth = qMax(brandMetrics.horizontalAdvance(QStringLiteral("DEF")) + 2 +
-                                         brandMetrics.horizontalAdvance(QStringLiteral("COIN")),
-                                     brandMetrics.horizontalAdvance(QStringLiteral("CORE NU")));
         QFont exploreFont = brandFont;
-        QFont noSpacingFont = brandFont;
-        noSpacingFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
         const QString exploreText = QStringLiteral("EXPLORE");
-        const int baseWidth = QFontMetrics(noSpacingFont).horizontalAdvance(exploreText);
+        const int baseWidth = trackedTextWidth(exploreFont, exploreText, 0.0, 0.0);
         const double fittedSpacing =
             exploreText.size() > 1 ?
                 qMax(0.0, static_cast<double>(targetWidth - baseWidth) / static_cast<double>(exploreText.size() - 1)) :
                 1.15;
-        exploreFont.setLetterSpacing(QFont::AbsoluteSpacing, fittedSpacing);
-        painter.setFont(exploreFont);
-        painter.drawText(QRect(wordX, wordY + 100, wordW, 66), Qt::AlignLeft | Qt::AlignVCenter, exploreText);
+        const int exploreY = coreY + lineHeight + lineGap - 14;
+        const int exploreBaseline = exploreY + QFontMetrics(exploreFont).ascent() + 3;
+        drawTrackedText(wordX, exploreBaseline, exploreFont, exploreText, fittedSpacing, 0.0);
     }
 }
 
@@ -441,6 +497,11 @@ void initializeLaunchLog(const QString& dataDir)
 class StartupReporter
 {
 public:
+    explicit StartupReporter(bool show_splash_status_indicator)
+        : m_show_splash_status_indicator(show_splash_status_indicator)
+    {
+    }
+
     void start()
     {
         m_elapsed.start();
@@ -458,6 +519,8 @@ public:
             QStringLiteral("Startup phase at %1s: %2").arg(QString::number(elapsedSeconds(), 'f', 1), clean));
         if (!m_splash)
             return;
+        if (!m_show_splash_status_indicator)
+            return;
 
         m_splash->showMessage(QStringLiteral("\n\n%1  |  %2s").arg(clean, QString::number(elapsedSeconds(), 'f', 1)),
                               Qt::AlignHCenter | Qt::AlignTop,
@@ -472,8 +535,192 @@ private:
     }
 
     QElapsedTimer m_elapsed;
+    bool m_show_splash_status_indicator = false;
     QSplashScreen* m_splash = nullptr;
 };
+
+QString uiSelfTestScreenshotDir()
+{
+    if (qEnvironmentVariableIsEmpty("DEFCOIN_NU_UI_SELF_TEST_SCREENSHOTS"))
+        return QString();
+    return QString::fromLocal8Bit(qgetenv("DEFCOIN_NU_UI_SELF_TEST_SCREENSHOTS")).trimmed();
+}
+
+QString uiSelfTestFileName(QString label)
+{
+    label = label.trimmed().toLower();
+    QString out;
+    out.reserve(label.size());
+    bool lastDash = false;
+    for (const QChar ch : label) {
+        if (ch.isLetterOrNumber()) {
+            out.append(ch);
+            lastDash = false;
+        } else if (!lastDash) {
+            out.append(QLatin1Char('-'));
+            lastDash = true;
+        }
+    }
+    while (out.startsWith(QLatin1Char('-')))
+        out.remove(0, 1);
+    while (out.endsWith(QLatin1Char('-')))
+        out.chop(1);
+    return out.isEmpty() ? QStringLiteral("screen") : out;
+}
+
+void uiSelfTestSettle(QApplication& app, int milliseconds = 500)
+{
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < milliseconds) {
+        app.processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(15);
+    }
+}
+
+QQuickWindow* uiSelfTestVisibleWindow(QQuickWindow* rootWindow)
+{
+    QQuickWindow* target = rootWindow;
+    for (QWindow* window : QGuiApplication::topLevelWindows()) {
+        auto* quick = qobject_cast<QQuickWindow*>(window);
+        if (quick && quick->isVisible()) {
+            target = quick;
+        }
+    }
+    return target;
+}
+
+bool uiSelfTestSaveScreenshot(QQuickWindow* rootWindow, const QString& dir, const QString& label)
+{
+    if (dir.isEmpty())
+        return true;
+    QDir().mkpath(dir);
+    QQuickWindow* target = uiSelfTestVisibleWindow(rootWindow);
+    if (!target)
+        return false;
+    const QString path = QDir(dir).filePath(uiSelfTestFileName(label) + QStringLiteral(".png"));
+    const QImage image = target->grabWindow();
+    const bool saved = !image.isNull() && image.save(path) && QFileInfo(path).size() > 0;
+    writeLaunchLogLine(
+        QStringLiteral("UI self-test screenshot %1: %2")
+            .arg(saved ? QStringLiteral("saved") : QStringLiteral("failed"), QDir::toNativeSeparators(path)));
+    return saved;
+}
+
+void uiSelfTestClosePopups(QApplication& app, QObject* rootObject)
+{
+    if (rootObject) {
+        QMetaObject::invokeMethod(rootObject, "uiSelfTestClosePopups");
+    }
+    uiSelfTestSettle(app, 220);
+}
+
+int runQtQuickUiSelfTest(QApplication& app, QObject* rootObject, QQuickWindow* rootWindow, NuRpcService& service)
+{
+    const QString screenshotDir = uiSelfTestScreenshotDir();
+    bool ok = rootObject && rootWindow;
+    if (!ok) {
+        writeLaunchLogLine(QStringLiteral("UI self-test failed: root window missing."));
+        return 3;
+    }
+
+    if (!qEnvironmentVariableIsEmpty("DEFCOIN_NU_PAPER_WALLET_PDF") &&
+        !qEnvironmentVariableIsEmpty("DEFCOIN_NU_PAPER_WALLET_RENDER_ONLY")) {
+        service.installPaperWalletSelfTestData();
+        const bool hide_art = qEnvironmentVariableIntValue("DEFCOIN_NU_PAPER_WALLET_HIDE_ART") > 0;
+        service.printPaperWallet(0, 3, 3, hide_art);
+        uiSelfTestSettle(app, 250);
+        writeLaunchLogLine(QStringLiteral("UI self-test paper wallet PDF render-only requested."));
+        return 0;
+    }
+
+    QStringList routes =
+        kExploreApp ?
+            (QStringList() << QStringLiteral("explorer") << QStringLiteral("pulse") << QStringLiteral("holders")
+                           << QStringLiteral("movements") << QStringLiteral("coindroids") << QStringLiteral("reddit")
+                           << QStringLiteral("messages") << QStringLiteral("contacts") << QStringLiteral("indexing")
+                           << QStringLiteral("paper") << QStringLiteral("witness")) :
+            (QStringList() << QStringLiteral("home") << QStringLiteral("send") << QStringLiteral("receive")
+                           << QStringLiteral("activity") << QStringLiteral("wallet") << QStringLiteral("mining")
+                           << QStringLiteral("rpc") << QStringLiteral("node") << QStringLiteral("settings"));
+    const QString route_filter = qEnvironmentVariable("DEFCOIN_NU_UI_SELF_TEST_ROUTE").trimmed();
+    if (!route_filter.isEmpty())
+        routes = {route_filter};
+
+    writeLaunchLogLine(QStringLiteral("UI self-test begin."));
+    for (const QString& route : routes) {
+        if (!kExploreApp && (route == QLatin1String("mining") || route == QLatin1String("rpc") ||
+                             route == QLatin1String("node") || route == QLatin1String("settings"))) {
+            service.setProperty("advancedToolsVisible", true);
+        }
+        rootObject->setProperty("currentRoute", route);
+        uiSelfTestSettle(app, route == QLatin1String("paper") ? 900 : 650);
+        if (kExploreApp && route == QLatin1String("paper")) {
+            service.installPaperWalletSelfTestData();
+            uiSelfTestSettle(app, 350);
+        } else if (!kExploreApp && route == QLatin1String("wallet") &&
+                   !qEnvironmentVariableIsEmpty("DEFCOIN_NU_UI_SELF_TEST_PAPER_WALLET")) {
+            const bool opened = QMetaObject::invokeMethod(rootObject, "uiSelfTestOpenPaperWalletTab");
+            if (!opened) {
+                ok = false;
+                writeLaunchLogLine(QStringLiteral("UI self-test failed: Paper Wallet tab hook missing."));
+            }
+            uiSelfTestSettle(app, 900);
+        }
+        writeLaunchLogLine(QStringLiteral("UI self-test route: %1").arg(route));
+        ok = uiSelfTestSaveScreenshot(rootWindow, screenshotDir, QStringLiteral("route-%1").arg(route)) && ok;
+    }
+
+    if (kExploreApp) {
+        rootObject->setProperty("currentRoute", QStringLiteral("paper"));
+        service.installPaperWalletSelfTestData();
+        uiSelfTestSettle(app, 450);
+        if (QMetaObject::invokeMethod(rootObject, "uiSelfTestOpenPaperWalletPopout")) {
+            uiSelfTestSettle(app, 700);
+            ok = uiSelfTestSaveScreenshot(rootWindow, screenshotDir, QStringLiteral("paper-wallet-popout")) && ok;
+            QMetaObject::invokeMethod(rootObject, "uiSelfTestClosePaperWalletPopout");
+            uiSelfTestSettle(app, 250);
+        } else {
+            ok = false;
+            writeLaunchLogLine(QStringLiteral("UI self-test failed: Paper Wallet pop-out hook missing."));
+        }
+    }
+
+    if (!qEnvironmentVariableIsEmpty("DEFCOIN_NU_PAPER_WALLET_PDF")) {
+        service.installPaperWalletSelfTestData();
+        const bool hide_art = qEnvironmentVariableIntValue("DEFCOIN_NU_PAPER_WALLET_HIDE_ART") > 0;
+        service.printPaperWallet(0, 3, 3, hide_art);
+        uiSelfTestSettle(app, 250);
+        writeLaunchLogLine(QStringLiteral("UI self-test paper wallet PDF render requested."));
+    }
+
+    const QStringList dialogs =
+        kExploreApp ?
+            (QStringList() << QStringLiteral("brand-button") << QStringLiteral("about") << QStringLiteral("help")
+                           << QStringLiteral("about-details")) :
+            (QStringList() << QStringLiteral("about") << QStringLiteral("build-notes") << QStringLiteral("help")
+                           << QStringLiteral("create-wallet") << QStringLiteral("create-recovery-wallet")
+                           << QStringLiteral("restore-recovery-wallet") << QStringLiteral("open-uri")
+                           << QStringLiteral("sign-message") << QStringLiteral("verify-message"));
+
+    for (const QString& dialogName : dialogs) {
+        uiSelfTestClosePopups(app, rootObject);
+        const bool opened =
+            QMetaObject::invokeMethod(rootObject, "uiSelfTestOpenMenuDialog", Q_ARG(QVariant, QVariant(dialogName)));
+        if (!opened) {
+            ok = false;
+            writeLaunchLogLine(QStringLiteral("UI self-test failed: dialog hook missing for %1.").arg(dialogName));
+            continue;
+        }
+        uiSelfTestSettle(app, 650);
+        writeLaunchLogLine(QStringLiteral("UI self-test dialog/menu action: %1").arg(dialogName));
+        ok = uiSelfTestSaveScreenshot(rootWindow, screenshotDir, QStringLiteral("dialog-%1").arg(dialogName)) && ok;
+        uiSelfTestClosePopups(app, rootObject);
+    }
+
+    writeLaunchLogLine(ok ? QStringLiteral("UI self-test done.") : QStringLiteral("UI self-test completed with gaps."));
+    return ok ? 0 : 3;
+}
 
 } // namespace
 
@@ -491,7 +738,7 @@ int main(int argc, char* argv[])
     QGuiApplication::styleHints()->setTabFocusBehavior(Qt::TabFocusAllControls);
     initializeLaunchLog(nuDefaultDataDir());
     gPreviousMessageHandler = qInstallMessageHandler(nuQtMessageHandler);
-    StartupReporter startup;
+    StartupReporter startup(QSettings().value(QStringLiteral("ShowStartupSplashStatusIndicator"), false).toBool());
     startup.start();
     startup.step(QStringLiteral("Preparing application startup."));
 
@@ -512,6 +759,7 @@ int main(int argc, char* argv[])
     const QString resourceRoot = QDir(appDir).filePath("nu");
     const QString deployedQmlRoot = QDir(appDir).filePath("qml");
 #endif
+    loadBundledNuFonts(resourceRoot);
     const QStringList arguments = app.arguments();
     const bool allowDebugEnvironment = arguments.contains(QStringLiteral("--debug-use-env")) ||
                                        !qEnvironmentVariableIsEmpty("DEFCOIN_NU_ALLOW_DEBUG_ENV");
@@ -525,8 +773,14 @@ int main(int argc, char* argv[])
     }
     const bool buildSmokeTest = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_SMOKE_TEST");
     const bool smokeTest = arguments.contains(QStringLiteral("--smoke-test")) || buildSmokeTest;
+    const bool uiSelfTest =
+        arguments.contains(QStringLiteral("--ui-self-test")) || !qEnvironmentVariableIsEmpty("DEFCOIN_NU_UI_SELF_TEST");
+    if (uiSelfTest) {
+        qputenv("DEFCOIN_NU_NO_BACKEND_AUTOSTART", "1");
+        qputenv("DEFCOIN_NU_UI_SELF_TEST_ACTIVE", "1");
+    }
     startup.step(QStringLiteral("Parsed launch arguments."));
-    if (buildSmokeTest) {
+    if (buildSmokeTest && !uiSelfTest) {
         return 0;
     }
     const bool allowMultiple = arguments.contains(QStringLiteral("--allow-multiple"));
@@ -549,7 +803,7 @@ int main(int argc, char* argv[])
     }
 
     std::unique_ptr<QLockFile> singleInstanceLock;
-    if (!smokeTest && !allowMultiple) {
+    if (!smokeTest && !uiSelfTest && !allowMultiple) {
         startup.step(QStringLiteral("Checking single-instance data-directory lock."));
         const QString dataDir = nuDefaultDataDir();
         QDir().mkpath(dataDir);
@@ -586,7 +840,7 @@ int main(int argc, char* argv[])
             break;
         }
     }
-    if (!smokeTest && velopackHookLaunch) {
+    if (!smokeTest && !uiSelfTest && velopackHookLaunch) {
         startup.step(QStringLiteral("Running update startup hook."));
         NuVelopackUpdater::runStartupHook(appDir);
     }
@@ -688,7 +942,7 @@ int main(int argc, char* argv[])
     startup.step(engine.rootObjects().isEmpty() ? QStringLiteral("Qt Quick interface failed to load.") :
                                                   QStringLiteral("Qt Quick interface loaded."));
 
-    if (smokeTest && grabIndex < 0) {
+    if (smokeTest && !uiSelfTest && grabIndex < 0) {
         if (splash) {
             splash->close();
             splash->deleteLater();
@@ -697,8 +951,9 @@ int main(int argc, char* argv[])
     }
 
     QQuickWindow* rootWindow = nullptr;
+    QObject* rootObject = nullptr;
     if (!engine.rootObjects().isEmpty()) {
-        QObject* rootObject = engine.rootObjects().constFirst();
+        rootObject = engine.rootObjects().constFirst();
         startup.step(QStringLiteral("Activating main window."));
         platform.setRootObject(rootObject);
         platform.installMacApplicationMenu();
@@ -822,6 +1077,14 @@ int main(int argc, char* argv[])
         QTimer::singleShot(1200, &app, [] { activateTopLevelWindowsForUser(); });
         QTimer::singleShot(2400, &app, [] { activateTopLevelWindowsForUser(); });
         QTimer::singleShot(4200, &app, [] { activateTopLevelWindowsForUser(); });
+    }
+
+    if (uiSelfTest) {
+        if (splash) {
+            splash->close();
+            splash->deleteLater();
+        }
+        return runQtQuickUiSelfTest(app, rootObject, rootWindow, service);
     }
 
     if (grabIndex >= 0 && grabIndex + 1 < arguments.size()) {

@@ -84,6 +84,9 @@ Section -Main SEC0000
     SetOutPath $INSTDIR\res\themes
     File /r /x .DS_Store @abs_top_srcdir@/src/qt/res/themes\*.*
     SetOutPath $INSTDIR
+    FileOpen $0 "$INSTDIR\.defcoin-core-nu-install" w
+    FileWrite $0 "Defcoin Core Nu NSIS install marker$\r$\n"
+    FileClose $0
     WriteRegStr HKCU "${REGKEY}\Components" Main 1
 SectionEnd
 
@@ -142,6 +145,7 @@ Section -un.post UNSEC0001
     Delete /REBOOTOK "$SMPROGRAMS\$StartMenuGroup\@PACKAGE_NAME@ (testnet, 64-bit).lnk"
     Delete /REBOOTOK "$SMSTARTUP\Defcoin.lnk"
     Delete /REBOOTOK $INSTDIR\uninstall.exe
+    Delete /REBOOTOK $INSTDIR\.defcoin-core-nu-install
     Delete /REBOOTOK $INSTDIR\debug.log
     Delete /REBOOTOK $INSTDIR\db.log
     DeleteRegValue HKCU "${REGKEY}" StartMenuGroup
@@ -173,6 +177,11 @@ FunctionEnd
 # Uninstaller functions
 Function un.onInit
     ReadRegStr $INSTDIR HKCU "${REGKEY}" Path
+    IfFileExists "$INSTDIR\.defcoin-core-nu-install" instdir_ok 0
+    IfFileExists "$INSTDIR\@BITCOIN_GUI_NAME@@EXEEXT@" instdir_ok 0
+    MessageBox MB_OK|MB_ICONSTOP "The recorded Defcoin Core install directory does not contain a Defcoin Core install marker or application binary. Uninstall has been stopped to avoid deleting files from the wrong folder."
+    Abort
+instdir_ok:
     !insertmacro MUI_STARTMENU_GETFOLDER Application $StartMenuGroup
     !insertmacro SELECT_UNSECTION Main ${UNSEC0000}
 FunctionEnd

@@ -12,11 +12,13 @@ For each new build:
 
 1. Add a new version entry at the top of `Entries`.
 2. Include the previous version it was based on.
-3. Separate what must be ported from what is Tahoe-only.
+3. Record only platforms or components that actually need action.
 4. Explain intent and hidden assumptions that a code diff will not reveal.
 5. List exact files/functions when porting is likely non-obvious.
 6. Include verification commands and the observed result.
-7. Note whether Lion, Catalina, Windows, and server builds need equivalent work.
+7. Do not write `no change` lines for untouched platforms. Server-specific
+   behavior belongs in the server's own release/deployment notes unless a Nu
+   change explicitly affects server compatibility.
 
 ## Entry Template
 
@@ -26,11 +28,8 @@ For each new build:
 Big picture:
 - ...
 
-Porting priority:
-- Lion Intel:
-- Catalina UTM:
-- Windows:
-- Server:
+Porting notes:
+- ...
 
 Changed behavior:
 - ...
@@ -53,6 +52,672 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.7s - 2026-06-17 - Paper Wallet generation and preview tightening
+
+Big picture:
+- Tahoe keeps Paper Wallet focused on the releasable Design 1 path while
+  retaining hidden Designs 2-5 for later polish.
+- Regeneration now preserves generated public addresses when users change
+  sheet/customization settings after keys exist.
+
+Porting notes:
+- Port the `m_paper_wallet_secrets` regeneration model to Lion and Windows so
+  existing public addresses do not change when BIP38/private-key presentation is
+  regenerated.
+- Keep Designs 2-5 compiled but hidden from the user-facing selector until each
+  design has been visually rechecked on that platform.
+
+Changed files and important details:
+- `src/qt/nu/qml/Views/PaperWalletView.qml`: hides unfinished designs, removes
+  duplicate entropy percent, improves disabled Generate reasons, and shows
+  weak BIP38 warnings in error color until acceptable.
+- `src/qt/nu/app/NuRpcService.cpp`: reuses service-owned paper-wallet secrets
+  across regeneration, draws QR modules directly for tighter Design 1 squares,
+  and adds key grouping guide marks for print readability.
+- `src/qt/nu/app/NuRpcService.h`: stores service-owned paper-wallet secrets for
+  regeneration and clears them with the normal Paper Wallet clear path.
+
+Verification performed:
+- `cmake --build build/nu-qml-arm64-26.6.7s --target DefcoinCoreNu -j 8`
+  completed.
+- `src/qt/nu/tools/render_paper_wallet_previews.sh
+  build/nu-qml-arm64-26.6.7s/DefcoinCoreNu.app
+  /tmp/defcoin-paper-wallet-26.6.7s-check 3 0 1` completed and the Design 1
+  page image was inspected.
+
+### 26.6.7r - 2026-06-17 - Bundled mono font and measured app icon
+
+Big picture:
+- Tahoe bundles Atkinson Hyperlegible Mono so paper-wallet key strings and
+  mono UI fields no longer depend on host fonts.
+- The macOS Nu app icon is regenerated from the transparent v26 coin mark with
+  no tile, ring, or artificial margin. The coin fills the icon canvas at the
+  four cardinal points while the corners remain alpha-transparent.
+
+Porting notes:
+- Port the Atkinson font assets, runtime asset list entries, and early startup
+  font registration to Lion and Windows. The QML `monoFont` token now assumes
+  the bundled family is available.
+- For Apple-platform ports, regenerate `.icns` from the same
+  `defcoin-nu-icon-1024.png` transparent v26 coin composition. Do not reuse
+  older gray-tile, white-background, or clipped coin icons.
+
+Changed files and important details:
+- `src/qt/nu/assets/fonts/`: adds Atkinson Hyperlegible Mono regular, bold,
+  italic, bold italic, and OFL license text.
+- `src/qt/nu/app/main.cpp`: registers bundled fonts from
+  `Resources/nu/assets/fonts` before QML starts.
+- `src/qt/nu/qml/Theme/Tokens.qml`: mono font token now resolves to
+  `Atkinson Hyperlegible Mono`.
+- `src/qt/nu/assets/brand/defcoin-nu-icon-1024.png`,
+  `DefcoinCoreNuNuIcon.icns`, `DefcoinCoreNu.ico`, and classic Qt icon mirrors:
+  regenerated from the v26 coin at near edge-to-edge scale.
+
+Verification performed:
+- Verified `defcoin-nu-icon-1024.png` has transparent corners and an alpha
+  bounding box of `1024x1024+0+0`, meaning the coin itself reaches the canvas
+  edges without a white background.
+- Verified `defcoin-v26-coin.png` exterior sample points are alpha `0.0`.
+
+### 26.6.7k - 2026-06-16 - Paper Wallet crypto hardening audit
+
+Big picture:
+- Tahoe adds a focused security pass for private-key generation and paper-wallet
+  encryption. The audit confirms normal Core wallet keys still use Core
+  `GetStrongRandBytes()` plus libsecp256k1 validation, and Nu paper-wallet keys
+  are not brainwallets because user entropy is mixed with system cryptographic
+  randomness before secp256k1 validation.
+- The Brainflayer-relevant risk is weak human BIP38 passphrases. Nu now rejects
+  BIP38 passphrases shorter than 12 characters in both QML and C++ and clears
+  the QML passphrase property after the generation attempt.
+- Paper-wallet and recovery secret bytes now prefer OpenSSL `RAND_priv_bytes()`
+  when available, falling back to `RAND_bytes()` only for older OpenSSL
+  compatibility.
+
+Porting notes:
+- Port `PAPER_WALLET_MIN_BIP38_PASSPHRASE_CHARS`,
+  `RAND_priv_bytes()` preference, and QML `bip38PassphraseReady` gating to Lion
+  and Windows. Keep the C++ gate even if a platform-specific UI already blocks
+  short passphrases.
+- Port `crypto-key-generation-audit-26.6.7k.md` or its findings into the
+  platform handoff notes so future ports preserve the same threat model.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.cpp`: paper-wallet/recovery random bytes now use
+  `RAND_priv_bytes()` on OpenSSL 1.1.1+; BIP38 generation requires at least 12
+  trimmed characters and fails closed if the check is bypassed.
+- `src/qt/nu/qml/Views/PaperWalletView.qml`: Generate is disabled until the
+  BIP38 passphrase meets the same minimum; successful generation clears the QML
+  passphrase property.
+- `src/qt/nu/docs/crypto-key-generation-audit-26.6.7k.md`: catalogs current
+  crypto algorithms, encodings, Brainflayer exposure, hardening changes, and
+  remaining recommendations.
+
+Compatibility notes:
+- Public protocol/consensus algorithms are unchanged. This is a wallet/UI
+  hardening change only.
+- BIP38 remains interoperable with BIP38 non-EC-multiply compressed-key wallets;
+  the only visible behavior change is refusing trivial passphrases.
+
+Verification performed:
+- Tahoe Apple Silicon configured against Qt 6.11.1 and OpenSSL 3.6.2, then
+  built successfully as `build/nu-qml-arm64-26.6.7k`.
+- `git diff --check` passed for the edited files.
+- `codesign --verify --deep --strict --verbose=2` passed for the built app.
+- `qmllint src/qt/nu/qml/Views/PaperWalletView.qml` completed with the existing
+  standalone-context warnings for injected `NuService`/delegate IDs and no
+  syntax errors.
+
+### 26.6.7j - 2026-06-16 - Paper Wallet preview caching and sealed entropy hourglass
+
+Big picture:
+- Tahoe keeps the Paper Wallet work moving without another full app route walk.
+  Paper-wallet preview rendering now has a content-keyed cache so the sheet
+  preview does not repeatedly flip back to "Generating sheet preview" when the
+  selected design, wallet count, amount, hide-art flag, BIP38 state, and key
+  readiness have not changed.
+- The entropy visual now uses a sealed, squat, gold-capped hourglass bitmap with
+  QML drawing only the sand overlay. This avoids the earlier open-top look and
+  keeps the animation cheaper than redrawing the whole illustration.
+- The render helper can now render one selected design and hide-art state
+  without walking the full UI, which should be the default way to iterate paper
+  wallet layout before rebuilding or launching the app.
+
+Porting notes:
+- Port the content-keyed preview cache from `PaperWalletView.qml` before doing
+  more paper-wallet layout work on Windows or Lion. The important behavior is
+  that `refreshPreviewPages()` is a no-op when the render key is unchanged and
+  a matching preview already exists or is already loading.
+- Bundle `assets/paperwallet/entropy/hourglass-empty-dark.png` and keep the
+  animation as a lightweight overlay. The source image must be sealed at the
+  top; do not use an open-top hourglass in platform ports.
+- Prefer `src/qt/nu/tools/render_paper_wallet_previews.sh <app> <out> <count>
+  <hide-art> <design>` for paper-wallet visual checks. It sets
+  `DEFCOIN_NU_PAPER_WALLET_RENDER_ONLY=1`, so it does not exercise the full
+  route/menu/dialog self-test.
+
+Changed files and important details:
+- `src/qt/nu/qml/Views/PaperWalletView.qml`: adds render-key tracking,
+  always-visible stage scrolling, pop-out preview zoom controls, sealed
+  hourglass background, and sand-only Canvas overlay.
+- `src/qt/nu/app/main.cpp`: adds the render-only self-test path for paper wallet
+  PDF generation.
+- `src/qt/nu/app/NuRpcService.cpp`: honors hide-art in test renders, moves
+  placeholder warnings to the footer, tightens several design hide-art paths,
+  and keeps Design 2/5 landscape previews aligned with print orientation.
+- `src/qt/nu/tools/render_paper_wallet_previews.sh`: adds hide-art and selected
+  design arguments.
+
+Verification performed:
+- `cmake --build build/nu-qml-arm64-26.6.7j -j6` completed.
+- Render-only previews were generated for all five designs in normal mode and
+  hide-art mode, then reviewed by contact sheet.
+
+### 26.6.7g - 2026-06-15 - Staged Paper Wallet workflow
+
+Big picture:
+- Tahoe replaces the cramped Wallet > Paper Wallet layout with a staged
+  workflow: choose design, customize wallet count/printed amount/BIP38, collect
+  entropy, generate, review/print, reviewed funding, and final memory cleanup.
+- The old two-QR utility preview is removed from the main tab. The right side is
+  now a persistent scaled sheet preview that shows placeholders before entropy
+  and key generation, then renders selected-design QR/address data. Double-sided
+  designs show front/back previews.
+- Paper Wallet generation defaults to one wallet and is capped at 100 wallets
+  per run. The printed amount is cosmetic sheet metadata until the user sends
+  funds from the reviewed funding table.
+- Wallet-tab and route changes now warn before leaving Paper Wallet with
+  generated private keys in memory; accepting clears those keys before leaving.
+- Design 4 is now the explicit simple public/private QR card layout; Design 5
+  remains the Defcoin Bulk two-page layout.
+- Review/Print no longer has a Clear button; explicit cleanup belongs only to
+  Step 7 and to the route/tab leave prompt.
+
+Porting notes:
+- Lion/Windows should port the staged QML flow, generated-entry amount metadata,
+  Design 4/5 print-form mapping, the 100-wallet cap, explicit Wallet tab click
+  handlers, real design preview, reviewed public-address funding table, and
+  leave-warning key cleanup.
+- Route changes from menus/shortcuts must go through `AppFrame.requestRoute()`
+  so the Paper Wallet private-key leave prompt cannot be bypassed.
+- After inserting the Paper Wallet tab after Files, keep the visible tab index
+  mapping aligned: Addresses is index 4, and its address-book table must not
+  keep the old index 3 binding.
+- Bulk split/distribution and custom template work still belong in Explore.
+
+### 26.6.7f port status - 2026-06-14 - Windows and Lion package refresh
+
+Big picture:
+- Windows was refreshed from Tahoe's current Nu QML/app/assets/resources/docs
+  layer and rebuilt as `26.6.7f`.
+- Lion was refreshed from the Lion source mirror, rebuilt on the physical OS X
+  10.7.5 iMac with Qt 5.9.8, and packaged as `26.6.7f-Lion-alpha`.
+
+Porting notes:
+- Windows cross builds now require a target MinGW OpenSSL prefix. Do not let
+  CMake satisfy `OpenSSL::Crypto` from `/opt/homebrew` or `/usr/local`; that
+  creates a host/target link mismatch when paper-wallet crypto is enabled.
+- The Windows build used the local target prefix
+  `Defcoin Core Nu/toolchains/openssl/win64` built from OpenSSL 3.6.2.
+- Lion's legacy QWidget Nu app received the shared v26/paper-wallet assets and
+  version metadata, but its companion contract still keeps Paper Wallet private
+  key generation in Explore only. Do not assume the Tahoe QML Wallet > Paper
+  Wallet tab exists in the Lion Nu app until that platform decision changes.
+
+Changed files and important details:
+- `src/qt/nu/app/CMakeLists.txt`: adds `DEFCOIN_NU_OPENSSL_ROOT` and rejects
+  host OpenSSL paths during Windows cross-configuration.
+- `src/qt/nu/app/CMakeLists.txt.agent.md`: documents the Windows target OpenSSL
+  requirement.
+- Lion `src/clientversion.h`, `src/qt/nu/legacy-osx107/*.pro`,
+  `src/qt/nu/legacy-osx107/main.cpp`, and
+  `contrib/legacy-osx107/package_legacy_dmg.sh`: updated to
+  `26.6.7f-Lion-alpha`.
+
+Build/package notes:
+- Windows output:
+  `Defcoin Core Nu/Distribution_Versions/Nu-26.6.7f/windows11-x86_64-20260614_143329`.
+- Windows Tools copy:
+  `Tools/Defcoin Core Nu/Nu-26.6.7f-win64-20260614-143329`.
+- Lion output on the iMac:
+  `/Users/david/_Distribution_Versions/Defcoin Core Nu/Nu-26.6.7f-Lion-alpha-20260614-145228`.
+
+Verification performed:
+- Tahoe and Lion `git diff --check` passed.
+- Windows CMake configure passed with Qt 6.11.1 and target OpenSSL 3.6.2.
+- Windows `cmake --build ... --target DefcoinCoreNu DefcoinCoreNuResources -j6`
+  completed.
+- Windows Velopack setup/portable package completed with Desktop and Start Menu
+  shortcut flags and refreshed SHA256 sums.
+- Lion `bash -n` passed for `build_nu_qt59_lion.sh` and
+  `package_legacy_dmg.sh`.
+- Lion Qt 5.9.8 qmake/make build completed on OS X 10.7.5.
+- Lion packaged app reports `CFBundleShortVersionString=26.6.7f-Lion-alpha`;
+  staging folders were removed; bundle/DMG SHA256 verification passed.
+
+### 26.6.7f - 2026-06-14 - Correct v26 lockup and liteaddress-style sheet controls
+
+Big picture:
+- Tahoe corrects the Nu combination mark around the transparent v26 coin and
+  documented DEFCOIN / CORE NU spacing so the reusable QML lockup and splash
+  stop drifting from the website reference.
+- Wallet > Paper Wallet now behaves like a native liteaddress-style sheet
+  generator: default three addresses, Hide Art, addresses per page, optional
+  BIP38 encryption, and a fixed-size foldable print sheet.
+- Paper Wallet also adds `Design 5 - Defcoin Bulk two-page`, based on the
+  historical `sibios/defcoin-bulk` two-wallet landscape front/back artwork and
+  coordinate layout.
+- This update tightens the paper-wallet print renderer: Design 1 centers the
+  private QR and warning inside the right panel and rebalances the center
+  DEFCOIN / PAPER WALLET stack; Design 5 keeps all overlaid address/key text
+  bounded to the original artwork slots with white forward-text backing and
+  dark inverted-text backing.
+- Paper Wallet security was tightened: the entropy UI now requires a larger
+  mouse/keyboard progress target, paper-wallet key derivation mixes user input
+  with OpenSSL/platform cryptographic randomness, generated recovery phrases
+  use the same frontend randomness helper, and temporary secret byte buffers are
+  cleansed with OpenSSL or an explicit volatile fallback where Nu owns them.
+
+Porting notes:
+- Lion/Windows should port the same QML controls and service API. Keep the GUI
+  preview unbranded; only the print sheet uses the v26 coin.
+- Lion/Windows should also port the Defcoin Bulk assets and notice file:
+  `assets/paperwallet/defcoin-bulk/defcoin-front-300dpi.png`,
+  `assets/paperwallet/defcoin-bulk/defcoin-back-300dpi.png`, and
+  `assets/licenses/defcoin-bulk-NOTICE.txt`. Preserve native Nu/Core key
+  generation; do not import the old browser-side crypto stack.
+- Windows packaging must include OpenSSL crypto and Qt PrintSupport when this is
+  ported.
+- Lion/Windows must port the RNG and secure-clearing changes, not just the
+  QML progress bar. Prefer OpenSSL `RAND_bytes()` and `OPENSSL_cleanse()` in
+  packaged builds; do not make user entropy the only secret source.
+
+Changed files and important details:
+- `src/qt/nu/qml/Components/NuBrandLockup.qml`: character-level DEFCOIN
+  construction with the documented F/C join and justified CORE / NU line.
+- `src/qt/nu/app/main.cpp`: splash painter mirrors the QML lockup logic.
+- `src/qt/nu/qml/Views/PaperWalletView.qml`: exposes the liteaddress-style
+  controls and longer entropy ceremony with visible collection progress.
+- `src/qt/nu/app/NuRpcService.cpp/.h`: adds multi-entry in-memory paper-wallet
+  generation and optional BIP38 encryption; fails closed if BIP38 cannot
+  complete; uses OpenSSL/platform cryptographic randomness plus collected local
+  entropy for paper-wallet keys and the same randomness helper for generated
+  recovery phrases.
+- `NuRpcService::printPaperWallet()`: renders the actual print sheet with a
+  liteaddress-style 486:261 strip ratio, three strips per Letter page by
+  default, public/private QR panels sized to the strip, dotted fold/tear guides,
+  checker/diagonal security fields around QR areas, and wavy guilloche-style
+  center fields behind the v26 coin.
+- `NuRpcService::printPaperWallet()`: `Design 5` uses the upstream
+  `sibios/defcoin-bulk` 972x319 art coordinate model, prints two front wallets
+  per landscape Letter page, then the matching backing page, with Nu-generated
+  QR codes and clipped key/address text overlaid in the original slots.
+- `src/qt/nu/app/CMakeLists.txt`: bundles the Defcoin Bulk art and notice into
+  `Contents/Resources/nu` / packaged runtime assets.
+
+Verification:
+- `git diff --check` passed.
+- Tahoe CMake configure completed with Qt PrintSupport, OpenSSL 3.6.2, and local
+  secp256k1.
+- `cmake --build build/nu-qml-arm64-26.6.7f --target DefcoinCoreNu -j 8`
+  completed.
+- `cmake --build build/nu-qml-arm64-26.6.7f --target DefcoinCoreNuResources -j 8`
+  completed and validated the ad-hoc signed bundle.
+- `--ui-self-test --allow-multiple` completed against the staged bundle with
+  screenshots written under `/tmp/nu-ui-26.6.7f`.
+- `DEFCOIN_NU_UI_SELF_TEST_ACTIVE=1 DEFCOIN_NU_PAPER_WALLET_PDF=/tmp/defcoin-paperwallet-layout-check-v2.pdf
+  --ui-self-test --allow-multiple --paper-wallet-print-test` rendered a
+  one-page, three-wallet PDF proof; page image reviewed at
+  `/tmp/defcoin-paperwallet-layout-check-v2-page-1.png`.
+- `DEFCOIN_NU_UI_SELF_TEST_ACTIVE=1 DEFCOIN_NU_PAPER_WALLET_SELF_TEST_COUNT=2
+  DEFCOIN_NU_PAPER_WALLET_FORM=5
+  DEFCOIN_NU_PAPER_WALLET_PDF=/tmp/defcoin-paperwallet-design-5-review.pdf
+  --ui-self-test --allow-multiple --paper-wallet-print-test` rendered the
+  two-page Design 5 proof. Review copies were saved under
+  `local-dev-notes/Defcoin Core Nu/paper-wallet-design-reviews/`.
+
+### 26.6.7e - 2026-06-14 - v26 logo correction and paper-wallet print sheet
+
+Changed behavior:
+- Corrects 26.6.7d branding so the reusable lockup, startup splash, app icon,
+  and paper-wallet printout all use a transparent-background derivative of the
+  explicit v26 colored coin asset.
+- Keeps the Paper Wallet GUI preview unbranded while the printable sheet gets
+  Defcoin branding, fold guidance, public/private QR panels, and storage
+  warnings.
+- Raises Paper Wallet entropy capture to 384 points and improves the print
+  confirmation footer spacing.
+- Hovering the already-selected left navigation button now still shows a subtle
+  purple border response.
+
+Porting notes:
+- Lion and Windows need the v26 coin asset/icon refresh, `NuBrandLockup.qml`
+  ratio changes, splash drawing changes, `PaperWalletView.qml` entropy/dialog
+  changes, `NuRpcService::paperWalletPrintHtml()`, and `NuNavButton.qml`.
+- `brand-logo-text.md` is the source of truth for coin-plus-wordmark ratios and
+  the canonical source-art path.
+- The print layout avoids vendored browser paper-wallet crypto; key generation
+  remains local C++ service code.
+
+Verification performed:
+- `git diff --check` passed.
+- Tahoe Qt build and bundle signing passed for
+  `build/nu-qml-arm64-26.6.7e`.
+- Packaged app copied to
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.7e-20260614/apple-silicon/`.
+
+### 26.6.7d - 2026-06-14 - Paper Wallet tab and v26 lockup polish
+
+Big picture:
+- Moves the single Paper Wallet generator into Nu Wallet as a first-class tab
+  after Files, while keeping bulk paper-wallet generation reserved for Explore.
+- Updates the reusable QML logo lockup to use the v26 coin mark and adds a
+  subtle dark-purple navigation hover outline for the Tahoe polish pass.
+
+Porting priority:
+- Lion Intel: port the Wallet > Paper Wallet tab, shared embedded view mode,
+  v26 lockup source/aspect changes, and navigation hover outline. Use Qt 5.9
+  compatible equivalents without dropping paper-wallet print/clear/copy safety.
+- Catalina UTM: same as Lion if active.
+- Windows: port the same Wallet tab, v26 lockup, and hover outline. Verify the
+  paper-wallet print prompt and private-key copy warning still work.
+
+Changed behavior:
+- `WalletView.qml` now exposes Paper Wallet between Files and Recovery.
+- `PaperWalletView.qml` accepts `embedded: true` to hide its route-level page
+  header when hosted inside Wallet.
+- The Nu wordmark component now defaults to the transparent v26 coin mark
+  instead of old coin-stack art.
+- Left navigation buttons show a richer purple border on hover, distinct from
+  the blue keyboard-focus state.
+
+Changed files and important details:
+- `src/qt/nu/qml/Views/WalletView.qml`: added the Paper Wallet tab and mapped it
+  through `walletPanelIndexForTab()` without reordering existing stateful
+  panels.
+- `src/qt/nu/qml/Views/PaperWalletView.qml`: added embedded mode and updated
+  session wording.
+- `src/qt/nu/qml/Components/NuBrandLockup.qml`: switched default coin art and
+  square source sizing to the v26 coin.
+- `src/qt/nu/qml/Components/NuAboutSummary.qml`: stops assuming the old
+  692x978 stacked-coin aspect ratio.
+- `src/qt/nu/qml/Components/NuNavButton.qml`: added subtle purple hover border.
+- `src/qt/nu/qml/Views/*.agent.md`: updated ownership notes so future agents do
+  not move the single paper-wallet route back out of Nu.
+
+Compatibility notes:
+- Paper-wallet cryptographic behavior stays the 26.6.7c local-derivation path.
+- Bulk paper wallets should be implemented separately in Explore so Nu does not
+  become a mass private-key generation surface.
+
+Verification performed:
+- `git diff --check -- src/clientversion.h src/qt/nu/app/CMakeLists.txt
+  src/qt/nu/qml src/qt/nu/docs` passed.
+- Tahoe: `cmake -S src/qt/nu/app -B build/nu-qml-arm64-26.6.7d -G Ninja
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+  -DQt6_DIR=/opt/homebrew/lib/cmake/Qt6 -DDEFCOIN_NU_RELEASE_NAME=26.6.7d`
+  configured successfully.
+- Tahoe: `cmake --build build/nu-qml-arm64-26.6.7d --target
+  DefcoinCoreNuResources -j6` completed and ad-hoc signed a valid app bundle.
+- Packaged app copied to
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.7d-20260614/apple-silicon/Defcoin Core Nu.app`;
+  `codesign --verify --deep --strict` passed there.
+- Launched packaged Tahoe app, accepted the macOS local-network/accessibility
+  prompt path, captured `src/qt/nu/docs/ui/defcoin-core-nu-26.6.7d-default-window.png`,
+  and verified Wallet shows the new Paper Wallet tab.
+- Added `src/qt/nu/docs/ui/defcoin-core-nu-ui-elements-26.6.7d.svg` and
+  `src/qt/nu/docs/ui/defcoin-core-nu-ui-design-language.md`.
+
+### 26.6.7c - 2026-06-14 - Tahoe candidate label for paper-wallet security build
+
+Big picture:
+- This is the visible Tahoe candidate label for the paper-wallet local
+  derivation and CSV/export security hardening work documented in the 26.6.7b
+  security entry below.
+
+Porting priority:
+- Lion Intel: port the 26.6.7b security behavior and use the matching current
+  visible candidate label for the Lion build.
+- Catalina UTM: same as Lion if active.
+- Windows: port the same security behavior and installer/update guards before
+  the next Windows candidate.
+- Server: no change.
+
+Changed behavior:
+- No additional behavior beyond the 26.6.7b paper-wallet/security hardening
+  entry; this entry records the new Tahoe visible build label.
+
+Changed files and important details:
+- `src/clientversion.h`: `DEFCOIN_RELEASE_VERSION_STR` moved to `26.6.7c`.
+- `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
+  `26.6.7c`.
+- `src/qt/nu/docs/release-notes-26.6.7c.md`: current Tahoe candidate release
+  note.
+
+Verification performed:
+- `git diff --check` passed for the touched Tahoe source, QML, docs, and NSIS
+  files.
+- Tahoe: `cmake -S src/qt/nu/app -B build/nu-qml-arm64-26.6.7c -G Ninja
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+  -DQt6_DIR=/opt/homebrew/lib/cmake/Qt6 -DDEFCOIN_NU_RELEASE_NAME=26.6.7c`
+  configured successfully.
+- Tahoe: `cmake --build build/nu-qml-arm64-26.6.7c --target
+  DefcoinCoreNuResources -j6` completed, deployed Qt runtime resources, and
+  ad-hoc signed a valid app bundle.
+
+### 26.6.7b - 2026-06-14 - Paper wallet local derivation and security hardening
+
+Big picture:
+- This change closes the paper-wallet WIF leak found during security review and
+  tightens adjacent UI trust boundaries. Paper-wallet keys are now generated and
+  converted to Defcoin P2PKH addresses locally instead of sending the WIF through
+  backend RPC descriptor commands.
+- The print flow now offers a one-page foldable paper-wallet sheet after
+  generation. The layout is inspired by established paper-wallet generators such
+  as liteaddress/bitaddress style pages, but the cryptographic generation remains
+  native Nu/Core code.
+
+Porting priority:
+- Lion Intel: port the same no-RPC paper-wallet derivation, in-memory QR rule,
+  print confirmation, CSV formula neutralization, and sensitive RPC Console
+  redaction. If Qt 5.9 printing APIs differ, keep the service-owned printable
+  HTML and show a clear fallback instead of writing private-key files.
+- Catalina UTM: same as Lion if the build is kept active.
+- Windows: port the same security behavior. Confirm the Windows build links a
+  target-architecture secp256k1 static library and keeps Qt PrintSupport
+  packaged.
+- Server: no paper-wallet UI. Remote-RPC hardening does not apply to server
+  daemons unless the Nu frontend bridge is built there.
+
+Changed behavior:
+- `generatePaperWallet()` fails closed if secure random bytes or local
+  secp256k1 address derivation are unavailable.
+- Generated WIF/private-key material is never sent over RPC, stored in settings,
+  written to QR temp files, or logged.
+- Optional public import still uses RPC `importaddress`, but only with the
+  public Defcoin address.
+- QR images for paper-wallet public/private fields are in-memory data URLs.
+- After generation, QML asks whether to print the foldable paper wallet.
+- Nu rejects non-loopback RPC targets by default. Operators can explicitly set
+  `DEFCOIN_NU_ALLOW_REMOTE_RPC=1` for a trusted secured remote RPC endpoint.
+- CSV exports neutralize spreadsheet formulas before quoting fields.
+- RPC Console output redacts sensitive results for private-key dump style
+  commands.
+- GitHub release fallback opens the release page; automatic download/apply is
+  reserved for Velopack-managed updates.
+- The NSIS fallback installer writes a Nu install marker and refuses uninstall
+  cleanup if the recorded install path lacks both the marker and the Nu app
+  binary.
+
+Changed files and important details:
+- `src/qt/nu/app/NuRpcService.{h,cpp}`: local paper-wallet derivation,
+  in-memory QR generation, print HTML, remote-RPC default refusal, CSV
+  neutralization, and sensitive RPC output redaction.
+- `src/qt/nu/qml/Views/PaperWalletView.qml`: post-generation print prompt.
+- `src/qt/nu/app/CMakeLists.txt`: links local `secp256k1-zkp` and
+  `crypto/ripemd160.cpp` into Nu/Explore app targets.
+- `share/setup.nsi.in`: adds a fallback-installer install marker and uninstall
+  guard against wrong-directory cleanup.
+- Companion `.agent.md` files document the no-WIF-over-RPC and no-temp-QR
+  contract for future agents.
+
+Compatibility notes:
+- The current Defcoin P2PKH prefix used by the Nu paper-wallet path is `30`.
+  If chain/network parameters change, update the local paper-wallet prefix in
+  the same change as the backend address-prefix constants.
+- This does not vendor third-party JavaScript paper-wallet cryptography. The
+  foldable-paper design pattern is borrowed at the UI/layout level only.
+
+Build/package notes:
+- Tahoe build `cmake --build build/nu-qml-arm64-26.6.7b --target
+  DefcoinCoreNuResources -j6` completed and reported local secp256k1 usage.
+- Packagers must include Qt PrintSupport and the existing Defcoin brand icon
+  resources.
+
+Verification performed:
+- `git diff --check` passed for the touched Nu C++/QML/CMake files.
+- Tahoe CMake reconfigured and rebuilt `DefcoinCoreNuResources` successfully
+  with `Using local libsecp256k1 for Nu paper-wallet address derivation`.
+
+Risks / follow-up:
+- Run a live disposable paper-wallet generate/print smoke test before public
+  release.
+- Port and rebuild the Windows and Lion variants before claiming cross-platform
+  parity.
+
+### 26.6.7b - 2026-06-13 - Mining stability and Velopack release-path cleanup
+
+Big picture:
+- This build focuses on Tahoe and Windows first-release readiness. It reduces
+  mining-monitor UI pressure, improves follow-tail behavior, and makes Windows
+  child-process cleanup more robust if the frontend crashes.
+- Windows packaging guidance now treats Velopack as the primary public
+  installer/update path. NSIS is documented as fallback/repair only.
+
+Porting priority:
+- Lion Intel: defer for now unless mining monitor changes are pulled forward;
+  if ported, throttle miner UI refreshes and cap the visible log in the local
+  QtWidgets/Qt 5 implementation.
+- Catalina UTM: defer.
+- Windows: ported in the Windows parity source tree.
+- Server: no server change.
+
+Changed behavior:
+- Miner output is still parsed continuously for hashrate and accepted/rejected
+  counters, but `minerChanged` is throttled to avoid emitting per raw output
+  chunk.
+- The visible miner log is capped at 256 KiB instead of growing toward multi-MiB
+  strings on the QML scene.
+- The Mining Monitor follow-tail switch follows real content position and no
+  longer fights manual scrollback.
+- On Windows, Nu-owned `QProcess` children are assigned to a kill-on-close job
+  object where the OS allows it, so a frontend crash is less likely to leave the
+  miner, backend, or helper processes running.
+
+Changed files and important details:
+- `src/clientversion.h`: visible Defcoin release identity moved to `26.6.7b`.
+- `src/qt/nu/app/CMakeLists.txt`: default Nu release label moved to
+  `26.6.7b`.
+- `src/qt/nu/app/NuRpcService.{h,cpp}`: added miner signal throttling,
+  smaller live log cap, and Windows child-process job containment helper.
+- `src/qt/nu/qml/Views/MiningView.qml`: repaired follow-tail scroll behavior
+  and updated the log-retention label.
+- `src/qt/nu/docs/build-and-installer-runbook.md`: clarified that Velopack is
+  primary for Windows updates; NSIS is fallback/repair only.
+
+Compatibility notes:
+- The Windows job object is best-effort. If Windows refuses assignment because
+  another parent job has incompatible limits, normal shutdown still calls
+  `stopMiner()`.
+- Tahoe/macOS crash-level miner containment still depends primarily on
+  preventing the UI overload and on normal shutdown. A separate watchdog helper
+  would be needed for hard crash kill-on-parent-death behavior on macOS.
+
+Build/package notes:
+- Public Windows release artifacts should be Velopack setup plus portable ZIP.
+- If NSIS is produced, label it clearly as fallback/repair and do not use it as
+  the main update-enabled installer.
+
+Verification performed:
+- Tahoe: `cmake --build build/nu-qml-arm64-26.6.7a --target DefcoinCoreNu -j6`
+  and `DefcoinCoreNuResources -j6` completed before the version label bump.
+- Tahoe: `--ui-self-test --allow-multiple` completed successfully after the
+  mining monitor changes.
+- Windows: `cmake --build build/nu-qml-win64-26.6.7a-qt6111 --target
+  DefcoinCoreNu -j6` and `DefcoinCoreNuResources -j6` completed before the
+  version label bump.
+
+Risks / follow-up:
+- Reconfigure/rebuild final `26.6.7b` artifacts before public release.
+- Run a real mining soak on Tahoe and Windows to confirm the accepted-share rate
+  slowdown was UI backpressure rather than pool/miner behavior.
+- Verify Velopack update check from a Velopack-installed Windows build and a
+  Tahoe build with the Velopack runtime bundled.
+
+### 26.6.7a package refresh - 2026-06-11 - Explore parity self-test and packaged builds
+
+Big picture:
+- After the Explore app received Paper Wallet and parity changes, the release
+  lane was rebuilt and re-walked for Tahoe, Windows, and Lion rather than
+  treating Explore as unchanged.
+- The UI self-test now exercises Nu and Explore routes, tabs, menu-backed
+  dialogs, text-logo/About actions, and the Explore Paper Wallet preview popout.
+- Lion keeps the behavior in its QtWidgets/Qt 5.9 implementation, including
+  the paper-wallet QR crash guard and product-name handling for Explore.
+
+Porting priority:
+- Lion Intel: complete for Nu and Explore on the physical OS X 10.7.5 iMac
+  using the modified Qt 5.9.8 prefix.
+- Catalina UTM: no new package produced in this pass.
+- Windows: source and resources ported from Tahoe; release package produced
+  with the locally available Qt 6.10.1 MinGW runtime.
+- Server: no server/backend change in this package-refresh pass.
+
+Changed behavior:
+- Normal launches are unchanged. `--ui-self-test` disables backend autostart,
+  skips single-instance blocking, and walks UI surfaces using fake
+  paper-wallet data only.
+- Explore now has desktop menus aligned with the route surfaces and the
+  self-test can open the brand/About button and Paper Wallet popout.
+- Lion Explore derives its product name in C++ instead of passing a spaced
+  qmake define, avoiding broken menu/app labels on the Qt 5.9 lane.
+
+Build/package notes:
+- Tahoe QtCore in the staged app reports Qt `6.11.1`.
+- Tahoe Nu/Explore apps and DMGs were staged under:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.7a-20260611/apple-silicon-20260611_125538`
+  and
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Explore/Explore-26.6.7a-20260611/apple-silicon-20260611_125538`.
+- Windows Qt `6.11.1` was not installable from the local `aqt`/Qt mirror during
+  this run; the package was built with the existing Qt `6.10.1` MinGW toolchain
+  after `aqt` failed to locate usable `6.11.1` Windows XML payloads.
+- Windows artifacts were staged under:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.7a-20260611/windows11-x86_64-20260611_125915`.
+- Lion Nu and Explore were packaged on `lion-imac107` under:
+  `/Users/david/_Distribution_Versions/Defcoin Core Nu/Nu-26.6.7a-Lion-alpha-20260611-131739`
+  and
+  `/Users/david/_Distribution_Versions/Defcoin Core Explore/Explore-26.6.7a-Lion-alpha-20260611-131739`.
+
+Verification performed:
+- Tahoe `DefcoinCoreNuResources` and `DefcoinCoreExploreResources` rebuilt.
+- Tahoe Nu and Explore `--ui-self-test --allow-multiple` completed with 34
+  screenshots total and no crash.
+- Windows `DefcoinCoreNuResources` and `DefcoinCoreExploreResources` rebuilt;
+  the portable ZIP passed `unzip -t` and contains no macOS sidecar files.
+- Windows Wine rendering could not complete the walk because Qt Quick RHI failed
+  before scenegraph startup under Wine (`Failed to create RHI`). Treat that as
+  a harness limitation until tested on a real Windows desktop.
+- Lion raw and packaged Nu/Explore `--ui-self-test --allow-multiple` completed
+  from the Qt 5.9 build and staged `_Distribution_Versions` apps. Packaged Nu
+  captured 29 screenshots; packaged Explore captured 17 screenshots including
+  Paper Wallet preview/popout.
+- Lion paper-wallet popout/QR path did not reproduce the earlier QR-wallet
+  crash after the fake-data self-test and missing-logo scaling guards.
+
+Risks / follow-up:
+- Re-run the Windows UI walk on native Windows hardware because Wine cannot
+  initialize the Qt Quick render path in this environment.
+
 ### 26.6.7a - 2026-06-11 - Wallet-tab, shutdown, mining mast, and UDP selector polish
 
 Big picture:
@@ -60,15 +725,16 @@ Big picture:
   wallet/UI polish and Fast Sync selector tuning pass; it does not alter
   consensus, wallet storage, or block validation.
 - The Wallet view had drifted out of sync: the visible Recovery tab opened the
-  Paper Wallet / Watch-only tools panel. This build adds an explicit tab-to-panel
-  mapping so visible Wallet tab labels open their matching panels.
+  old tools panel. This build adds an explicit tab-to-panel mapping so visible
+  Wallet tab labels open their matching panels, leaves Watch-only under Wallet >
+  Tools, and moves Paper Wallet generation to Explore.
 - The mast/header is tightened for mining and normal sync use. Average block
   spacing is removed from the mast and should remain in Metrics.
 - Shutdown now presents a status overlay before quitting, warning users not to
   force-quit while wallets, indexes, and database files are closing cleanly.
 - Shared panels keep their existing hover light and add a subtle dark purple
-  rollover outline. Wallet > Tools is scrollable so Paper Wallet and Watch-only
-  tools stay reachable on smaller windows.
+  rollover outline. Wallet > Tools is scrollable so Watch-only tools stay
+  reachable on smaller windows.
 - Verified UDP Fast Sync peers now keep a minimum selector share and shorter
   cooldown, so a transient failure does not make the selector over-prefer the
   normal Core path before UDP has enough fair samples.
@@ -76,8 +742,9 @@ Big picture:
 Porting priority:
 - Lion Intel: required. Port the Wallet tab mapping, mining mast alignment,
   shutdown overlay, shared panel hover outline, scrollable Wallet Tools panel,
-  Mining Monitor Follow tail checkbox, new pool presets, splash text nudge, and
-  UDP selector cooldown logic using Qt 5.9-compatible controls.
+  Explore Paper Wallet placement, Mining Monitor Follow tail checkbox, new pool
+  presets, splash text nudge, and UDP selector cooldown logic using
+  Qt 5.9-compatible controls.
 - Catalina UTM: required if it shares Tahoe QML.
 - Windows: required. Port the same UI/QML changes and selector behavior.
 - Server: required for Fast Sync parity only. Update visible/version identity
@@ -85,11 +752,13 @@ Porting priority:
 
 Changed behavior:
 - Wallet > Recovery now opens recovery phrase tooling; Wallet > Tools opens
-  Paper Wallet and Watch-only tools.
+  Watch-only tools, and Explore opens Paper Wallet generation.
 - Quitting routes through a visible shutdown sequence before the app asks the
   backend to stop.
-- Wallet > Tools scrolls when content exceeds the available height, and Paper
-  Wallet copy controls use Nu button styling with enough right-side padding.
+- Wallet > Tools scrolls when content exceeds the available height.
+- Explore Paper Wallet collects mouse/keyboard entropy, mixes it with system
+  RNG in the bridge, derives the public address through Core descriptor RPC, and
+  keeps private-key QR images in memory for preview/printing.
 - The mast keeps Network/TX/RX/Hashrate/Difficulty on row one and
   Wallet/Sync/Peers/Block on row two, with stable learned slots.
 - Mining status uses a single aligned dot plus metric rows instead of mixing a
@@ -102,12 +771,15 @@ Changed behavior:
 Changed files and important details:
 - `src/clientversion.h`: visible Defcoin release identity moved to `26.6.7a`.
 - `src/qt/nu/app/CMakeLists.txt`: default `DEFCOIN_NU_RELEASE_NAME` moved to
-  `26.6.7a`.
+  `26.6.7a`; Qt PrintSupport is linked for Paper Wallet printing.
 - `src/qt/nu/app/NuPlatformIntegration.cpp` and `src/qt/nu/qml/Main.qml`:
   native Quit now routes through the QML shutdown status overlay.
 - `src/qt/nu/qml/Views/WalletView.qml`: `walletPanelIndexForTab()` maps visible
   Wallet tabs to the historically declared StackLayout panel order; Wallet
-  Tools content now scrolls when needed.
+  Tools content now scrolls when needed and no longer hosts Paper Wallet.
+- `src/qt/nu/qml/Views/PaperWalletView.qml`: new Explore-only Paper Wallet route
+  with entropy capture, address/WIF preview, pop-out preview, Print, Clear, and
+  guarded private-key copy.
 - `src/qt/nu/qml/Components/NuPanel.qml` and `NuCopyField.qml`: shared hover
   outline polish and unclipped Copy button styling.
 - `src/qt/nu/qml/Shell/StatusStrip.qml`: removes average block time from the
@@ -138,6 +810,11 @@ Build/package notes:
 
 Verification performed:
 - `git diff --check`: passed.
+- Paper-wallet security pass: generated WIF/private-key state stays in process
+  memory; paper QR sources use data URLs rather than temp files; descriptor RPC
+  console input is redacted for `getdescriptorinfo` and `deriveaddresses`; no
+  paper WIF settings/log/file/network export path was added. Printing still
+  hands the in-memory document to the user-selected native print destination.
 - `ruff check src/qt/nu/tools/defcoin_fast_syncd.py`: passed.
 - `ruff format --check src/qt/nu/tools/defcoin_fast_syncd.py`: passed.
 - `qmllint` on modified Wallet, StatusStrip, Mining, and Main QML files:
@@ -146,6 +823,10 @@ Verification performed:
 - Launch gate first-launch test recorded a clean post-allow Local Network audit.
 - QML grabs verified the tightened mast/header. Live Wallet-tab test verified
   Recovery and Tools content are no longer swapped.
+- 2026-06-11 paper-wallet check build passed:
+  `cmake -S src/qt/nu/app -B build/nu-qml-arm64-paper-wallet-check ...`,
+  `cmake --build build/nu-qml-arm64-paper-wallet-check --target DefcoinCoreNuResources -- -j1`,
+  and `cmake --build build/nu-qml-arm64-paper-wallet-check --target DefcoinCoreExploreResources -- -j1`.
 - Server RPC verification reported blocks and headers equal at `2344693` with
   `initialblockdownload=false`, and `defcoind` / `defcoin-fast-syncd` /
   `p2pool-defcoin` were active after restart.
@@ -3598,3 +4279,167 @@ Test focus:
 - Confirm Lion logs `NU_UDP_FASTSYNC_REQUEST`, `NU_UDP_FASTSYNC_STAGED`, and
   `NU_UDP_FASTSYNC_ACCEPTED`, with active requests rising above the old mostly
   one-at-a-time pattern.
+
+## 26.6.7h - 2026-06-15 - Paper Wallet previews use the print renderer
+
+Scope:
+- Tahoe Paper Wallet preview now calls a C++ service method that renders PNG
+  pages from the same renderer used by Print. This replaces the prior
+  independent QML Canvas sketch, which could drift from the actual PDF output.
+
+Implementation:
+- Add `NuRpcService::paperWalletPreviewPageSources()` and
+  `renderPaperWalletPages()` so print and preview share page geometry,
+  artwork, QR placement, and double-sided ordering.
+- Add `src/qt/nu/tools/render_paper_wallet_previews.sh` to render all paper
+  wallet designs from an existing app bundle into PDFs and PNGs for faster
+  layout iteration.
+
+Cross-build note:
+- Port the service invokable, shared renderer, QML image-preview binding, and
+  render helper to Lion and Windows when syncing Paper Wallet UI parity.
+
+## 26.6.7i - 2026-06-15 - Paper Wallet responsiveness and entropy polish
+
+Scope:
+- Tahoe Paper Wallet preview work continues under the shared renderer model.
+- This update improves interaction latency and makes pre-generation preview and
+  print behavior explicit instead of blocking alignment-test prints.
+
+Implementation:
+- Defer/coalesce Paper Wallet preview rendering behind a loading state.
+- Allow Pop Out and Print before entropy is complete; generated placeholder
+  print pages must include the unusable/test-print warning.
+- Add preview zoom controls and remove the redundant final clear-keys step.
+- Update the entropy panel to the new dark purple/gold hourglass design
+  direction and remove raw key-code/debug-number visual output.
+- Tighten Design 1 center typography, amount box, and private flap warning
+  layout.
+
+Cross-build note:
+- Port the QML preview scheduling, zoom controls, entropy panel, and
+  `printPaperWallet()` signature to Lion/Windows with platform-appropriate Qt
+  syntax. Keep preview/print on the same C++ renderer path.
+
+## 26.6.7l - 2026-06-16 - Paper Wallet preview/renderer polish
+
+Scope:
+- Tahoe Paper Wallet now has a BIP38 `Allow weak phrases?` checkbox, default
+  off, which is the only path that bypasses the normal 12-character passphrase
+  minimum.
+- The Paper Wallet view separates the left workflow scroll area from the right
+  sheet-preview scroll/zoom area so zoomed pages can extend beyond the preview
+  frame without trapping the whole route.
+- The shared print/preview renderer fixes Design 1 side-panel borders, Design 2
+  landscape panel rotation/fit, Design 3 top-layer Avery border visibility, and
+  Design 5 no-art BrainSilo/DFC/key-lane placement.
+
+Cross-build note:
+- Port the weak BIP38 override, split preview/workflow scroll behavior, and all
+  renderer fixes to Lion and Windows. Bundle `brainsilo_logo.png` alongside the
+  existing `defcoin-bulk` artwork or Design 5 no-art will fall back poorly.
+
+## 26.6.7m - 2026-06-16 - Paper Wallet entropy hourglass and preview fit
+
+Scope:
+- Tahoe Paper Wallet entropy visualization now draws a chamber-following upper
+  sand body with a flatter-to-slightly-concave drain surface, denser lower
+  grains, and multiple jittered falling streams instead of the previous hard
+  V-shaped top and single center line.
+- Sheet Preview gets more of the right-side pane and tighter internal margins so
+  actual print-rendered pages are easier to inspect without zooming.
+- OpenSSL dependency check confirmed Homebrew OpenSSL 3.6.2 is installed and the
+  prior staged app bundled OpenSSL 3.6.2 `libcrypto`/`libssl`.
+
+Cross-build note:
+- Port the QML-only hourglass and preview-pane sizing changes to Lion/Windows.
+- Keep the C++ paper-wallet renderer shared between preview and print on every
+  platform.
+
+## 26.6.7n - 2026-06-16 - OpenSSL 3.6.3 Tahoe runtime pin
+
+Scope:
+- Tahoe Apple Silicon Paper Wallet polish build now uses official OpenSSL
+  3.6.3 instead of the Homebrew 3.6.2 runtime that was present in prior staged
+  app bundles.
+
+Implementation:
+- Downloaded and SHA-256 verified the official OpenSSL 3.6.3 source tarball.
+- Built a local Tahoe arm64 OpenSSL 3.6.3 toolchain for the Nu frontend crypto
+  dependency.
+- Built OpenSSL 3.6.3 shared libraries under a no-space temporary prefix
+  because OpenSSL's generated Darwin shared-library install-name command does
+  not quote paths containing `Defcoin Core Nu`.
+- Copied `libcrypto.3.dylib` and `libssl.3.dylib` into the Tahoe app bundle,
+  rewrote their install names to `@rpath`, and re-signed the bundle.
+
+Cross-build note:
+- For Lion and Windows parity, prefer platform-native OpenSSL 3.6.3 builds when
+  available. If a source/build path contains spaces, build shared OpenSSL
+  libraries under a no-space prefix first, then copy the runtime artifacts into
+  the application package.
+
+## 26.6.7o - 2026-06-16 - Paper Wallet gating and import cleanup
+
+Scope:
+- Tahoe Paper Wallet removes the entropy hourglass animation and returns to a
+  clear progress-only ceremony so entropy capture is fast, deterministic, and
+  does not block the UI.
+- Entropy collection now starts only after the user presses Start Entropy Input
+  and stops automatically when the visible target is reached.
+- Receive adds a Paper Wallet import tab for local WIF/private-key import into
+  the active wallet, with the entered key cleared after submission.
+- The app icon is regenerated from the transparent v26 coin mark at a larger
+  fill ratio.
+
+Implementation:
+- Removed the obsolete hourglass asset from the Nu resource bundle.
+- Tightened Design 1 paper-wallet strip guide lines, QR frame spacing, and
+  caption placement so lines do not overrun the printed frame.
+- Kept paper-wallet preview and print on the same C++ renderer path.
+
+Cross-build note:
+- Port the entropy capture gate, Receive import tab, v26 icon refresh, and
+  Design 1 renderer cleanup to Lion and Windows. The import tab submits private
+  key material to local Core RPC only; do not persist or log it.
+
+## 26.6.7p - 2026-06-17 - Nu bundle packaging hygiene
+
+Scope:
+- Tahoe Nu packaging now prunes development-only QML companion notes and
+  Explore-only QML screens from the Nu wallet app bundle.
+- The active Nu source tree drops generated Finder/Python/Ruff cache files and
+  the stale paper-wallet hourglass PNG left over from the removed hourglass
+  animation.
+
+Implementation:
+- `DefcoinCoreNuResources` still copies the shared QML tree, then removes
+  `*.agent.md`, `ExploreMain.qml`, `Shell/ExploreFrame.qml`,
+  `Shell/ExploreNavigationRail.qml`, `Views/ExplorerView.qml`, and
+  `Views/ForensicsView.qml` from the Nu wallet resource directory.
+- `DefcoinCoreExploreResources` keeps the full shared QML tree for the separate
+  Explore app.
+
+Cross-build note:
+- Apply the same Nu-vs-Explore resource pruning in Windows packaging so the Nu
+  wallet installer does not carry development companions or Explore-only QML.
+
+## 26.6.7q - 2026-06-17 - Tahoe q packaging crash fix
+
+Scope:
+- Fixed the Tahoe q app launch abort caused by loading Homebrew Qt and bundled
+  Qt frameworks in the same process.
+- Regenerated the macOS/Windows app icons from the transparent v26 coin with
+  the coin scaled past the icon canvas so it reads edge-to-edge in Finder.
+
+Implementation:
+- `stage_macos_distribution.sh` now trusts pre-existing bundled Qt only when
+  the app executable already resolves Qt through bundled `@rpath` or
+  `@executable_path` install names. If the executable still links Homebrew Qt,
+  staging redeploys and repairs the Qt runtime instead of reusing the mixed
+  bundle.
+
+Cross-build note:
+- Keep the same single-Qt-runtime rule in every macOS staging path. A bundle
+  with Homebrew-linked Qt install names plus bundled Qt plugins will abort at
+  launch before the UI opens.

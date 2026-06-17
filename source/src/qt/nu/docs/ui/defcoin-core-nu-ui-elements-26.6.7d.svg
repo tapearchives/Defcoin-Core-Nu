@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="850" viewBox="0 0 1700 850">
+  <defs>
+    <style>
+      .bg { fill: #f7f4ec; }
+      .title { font: 700 30px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #15121b; }
+      .subtitle { font: 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5a5265; }
+      .box { fill: #ffffff; stroke: #5b2a7e; stroke-width: 1.4; rx: 12; }
+      .term { font: 700 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #25152f; }
+      .desc { font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5e5667; }
+      .rule { stroke: #f2c94c; stroke-width: 2; }
+      .callout { fill: none; stroke: #7b4aa2; stroke-width: 2; stroke-dasharray: 6 8; stroke-linecap: round; }
+      .dot { fill: #f2c94c; stroke: #4b1f65; stroke-width: 2; }
+      .shot { filter: drop-shadow(0 18px 28px rgba(20, 12, 30, 0.20)); }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1700" height="850"/>
+  <text class="title" x="32" y="42">Elements of the Defcoin Core Nu App UI</text>
+  <text class="subtitle" x="32" y="68">Standard terms for referring to the main Nu wallet window.</text>
+
+  <image class="shot" href="defcoin-core-nu-26.6.7d-default-window.png" x="28" y="96" width="1123" height="665" preserveAspectRatio="xMidYMid meet"/>
+
+  <g transform="translate(1210 96)">
+    <rect class="box" x="0" y="0" width="430" height="64"/>
+    <text class="term" x="18" y="24">Window Chrome</text>
+    <line class="rule" x1="18" y1="32" x2="154" y2="32"/>
+    <text class="desc" x="18" y="51">Native title bar, traffic-light controls, and app title.</text>
+  </g>
+  <path class="callout" d="M 1200 128 C 1115 128, 1040 110, 1010 104"/>
+  <circle class="dot" cx="1010" cy="104" r="5"/>
+
+  <g transform="translate(1210 174)">
+    <rect class="box" x="0" y="0" width="430" height="76"/>
+    <text class="term" x="18" y="24">Brand Lockup</text>
+    <line class="rule" x1="18" y1="32" x2="136" y2="32"/>
+    <text class="desc" x="18" y="51">The v26 coin mark plus the DEFCOIN CORE NU</text>
+    <text class="desc" x="18" y="67">wordmark. Keep these grouped as one identity.</text>
+  </g>
+  <path class="callout" d="M 1200 212 C 900 190, 300 145, 68 158"/>
+  <circle class="dot" cx="68" cy="158" r="5"/>
+
+  <g transform="translate(1210 266)">
+    <rect class="box" x="0" y="0" width="430" height="76"/>
+    <text class="term" x="18" y="24">Navigation Rail</text>
+    <line class="rule" x1="18" y1="32" x2="148" y2="32"/>
+    <text class="desc" x="18" y="51">Persistent left-side destination list for Home,</text>
+    <text class="desc" x="18" y="67">Send, Receive, Wallet, Mining, Metrics, and Settings.</text>
+  </g>
+  <path class="callout" d="M 1200 304 C 935 325, 320 390, 60 410"/>
+  <circle class="dot" cx="60" cy="410" r="5"/>
+
+  <g transform="translate(1210 358)">
+    <rect class="box" x="0" y="0" width="430" height="76"/>
+    <text class="term" x="18" y="24">Global Status Header</text>
+    <line class="rule" x1="18" y1="32" x2="196" y2="32"/>
+    <text class="desc" x="18" y="51">At-a-glance node, wallet, sync, peer, hashrate,</text>
+    <text class="desc" x="18" y="67">traffic, and block-tip telemetry.</text>
+  </g>
+  <path class="callout" d="M 1200 396 C 1015 320, 820 170, 560 148"/>
+  <circle class="dot" cx="560" cy="148" r="5"/>
+
+  <g transform="translate(1210 450)">
+    <rect class="box" x="0" y="0" width="430" height="76"/>
+    <text class="term" x="18" y="24">Route Header</text>
+    <line class="rule" x1="18" y1="32" x2="130" y2="32"/>
+    <text class="desc" x="18" y="51">Current page title. In compact pages this stays</text>
+    <text class="desc" x="18" y="67">small so tables and controls get the space.</text>
+  </g>
+  <path class="callout" d="M 1200 488 C 980 450, 500 240, 205 216"/>
+  <circle class="dot" cx="205" cy="216" r="5"/>
+
+  <g transform="translate(1210 542)">
+    <rect class="box" x="0" y="0" width="430" height="76"/>
+    <text class="term" x="18" y="24">Wallet Summary Panel</text>
+    <line class="rule" x1="18" y1="32" x2="198" y2="32"/>
+    <text class="desc" x="18" y="51">Account context, selected wallet, balance, and</text>
+    <text class="desc" x="18" y="67">spendable-state summary.</text>
+  </g>
+  <path class="callout" d="M 1200 580 C 1030 535, 650 330, 410 300"/>
+  <circle class="dot" cx="410" cy="300" r="5"/>
+
+  <g transform="translate(1210 634)">
+    <rect class="box" x="0" y="0" width="430" height="76"/>
+    <text class="term" x="18" y="24">Primary Action Row</text>
+    <line class="rule" x1="18" y1="32" x2="178" y2="32"/>
+    <text class="desc" x="18" y="51">High-frequency commands for the active route.</text>
+    <text class="desc" x="18" y="67">Dark fill marks the current primary action.</text>
+  </g>
+  <path class="callout" d="M 1200 672 C 980 650, 545 435, 340 412"/>
+  <circle class="dot" cx="340" cy="412" r="5"/>
+
+  <g transform="translate(1210 726)">
+    <rect class="box" x="0" y="0" width="430" height="76"/>
+    <text class="term" x="18" y="24">Data Grid</text>
+    <line class="rule" x1="18" y1="32" x2="100" y2="32"/>
+    <text class="desc" x="18" y="51">Dense tabular history or diagnostics. Columns</text>
+    <text class="desc" x="18" y="67">should auto-fit and remain copyable where useful.</text>
+  </g>
+  <path class="callout" d="M 1200 764 C 980 760, 680 625, 405 640"/>
+  <circle class="dot" cx="405" cy="640" r="5"/>
+
+  <g transform="translate(32 788)">
+    <rect class="box" x="0" y="0" width="420" height="44"/>
+    <text class="term" x="18" y="28">Advanced Tools Toggle</text>
+  </g>
+  <path class="callout" d="M 460 810 C 390 805, 220 790, 45 724"/>
+  <circle class="dot" cx="45" cy="724" r="5"/>
+</svg>

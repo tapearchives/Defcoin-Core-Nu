@@ -1,6 +1,6 @@
 # Defcoin Core Nu UI Implementation
 
-This directory contains the developer reference for Defcoin Core Nu 26.6.7a.
+This directory contains the developer reference for Defcoin Core Nu 26.6.7b.
 Nu is a Qt Quick interface that talks to the Defcoin Core backend through a
 small JSON-RPC service layer.
 
@@ -48,6 +48,10 @@ wallet keys, signing, validation, and networking out of QML.
 See `build-and-installer-runbook.md` for the current local build, staging,
 installer, cleanup, and verification procedure.
 
+See `defcoin-core-versioning.md` for the canonical Defcoin Core Nu
+Epoch-SemVer Hybrid versioning rules used by client constants, user agents,
+release notes, and package labels.
+
 See `cross-build-change-log.md` for the internal Tahoe-to-Lion/Catalina/Windows
 change ledger. Update it for every build that changes behavior, packaging,
 backend interfaces, or porting assumptions.
@@ -57,6 +61,13 @@ causes, smoke gates, and triage order for new app bundles.
 
 See `brand-logo-text.md` for the canonical Defcoin Core Nu wordmark font,
 kerning, Explore third-line variant, and DMG layout rules.
+
+See `crypto-key-generation-audit-26.6.7k.md` for the Nu key-generation,
+Brainflayer threat-model, crypto algorithm, and encoding audit.
+
+See `ui/defcoin-core-nu-ui-design-language.md` and
+`ui/defcoin-core-nu-ui-tables-and-lists.md` for internal UI/UX color,
+interaction, table, and list design guidance.
 
 See `bitcoin-core-qml-comparison.md` for the architecture comparison with
 Bitcoin Core QML.

@@ -74,6 +74,12 @@ Rectangle {
             help: "Monitor Explorer, Holder Atlas, movement, and forensics indexing jobs and tune long runs."
         },
         {
+            route: "paper",
+            label: "Paper Wallet",
+            icon: "../../assets/icons/qr.svg",
+            help: "Generate and print a branded Defcoin paper wallet with local entropy."
+        },
+        {
             route: "witness",
             label: "Witness Repair",
             icon: "../../assets/icons/warning.svg",

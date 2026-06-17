@@ -301,6 +301,13 @@ ColumnLayout {
                                   : "When enabled, closing the window keeps Defcoin Core Nu running from the system tray so the node can stay synchronized."
                         onToggled: NuService.backgroundCloseEnabled = checked
                     }
+
+                    NuCheckBox {
+                        text: "Show startup status indicator"
+                        checked: NuService.showStartupSplashStatusIndicator
+                        helpText: "Off by default. When enabled, the startup splash shows a small top-center phase and timer line while Nu loads. Startup progress is still written to the launch log when this is off."
+                        onToggled: NuService.showStartupSplashStatusIndicator = checked
+                    }
                 }
 
                 Rectangle {

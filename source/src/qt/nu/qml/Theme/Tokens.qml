@@ -39,7 +39,7 @@ QtObject {
     readonly property int fontLog: 13
 
     readonly property string bodyFont: Qt.platform.os === "windows" ? "Segoe UI" : "Arial"
-    readonly property string monoFont: Qt.platform.os === "windows" ? "Consolas" : (Qt.platform.os === "osx" ? "Menlo" : "monospace")
+    readonly property string monoFont: "Atkinson Hyperlegible Mono"
 
     readonly property int spaceXs: 4
     readonly property int spaceSm: 8

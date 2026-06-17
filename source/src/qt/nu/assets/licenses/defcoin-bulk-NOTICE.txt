@@ -1,0 +1,18 @@
+Defcoin Bulk Paper Wallet Design Notice
+=======================================
+
+Nu Paper Wallet Design 5 uses the front and back artwork and paper-wallet
+layout model from sibios/defcoin-bulk:
+
+    https://github.com/sibios/defcoin-bulk
+
+The upstream index.htm describes the software lineage as a fork of
+bitaddress.org / CryptoLife Universal Paper Wallet Generator and includes the
+MIT license text for the bitaddress.org software. The upstream header also
+states that the artwork is licensed under the Creative Commons Freeworks
+license:
+
+    https://creativecommons.org/freeworks
+
+Nu uses Core-native key generation and QR rendering. It does not import the
+2014 browser cryptography stack from defcoin-bulk.

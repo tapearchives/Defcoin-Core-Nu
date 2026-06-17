@@ -10,6 +10,7 @@ ColumnLayout {
     id: root
     spacing: NuTokens.spaceLg
     property var currentRequest: ({})
+    property int receiveTab: 0
 
     function currentDisplayAddress() {
         var selected = root.currentRequest.address || ""
@@ -44,8 +45,17 @@ ColumnLayout {
         dense: true
     }
 
+    NuTabBar {
+        Layout.fillWidth: true
+        currentIndex: root.receiveTab
+        NuTabButton { text: "Payment Request"; onClicked: root.receiveTab = 0 }
+        NuTabButton { text: "Import"; onClicked: root.receiveTab = 1 }
+    }
+
     NuPanel {
         Layout.fillWidth: true
+        visible: root.receiveTab === 0
+        Layout.preferredHeight: visible ? implicitHeight : 0
         implicitHeight: 284
 
         RowLayout {
@@ -107,6 +117,8 @@ ColumnLayout {
 
     RowLayout {
         Layout.fillWidth: true
+        visible: root.receiveTab === 0
+        Layout.preferredHeight: visible ? implicitHeight : 0
         spacing: NuTokens.spaceMd
 
         Label {
@@ -136,6 +148,8 @@ ColumnLayout {
         id: receiveRequestsTable
         Layout.fillWidth: true
         Layout.fillHeight: true
+        visible: root.receiveTab === 0
+        Layout.preferredHeight: visible ? implicitHeight : 0
         tableId: "receiveRequests"
         columns: ["", "Date", "Label", "Address", "Amount"]
         columnTypes: ["action", "date", "text", "address", "amount"]
@@ -154,6 +168,92 @@ ColumnLayout {
                 root.currentRequest = ({})
         }
         onRowActivated: (row) => root.openRequestDetails(row)
+    }
+
+    NuPanel {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        visible: root.receiveTab === 1
+        Layout.preferredHeight: visible ? implicitHeight : 0
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: NuTokens.spaceMd
+
+            Label {
+                Layout.fillWidth: true
+                text: "Import a paper-wallet private key into the active wallet. The key is sent only to the local backend RPC for import."
+                color: NuTokens.textSecondary
+                font.pixelSize: NuTokens.fontBody
+                wrapMode: Text.WordWrap
+            }
+
+            FieldBlock {
+                title: "Private key"
+                detail: "Paste the WIF private key from the paper wallet. Anyone who sees this key can spend the funds."
+
+                NuTextField {
+                    id: paperPrivateKeyField
+                    Layout.fillWidth: true
+                    echoMode: TextInput.Password
+                    placeholderText: "Paper wallet private key"
+                    helpText: "Paste the private key from a Defcoin paper wallet. Keep it off shared screens and clear it after import."
+                }
+            }
+
+            FieldBlock {
+                title: "Label"
+                detail: "Optional label used for the imported key."
+
+                NuTextField {
+                    id: paperImportLabelField
+                    Layout.fillWidth: true
+                    text: "Paper wallet import"
+                    helpText: "This label is attached to the imported key/address in the active wallet."
+                }
+            }
+
+            CheckBox {
+                id: sweepPaperKeyCheck
+                text: "Sweep"
+                checked: true
+                ToolTip.visible: hovered
+                ToolTip.text: "Sweep means move funds from the imported paper wallet to a fresh address in the active wallet after the rescan confirms spendable balance. This build imports and rescans first, then instructs you to send once the balance is visible."
+                ToolTip.delay: NuTokens.tooltipDelay
+                ToolTip.timeout: NuTokens.tooltipTimeout
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: sweepPaperKeyCheck.checked
+                      ? "Sweep is selected. Nu will import and rescan first; after the funds are visible, move them to a fresh wallet address from Send."
+                      : "Import only keeps the private key in this wallet. The paper wallet remains spendable from any copy of that key."
+                color: sweepPaperKeyCheck.checked ? NuTokens.stateWarning : NuTokens.textSecondary
+                font.pixelSize: NuTokens.fontSmall
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: NuTokens.spaceMd
+
+                NuActionButton {
+                    text: "Import Private Key"
+                    primary: true
+                    enabled: paperPrivateKeyField.text.trim().length > 0 && NuService.walletSelected
+                    Layout.preferredWidth: 190
+                    helpText: "Import the paper-wallet private key into the active wallet and start a rescan."
+                    onClicked: {
+                        NuService.importPaperWalletPrivateKey(paperPrivateKeyField.text,
+                                                              sweepPaperKeyCheck.checked,
+                                                              paperImportLabelField.text)
+                        paperPrivateKeyField.text = ""
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+        }
     }
 
     NuDialog {
@@ -272,6 +372,36 @@ ColumnLayout {
                 onClicked: NuService.copyText(root.currentRequest.address || "")
             }
             Item { Layout.fillWidth: true }
+        }
+    }
+
+    component FieldBlock: ColumnLayout {
+        property string title: ""
+        property string detail: ""
+        default property alias content: body.data
+        spacing: NuTokens.spaceXs
+
+        Label {
+            Layout.fillWidth: true
+            text: title
+            color: NuTokens.textPrimary
+            font.pixelSize: NuTokens.fontSmall
+            font.weight: Font.DemiBold
+            wrapMode: Text.WordWrap
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: detail
+            color: NuTokens.textSecondary
+            font.pixelSize: NuTokens.fontTiny
+            wrapMode: Text.WordWrap
+        }
+
+        ColumnLayout {
+            id: body
+            Layout.fillWidth: true
+            spacing: NuTokens.spaceXs
         }
     }
 }

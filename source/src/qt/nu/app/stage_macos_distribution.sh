@@ -59,6 +59,7 @@ rm -f "$DEST_APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
 find "$DEST_APP/Contents/Frameworks" -type f \( -name '*.a' -o -name '*.la' \) -delete 2>/dev/null || true
 "$(dirname "$0")/bundle_macos_backend_deps.sh" "$DEST_APP"
 PYTHON_FOR_QT_REPAIR="${DEFCOIN_NU_PACKAGING_PYTHON:-$(command -v python3)}"
+APP_EXE="$DEST_APP/Contents/MacOS/$APP_EXECUTABLE_NAME"
 
 find_existing_dir() {
   for candidate in "$@"; do
@@ -71,9 +72,22 @@ find_existing_dir() {
   return 1
 }
 
+app_executable_uses_bundled_qt() {
+  [ -x "$APP_EXE" ] || return 1
+  otool -L "$APP_EXE" | awk '
+    /Qt[A-Za-z0-9_]*\.framework/ {
+      if ($1 !~ /^@rpath\// && $1 !~ /^@executable_path\//) {
+        bad = 1
+      }
+    }
+    END { exit bad ? 1 : 0 }
+  '
+}
+
 if [ -z "${DEFCOIN_NU_QT_ROOT:-}" ] \
   && [ -d "$DEST_APP/Contents/Frameworks/QtCore.framework" ] \
-  && [ -f "$DEST_APP/Contents/PlugIns/platforms/libqcocoa.dylib" ]; then
+  && [ -f "$DEST_APP/Contents/PlugIns/platforms/libqcocoa.dylib" ] \
+  && app_executable_uses_bundled_qt; then
   echo "Using Qt runtime already bundled in $DEST_APP"
 else
   QT_ROOT="${DEFCOIN_NU_QT_ROOT:-/opt/homebrew}"
@@ -102,7 +116,6 @@ else
 fi
 find "$DEST_APP/Contents/Frameworks" -type f \( -name '*.a' -o -name '*.la' \) -delete 2>/dev/null || true
 
-APP_EXE="$DEST_APP/Contents/MacOS/$APP_EXECUTABLE_NAME"
 while IFS= read -r rpath; do
   case "$rpath" in
     /opt/homebrew/lib|*"/toolchains/qt/"*|*"/Qt/"*"/macos/lib")

@@ -12,6 +12,7 @@ ColumnLayout {
     spacing: NuTokens.spaceLg
     property bool syncingPayoutFromWallet: false
     property bool minerLogAutoFollow: true
+    property bool adjustingMinerLogTail: false
 
     function quoteShell(value) {
         const text = String(value || "")
@@ -164,8 +165,16 @@ ColumnLayout {
 
     function followMinerLogTail() {
         Qt.callLater(function() {
+            root.adjustingMinerLogTail = true
             minerLogText.cursorPosition = minerLogText.length
+            if (minerLogScroll.contentItem && minerLogScroll.contentItem.contentHeight !== undefined) {
+                minerLogScroll.contentItem.contentY = Math.max(
+                    0,
+                    minerLogScroll.contentItem.contentHeight - minerLogScroll.contentItem.height
+                )
+            }
             minerLogVerticalBar.position = Math.max(0, 1 - minerLogVerticalBar.size)
+            Qt.callLater(function() { root.adjustingMinerLogTail = false })
         })
     }
 
@@ -518,7 +527,7 @@ ColumnLayout {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Recent miner output. Nu keeps up to about 2 MB in this view; copy the log before clearing it."
+                    text: "Recent miner output. Nu keeps a capped live view so mining stays responsive; copy the log before clearing it."
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap
@@ -532,8 +541,14 @@ ColumnLayout {
                     Basic.ScrollBar.vertical: Basic.ScrollBar {
                         id: minerLogVerticalBar
                         policy: Basic.ScrollBar.AlwaysOn
-                        onPositionChanged: root.minerLogAutoFollow = position + size >= 0.985
-                        onSizeChanged: root.minerLogAutoFollow = position + size >= 0.985
+                        onPositionChanged: {
+                            if (!root.adjustingMinerLogTail)
+                                root.minerLogAutoFollow = position + size >= 0.985
+                        }
+                        onSizeChanged: {
+                            if (!root.adjustingMinerLogTail)
+                                root.minerLogAutoFollow = position + size >= 0.985
+                        }
                     }
                     Basic.ScrollBar.horizontal: Basic.ScrollBar {
                         policy: Basic.ScrollBar.AlwaysOn
@@ -559,6 +574,16 @@ ColumnLayout {
                             if (!root.minerLogAutoFollow)
                                 return
                             root.followMinerLogTail()
+                        }
+                    }
+
+                    Connections {
+                        target: minerLogScroll.contentItem
+                        function onContentYChanged() {
+                            if (root.adjustingMinerLogTail || !minerLogScroll.contentItem)
+                                return
+                            const item = minerLogScroll.contentItem
+                            root.minerLogAutoFollow = item.contentY + item.height >= item.contentHeight - 6
                         }
                     }
                 }

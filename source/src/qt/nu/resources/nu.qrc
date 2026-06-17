@@ -34,6 +34,7 @@
         <file>../qml/Views/HomeView.qml</file>
         <file>../qml/Views/MiningView.qml</file>
         <file>../qml/Views/NodeView.qml</file>
+        <file>../qml/Views/PaperWalletView.qml</file>
         <file>../qml/Views/ReceiveView.qml</file>
         <file>../qml/Views/SendView.qml</file>
         <file>../qml/Views/SettingsView.qml</file>
@@ -60,5 +61,11 @@
         <file>../assets/data/defcoin_reddit_timeline.json</file>
         <file>../assets/brand/defcoin-nu-icon-1024.png</file>
         <file>../assets/brand/defcoin-nu-coin-stack-hires.png</file>
+        <file>../assets/brand/defcoin-v26-coin.png</file>
+        <file>../assets/fonts/AtkinsonHyperlegibleMono-Bold.ttf</file>
+        <file>../assets/fonts/AtkinsonHyperlegibleMono-BoldItalic.ttf</file>
+        <file>../assets/fonts/AtkinsonHyperlegibleMono-Italic.ttf</file>
+        <file>../assets/fonts/AtkinsonHyperlegibleMono-OFL.txt</file>
+        <file>../assets/fonts/AtkinsonHyperlegibleMono-Regular.ttf</file>
     </qresource>
 </RCC>

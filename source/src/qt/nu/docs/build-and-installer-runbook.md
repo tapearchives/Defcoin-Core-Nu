@@ -11,6 +11,10 @@ For the canonical release overview, see:
 doc/defcoin-core-nu-technical-guide.md
 ```
 
+For version-number decisions, first read `defcoin-core-versioning.md`. Public
+Nu releases use strict `Epoch.Feature.Patch`; letter suffixes are candidate or
+staging labels unless explicitly promoted.
+
 ## Path Variables
 
 Use local variables instead of committing machine-specific paths:
@@ -164,7 +168,7 @@ cmake -S src/qt/nu/app -B build/nu-qml-win64 \
 cmake --build build/nu-qml-win64 --target DefcoinCoreNuResources -j1
 ```
 
-Before Velopack or ZIP packaging, stage the Windows payload from the completed
+Before Velopack, fallback installer, or ZIP packaging, stage the Windows payload from the completed
 Qt build output and fail the build if any runtime piece is missing. The payload
 must include all top-level `*.dll` files, `DefcoinCoreNu.exe`, `qt.conf`, and
 the `nu`, `plugins`, `qml`, and `translations` directories. At minimum, verify:
@@ -193,21 +197,39 @@ for required in \
 done
 ```
 
-When copying the Velopack output into the public distribution folder, keep only
-the renamed user-facing setup and portable ZIP there. Leave generated
+Velopack is the primary Windows release path because it provides the built-in
+check-for-updates flow. Copy only the renamed user-facing Velopack setup and
+portable ZIP into the public distribution folder. Leave generated
 `org.defcoincore...` feed artifacts under `_velopack-update-feeds` so the
 Windows share does not show duplicate installers.
 
-Package installers with the NSIS script or platform release helper used by the
-local build environment. Installers should launch `DefcoinCoreNu.exe --raise`
-directly from the finish page.
+When packaging Windows from macOS, call the Velopack CLI with the hidden
+platform directive before `pack`:
+
+```bash
+vpk "[win]" pack --yes \
+  --channel win-x64 \
+  --runtime win-x64 \
+  --shortcuts Desktop,StartMenuRoot \
+  ...
+```
+
+Without `"[win]"`, the macOS-hosted CLI assumes an OSX package and rejects the
+Windows runtime. The `--shortcuts Desktop,StartMenuRoot` flag is the Velopack
+shortcut path for the public setup build.
+
+NSIS setup files are fallback or repair packages only. They are useful when
+Velopack packaging is temporarily unavailable, but they do not provide the
+managed update path and must not be treated as the primary public installer.
+Fallback installers should launch `DefcoinCoreNu.exe --raise` directly from the
+finish page.
 
 ## Release Hygiene
 
 - Do not commit app bundles, installers, DMGs, ZIPs, or generated build trees.
 - Do not commit private credentials, wallet files, RPC cookies, `.env` files,
   or workstation-specific paths.
-- Keep the visible release version as `26.6.2i`.
+- Keep the visible release version aligned with `src/clientversion.h`.
 - If a rebuild contains any source, UI, packaging, documentation, or behavior
   change, advance the visible release label with a letter suffix before staging
   it: `26.6.2j`, `26.6.2k`, and so on.

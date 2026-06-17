@@ -16,7 +16,7 @@ This git tree is the current Tahoe / Apple Silicon Defcoin Core Nu source, based
 - Fast Sync and Quick Clone changes must keep transport/orchestration separate from consensus validation unless the user explicitly approves a trusted-copy mode.
 - Quick Clone is trusted LAN public-chain data only. It must never copy wallets, keys, configs, peers, bans, RPC cookies, or address books.
 - Close existing Nu frontend/backend instances before launch tests or rebuilds.
-- A new Tahoe build must use the current versioning rule and update release/change notes.
+- A new Tahoe build must follow `source/src/qt/nu/docs/defcoin-core-versioning.md` and update release/change notes. Public releases use strict `Epoch.Feature.Patch`; suffixes are candidate/staging labels unless explicitly promoted.
 
 ## Work Guidance
 
