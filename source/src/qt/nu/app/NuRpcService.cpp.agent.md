@@ -52,6 +52,10 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   Key
   generation and QR creation remain in Core-native Nu code rather than importing
   the 2014 browser cryptography stack.
+  Design 1's private-key lane must split long WIF/BIP38 output across two
+  rotated Atkinson Hyperlegible Mono lines, with the first line ending on a
+  six-character group boundary when possible; keep panel 3's QR/checker area
+  slightly narrower so the secret lane does not clip.
   Keep `DFC` visible on printed designs. Do not replace this with a generic
   multi-page print document. The printout uses the pure v26 coin mark; the GUI
   preview itself stays unbranded. Preview and print may render placeholder

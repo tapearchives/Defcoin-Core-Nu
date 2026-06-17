@@ -11583,6 +11583,23 @@ bool NuRpcService::renderPaperWalletPages(QPainter& painter,
         painter.restore();
     };
 
+    auto splitGroupedKeyLines = [](const QString& key, int group_size = 6) {
+        QStringList lines;
+        if (key.size() <= group_size * 6) {
+            lines << key;
+            return lines;
+        }
+        const int raw_half = key.size() / 2;
+        int split = qMax(group_size, qRound(double(raw_half) / double(group_size)) * group_size);
+        if (split >= key.size())
+            split = qMax(group_size, (key.size() / group_size - 1) * group_size);
+        if (split <= 0 || split >= key.size()) {
+            split = raw_half;
+        }
+        lines << key.left(split) << key.mid(split);
+        return lines;
+    };
+
     auto sheetFont = [](const QString& family, int pixel_size, int weight = QFont::Normal) {
         QFont font(family, -1, weight);
         font.setPixelSize(pixel_size);
@@ -11935,11 +11952,11 @@ bool NuRpcService::renderPaperWalletPages(QPainter& painter,
         const QRectF base(0, 0, liteaddress_width, liteaddress_height);
         const QRectF public_security(1, 1, 113, 259);
         const QRectF public_qr(6, 32, 105, 105);
-        const QRectF private_security(366, 1, 119, 259);
-        const QRectF private_qr(private_security.center().x() - 53, 28, 106, 106);
+        const QRectF private_security(386, 1, 99, 259);
+        const QRectF private_qr(private_security.center().x() - 45, 31, 90, 90);
         const QRectF address_panel(112, 0, 48, liteaddress_height);
         const QRectF center_panel(160, 0, 172, liteaddress_height);
-        const QRectF private_panel(334, 0, 26, liteaddress_height);
+        const QRectF private_panel(334, 0, 50, liteaddress_height);
 
         painter.setPen(QPen(QColor("#7c5eb5"), 1));
         painter.setBrush(QColor("#fbf8ff"));
@@ -12019,7 +12036,7 @@ bool NuRpcService::renderPaperWalletPages(QPainter& painter,
                            "wallet. Keep it offline, away from cameras, and out of sight.");
         QFont private_warning_font = sheetFont(QStringLiteral("Helvetica Neue"), 6, QFont::DemiBold);
         QFontMetricsF private_warning_metrics(private_warning_font);
-        const qreal private_warning_width = 108.0;
+        const qreal private_warning_width = 90.0;
         const QRectF private_warning_measure(0, 0, private_warning_width - 8.0, 120.0);
         const qreal private_warning_height = qMin<qreal>(
             96.0,
@@ -12028,7 +12045,7 @@ bool NuRpcService::renderPaperWalletPages(QPainter& painter,
                           .height()) +
                 8.0);
         const QRectF private_warning(private_security.center().x() - private_warning_width / 2.0,
-                                     158,
+                                     154,
                                      private_warning_width,
                                      private_warning_height);
         painter.setPen(QPen(QColor(214, 224, 228), 0.6));
@@ -12049,7 +12066,11 @@ bool NuRpcService::renderPaperWalletPages(QPainter& painter,
                         label_font,
                         QColor("#16344a"),
                         135);
-        drawRotatedGroupedText(QPointF(359, 236), key, value_font, QColor("#111111"), 215);
+        const QStringList private_key_lines = splitGroupedKeyLines(key);
+        drawRotatedGroupedText(QPointF(359, 236), private_key_lines.value(0), value_font, QColor("#111111"), 215);
+        if (private_key_lines.size() > 1) {
+            drawRotatedGroupedText(QPointF(374, 236), private_key_lines.value(1), value_font, QColor("#111111"), 215);
+        }
 
         if (!hide_art) {
             if (!coin.isNull()) {

@@ -4443,3 +4443,20 @@ Cross-build note:
 - Keep the same single-Qt-runtime rule in every macOS staging path. A bundle
   with Homebrew-linked Qt install names plus bundled Qt plugins will abort at
   launch before the UI opens.
+
+## 26.6.7s-followup - 2026-06-17 - Design 1 private-key lane fit
+
+Scope:
+- Tahoe Paper Wallet Design 1 now gives the private-key lane enough room for a
+  label plus two rotated key lines, preventing WIF/BIP38 text clipping in the
+  right secret panel.
+
+Implementation:
+- Splits long private keys near the midpoint while preserving six-character
+  grouping when possible.
+- Narrows the panel 3 checker/QR area and slightly shrinks its QR box to make
+  room for the expanded secret text lane.
+
+Cross-build note:
+- Port the same two-line private-key lane and narrowed secret panel geometry to
+  Lion and Windows before exposing Paper Wallet there.

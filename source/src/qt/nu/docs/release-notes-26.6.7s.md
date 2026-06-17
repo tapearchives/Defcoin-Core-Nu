@@ -19,6 +19,8 @@ accuracy.
 - Tightens Design 1 QR rendering by drawing QR modules directly into the
   reserved square instead of scaling a padded QR image.
 - Adds subtle key/address grouping guides for paper-wallet transcription.
+- Splits Design 1 private-key output across two grouped mono lines and narrows
+  the secret checker/QR area so the WIF/BIP38 text is not clipped.
 
 ## Verification
 
