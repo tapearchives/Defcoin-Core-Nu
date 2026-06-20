@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="source/src/qt/nu/assets/brand/defcoin-core-nu-readme-hero.png" width="720" alt="Defcoin Core Nu logo">
+  <img src="source/doc/assets/screenshots/nu-splash-26.6.8-alpha.png" width="720" alt="Defcoin Core Nu 26.6.8-alpha splash screen">
 </p>
 
 <h1 align="center">Defcoin Core Nu</h1>
 
 <p align="center">
-  <strong>Download a Defcoin wallet. Store DFC. Send and receive Defcoin on the Defcoin network.</strong>
+  <strong>Full-node Defcoin wallet, local network tools, paper wallets, recovery workflows, and the companion Explore app.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/v26.5.1"><strong>Download Wallet</strong></a>
+  <a href="https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/v26.6.8-alpha"><strong>Download v26.6.8-alpha</strong></a>
   ·
   <a href="#build-from-source">Build from source</a>
   ·
@@ -17,91 +17,97 @@
   ·
   <a href="source/doc/defcoin-nu-architecture.md">Architecture</a>
   ·
-  <a href="source/doc/release-notes/release-notes-26.5.1.md">Release notes</a>
+  <a href="source/src/qt/nu/docs/release-notes-26.6.8-alpha.md">Release notes</a>
 </p>
 
 Defcoin is a Scrypt proof-of-work cryptocurrency with a long-running independent
-chain. Defcoin Core Nu is the current full-node desktop wallet for holding DFC,
-sending and receiving payments, inspecting network peers, and participating in
-the Defcoin network.
+chain. Defcoin Core Nu is the current desktop full-node wallet for holding DFC,
+sending and receiving payments, managing local wallets, inspecting peers, and
+participating in the Defcoin network.
 
-The `26.5.1` release, codename `Core Memories`, preserves Defcoin's historical
-chain rules and wallet data while adding a focused Qt Quick desktop experience
-for modern macOS and Windows users.
+`26.6.8-alpha`, codename `Core Memories`, is the current public alpha release.
+It preserves Defcoin's historical chain rules and wallet data while adding a
+modern Qt Quick desktop experience for macOS Apple Silicon and Windows 11.
 
-## Get The Wallet
+## Get The Current Alpha
 
-Choose the package for your computer from
-[Defcoin Core Nu 26.5.1 "Core Memories"](https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/v26.5.1).
+Download packages from
+[Defcoin Core Nu v26.6.8-alpha](https://github.com/defcoincore/Defcoin-Core-Nu/releases/tag/v26.6.8-alpha).
 
 | Platform | Package |
 | --- | --- |
-| macOS Apple Silicon | [DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-Core-Nu-v26.5.1-macOS-AppleSilicon.dmg) |
-| macOS Intel | [DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-Core-Nu-v26.5.1-macOS-Intel.dmg) |
-| Windows 11 x86_64 | [Installer](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-Core-Nu-v26.5.1-Windows11-x86_64-Setup.exe) |
-| Windows 11 x86_64 | [Portable ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-Core-Nu-v26.5.1-Windows11-x86_64-portable.zip) |
-| Optional bootstrap pack | [Bootstrap ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-bootstrap-mainnet-2332283.zip) · [SHA-256](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/Defcoin-bootstrap-mainnet-2332283.zip.sha256) |
-| Verification | [SHA256SUMS.txt](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.5.1/SHA256SUMS.txt) |
+| macOS Apple Silicon | [Nu DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8-alpha-macOS-AppleSilicon.dmg) |
+| macOS Apple Silicon | [Explore DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-Explore-v26.6.8-alpha-macOS-AppleSilicon.dmg) |
+| Windows 11 x86_64 | [Nu Installer](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-26.6.8-alpha-win64-Setup.exe) |
+| Windows 11 x86_64 | [Nu Portable ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-26.6.8-alpha-win64-Portable.zip) |
+| Windows 11 x86_64 | [Explore Installer](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-Explore-26.6.8-alpha-win64-Setup.exe) |
+| Windows 11 x86_64 | [Explore Portable ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-Explore-26.6.8-alpha-win64-Portable.zip) |
+| Verification | [SHA256SUMS.txt](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/SHA256SUMS.txt) |
 
-The macOS Intel build is provided for compatibility but has not yet been tested
-on Intel Mac hardware.
+This is an alpha prerelease. The macOS Apple Silicon DMGs are ad-hoc signed and
+not notarized; Windows packages are not Authenticode-signed. Back up wallets
+before testing new builds, especially when opening older wallet files.
 
-After installing, start the wallet, let it connect to peers, and allow it to
-sync before relying on balances or recent transactions.
-
-Optional bootstrap pack: users who want to speed up first sync can download the
-bootstrap ZIP from the release assets. It contains `bootstrap.dat`, macOS and
-Windows import scripts, install instructions, and checksums. The snapshot is at
-block `2,332,283`; the node still verifies imported blocks and syncs newer
-blocks normally.
+After installing, start Nu, allow it to connect to peers, and let the node sync
+before relying on balances or recent transactions. Explore is packaged as a
+separate companion app for local chain search, holder views, movement maps, and
+indexing workflows.
 
 ## What Nu Adds
 
 - A Qt Quick desktop shell for Home, Send, Receive, Transactions, Wallet,
-  Mining, Diagnostics, and Settings.
-- Managed local `defcoind` startup for packaged desktop builds.
-- Bundled `defcoin-cli` in packaged desktop builds for advanced local support
-  and RPC diagnostics.
-- Bitcoin Core-style wallet storage detection with side-by-side `BDB` legacy
-  wallets and modern `SQL` descriptor wallets. Defcoin Core Nu `26.5` and later
-  create SQL descriptor wallets by default while existing Berkeley DB wallets
-  remain loadable.
-- Peer diagnostics with actual observed magic bytes, protocol version, services,
-  User-Agent, sync, and traffic details.
-- Network-health diagnostics for difficulty, estimated network hash rate,
-  chain-tip state, sync progress, and top P2P message traffic.
-- English BIP39 recovery phrase creation and restore workflows for Nu/Core HD
-  wallets, plus 12-24 word external scan support with Defcoin `T...` and
-  legacy `Q...` WIF compatibility guidance. Extended keys can be read as
-  `xpub`/`xprv` or `dfcp`/`dfcv`; generated P2SH addresses remain `M...`.
+  Mining, RPC Console, Metrics, and Settings.
+- Managed local `defcoind` startup for packaged desktop builds, plus a bundled
+  `defcoin-cli` for advanced local support and RPC diagnostics.
+- Wallets management with legacy Berkeley DB wallets and modern SQL descriptor
+  wallets shown side by side, including active wallet totals, transaction
+  counts, address counts, non-zero address counts, backups, encryption, and
+  wallet close/open actions.
+- BIP39 recovery phrase creation and restore workflows, optional SQL descriptor
+  recovery, passphrase quality feedback, passphrase visibility controls, and
+  zero-balance scan options for slower but cleaner recovery imports.
+- Paper Wallet generation with local key/address derivation, BIP38 passphrase
+  handling, print and preview controls, entropy safeguards, and the release-gated
+  Design 1 output.
+- Send-path hardening for depleted keypool/change-address errors: Nu can refill
+  the keypool and retry when the backend reports that a change address cannot be
+  generated.
+- Peer and network diagnostics with observed magic bytes, protocol version,
+  services, User-Agent, seed-source attribution, DNS names, IPv6 display, traffic
+  metrics, peer inspection, selectable/copyable inspection text, bans, and
+  Trippy route tracing when available.
+- A restored Debug Log surface under the RPC Console area with line-numbered log
+  inspection alongside the RPC command console.
+- Explorer presets for Defcoin block explorers, including transaction and
+  address URL templates.
 - Local mining setup and monitoring helpers that let users select an external
   miner executable rather than bundling mining code inside the wallet.
-- Dual-magic compatibility for the Defcoin network migration: upgraded peers use
-  `defc014e`; compatibility mode can still accept legacy `fbc0b6db`.
+- Defcoin network migration support: upgraded peers use `defc014e`; compatibility
+  mode can still accept legacy `fbc0b6db` before defcoin-only enforcement.
 - Defcoin User-Agent filtering using the `/Defcoin` prefix rule to reduce
   Litecoin-family peer pollution.
-- Receive request history, PSBT handling, message signing, wallet backup,
-  encryption, and passphrase flows.
+- Receive request history, PSBT handling, message signing guidance, wallet
+  backup, encryption, and passphrase flows.
 
 ## Screenshots
 
 <p align="center">
-  <img src="source/doc/assets/screenshots/nu-diagnostics-traffic.png" width="860" alt="Defcoin Core Nu Diagnostics network traffic chart">
+  <img src="source/doc/assets/screenshots/nu-wallets-26.6.8-alpha.png" width="860" alt="Defcoin Core Nu Wallets tab">
 </p>
 
-<p align="center"><em>Diagnostics traffic view after an extended live network session.</em></p>
+<p align="center"><em>Wallets management with wallet stats, encryption, backups, watch-only tooling, and scroll-visible wallet tables.</em></p>
 
 <p align="center">
-  <img src="source/doc/assets/screenshots/nu-diagnostics-peers.png" width="860" alt="Defcoin Core Nu Diagnostics peers table">
+  <img src="source/doc/assets/screenshots/nu-metrics-peers-26.6.8-alpha.png" width="860" alt="Defcoin Core Nu peer diagnostics table">
 </p>
 
-<p align="center"><em>Peer diagnostics with observed magic bytes, protocol version, DNS names, and aliases.</em></p>
+<p align="center"><em>Peer diagnostics layout with columns for seed-source attribution, DNS names, observed magic bytes, services, FastSync availability, and latency.</em></p>
 
 <p align="center">
-  <img src="source/doc/assets/screenshots/nu-settings-network.png" width="860" alt="Defcoin Core Nu network settings">
+  <img src="source/doc/assets/screenshots/nu-explore-splash-26.6.8-alpha.png" width="720" alt="Defcoin Core Nu Explore splash screen">
 </p>
 
-<p align="center"><em>Network settings for peer filtering, dual-magic migration, and LAN discovery.</em></p>
+<p align="center"><em>Explore uses the Defcoin Core Nu family mark with its own product identity.</em></p>
 
 ## Network Identity
 
@@ -112,6 +118,7 @@ blocks normally.
 | Mainnet P2P/RPC ports | `1337` / `9332` |
 | Mainnet Defcoin magic | `de fc 01 4e` (`defc014e`) |
 | Mainnet legacy magic | `fb c0 b6 db` (`fbc0b6db`) |
+| Defcoin-only magic enforcement | August 1, 2026 |
 | Config file | `defcoin.conf` |
 | macOS data directory | `~/Library/Application Support/Defcoin/` |
 
