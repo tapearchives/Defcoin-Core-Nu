@@ -52,6 +52,84 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.7v - 2026-06-19 - Post-review packaging and UI polish
+
+Big picture:
+- Tahoe moves the visible candidate label from `26.6.7u` to `26.6.7v` because
+  the publish candidate received post-review source changes after the u
+  artifact was staged.
+- The v candidate carries forward the 26.6.7u release work and adds the final
+  roborev/UI polish: direct app-target icon resource installation, Trippy flag
+  capability probing, full ICNS fallback generation, About logo ratio
+  correction, Settings scroll containers, and focused Settings-tab screenshot
+  hooks.
+
+Porting notes:
+- Port the CMake direct-target icon install helper and full-ICNS fallback
+  generation to Lion/macOS build trees so `DefcoinCoreNu.app` and
+  `DefcoinCoreExplore.app` contain `AppIcon.icns` and `Assets.car` even when
+  built directly.
+- Port the Trippy `--help` capability probe before passing newer TUI flags.
+- Port Settings > Display / Updates scroll containers and the non-product
+  self-test Settings tab hook if the target has the same QML testing harness.
+
+Changed behavior:
+- Direct app target builds copy icon resources into the macOS app bundle.
+- `AppIcon.icns` is regenerated from the corrected 1024 PNG through a full
+  iconset, while `Assets.car` remains the modern Icon Composer Finder path.
+- Traceroute uses newer Trippy single-page flags only when supported; older
+  installations use legacy stream mode.
+- About uses the canonical shared logo coin ratio instead of a smaller local
+  override.
+- Settings > Display and Settings > Updates are scroll-backed so expanded rows
+  stay reachable.
+- Recovery-wallet creation uses "Encrypt new wallet" copy.
+
+Changed files and important details:
+- `src/clientversion.h` and `src/qt/nu/app/CMakeLists.txt`: move visible label
+  to `26.6.7v`.
+- `src/qt/nu/app/CMakeLists.txt`: installs compiled app icon resources for both
+  app targets during direct target builds and regenerates `AppIcon.icns` with
+  all standard macOS icon sizes through `512x512@2x`.
+- `src/qt/nu/app/NuRpcService.cpp`: probes Trippy help output before adding
+  newer TUI flags.
+- `src/qt/nu/qml/Components/NuAboutSummary.qml`,
+  `src/qt/nu/qml/Views/SettingsView.qml`, `src/qt/nu/qml/Shell/AppFrame.qml`,
+  `src/qt/nu/qml/Main.qml`, and `src/qt/nu/app/main.cpp`: own About/Settings
+  polish and focused Settings-tab self-test coverage.
+
+Build/package notes:
+- Tahoe Apple Silicon staging output target:
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.7v-20260619/apple-silicon/`.
+- DMG target:
+  `Defcoin-Core-Nu-v26.6.7v-macOS-AppleSilicon.dmg`.
+- DMG SHA-256:
+  `82a4a16db0908adc0ce850b2a7e09ce25301978193a1b98f2af1f3bbd8940db4`.
+
+Verification performed:
+- `git diff --check` passed.
+- `/usr/bin/xcrun clang-format --dry-run --Werror
+  src/qt/nu/app/NuRpcService.cpp src/qt/nu/app/main.cpp` passed.
+- Backend tools rebuilt and report `v26.6.7v`.
+- Full built-app UI self-test passed, and focused Settings > Display / Updates
+  screenshots were inspected.
+- Built and staged `AppIcon.icns` extract to a complete iconset through
+  `icon_512x512@2x.png`; the staged app rendered through
+  `NSWorkspace.icon(forFile:)` measured `890x888+67+76`.
+- Roborev `v0.58.0` maximum-reasoning dirty review passed with no issues after
+  the full-ICNS fallback change.
+- `stage_macos_distribution.sh ... 26.6.7v macOS-AppleSilicon` staged, signed,
+  and created the DMG; `hdiutil verify` passed.
+- `codesign --verify --deep --strict --verbose=2` passed for the staged app.
+- Staged-app UI self-test passed.
+- Staged app contains no `.agent.md` files.
+
+Risks / follow-up:
+- GitHub push requires the local GitHub CLI to authenticate as `defcoincore`;
+  do not publish from a non-release-owner account.
+- The automatic keypool recovery path was built and reviewed but not exercised
+  against a live empty-keypool wallet in this pass.
+
 ### 26.6.7u - 2026-06-17 - Finder icon, shutdown, send retry, and release polish
 
 Big picture:
@@ -93,15 +171,6 @@ Changed behavior:
   two-line wordmark ratios.
 - The staging script now prunes source-only `.agent.md` companions and
   wallet-app Explore-only QML from final macOS bundles.
-- Post-review packaging fix: direct macOS app target builds copy
-  `AppIcon.icns` and `Assets.car` into both Nu app bundles, not only via the
-  resource target path.
-- Trippy trace launch probes `trip --help` before passing newer single-page TUI
-  flags and falls back to legacy stream mode for older installations.
-- About uses the canonical shared logo coin ratio, and Settings > Display /
-  Updates are scroll-backed so expanded rows remain reachable.
-- The UI self-test can now capture Settings > Display or Updates with
-  `DEFCOIN_NU_UI_SELF_TEST_SETTINGS_TAB`.
 
 Changed files and important details:
 - `src/qt/nu/app/CMakeLists.txt`,
@@ -117,11 +186,6 @@ Changed files and important details:
   popup toggling.
 - `src/qt/nu/app/stage_macos_distribution.sh`: prunes source-only companions
   from staged packages.
-- `src/qt/nu/qml/Views/SettingsView.qml`, `src/qt/nu/qml/Shell/AppFrame.qml`,
-  `src/qt/nu/qml/Main.qml`, and `src/qt/nu/app/main.cpp`: add focused
-  Settings-tab screenshot coverage and scroll-backed Display/Updates panes.
-- `src/qt/nu/qml/Components/NuAboutSummary.qml`: removes the undersized About
-  coin override and uses the shared logo ratio.
 
 Compatibility notes:
 - OpenSSL was checked after `brew update`; Homebrew reports `openssl@3` stable
@@ -158,11 +222,6 @@ Verification performed:
 - The staged app Finder icon rendered through `NSWorkspace.icon(forFile:)`
   measured `824x824+100+100` for the colored coin foreground, matching the
   Chrome-width comparison path.
-- Roborev `v0.58.0` maximum-reasoning review found the direct-target icon
-  resource copy gap and the unconditional Trippy flag compatibility risk; both
-  were fixed, and the dirty rerun passed with no issues found.
-- Focused built-app UI self-tests captured Settings > Display and Settings >
-  Updates after adding explicit scroll containers.
 - `stage_macos_distribution.sh ... 26.6.7u macOS-AppleSilicon` staged, signed,
   and created the DMG; `hdiutil verify` passed.
 - `codesign --verify --deep --strict --verbose=2` passed for the staged app.

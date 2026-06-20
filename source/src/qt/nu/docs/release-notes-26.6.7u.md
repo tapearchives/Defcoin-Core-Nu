@@ -33,11 +33,6 @@ Internal Tahoe Apple Silicon publish candidate after `26.6.7t`.
   address appears from more than one source.
 - Splash, About, Home, and navigation rail branding use the tighter centered
   coin + two-line wordmark ratios from the brand spec.
-- About now uses the same canonical coin-to-wordmark ratio as the shared logo
-  component, and the recovery-wallet creation dialog uses "Encrypt new wallet"
-  instead of "Encrypt recovered wallet".
-- Settings > Display and Settings > Updates now use explicit scroll containers
-  so expanded explorer URL/status controls stay reachable on smaller windows.
 
 ## Packaging
 
@@ -50,12 +45,6 @@ Internal Tahoe Apple Silicon publish candidate after `26.6.7t`.
   `174b40d94297732795111771874703bce745244a2ef13c7ca9315756df28274a`.
 - The staging script now removes source-only `.agent.md` companions and
   wallet-app Explore-only QML from final app bundles.
-- Direct macOS app target builds now install `AppIcon.icns` and `Assets.car`
-  into the app bundle, so Finder icons are present even when the resource target
-  is not run first.
-- Trippy single-page TUI flags are now passed only when the installed
-  `trip`/`trippy` binary advertises support; older Trippy binaries fall back to
-  legacy stream mode instead of failing the trace.
 
 ## Verification
 
@@ -65,11 +54,6 @@ Internal Tahoe Apple Silicon publish candidate after `26.6.7t`.
 - `clang-format --dry-run --Werror` passed for touched C++ files.
 - Backend tools, Qt app, and Nu resources rebuilt successfully.
 - Built-app and staged-app UI self-tests passed with backend autostart disabled.
-- Post-review UI self-tests captured Settings > Display and Settings > Updates
-  with backend autostart disabled.
-- Roborev was updated/current at `v0.58.0`; maximum-reasoning review found the
-  direct-target icon and Trippy-flag issues, and the dirty rerun passed with no
-  issues found.
 - Staged app codesign verification passed.
 - `hdiutil verify` passed for the DMG.
 - Staged app contains no `.agent.md` files and no wallet-app Explore-only QML.

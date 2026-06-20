@@ -10,7 +10,7 @@ endif()
 
 project(DefcoinCoreNuQml VERSION 26.6.7 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.6.7u" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.6.7v" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -167,7 +167,9 @@ target_sources(DefcoinCoreNu PRIVATE ${DEFCOIN_NU_ICON_MACOS})
 
 if(APPLE)
     set(DEFCOIN_NU_APP_ICON_SOURCE "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/AppIcon.icon")
+    set(DEFCOIN_NU_APP_ICON_FOREGROUND_PNG "${DEFCOIN_NU_APP_ICON_SOURCE}/Assets/foreground.png")
     set(DEFCOIN_NU_APP_ICON_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/AppIconAssets")
+    set(DEFCOIN_NU_APP_ICONSET_DIR "${DEFCOIN_NU_APP_ICON_BUILD_DIR}/AppIcon.iconset")
     set(DEFCOIN_NU_APP_ICON_ASSETS_CAR "${DEFCOIN_NU_APP_ICON_BUILD_DIR}/Assets.car")
     set(DEFCOIN_NU_APP_ICON_ICNS "${DEFCOIN_NU_APP_ICON_BUILD_DIR}/AppIcon.icns")
     add_custom_command(
@@ -181,10 +183,24 @@ if(APPLE)
             --app-icon AppIcon
             --output-partial-info-plist "${DEFCOIN_NU_APP_ICON_BUILD_DIR}/AppIconPartial.plist"
             "${DEFCOIN_NU_APP_ICON_SOURCE}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_APP_ICONSET_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_APP_ICONSET_DIR}"
+        COMMAND /usr/bin/sips -z 16 16 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_16x16.png"
+        COMMAND /usr/bin/sips -z 32 32 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_16x16@2x.png"
+        COMMAND /usr/bin/sips -z 32 32 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_32x32.png"
+        COMMAND /usr/bin/sips -z 64 64 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_32x32@2x.png"
+        COMMAND /usr/bin/sips -z 128 128 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_128x128.png"
+        COMMAND /usr/bin/sips -z 256 256 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_128x128@2x.png"
+        COMMAND /usr/bin/sips -z 256 256 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_256x256.png"
+        COMMAND /usr/bin/sips -z 512 512 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_256x256@2x.png"
+        COMMAND /usr/bin/sips -z 512 512 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_512x512.png"
+        COMMAND /usr/bin/sips -z 1024 1024 "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}" --out "${DEFCOIN_NU_APP_ICONSET_DIR}/icon_512x512@2x.png"
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${DEFCOIN_NU_APP_ICON_ICNS}"
+        COMMAND /usr/bin/iconutil -c icns "${DEFCOIN_NU_APP_ICONSET_DIR}" -o "${DEFCOIN_NU_APP_ICON_ICNS}"
         DEPENDS
             "${DEFCOIN_NU_APP_ICON_SOURCE}/icon.json"
-            "${DEFCOIN_NU_APP_ICON_SOURCE}/Assets/foreground.png"
-        COMMENT "Compiling Defcoin Core Nu Icon Composer app icon"
+            "${DEFCOIN_NU_APP_ICON_FOREGROUND_PNG}"
+        COMMENT "Compiling Defcoin Core Nu Icon Composer app icon and full ICNS fallback"
         VERBATIM
     )
     add_custom_target(DefcoinCoreNuAppIconAssets DEPENDS "${DEFCOIN_NU_APP_ICON_ASSETS_CAR}" "${DEFCOIN_NU_APP_ICON_ICNS}")

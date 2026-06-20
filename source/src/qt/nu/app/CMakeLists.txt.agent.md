@@ -9,10 +9,11 @@ Defines the Tahoe Nu Qt Quick app targets, bundle metadata, release label, Qt mo
 - Builds `DefcoinCoreNu` and optional `DefcoinCoreExplore` from the same Nu QML/C++ source base.
 - Owns the visible Nu release label through `DEFCOIN_NU_RELEASE_NAME`.
 - Sets macOS bundle identifiers, icon files, Info.plist, Qt module list, runtime assets, help assets, and Velopack update URL.
-- On Apple builds, compiles `assets/brand/AppIcon.icon` with `actool` and
-  bundles both `AppIcon.icns` and `Assets.car` so Finder uses the modern icon
-  stack while older icon consumers still have an ICNS fallback. The app targets
-  themselves install those compiled icon files so a direct `DefcoinCoreNu` or
+- On Apple builds, compiles `assets/brand/AppIcon.icon` with `actool`, then
+  regenerates `AppIcon.icns` from the corrected 1024 foreground PNG through a
+  full iconset so Finder uses the modern `Assets.car` icon while older icon
+  consumers still receive every ICNS size through 1024. The app targets
+  themselves install those icon files so a direct `DefcoinCoreNu` or
   `DefcoinCoreExplore` build does not leave bundle metadata pointing at missing
   resources.
 - Bundles Atkinson Hyperlegible Mono TTFs and license text as runtime assets so
