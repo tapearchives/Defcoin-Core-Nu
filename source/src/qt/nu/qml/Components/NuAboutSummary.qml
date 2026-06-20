@@ -28,7 +28,7 @@ ColumnLayout {
         Layout.minimumHeight: 130
 
         readonly property int brandWordmarkSize: Math.round(Math.max(30, Math.min(58, width * 0.074, height * 0.145)))
-        readonly property int brandCoinWidth: Math.round(brandWordmarkSize * 1.85)
+        readonly property int brandCoinWidth: Math.round(brandWordmarkSize * 2.12)
 
         Rectangle {
             anchors.fill: parent

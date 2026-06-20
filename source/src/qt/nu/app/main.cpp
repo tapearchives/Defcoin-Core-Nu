@@ -669,6 +669,16 @@ int runQtQuickUiSelfTest(QApplication& app, QObject* rootObject, QQuickWindow* r
                 writeLaunchLogLine(QStringLiteral("UI self-test failed: Paper Wallet tab hook missing."));
             }
             uiSelfTestSettle(app, 900);
+        } else if (!kExploreApp && route == QLatin1String("settings") &&
+                   !qEnvironmentVariableIsEmpty("DEFCOIN_NU_UI_SELF_TEST_SETTINGS_TAB")) {
+            const QString settingsTab = qEnvironmentVariable("DEFCOIN_NU_UI_SELF_TEST_SETTINGS_TAB").trimmed();
+            const bool opened = QMetaObject::invokeMethod(
+                rootObject, "uiSelfTestOpenSettingsTab", Q_ARG(QVariant, QVariant(settingsTab)));
+            if (!opened) {
+                ok = false;
+                writeLaunchLogLine(QStringLiteral("UI self-test failed: Settings tab hook missing."));
+            }
+            uiSelfTestSettle(app, 450);
         }
         writeLaunchLogLine(QStringLiteral("UI self-test route: %1").arg(route));
         ok = uiSelfTestSaveScreenshot(rootWindow, screenshotDir, QStringLiteral("route-%1").arg(route)) && ok;

@@ -30,6 +30,9 @@ Initializes the Nu QML app, command-line switches, backend/service objects, sing
   menu, or dialog.
 - When `DEFCOIN_NU_UI_SELF_TEST_PAPER_WALLET=1` is set, the Nu UI self-test
   captures the Wallet route with the Paper Wallet tab selected.
+- When `DEFCOIN_NU_UI_SELF_TEST_SETTINGS_TAB=display` or `updates` is combined
+  with `DEFCOIN_NU_UI_SELF_TEST_ROUTE=settings`, the self-test captures that
+  Settings tab instead of the default Network tab.
 - `DEFCOIN_NU_UI_SELF_TEST_ROUTE=<route>` narrows the self-test route walk to
   one route for focused layout debugging.
 

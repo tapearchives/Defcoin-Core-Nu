@@ -438,6 +438,10 @@ ApplicationWindow {
         frame.uiSelfTestOpenPaperWalletTab()
     }
 
+    function uiSelfTestOpenSettingsTab(tabName) {
+        frame.uiSelfTestOpenSettingsTab(tabName)
+    }
+
     menuBar: MenuBar {
         Menu {
             id: fileMenu
@@ -1407,7 +1411,7 @@ ApplicationWindow {
             }
             if (createRecoveryEncrypt.checked && createRecoveryPassphrase.text.length < 8) {
                 messageDialog.title = qsTr("Wallet not created")
-                messageDialog.text = qsTr("Enter a wallet passphrase of at least 8 characters, or turn off Encrypt recovered wallet.")
+                messageDialog.text = qsTr("Enter a wallet passphrase of at least 8 characters, or turn off Encrypt new wallet.")
                 messageDialog.open()
                 return false
             }
@@ -1444,7 +1448,7 @@ ApplicationWindow {
 
         NuCheckBox {
             id: createRecoveryEncrypt
-            text: qsTr("Encrypt recovered wallet")
+            text: qsTr("Encrypt new wallet")
             checked: true
             helpText: qsTr("Recommended. Encrypts the new recovery wallet before Nu sets its seed. You will need this passphrase to spend coins.")
         }

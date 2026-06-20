@@ -93,6 +93,15 @@ Changed behavior:
   two-line wordmark ratios.
 - The staging script now prunes source-only `.agent.md` companions and
   wallet-app Explore-only QML from final macOS bundles.
+- Post-review packaging fix: direct macOS app target builds copy
+  `AppIcon.icns` and `Assets.car` into both Nu app bundles, not only via the
+  resource target path.
+- Trippy trace launch probes `trip --help` before passing newer single-page TUI
+  flags and falls back to legacy stream mode for older installations.
+- About uses the canonical shared logo coin ratio, and Settings > Display /
+  Updates are scroll-backed so expanded rows remain reachable.
+- The UI self-test can now capture Settings > Display or Updates with
+  `DEFCOIN_NU_UI_SELF_TEST_SETTINGS_TAB`.
 
 Changed files and important details:
 - `src/qt/nu/app/CMakeLists.txt`,
@@ -108,6 +117,11 @@ Changed files and important details:
   popup toggling.
 - `src/qt/nu/app/stage_macos_distribution.sh`: prunes source-only companions
   from staged packages.
+- `src/qt/nu/qml/Views/SettingsView.qml`, `src/qt/nu/qml/Shell/AppFrame.qml`,
+  `src/qt/nu/qml/Main.qml`, and `src/qt/nu/app/main.cpp`: add focused
+  Settings-tab screenshot coverage and scroll-backed Display/Updates panes.
+- `src/qt/nu/qml/Components/NuAboutSummary.qml`: removes the undersized About
+  coin override and uses the shared logo ratio.
 
 Compatibility notes:
 - OpenSSL was checked after `brew update`; Homebrew reports `openssl@3` stable
@@ -144,6 +158,11 @@ Verification performed:
 - The staged app Finder icon rendered through `NSWorkspace.icon(forFile:)`
   measured `824x824+100+100` for the colored coin foreground, matching the
   Chrome-width comparison path.
+- Roborev `v0.58.0` maximum-reasoning review found the direct-target icon
+  resource copy gap and the unconditional Trippy flag compatibility risk; both
+  were fixed, and the dirty rerun passed with no issues found.
+- Focused built-app UI self-tests captured Settings > Display and Settings >
+  Updates after adding explicit scroll containers.
 - `stage_macos_distribution.sh ... 26.6.7u macOS-AppleSilicon` staged, signed,
   and created the DMG; `hdiutil verify` passed.
 - `codesign --verify --deep --strict --verbose=2` passed for the staged app.

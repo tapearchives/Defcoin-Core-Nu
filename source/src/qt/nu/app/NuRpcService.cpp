@@ -10767,17 +10767,32 @@ void NuRpcService::tracePeer(const QString& node_id)
     QStringList args;
     QString tool_name;
     if (!trip.isEmpty()) {
-        tool_name = QStringLiteral("Trippy");
+        auto trip_supports_option = [](const QString& executable, const QString& option) {
+            QProcess probe;
+            probe.setProgram(executable);
+            probe.setArguments({QStringLiteral("--help")});
+            probe.setProcessChannelMode(QProcess::MergedChannels);
+            probe.start();
+            if (!probe.waitForStarted(500))
+                return false;
+            if (!probe.waitForFinished(1500)) {
+                probe.kill();
+                probe.waitForFinished(250);
+                return false;
+            }
+            const QString help = QString::fromLocal8Bit(probe.readAllStandardOutput());
+            return help.contains(option);
+        };
+        const bool supports_tui_page_flags = trip_supports_option(trip, QStringLiteral("--tui-preserve-screen")) &&
+                                             trip_supports_option(trip, QStringLiteral("--tui-custom-columns"));
+        tool_name = supports_tui_page_flags ? QStringLiteral("Trippy") : QStringLiteral("Trippy legacy stream mode");
         program = trip;
-        args = {QStringLiteral("-u"),
-                QStringLiteral("--mode"),
-                QStringLiteral("stream"),
-                QStringLiteral("--tui-preserve-screen"),
-                QStringLiteral("--tui-custom-columns"),
-                QStringLiteral("holsravbwdt"),
-                QStringLiteral("--report-cycles"),
-                QStringLiteral("16"),
-                host};
+        args = {QStringLiteral("-u"), QStringLiteral("--mode"), QStringLiteral("stream")};
+        if (supports_tui_page_flags) {
+            args << QStringLiteral("--tui-preserve-screen") << QStringLiteral("--tui-custom-columns")
+                 << QStringLiteral("holsravbwdt");
+        }
+        args << QStringLiteral("--report-cycles") << QStringLiteral("16") << host;
     } else {
 #if defined(Q_OS_WIN)
         tool_name = QStringLiteral("tracert");

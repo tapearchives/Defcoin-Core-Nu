@@ -309,6 +309,21 @@ target_compile_definitions(DefcoinCoreExplore PRIVATE
     DEFCOIN_NU_HAS_OPENSSL_CRYPTO=1
 )
 
+if(APPLE)
+    function(defcoin_nu_install_compiled_app_icon target_name)
+        add_dependencies(${target_name} DefcoinCoreNuAppIconAssets)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_APP_ICON_ASSETS_CAR}" "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/Assets.car"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_APP_ICON_ICNS}" "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/AppIcon.icns"
+            COMMENT "Installing compiled app icon for ${target_name}"
+        )
+    endfunction()
+
+    defcoin_nu_install_compiled_app_icon(DefcoinCoreNu)
+    defcoin_nu_install_compiled_app_icon(DefcoinCoreExplore)
+endif()
+
 file(GLOB_RECURSE DEFCOIN_NU_QML_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/../qml/*.qml"
     "${CMAKE_CURRENT_LIST_DIR}/../qml/qmldir"

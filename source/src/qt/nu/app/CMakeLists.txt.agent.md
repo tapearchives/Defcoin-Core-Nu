@@ -11,7 +11,10 @@ Defines the Tahoe Nu Qt Quick app targets, bundle metadata, release label, Qt mo
 - Sets macOS bundle identifiers, icon files, Info.plist, Qt module list, runtime assets, help assets, and Velopack update URL.
 - On Apple builds, compiles `assets/brand/AppIcon.icon` with `actool` and
   bundles both `AppIcon.icns` and `Assets.car` so Finder uses the modern icon
-  stack while older icon consumers still have an ICNS fallback.
+  stack while older icon consumers still have an ICNS fallback. The app targets
+  themselves install those compiled icon files so a direct `DefcoinCoreNu` or
+  `DefcoinCoreExplore` build does not leave bundle metadata pointing at missing
+  resources.
 - Bundles Atkinson Hyperlegible Mono TTFs and license text as runtime assets so
   paper-wallet key strings and mono UI fields render consistently without a
   host-system font dependency.
@@ -33,6 +36,8 @@ Defines the Tahoe Nu Qt Quick app targets, bundle metadata, release label, Qt mo
 - Do not regress the Apple icon pipeline back to a raw scaled ICNS only. Finder
   app icons must keep `CFBundleIconFile=AppIcon`, `CFBundleIconName=AppIcon`,
   `AppIcon.icns`, and `Assets.car` in sync.
+- Do not move icon installation exclusively into resource targets; direct app
+  target builds must also include `AppIcon.icns` and `Assets.car`.
 - Do not let paper-wallet generation silently build without local secp256k1 support; if the library is missing, the app path must fail closed and the build output should make the missing dependency obvious.
 - Do not allow Windows builds to fall back to host OpenSSL. If `DEFCOIN_NU_OPENSSL_ROOT` is missing, build a MinGW OpenSSL prefix first.
 

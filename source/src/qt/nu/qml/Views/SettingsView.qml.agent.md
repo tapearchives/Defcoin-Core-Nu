@@ -11,6 +11,8 @@ Owns Settings tabs, network/connectivity controls, Quick Clone controls, display
 - Display preferences include table width reset, copy delimiter behavior, the
   blockchain explorer preset selector, and separate custom transaction/address
   URL templates.
+- Display and Updates content is inside scroll containers so expanded custom
+  URL or status text remains reachable on smaller windows.
 - The scheduled Defcoin-only magic setting label is August 1, 2026, matching
   service-side enforcement.
 
@@ -26,3 +28,6 @@ Owns Settings tabs, network/connectivity controls, Quick Clone controls, display
 
 - `git diff --check`
 - Open Settings > Network and Settings > Display; verify controls bind to `NuService` and do not clip.
+- Use `DEFCOIN_NU_UI_SELF_TEST_ROUTE=settings` with
+  `DEFCOIN_NU_UI_SELF_TEST_SETTINGS_TAB=display` or `updates` to capture
+  focused tab screenshots.

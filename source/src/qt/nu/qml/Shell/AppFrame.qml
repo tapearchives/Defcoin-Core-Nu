@@ -46,6 +46,12 @@ Item {
         walletView.requestWalletTab(1)
     }
 
+    function uiSelfTestOpenSettingsTab(tabName) {
+        root.currentRoute = "settings"
+        const clean = String(tabName || "").toLowerCase()
+        settingsView.openTab(clean === "display" ? 1 : clean === "updates" ? 2 : 0)
+    }
+
     function requestRoute(route) {
         if (route === root.currentRoute)
             return
@@ -110,7 +116,9 @@ Item {
                         initialTab: root.nodeInitialTab
                         initialPeerView: root.peerInitialView
                     }
-                    SettingsView {}
+                    SettingsView {
+                        id: settingsView
+                    }
                 }
             }
         }

@@ -10,6 +10,10 @@ ColumnLayout {
     id: root
     spacing: NuTokens.spaceLg
     property bool helpEnabled: NuHelpEnabled
+    property int initialTab: 0
+    function openTab(index) {
+        tabs.currentIndex = Math.max(0, Math.min(2, index))
+    }
     function delimiterStyleIndex(style) {
         const values = ["csv", "tsv", "pipe", "semicolon", "custom"]
         const index = values.indexOf(String(style).toLowerCase())
@@ -41,6 +45,7 @@ ColumnLayout {
     NuTabBar {
         id: tabs
         Layout.fillWidth: true
+        Component.onCompleted: root.openTab(root.initialTab)
         NuTabButton { text: "Network" }
         NuTabButton { text: "Display" }
         NuTabButton { text: "Updates" }
@@ -274,215 +279,225 @@ ColumnLayout {
         }
 
         NuPanel {
-            ColumnLayout {
+            ScrollView {
+                id: displayScroll
                 anchors.fill: parent
-                spacing: NuTokens.spaceLg
-                Label {
-                    Layout.fillWidth: true
-                    text: "Nu uses a neutral high-contrast interface designed for legibility, clear hierarchy, and fewer visual distractions."
-                    color: NuTokens.textSecondary
-                    font.pixelSize: NuTokens.fontBody
-                    wrapMode: Text.WordWrap
-                }
+                clip: true
+                contentWidth: availableWidth
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
                 ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: NuTokens.spaceSm
-
-                    Label {
-                        text: "Window behavior"
-                        color: NuTokens.textPrimary
-                        font.pixelSize: NuTokens.fontBody
-                        font.weight: Font.DemiBold
-                    }
-
-                    NuCheckBox {
-                        text: Qt.platform.os === "osx" ? "Keep running in the menu bar when window is closed" : "Minimize to System Tray when closing the window"
-                        checked: NuService.backgroundCloseEnabled
-                        enabled: NuPlatform.trayAvailable
-                        helpText: Qt.platform.os === "osx"
-                                  ? "When enabled, closing the window keeps Defcoin Core Nu running from the macOS menu bar status item so the node can stay synchronized."
-                                  : "When enabled, closing the window keeps Defcoin Core Nu running from the system tray so the node can stay synchronized."
-                        onToggled: NuService.backgroundCloseEnabled = checked
-                    }
-
-                    NuCheckBox {
-                        text: "Show startup status indicator"
-                        checked: NuService.showStartupSplashStatusIndicator
-                        helpText: "Off by default. When enabled, the startup splash shows a small top-center phase and timer line while Nu loads. Startup progress is still written to the launch log when this is off."
-                        onToggled: NuService.showStartupSplashStatusIndicator = checked
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: NuTokens.lineSubtle
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: NuTokens.spaceSm
-
-                    Label {
-                        text: "Explorer links"
-                        color: NuTokens.textPrimary
-                        font.pixelSize: NuTokens.fontBody
-                        font.weight: Font.DemiBold
-                    }
-
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 2
-                        rowSpacing: NuTokens.spaceMd
-                        columnSpacing: NuTokens.spaceLg
-
-                        Label {
-                            text: "Open explorer links with"
-                            color: NuTokens.textSecondary
-                            font.pixelSize: NuTokens.fontBody
-                        }
-                        NuComboBox {
-                            id: explorerMode
-                            Layout.fillWidth: true
-                            model: ["Nu Explore app", "External: DC903 Explorer", "External: Legacy Explorer", "External: explorer.defcoin.fun", "External: Custom URLs"]
-                            currentIndex: root.explorerModeIndex(NuService.explorerMode)
-                            helpText: "Nu Explore is the default local lookup target. It opens the adjunct Defcoin Core Nu Explore app for address, transaction, and block details. External choices open a browser."
-                            onActivated: function(index) {
-                                NuService.setExplorerMode(root.explorerModeAt(index))
-                            }
-                            Connections {
-                                target: NuService
-                                function onSettingsChanged() {
-                                    explorerMode.currentIndex = root.explorerModeIndex(NuService.explorerMode)
-                                }
-                            }
-                        }
-
-                        Label {
-                            text: "External transaction URL"
-                            visible: NuService.explorerMode === "custom"
-                            Layout.preferredHeight: visible ? implicitHeight : 0
-                            color: NuTokens.textSecondary
-                            font.pixelSize: NuTokens.fontBody
-                        }
-                        NuTextField {
-                            id: explorerUrl
-                            Layout.fillWidth: true
-                            visible: NuService.explorerMode === "custom"
-                            Layout.preferredHeight: visible ? implicitHeight : 0
-                            text: NuService.thirdPartyTxUrl
-                            placeholderText: "https://example.invalid/tx/%s"
-                            helpText: "Use %s where the transaction ID should be inserted."
-                            onEditingFinished: {
-                                NuService.thirdPartyTxUrl = text
-                                NuService.setExplorerMode("custom")
-                            }
-                        }
-                        Label {
-                            text: "External address URL"
-                            visible: NuService.explorerMode === "custom"
-                            Layout.preferredHeight: visible ? implicitHeight : 0
-                            color: NuTokens.textSecondary
-                            font.pixelSize: NuTokens.fontBody
-                        }
-                        NuTextField {
-                            id: explorerAddressUrl
-                            Layout.fillWidth: true
-                            visible: NuService.explorerMode === "custom"
-                            Layout.preferredHeight: visible ? implicitHeight : 0
-                            text: NuService.thirdPartyAddressUrl
-                            placeholderText: "https://example.invalid/address/%s"
-                            helpText: "Use %s where the wallet address should be inserted."
-                            onEditingFinished: {
-                                NuService.thirdPartyAddressUrl = text
-                                NuService.setExplorerMode("custom")
-                            }
-                        }
-                    }
+                    width: displayScroll.availableWidth
+                    spacing: NuTokens.spaceLg
 
                     Label {
                         Layout.fillWidth: true
-                        text: NuService.explorerMode === "internal"
-                              ? "Nu Explore lookups stay local, open in the separate Explore app, and use the local SQLite cache at: " + NuService.explorerDatabasePath
-                              : (!root.customExplorerTemplatesValid()
-                                 ? "External explorer links need transaction and address URL templates containing %s."
-                                 : "External explorer links open in the system browser.")
-                        color: NuService.explorerMode !== "internal" && !root.customExplorerTemplatesValid() ? NuTokens.stateWarning : NuTokens.textSecondary
-                        font.pixelSize: NuTokens.fontSmall
+                        text: "Nu uses a neutral high-contrast interface designed for legibility, clear hierarchy, and fewer visual distractions."
+                        color: NuTokens.textSecondary
+                        font.pixelSize: NuTokens.fontBody
                         wrapMode: Text.WordWrap
                     }
-                }
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: NuTokens.lineSubtle
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: NuTokens.spaceSm
-
-                    Label {
-                        text: "Table behavior"
-                        color: NuTokens.textPrimary
-                        font.pixelSize: NuTokens.fontBody
-                        font.weight: Font.DemiBold
-                    }
-
-                    NuActionButton {
-                        text: "Reset widths"
-                        Layout.preferredWidth: 168
-                        helpText: "Forget saved table column widths, remove active table sorts, and restore first-launch table defaults."
-                        onClicked: NuService.resetTableColumnWidths("")
-                    }
-
-                    GridLayout {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        columns: 2
-                        rowSpacing: NuTokens.spaceMd
-                        columnSpacing: NuTokens.spaceLg
+                        spacing: NuTokens.spaceSm
 
                         Label {
-                            text: "Table copy delimiter"
-                            color: NuTokens.textSecondary
+                            text: "Window behavior"
+                            color: NuTokens.textPrimary
                             font.pixelSize: NuTokens.fontBody
+                            font.weight: Font.DemiBold
                         }
-                        NuComboBox {
-                            id: delimiterStyle
+
+                        NuCheckBox {
+                            text: Qt.platform.os === "osx" ? "Keep running in the menu bar when window is closed" : "Minimize to System Tray when closing the window"
+                            checked: NuService.backgroundCloseEnabled
+                            enabled: NuPlatform.trayAvailable
+                            helpText: Qt.platform.os === "osx"
+                                      ? "When enabled, closing the window keeps Defcoin Core Nu running from the macOS menu bar status item so the node can stay synchronized."
+                                      : "When enabled, closing the window keeps Defcoin Core Nu running from the system tray so the node can stay synchronized."
+                            onToggled: NuService.backgroundCloseEnabled = checked
+                        }
+
+                        NuCheckBox {
+                            text: "Show startup status indicator"
+                            checked: NuService.showStartupSplashStatusIndicator
+                            helpText: "Off by default. When enabled, the startup splash shows a small top-center phase and timer line while Nu loads. Startup progress is still written to the launch log when this is off."
+                            onToggled: NuService.showStartupSplashStatusIndicator = checked
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: NuTokens.lineSubtle
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceSm
+
+                        Label {
+                            text: "Explorer links"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontBody
+                            font.weight: Font.DemiBold
+                        }
+
+                        GridLayout {
                             Layout.fillWidth: true
-                            model: ["CSV", "TSV", "|", ";", "Custom"]
-                            currentIndex: root.delimiterStyleIndex(NuService.tableCopyDelimiterStyle)
-                            helpText: "Choose how copied table columns are separated when multiple cells, rows, or columns are copied."
-                            onActivated: function(index) {
-                                NuService.tableCopyDelimiterStyle = root.delimiterStyleAt(index)
+                            columns: 2
+                            rowSpacing: NuTokens.spaceMd
+                            columnSpacing: NuTokens.spaceLg
+
+                            Label {
+                                text: "Open explorer links with"
+                                color: NuTokens.textSecondary
+                                font.pixelSize: NuTokens.fontBody
                             }
-                            Connections {
-                                target: NuService
-                                function onSettingsChanged() {
-                                    delimiterStyle.currentIndex = root.delimiterStyleIndex(NuService.tableCopyDelimiterStyle)
+                            NuComboBox {
+                                id: explorerMode
+                                Layout.fillWidth: true
+                                model: ["Nu Explore app", "External: DC903 Explorer", "External: Legacy Explorer", "External: explorer.defcoin.fun", "External: Custom URLs"]
+                                currentIndex: root.explorerModeIndex(NuService.explorerMode)
+                                helpText: "Nu Explore is the default local lookup target. It opens the adjunct Defcoin Core Nu Explore app for address, transaction, and block details. External choices open a browser."
+                                onActivated: function(index) {
+                                    NuService.setExplorerMode(root.explorerModeAt(index))
+                                }
+                                Connections {
+                                    target: NuService
+                                    function onSettingsChanged() {
+                                        explorerMode.currentIndex = root.explorerModeIndex(NuService.explorerMode)
+                                    }
+                                }
+                            }
+
+                            Label {
+                                text: "External transaction URL"
+                                visible: NuService.explorerMode === "custom"
+                                Layout.preferredHeight: visible ? implicitHeight : 0
+                                color: NuTokens.textSecondary
+                                font.pixelSize: NuTokens.fontBody
+                            }
+                            NuTextField {
+                                id: explorerUrl
+                                Layout.fillWidth: true
+                                visible: NuService.explorerMode === "custom"
+                                Layout.preferredHeight: visible ? implicitHeight : 0
+                                text: NuService.thirdPartyTxUrl
+                                placeholderText: "https://example.invalid/tx/%s"
+                                helpText: "Use %s where the transaction ID should be inserted."
+                                onEditingFinished: {
+                                    NuService.thirdPartyTxUrl = text
+                                    NuService.setExplorerMode("custom")
+                                }
+                            }
+                            Label {
+                                text: "External address URL"
+                                visible: NuService.explorerMode === "custom"
+                                Layout.preferredHeight: visible ? implicitHeight : 0
+                                color: NuTokens.textSecondary
+                                font.pixelSize: NuTokens.fontBody
+                            }
+                            NuTextField {
+                                id: explorerAddressUrl
+                                Layout.fillWidth: true
+                                visible: NuService.explorerMode === "custom"
+                                Layout.preferredHeight: visible ? implicitHeight : 0
+                                text: NuService.thirdPartyAddressUrl
+                                placeholderText: "https://example.invalid/address/%s"
+                                helpText: "Use %s where the wallet address should be inserted."
+                                onEditingFinished: {
+                                    NuService.thirdPartyAddressUrl = text
+                                    NuService.setExplorerMode("custom")
                                 }
                             }
                         }
 
                         Label {
-                            text: "Custom delimiter"
-                            visible: NuService.tableCopyDelimiterStyle === "custom"
-                            Layout.preferredHeight: visible ? implicitHeight : 0
-                            color: NuTokens.textSecondary
-                            font.pixelSize: NuTokens.fontBody
-                        }
-                        NuTextField {
-                            id: customDelimiter
                             Layout.fillWidth: true
-                            visible: NuService.tableCopyDelimiterStyle === "custom"
-                            Layout.preferredHeight: visible ? implicitHeight : 0
-                            text: NuService.tableCopyCustomDelimiter
-                            maximumLength: 15
-                            placeholderText: "|"
-                            helpText: "Delimiter inserted between copied table columns when Custom is selected. Up to 15 characters."
-                            onEditingFinished: NuService.tableCopyCustomDelimiter = text
+                            text: NuService.explorerMode === "internal"
+                                  ? "Nu Explore lookups stay local, open in the separate Explore app, and use the local SQLite cache at: " + NuService.explorerDatabasePath
+                                  : (!root.customExplorerTemplatesValid()
+                                     ? "External explorer links need transaction and address URL templates containing %s."
+                                     : "External explorer links open in the system browser.")
+                            color: NuService.explorerMode !== "internal" && !root.customExplorerTemplatesValid() ? NuTokens.stateWarning : NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: NuTokens.lineSubtle
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceSm
+
+                        Label {
+                            text: "Table behavior"
+                            color: NuTokens.textPrimary
+                            font.pixelSize: NuTokens.fontBody
+                            font.weight: Font.DemiBold
+                        }
+
+                        NuActionButton {
+                            text: "Reset widths"
+                            Layout.preferredWidth: 168
+                            helpText: "Forget saved table column widths, remove active table sorts, and restore first-launch table defaults."
+                            onClicked: NuService.resetTableColumnWidths("")
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            rowSpacing: NuTokens.spaceMd
+                            columnSpacing: NuTokens.spaceLg
+
+                            Label {
+                                text: "Table copy delimiter"
+                                color: NuTokens.textSecondary
+                                font.pixelSize: NuTokens.fontBody
+                            }
+                            NuComboBox {
+                                id: delimiterStyle
+                                Layout.fillWidth: true
+                                model: ["CSV", "TSV", "|", ";", "Custom"]
+                                currentIndex: root.delimiterStyleIndex(NuService.tableCopyDelimiterStyle)
+                                helpText: "Choose how copied table columns are separated when multiple cells, rows, or columns are copied."
+                                onActivated: function(index) {
+                                    NuService.tableCopyDelimiterStyle = root.delimiterStyleAt(index)
+                                }
+                                Connections {
+                                    target: NuService
+                                    function onSettingsChanged() {
+                                        delimiterStyle.currentIndex = root.delimiterStyleIndex(NuService.tableCopyDelimiterStyle)
+                                    }
+                                }
+                            }
+
+                            Label {
+                                text: "Custom delimiter"
+                                visible: NuService.tableCopyDelimiterStyle === "custom"
+                                Layout.preferredHeight: visible ? implicitHeight : 0
+                                color: NuTokens.textSecondary
+                                font.pixelSize: NuTokens.fontBody
+                            }
+                            NuTextField {
+                                id: customDelimiter
+                                Layout.fillWidth: true
+                                visible: NuService.tableCopyDelimiterStyle === "custom"
+                                Layout.preferredHeight: visible ? implicitHeight : 0
+                                text: NuService.tableCopyCustomDelimiter
+                                maximumLength: 15
+                                placeholderText: "|"
+                                helpText: "Delimiter inserted between copied table columns when Custom is selected. Up to 15 characters."
+                                onEditingFinished: NuService.tableCopyCustomDelimiter = text
+                            }
                         }
                     }
                 }
@@ -490,46 +505,55 @@ ColumnLayout {
         }
 
         NuPanel {
-            ColumnLayout {
+            ScrollView {
+                id: updatesScroll
                 anchors.fill: parent
-                spacing: NuTokens.spaceLg
+                clip: true
+                contentWidth: availableWidth
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-                Label {
-                    Layout.fillWidth: true
-                    text: "Nu checks GitHub and Velopack metadata for newer Defcoin Core Nu packages. Automatic checks run after launch when enabled."
-                    color: NuTokens.textSecondary
-                    font.pixelSize: NuTokens.fontBody
-                    wrapMode: Text.WordWrap
-                }
-
-                NuCheckBox {
-                    text: "Check for wallet updates at startup"
-                    checked: NuService.automaticUpdateChecksEnabled
-                    helpText: "On by default. Nu checks for Defcoin Core Nu releases after launch and uses Velopack when the app was installed with it; otherwise it falls back to verified GitHub packages."
-                    onToggled: NuService.automaticUpdateChecksEnabled = checked
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: NuTokens.spaceMd
-
-                    NuActionButton {
-                        text: "Check now"
-                        Layout.preferredWidth: 150
-                        helpText: "Check for the latest Defcoin Core Nu package now."
-                        onClicked: NuService.checkForUpdates(true)
-                    }
+                ColumnLayout {
+                    width: updatesScroll.availableWidth
+                    spacing: NuTokens.spaceLg
 
                     Label {
                         Layout.fillWidth: true
-                        text: NuService.updateStatus.length > 0 ? NuService.updateStatus : "Manual update checks are available from the app menu on macOS and the Help menu on Windows and Linux."
+                        text: "Nu checks GitHub and Velopack metadata for newer Defcoin Core Nu packages. Automatic checks run after launch when enabled."
                         color: NuTokens.textSecondary
-                        font.pixelSize: NuTokens.fontSmall
+                        font.pixelSize: NuTokens.fontBody
                         wrapMode: Text.WordWrap
                     }
-                }
 
-                Item { Layout.fillHeight: true }
+                    NuCheckBox {
+                        text: "Check for wallet updates at startup"
+                        checked: NuService.automaticUpdateChecksEnabled
+                        helpText: "On by default. Nu checks for Defcoin Core Nu releases after launch and uses Velopack when the app was installed with it; otherwise it falls back to verified GitHub packages."
+                        onToggled: NuService.automaticUpdateChecksEnabled = checked
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: NuTokens.spaceMd
+
+                        NuActionButton {
+                            text: "Check now"
+                            Layout.preferredWidth: 150
+                            helpText: "Check for the latest Defcoin Core Nu package now."
+                            onClicked: NuService.checkForUpdates(true)
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: NuService.updateStatus.length > 0 ? NuService.updateStatus : "Manual update checks are available from the app menu on macOS and the Help menu on Windows and Linux."
+                            color: NuTokens.textSecondary
+                            font.pixelSize: NuTokens.fontSmall
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
             }
         }
     }

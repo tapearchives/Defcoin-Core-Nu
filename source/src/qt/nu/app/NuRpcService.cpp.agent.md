@@ -96,6 +96,10 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   `getrawchangeaddress`, and then re-run the original wallet RPC.
 - App shutdown owns a user-visible status string and should stop Nu-managed
   sockets, helper processes, and the managed backend before the frontend exits.
+- Trippy peer traces should prefer the single-page/preserve-screen flags only
+  when the selected `trip` binary advertises those options. Older system Trippy
+  binaries must fall back to the legacy stream command instead of failing the
+  trace.
 - Backs up the active wallet selected in Nu. The default backup filename must include the active wallet display/storage identity (`wallet_<name>.dat` for BDB, `wallet_<name>.sqlite` for SQL) rather than blindly offering `wallet.dat`.
 - Installs placeholder paper-wallet data for `--ui-self-test` only. This path
   is gated by `DEFCOIN_NU_UI_SELF_TEST_ACTIVE`, uses clearly fake key/address
@@ -156,6 +160,8 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   address priming, and one original-RPC retry.
 - Do not treat `seed.defcoin.mikej.tech` as the preferred display source when
   the same address also matches a more specific configured seed name.
+- Do not pass newer Trippy `--tui-*` flags to arbitrary PATH binaries without a
+  help-output capability check or fallback.
 - Peer table grouping is display-only: the visible Node cell may append `(gN)` when multiple current rows appear to be the same running Nu node, but row metadata and peer actions must keep Core's real numeric peer id.
 - Do not let paper-wallet self-test placeholders run outside
   `DEFCOIN_NU_UI_SELF_TEST_ACTIVE`.

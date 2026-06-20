@@ -21,8 +21,13 @@ Owns the main Nu shell frame, route switching, left navigation placement, status
 - Preserve enough width for the navigation rail and status mast at common Mac/Lion window sizes.
 - Do not route away from Wallet > Paper Wallet with generated keys silently
   alive; keep the warning/clear behavior synchronized with WalletView.
+- Keep self-test route helpers limited to deterministic tab selection; they
+  must not create wallets, change private-key state, or bypass Paper Wallet key
+  clearing.
 
 ## Verification
 
 - `git diff --check`
 - Launch and switch through all visible routes with Advanced tools both off and on.
+- Use `--ui-self-test` with the Settings tab environment hook after changing
+  Settings tab routing.
