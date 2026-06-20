@@ -156,8 +156,10 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString recoveryRecentFoundAddress READ recoveryRecentFoundAddress NOTIFY recoveryChanged)
     Q_PROPERTY(QString recoveryDetectedMethod READ recoveryDetectedMethod NOTIFY recoveryChanged)
     Q_PROPERTY(QString recoveryCurrentMethod READ recoveryCurrentMethod NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryAddressScanStatus READ recoveryAddressScanStatus NOTIFY recoveryChanged)
     Q_PROPERTY(QString recoveryElapsed READ recoveryElapsed NOTIFY recoveryChanged)
     Q_PROPERTY(QString recoveryEta READ recoveryEta NOTIFY recoveryChanged)
+    Q_PROPERTY(QString recoveryExploreLookupSuggestion READ recoveryExploreLookupSuggestion NOTIFY explorerChanged)
     Q_PROPERTY(bool recoveryCancelable READ recoveryCancelable NOTIFY recoveryChanged)
     Q_PROPERTY(QStringList bip39EnglishWords READ bip39EnglishWords CONSTANT)
     Q_PROPERTY(QString minerExecutable READ minerExecutable NOTIFY minerChanged)
@@ -675,6 +677,10 @@ public:
     {
         return m_recovery_current_method;
     }
+    QString recoveryAddressScanStatus() const
+    {
+        return m_recovery_address_scan_status;
+    }
     QString recoveryElapsed() const
     {
         return m_recovery_elapsed;
@@ -761,6 +767,7 @@ public:
     {
         return m_shutdown_status;
     }
+    QString recoveryExploreLookupSuggestion() const;
     QString explorerDatabasePath() const;
     QVariantList explorerRecentLookups() const
     {
@@ -1029,7 +1036,8 @@ public:
                                        const QString& message = QString());
     Q_INVOKABLE void importPaperWalletPrivateKey(const QString& private_key,
                                                  bool sweep,
-                                                 const QString& label = QStringLiteral("Paper wallet import"));
+                                                 const QString& label = QStringLiteral("Paper wallet import"),
+                                                 const QString& bip38_passphrase = QString());
     Q_INVOKABLE void deleteReceiveRequest(const QString& address);
     Q_INVOKABLE void deleteReceiveRequests(const QVariantList& addresses);
     Q_INVOKABLE void sendCoins(const QString& address,
@@ -1156,6 +1164,7 @@ public:
     Q_INVOKABLE void openBlockInExplorer(const QString& block_id);
     Q_INVOKABLE void searchExplorer(const QString& query);
     Q_INVOKABLE void openExplorerLink(const QString& link);
+    Q_INVOKABLE void openNuExplore();
     Q_INVOKABLE void refreshExplorerRecentLookups();
     Q_INVOKABLE void refreshExplorerAnalytics(int movement_threshold_coins = 5000,
                                               const QString& scope = QStringLiteral("all"));
@@ -1208,7 +1217,9 @@ public:
                                                      const QString& wif_mode,
                                                      int range,
                                                      bool encrypt = false,
-                                                     const QString& passphrase = QString());
+                                                     const QString& passphrase = QString(),
+                                                     bool skip_zero_balance_addresses = false,
+                                                     bool descriptor_sql_wallet = false);
     Q_INVOKABLE void cancelRecovery();
     Q_INVOKABLE QVariantMap convertCompatibilityEncoding(const QString& text) const;
     Q_INVOKABLE void chooseMinerExecutable();
@@ -1259,6 +1270,7 @@ Q_SIGNALS:
     void tableSettingsChanged();
     void updateStatusChanged();
     void userMessage(const QString& title, const QString& message);
+    void walletWorkflowFinished(const QString& workflow, bool success);
     void quickClonePromptRequested(const QString& title, const QString& message);
     void transactionDetailsReady(const QString& title, const QString& html);
     void explorerWindowRequested(const QString& title, const QString& html);
@@ -1555,11 +1567,25 @@ private:
     void resetMinerRuntimeStats();
     void setRecoveryState(bool active, const QString& status, int progress = -1);
     void setRecoveryCurrentMethod(const QString& method);
+    void setRecoveryAddressScanProgress(const QString& phase, int completed, int total);
     void updateRecoveryTiming(int completed_work = -1, int estimated_total_work = -1);
     void scheduleRecoveryScanPoll();
-    void importRecoveryDescriptorsWithRescan(const QVector<QPair<QString, QString>>& descriptors, int range);
+    bool explorerIndexReadyForRecovery(int* indexed_height = nullptr,
+                                       int* tip_height = nullptr,
+                                       QString* detail = nullptr) const;
+    bool queryRecoveryAddressesFromExplorerIndex(const QStringList& addresses,
+                                                 QHash<QString, qint64>* unspent_sats_by_address,
+                                                 QString* detail = nullptr);
+    void importRecoveryDescriptorsWithRescan(const QVector<QPair<QString, QString>>& descriptors,
+                                             int range,
+                                             bool skip_zero_balance_addresses = false);
+    void importRecoveryDescriptorsToSqlWallet(const QVector<QPair<QString, QString>>& descriptors, int range);
+    void importRecoveryDescriptorsWithUtxoFilter(const QVector<QPair<QString, QString>>& descriptors, int range);
     void importRecoveryDescriptorsUntilEmpty(const QVector<QPair<QString, QString>>& descriptors, int empty_gap);
-    void summarizeCompletedRecoveryImport(int import_range, const QStringList& tried_methods = {});
+    void summarizeCompletedRecoveryImport(int import_range,
+                                          const QStringList& tried_methods = {},
+                                          bool skipped_zero_balance = false,
+                                          int imported_address_count = -1);
     void lockRecoveryWalletIfNeeded();
     QString currentNuVersion() const;
     QString selectedUpdateAssetNeedle() const;
@@ -1675,6 +1701,9 @@ private:
     QString m_recovery_recent_found_address;
     QString m_recovery_detected_method;
     QString m_recovery_current_method;
+    QString m_recovery_address_scan_status;
+    int m_recovery_address_scan_completed = 0;
+    int m_recovery_address_scan_total = 0;
     QString m_recovery_elapsed = QStringLiteral("Not running");
     QString m_recovery_eta = QStringLiteral("Unknown");
     bool m_recovery_lock_after_restore = false;

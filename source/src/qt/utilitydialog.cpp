@@ -75,7 +75,7 @@ HelpMessageDialog::HelpMessageDialog(QWidget *parent, Mode mode) :
             "<br><b>" + tr("Mainnet seed addresses") + "</b><br>"
             "seed.defcoin.io<br>"
             "seed.defcoin.mikej.tech<br>"
-            "seed.defcoin.dc903.org:10332<br>"
+            "seed.defcoin.dc903.org<br>"
             "seed.defcoincore.org<br>"
             "seed.defcoin-ng.org";
 
@@ -85,7 +85,7 @@ HelpMessageDialog::HelpMessageDialog(QWidget *parent, Mode mode) :
                "\nMainnet seed addresses:\n"
                "seed.defcoin.io\n"
                "seed.defcoin.mikej.tech\n"
-               "seed.defcoin.dc903.org:10332\n"
+               "seed.defcoin.dc903.org\n"
                "seed.defcoincore.org\n"
                "seed.defcoin-ng.org";
         ui->aboutMessage->setText(version + "<br>" + codename + "<br><br>" + licenseInfoHTML + seedInfoHTML);

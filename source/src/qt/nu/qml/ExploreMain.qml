@@ -286,6 +286,7 @@ ApplicationWindow {
                 buildVersion: root.buildVersion
                 buildId: root.buildId
                 codeName: root.releaseCodeName
+                thirdLine: "EXPLORE"
                 heroHeight: Math.min(405, aboutDialog.height - 200)
                 textHeight: 0
             }

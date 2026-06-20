@@ -84,6 +84,10 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   resolution and duplicate addresses. If `seed.defcoin.mikej.tech` and another
   configured name resolve to the same address, show the non-mikej configured
   name first because the mikej seed is the broad fallback source.
+- Nu's default launch seed list uses `defcoin.dc903.org` and
+  `seed.defcoin.dc903.org` on the Defcoin default Core P2P port `1337`.
+  Server-side `10332` is a compatibility listener for older builds, not the
+  forward default for new Nu launch arguments.
 - The scheduled Defcoin-only magic-byte switch is August 1, 2026. Settings may
   migrate the older July 1 key, but runtime enforcement and user-facing labels
   must use the August date.
@@ -94,6 +98,21 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   address cannot be generated because the keypool is empty. The retry must call
   wallet-scoped `keypoolrefill`, prime a change address with
   `getrawchangeaddress`, and then re-run the original wallet RPC.
+- Restore Wallet fixed-range BIP39 recovery can skip current zero-balance
+  addresses by deriving candidate addresses, checking the current Nu Explore
+  SQLite index when it is caught up to the backend tip, falling back to one
+  local `scantxoutset` UTXO pre-scan when the index is absent/stale, and
+  importing only funded descriptor index ranges. This is not historical
+  pruning; addresses with only fully spent past activity are skipped. Recovery
+  progress must expose elapsed time, ETA, and address scan counts while these
+  checks run.
+- BIP39 phrase wallet creation is a direct Create Wallet workflow: validate the
+  generated phrase locally, create a legacy BDB blank wallet, set the Core HD
+  seed, refill the keypool, relock encrypted wallets, and emit
+  `walletWorkflowFinished("createWallet", success)`. Restore for Nu-created
+  Core HD phrases defaults to setting the seed, refilling the keypool, and
+  rescanning the chain. The opt-in SQL restore path must instead import checked
+  active ranged descriptors with `importdescriptors`.
 - App shutdown owns a user-visible status string and should stop Nu-managed
   sockets, helper processes, and the managed backend before the frontend exits.
 - Trippy peer traces should prefer the single-page/preserve-screen flags only
@@ -109,9 +128,10 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   public addresses and positive DFC amounts before using wallet-scoped
   `sendmany`. This path never receives or sends generated private keys.
 - Imports paper-wallet private keys through `importPaperWalletPrivateKey()`.
-  The bridge requires a loopback RPC connection before sending the WIF directly
-  to wallet-scoped Core RPC `importprivkey` with a rescan request, refreshes
-  wallet state, and emits user-facing guidance.
+  The bridge requires a loopback RPC connection, decrypts BIP38 non-EC-multiply
+  keys locally when a passphrase is supplied, then imports WIF through
+  wallet-scoped Core RPC. Legacy wallets use `importprivkey`; descriptor wallets
+  use a checked `combo(WIF)` descriptor with `importdescriptors`.
   The current sweep option is conservative: it imports/rescans first and tells
   the user to move confirmed funds after the balance is visible rather than
   constructing an automatic sweep transaction in the same call.
@@ -158,6 +178,14 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 - Do not retry change-address failures by inventing frontend keys. The only
   supported automatic recovery is wallet-scoped Core keypool refill, change
   address priming, and one original-RPC retry.
+- Do not implement zero-balance recovery as in-place wallet key/descriptor
+  deletion. Keep it as a new-wallet fixed-scan pre-import filter. The Nu Explore
+  shortcut may read only a current local SQLite index; otherwise fall back to
+  local-only `scantxoutset` because scan objects expose derived wallet
+  addresses.
+- Do not route SQL descriptor-wallet phrase recovery through `sethdseed` or
+  `importmulti`; descriptor wallets recover by importing ranged checked
+  descriptors with private material into a blank SQLite wallet.
 - Do not treat `seed.defcoin.mikej.tech` as the preferred display source when
   the same address also matches a more specific configured seed name.
 - Do not pass newer Trippy `--tui-*` flags to arbitrary PATH binaries without a

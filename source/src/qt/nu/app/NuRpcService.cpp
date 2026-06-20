@@ -199,6 +199,42 @@ bool isChangeAddressKeypoolError(const QString& error)
            lower.contains(QStringLiteral("keypoolrefill"));
 }
 
+QString addressFromScantxoutsetDescriptor(const QString& descriptor)
+{
+    static const QRegularExpression addr_expression(QStringLiteral("addr\\(([^)]+)\\)"));
+    const QRegularExpressionMatch match = addr_expression.match(descriptor);
+    return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+bool recoveryDescriptorLikelyInternal(const QString& label)
+{
+    const QString lower = label.toLower();
+    return lower.contains(QStringLiteral("change")) || lower.contains(QStringLiteral("internal"));
+}
+
+bool recoveryDescriptorShouldBeActiveSql(const QString& label)
+{
+    const QString lower = label.toLower();
+    return lower.contains(QStringLiteral("nu/core hd")) ||
+           lower.contains(QStringLiteral("coinomi/ian coleman defcoin bip44")) ||
+           lower.contains(QStringLiteral("manual external scan")) ||
+           lower.contains(QStringLiteral("manual inferred change"));
+}
+
+QString inferredRecoveryChangePath(QString path)
+{
+    path = path.trimmed();
+    const QVector<QPair<QString, QString>> endings = {{QStringLiteral("/0/*"), QStringLiteral("/1/*")},
+                                                      {QStringLiteral("/0/*'"), QStringLiteral("/1/*'")},
+                                                      {QStringLiteral("/0/*h"), QStringLiteral("/1/*h")},
+                                                      {QStringLiteral("/0/*H"), QStringLiteral("/1/*H")}};
+    for (const auto& ending : endings) {
+        if (path.endsWith(ending.first))
+            return path.left(path.size() - ending.first.size()) + ending.second;
+    }
+    return QString();
+}
+
 QByteArray doubleSha256(const QByteArray& bytes)
 {
     return QCryptographicHash::hash(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256),
@@ -274,6 +310,34 @@ bool launchExploreLookup(const QString& option, const QString& value)
     const QFileInfo candidate_info(candidate);
     if (candidate_info.exists() && candidate_info.isExecutable())
         return QProcess::startDetached(candidate, lookup_args);
+    return false;
+#endif
+}
+
+bool launchExploreApp()
+{
+#if DEFCOIN_NU_EXPLORE_APP
+    return false;
+#else
+#if defined(Q_OS_MACOS)
+    QStringList open_args;
+    open_args << QStringLiteral("-b") << QStringLiteral("org.defcoincore.DefcoinCoreNuExplore");
+    if (QProcess::startDetached(QStringLiteral("/usr/bin/open"), open_args))
+        return true;
+    open_args.clear();
+    open_args << QStringLiteral("-b") << QStringLiteral("org.defcoincore.DefcoinCoreExplore");
+    if (QProcess::startDetached(QStringLiteral("/usr/bin/open"), open_args))
+        return true;
+#endif
+    const QDir app_dir(QCoreApplication::applicationDirPath());
+#if defined(Q_OS_WIN)
+    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExplore.exe"));
+#else
+    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExplore"));
+#endif
+    const QFileInfo candidate_info(candidate);
+    if (candidate_info.exists() && candidate_info.isExecutable())
+        return QProcess::startDetached(candidate, {});
     return false;
 #endif
 }
@@ -1278,7 +1342,7 @@ QByteArray hash160Bytes(const QByteArray& data)
     return out;
 }
 
-QString defcoinP2pkhAddressFromSecret(const QByteArray& secret)
+QString defcoinP2pkhAddressFromSecret(const QByteArray& secret, bool compressed = true)
 {
     if (!isValidSecp256k1Secret(secret))
         return QString();
@@ -1304,12 +1368,14 @@ QString defcoinP2pkhAddressFromSecret(const QByteArray& secret)
         return QString();
     }
 
-    unsigned char serialized[33];
+    unsigned char serialized[65];
     size_t serialized_len = sizeof(serialized);
+    const unsigned int flags = compressed ? SECP256K1_EC_COMPRESSED : SECP256K1_EC_UNCOMPRESSED;
     const bool serialized_ok =
-        secp256k1_ec_pubkey_serialize(context, serialized, &serialized_len, &public_key, SECP256K1_EC_COMPRESSED) == 1;
+        secp256k1_ec_pubkey_serialize(context, serialized, &serialized_len, &public_key, flags) == 1;
     secp256k1_context_destroy(context);
-    if (!serialized_ok || serialized_len != sizeof(serialized))
+    const size_t expected_len = compressed ? 33 : 65;
+    if (!serialized_ok || serialized_len != expected_len)
         return QString();
 
     const QByteArray pubkey(reinterpret_cast<const char*>(serialized), int(serialized_len));
@@ -1322,14 +1388,15 @@ QString defcoinP2pkhAddressFromSecret(const QByteArray& secret)
 #endif
 }
 
-QString defcoinWifFromSecret(const QByteArray& secret)
+QString defcoinWifFromSecret(const QByteArray& secret, bool compressed = true)
 {
     if (!isValidSecp256k1Secret(secret))
         return QString();
     QByteArray payload;
     payload.append(char(DEFCOIN_CURRENT_WIF_PREFIX));
     payload.append(secret);
-    payload.append(char(1)); // compressed key marker
+    if (compressed)
+        payload.append(char(1)); // compressed key marker
     const QString wif = encodeBase58Check(payload);
     secureClear(&payload);
     return wif;
@@ -1370,6 +1437,176 @@ QByteArray aes256EcbEncryptBlock(const QByteArray& key, const QByteArray& block)
     Q_UNUSED(key);
     Q_UNUSED(block);
     return QByteArray();
+#endif
+}
+
+QByteArray aes256EcbDecryptBlock(const QByteArray& key, const QByteArray& block)
+{
+#if defined(DEFCOIN_NU_HAS_OPENSSL_CRYPTO)
+    if (key.size() != 32 || block.size() != 16)
+        return QByteArray();
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx)
+        return QByteArray();
+
+    QByteArray out(32, char(0));
+    int out_len_1 = 0;
+    int out_len_2 = 0;
+    const bool ok =
+        EVP_DecryptInit_ex(
+            ctx, EVP_aes_256_ecb(), nullptr, reinterpret_cast<const unsigned char*>(key.constData()), nullptr) == 1 &&
+        EVP_CIPHER_CTX_set_padding(ctx, 0) == 1 &&
+        EVP_DecryptUpdate(ctx,
+                          reinterpret_cast<unsigned char*>(out.data()),
+                          &out_len_1,
+                          reinterpret_cast<const unsigned char*>(block.constData()),
+                          block.size()) == 1 &&
+        EVP_DecryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(out.data()) + out_len_1, &out_len_2) == 1;
+    EVP_CIPHER_CTX_free(ctx);
+
+    if (!ok || out_len_1 + out_len_2 != 16) {
+        secureClear(&out);
+        return QByteArray();
+    }
+    out.truncate(16);
+    return out;
+#else
+    Q_UNUSED(key);
+    Q_UNUSED(block);
+    return QByteArray();
+#endif
+}
+
+bool isBip38Payload(const QByteArray& payload)
+{
+    if (payload.size() != 39)
+        return false;
+    return static_cast<unsigned char>(payload.at(0)) == 0x01 &&
+           (static_cast<unsigned char>(payload.at(1)) == 0x42 || static_cast<unsigned char>(payload.at(1)) == 0x43);
+}
+
+bool isLikelyBip38KeyText(const QString& text)
+{
+    QByteArray payload;
+    return decodeBase58CheckPayload(text, &payload) && isBip38Payload(payload);
+}
+
+QString bip38DecryptToDefcoinWif(const QString& encrypted_key, const QString& passphrase, QString* error)
+{
+#if defined(DEFCOIN_NU_HAS_OPENSSL_CRYPTO)
+    QByteArray payload;
+    if (!decodeBase58CheckPayload(encrypted_key, &payload) || !isBip38Payload(payload)) {
+        if (error)
+            *error = QStringLiteral("This does not look like a valid BIP38 encrypted private key.");
+        return QString();
+    }
+
+    const auto type_byte = static_cast<unsigned char>(payload.at(1));
+    if (type_byte == 0x43) {
+        if (error)
+            *error = QStringLiteral("BIP38 EC-multiply keys are not supported by this importer.");
+        secureClear(&payload);
+        return QString();
+    }
+    if (type_byte != 0x42) {
+        if (error)
+            *error = QStringLiteral("Unsupported BIP38 key type.");
+        secureClear(&payload);
+        return QString();
+    }
+
+    const auto flag_byte = static_cast<unsigned char>(payload.at(2));
+    bool compressed = true;
+    if (flag_byte == 0xe0) {
+        compressed = true;
+    } else if (flag_byte == 0xc0) {
+        compressed = false;
+    } else {
+        if (error)
+            *error = QStringLiteral("Unsupported BIP38 key flags.");
+        secureClear(&payload);
+        return QString();
+    }
+
+    const QByteArray address_hash = payload.mid(3, 4);
+    const QByteArray encrypted_1 = payload.mid(7, 16);
+    const QByteArray encrypted_2 = payload.mid(23, 16);
+
+    QByteArray passphrase_utf8 = passphrase.toUtf8();
+    QByteArray derived(64, char(0));
+    const int scrypt_ok = EVP_PBE_scrypt(passphrase_utf8.constData(),
+                                         size_t(passphrase_utf8.size()),
+                                         reinterpret_cast<const unsigned char*>(address_hash.constData()),
+                                         size_t(address_hash.size()),
+                                         16384,
+                                         8,
+                                         8,
+                                         0,
+                                         reinterpret_cast<unsigned char*>(derived.data()),
+                                         size_t(derived.size()));
+    OPENSSL_cleanse(passphrase_utf8.data(), size_t(passphrase_utf8.size()));
+    if (scrypt_ok != 1) {
+        if (error)
+            *error = QStringLiteral("BIP38 decryption failed while deriving the passphrase key.");
+        secureClear(&derived);
+        secureClear(&payload);
+        return QString();
+    }
+
+    QByteArray derived_half_1 = derived.left(32);
+    QByteArray derived_half_2 = derived.mid(32, 32);
+    QByteArray decrypted_1 = aes256EcbDecryptBlock(derived_half_2, encrypted_1);
+    QByteArray decrypted_2 = aes256EcbDecryptBlock(derived_half_2, encrypted_2);
+    secureClear(&derived_half_2);
+    secureClear(&derived);
+    secureClear(&payload);
+    if (decrypted_1.size() != 16 || decrypted_2.size() != 16) {
+        if (error)
+            *error = QStringLiteral("BIP38 AES decryption failed.");
+        secureClear(&derived_half_1);
+        secureClear(&decrypted_1);
+        secureClear(&decrypted_2);
+        return QString();
+    }
+
+    QByteArray secret(32, char(0));
+    for (int i = 0; i < 16; ++i) {
+        secret[i] =
+            char(static_cast<unsigned char>(decrypted_1.at(i)) ^ static_cast<unsigned char>(derived_half_1.at(i)));
+        secret[i + 16] =
+            char(static_cast<unsigned char>(decrypted_2.at(i)) ^ static_cast<unsigned char>(derived_half_1.at(i + 16)));
+    }
+    secureClear(&derived_half_1);
+    secureClear(&decrypted_1);
+    secureClear(&decrypted_2);
+
+    if (!isValidSecp256k1Secret(secret)) {
+        if (error)
+            *error = QStringLiteral("BIP38 passphrase did not decrypt a valid Defcoin key.");
+        secureClear(&secret);
+        return QString();
+    }
+
+    const QString address = defcoinP2pkhAddressFromSecret(secret, compressed);
+    if (address.isEmpty() || hash256Bytes(address.toLatin1()).left(4) != address_hash) {
+        if (error)
+            *error = QStringLiteral("BIP38 passphrase did not match this encrypted key.");
+        secureClear(&secret);
+        return QString();
+    }
+
+    const QString wif = defcoinWifFromSecret(secret, compressed);
+    secureClear(&secret);
+    if (wif.isEmpty() && error)
+        *error = QStringLiteral("BIP38 decryption succeeded but the WIF private key could not be encoded.");
+    return wif;
+#else
+    Q_UNUSED(encrypted_key);
+    Q_UNUSED(passphrase);
+    if (error)
+        *error = QStringLiteral("This build does not include OpenSSL crypto support for BIP38 decryption.");
+    return QString();
 #endif
 }
 
@@ -3843,8 +4080,8 @@ bool NuRpcService::ensureBackendStarted()
                            "avoiding the Local Network permission prompt on first launch."));
     }
 
-    args << QStringLiteral("-seednode=seed.defcoin.io") << QStringLiteral("-seednode=defcoin.dc903.org:10332")
-         << QStringLiteral("-seednode=seed.defcoin.dc903.org:10332") << QStringLiteral("-seednode=seed.defcoincore.org")
+    args << QStringLiteral("-seednode=seed.defcoin.io") << QStringLiteral("-seednode=defcoin.dc903.org")
+         << QStringLiteral("-seednode=seed.defcoin.dc903.org") << QStringLiteral("-seednode=seed.defcoincore.org")
          << QStringLiteral("-seednode=seed.defcoin-ng.org") << QStringLiteral("-seednode=seed.defcoin.mikej.tech");
 
     if (m_backend_process == nullptr) {
@@ -5730,6 +5967,8 @@ void NuRpcService::refreshWallet()
                 m_wallet_encrypted = wallet.contains(QStringLiteral("unlocked_until"));
                 m_wallet_locked = m_wallet_encrypted ? unlocked_until.toDouble() == 0 : false;
                 QVariantMap updates;
+                updates.insert(QStringLiteral("encrypted"),
+                               m_wallet_encrypted ? QStringLiteral("Yes") : QStringLiteral("No"));
                 updates.insert(QStringLiteral("total"), m_total_balance);
                 updates.insert(QStringLiteral("available"), m_available_balance);
                 updates.insert(QStringLiteral("pending"), m_pending_balance);
@@ -9762,7 +10001,10 @@ void NuRpcService::requestNewAddress(const QString& label, const QString& amount
             });
 }
 
-void NuRpcService::importPaperWalletPrivateKey(const QString& private_key, bool sweep, const QString& label)
+void NuRpcService::importPaperWalletPrivateKey(const QString& private_key,
+                                               bool sweep,
+                                               const QString& label,
+                                               const QString& bip38_passphrase)
 {
     if (!ensureCurrentWalletSelected(QStringLiteral("Paper wallet not imported")))
         return;
@@ -9777,36 +10019,148 @@ void NuRpcService::importPaperWalletPrivateKey(const QString& private_key, bool 
         return;
 
     const QString clean_label = label.trimmed().isEmpty() ? QStringLiteral("Paper wallet import") : label.trimmed();
+    QString import_key = clean_key;
+    if (isLikelyBip38KeyText(clean_key)) {
+        if (bip38_passphrase.isEmpty()) {
+            Q_EMIT userMessage(QStringLiteral("Paper wallet not imported"),
+                               QStringLiteral("Enter the BIP38 passphrase for this encrypted paper wallet key."));
+            return;
+        }
+        QString decrypt_error;
+        import_key = bip38DecryptToDefcoinWif(clean_key, bip38_passphrase, &decrypt_error);
+        if (import_key.isEmpty()) {
+            Q_EMIT userMessage(
+                QStringLiteral("Paper wallet import failed"),
+                decrypt_error.isEmpty() ? QStringLiteral("The BIP38 key could not be decrypted.") : decrypt_error);
+            return;
+        }
+    }
+
     const QString wallet_name = m_wallet_name;
-    QJsonArray params;
-    params.push_back(clean_key);
-    params.push_back(clean_label);
-    params.push_back(true);
-    rpcCall(QStringLiteral("importprivkey"),
-            params,
+    const auto report_imported = [this, wallet_name, sweep]() {
+        if (wallet_name != m_wallet_name)
+            return;
+        refreshWallet();
+        if (sweep) {
+            Q_EMIT userMessage(
+                QStringLiteral("Paper wallet imported"),
+                QStringLiteral("The private key was imported and the wallet is rescanning. Sweep is selected, "
+                               "but automatic sweep needs a confirmed imported balance before Nu can create "
+                               "a safe spend transaction. After the rescan completes, use Send to move the "
+                               "funds to a fresh wallet address."));
+            return;
+        }
+        Q_EMIT userMessage(
+            QStringLiteral("Paper wallet imported"),
+            QStringLiteral("The private key was imported into the active wallet. The wallet is rescanning for funds."));
+    };
+
+    const auto import_legacy_key = [this, wallet_name, clean_label, import_key, report_imported]() {
+        QJsonArray params;
+        params.push_back(import_key);
+        params.push_back(clean_label);
+        params.push_back(true);
+        rpcCall(QStringLiteral("importprivkey"),
+                params,
+                true,
+                [this, wallet_name, report_imported](const QJsonValue&, const QString& error) {
+                    if (wallet_name != m_wallet_name)
+                        return;
+                    if (!error.isEmpty()) {
+                        Q_EMIT userMessage(QStringLiteral("Paper wallet import failed"), error);
+                        return;
+                    }
+                    report_imported();
+                });
+    };
+
+    const auto import_descriptor_key = [this, wallet_name, clean_label, import_key, report_imported]() {
+        const QString descriptor = QStringLiteral("combo(%1)").arg(import_key);
+        rpcCall(
+            QStringLiteral("getdescriptorinfo"),
+            {descriptor},
             true,
-            [this, wallet_name, sweep](const QJsonValue&, const QString& error) {
+            [this, wallet_name, clean_label, descriptor, report_imported](const QJsonValue& result,
+                                                                          const QString& descriptor_error) {
                 if (wallet_name != m_wallet_name)
                     return;
-                if (!error.isEmpty()) {
-                    Q_EMIT userMessage(QStringLiteral("Paper wallet import failed"), error);
-                    return;
-                }
-                refreshWallet();
-                if (sweep) {
+                if (!descriptor_error.isEmpty() || !result.isObject()) {
                     Q_EMIT userMessage(
-                        QStringLiteral("Paper wallet imported"),
-                        QStringLiteral("The private key was imported and the wallet is rescanning. Sweep is selected, "
-                                       "but automatic sweep needs a confirmed imported balance before Nu can create "
-                                       "a safe spend transaction. After the rescan completes, use Send to move the "
-                                       "funds to a fresh wallet address."));
+                        QStringLiteral("Paper wallet import failed"),
+                        descriptor_error.isEmpty() ?
+                            QStringLiteral("The backend did not return descriptor details for this key.") :
+                            descriptor_error);
                     return;
                 }
-                Q_EMIT userMessage(
-                    QStringLiteral("Paper wallet imported"),
-                    QStringLiteral(
-                        "The private key was imported into the active wallet. The wallet is rescanning for funds."));
+
+                const QString checksum = result.toObject().value(QStringLiteral("checksum")).toString();
+                if (checksum.isEmpty()) {
+                    Q_EMIT userMessage(QStringLiteral("Paper wallet import failed"),
+                                       QStringLiteral("The backend did not return a descriptor checksum."));
+                    return;
+                }
+
+                QJsonObject request;
+                request.insert(QStringLiteral("desc"),
+                               descriptor.section(QLatin1Char('#'), 0, 0) + QStringLiteral("#") + checksum);
+                request.insert(QStringLiteral("timestamp"), 0);
+                request.insert(QStringLiteral("label"), clean_label);
+                QJsonArray requests;
+                requests.push_back(request);
+
+                rpcCall(
+                    QStringLiteral("importdescriptors"),
+                    {requests},
+                    true,
+                    [this, wallet_name, report_imported](const QJsonValue& import_result, const QString& import_error) {
+                        if (wallet_name != m_wallet_name)
+                            return;
+                        QString detail = import_error;
+                        if (detail.isEmpty()) {
+                            if (!import_result.isArray()) {
+                                detail = QStringLiteral("The backend did not return descriptor import results.");
+                            } else {
+                                const QJsonArray results = import_result.toArray();
+                                for (const QJsonValue& value : results) {
+                                    const QJsonObject item = value.toObject();
+                                    if (item.value(QStringLiteral("success")).toBool(false))
+                                        continue;
+                                    const QJsonObject error_object = item.value(QStringLiteral("error")).toObject();
+                                    detail = error_object.value(QStringLiteral("message")).toString();
+                                    if (detail.isEmpty())
+                                        detail = QStringLiteral("Descriptor import failed.");
+                                    break;
+                                }
+                            }
+                        }
+                        if (!detail.isEmpty()) {
+                            Q_EMIT userMessage(QStringLiteral("Paper wallet import failed"), detail);
+                            return;
+                        }
+                        report_imported();
+                    });
             });
+    };
+
+    rpcCall(
+        QStringLiteral("getwalletinfo"),
+        {},
+        true,
+        [this, wallet_name, import_legacy_key, import_descriptor_key](const QJsonValue& result, const QString& error) {
+            if (wallet_name != m_wallet_name)
+                return;
+            if (!error.isEmpty() || !result.isObject()) {
+                Q_EMIT userMessage(
+                    QStringLiteral("Paper wallet import failed"),
+                    error.isEmpty() ? QStringLiteral("The backend did not return wallet details.") : error);
+                return;
+            }
+            const bool descriptor_wallet = result.toObject().value(QStringLiteral("descriptors")).toBool(false);
+            if (descriptor_wallet)
+                import_descriptor_key();
+            else
+                import_legacy_key();
+        });
 }
 
 void NuRpcService::deleteReceiveRequest(const QString& address)
@@ -10248,6 +10602,9 @@ void NuRpcService::refreshWalletStats()
             QStringLiteral("state"),
             current ? QStringLiteral("Current") : (loaded ? QStringLiteral("Loaded") : QStringLiteral("Available")));
         item.insert(QStringLiteral("type"), storage_type);
+        item.insert(QStringLiteral("encrypted"),
+                    current ? (m_wallet_encrypted ? QStringLiteral("Yes") : QStringLiteral("No")) :
+                              (loaded ? QStringLiteral("Loading") : QStringLiteral("Unknown")));
         item.insert(QStringLiteral("total"),
                     current ? m_total_balance : (loaded ? QStringLiteral("Loading") : QStringLiteral("Load to scan")));
         item.insert(QStringLiteral("available"),
@@ -10287,6 +10644,9 @@ void NuRpcService::refreshWalletStats()
                                walletStorageTypeFromFormat(wallet.value(QStringLiteral("format")).toString()));
                 updates.insert(QStringLiteral("descriptors"),
                                wallet.value(QStringLiteral("descriptors")).toBool(false));
+                updates.insert(
+                    QStringLiteral("encrypted"),
+                    wallet.contains(QStringLiteral("unlocked_until")) ? QStringLiteral("Yes") : QStringLiteral("No"));
                 updates.insert(QStringLiteral("total"), walletAmountText(available + pending + immature, true));
                 updates.insert(QStringLiteral("available"), walletAmountText(available));
                 updates.insert(QStringLiteral("pending"), walletAmountText(pending));
@@ -14033,12 +14393,15 @@ QString NuRpcService::descriptorForRecoveryPath(const QString& xprv,
             *error = QStringLiteral("Derivation paths must start with m/.");
         return QString();
     }
-    if (!path.endsWith(QStringLiteral("/*"))) {
+    const bool has_unhardened_wildcard = path.endsWith(QStringLiteral("/*"));
+    const bool has_hardened_wildcard = path.endsWith(QStringLiteral("/*'")) || path.endsWith(QStringLiteral("/*h")) ||
+                                       path.endsWith(QStringLiteral("/*H"));
+    if (!has_unhardened_wildcard && !has_hardened_wildcard) {
         if (error)
-            *error = QStringLiteral("Use a ranged derivation path ending in /*.");
+            *error = QStringLiteral("Use a ranged derivation path ending in /*, /*', or /*h.");
         return QString();
     }
-    static const QRegularExpression allowed_path(QStringLiteral(R"(^m(/[0-9]+(['hH])?)*(/\*)$)"));
+    static const QRegularExpression allowed_path(QStringLiteral(R"(^m(/[0-9]+(['hH])?)*(/\*(['hH])?)$)"));
     if (!allowed_path.match(path).hasMatch()) {
         if (error)
             *error = QStringLiteral("Use numeric BIP32 path segments, for example m/44'/2'/0'/0/*.");
@@ -14249,6 +14612,9 @@ void NuRpcService::setRecoveryState(bool active, const QString& status, int prog
         m_recovery_recent_found_address = QStringLiteral("No address hits reported yet.");
         m_recovery_detected_method = QStringLiteral("Checking recovery options.");
         m_recovery_current_method = QStringLiteral("Starting recovery.");
+        m_recovery_address_scan_status = QStringLiteral("Waiting for address scan work to start.");
+        m_recovery_address_scan_completed = 0;
+        m_recovery_address_scan_total = 0;
         m_recovery_elapsed = QStringLiteral("0s");
         m_recovery_eta = QStringLiteral("Estimating after the first scan step.");
     }
@@ -14288,12 +14654,44 @@ void NuRpcService::setRecoveryCurrentMethod(const QString& method)
     Q_EMIT recoveryChanged();
 }
 
+void NuRpcService::setRecoveryAddressScanProgress(const QString& phase, int completed, int total)
+{
+    const int clean_total = std::max(0, total);
+    const int clean_completed = clean_total > 0 ? std::clamp(completed, 0, clean_total) : std::max(0, completed);
+    m_recovery_address_scan_completed = clean_completed;
+    m_recovery_address_scan_total = clean_total;
+
+    const QString clean_phase = phase.trimmed().isEmpty() ? QStringLiteral("Address scan") : phase.trimmed();
+    if (clean_total > 0) {
+        QString status = QStringLiteral("%1: %2 / %3 addresses")
+                             .arg(clean_phase, QString::number(clean_completed), QString::number(clean_total));
+        if (clean_completed > 0 && m_recovery_timer.isValid()) {
+            const double elapsed_ms =
+                std::max<qint64>(1, m_recovery_timer.elapsed()) / static_cast<double>(clean_completed);
+            status += elapsed_ms < 1000.0 ?
+                          QStringLiteral(" (%1 ms/address avg)").arg(QString::number(elapsed_ms, 'f', 0)) :
+                          QStringLiteral(" (%1 s/address avg)").arg(QString::number(elapsed_ms / 1000.0, 'f', 2));
+        }
+        m_recovery_address_scan_status = status;
+        updateRecoveryTiming(clean_completed, clean_total);
+    } else {
+        m_recovery_address_scan_status = clean_phase;
+        updateRecoveryTiming();
+    }
+    Q_EMIT recoveryChanged();
+}
+
 void NuRpcService::updateRecoveryTiming(int completed_work, int estimated_total_work)
 {
     if (!m_recovery_timer.isValid()) {
         m_recovery_elapsed = QStringLiteral("Not running");
         m_recovery_eta = QStringLiteral("Unknown");
         return;
+    }
+
+    if (completed_work < 0 && estimated_total_work < 0 && m_recovery_address_scan_total > 0) {
+        completed_work = m_recovery_address_scan_completed;
+        estimated_total_work = m_recovery_address_scan_total;
     }
 
     const qint64 elapsed_seconds = std::max<qint64>(0, m_recovery_timer.elapsed() / 1000);
@@ -14359,6 +14757,163 @@ void NuRpcService::scheduleRecoveryScanPoll()
     });
 }
 
+bool NuRpcService::explorerIndexReadyForRecovery(int* indexed_height, int* tip_height, QString* detail) const
+{
+#if DEFCOIN_NU_EXPLORE_APP
+    if (detail)
+        *detail = QStringLiteral("Explore index lookup is not available inside the Explore app.");
+    if (indexed_height)
+        *indexed_height = -1;
+    if (tip_height)
+        *tip_height = -1;
+    return false;
+#else
+    const QFileInfo db_info(explorerDatabasePath());
+    if (!db_info.exists()) {
+        if (detail)
+            *detail = QStringLiteral("Nu Explore has not built a local address index yet.");
+        if (indexed_height)
+            *indexed_height = -1;
+        if (tip_height)
+            *tip_height = m_block_height > 0 ? m_block_height : m_header_height;
+        return false;
+    }
+
+    const int indexed = explorerHighestIndexedBlock();
+    const int tip = m_block_height > 0 ? m_block_height : m_header_height;
+    if (indexed_height)
+        *indexed_height = indexed;
+    if (tip_height)
+        *tip_height = tip;
+    if (indexed < 0) {
+        if (detail)
+            *detail = QStringLiteral("Nu Explore has not indexed any blocks yet.");
+        return false;
+    }
+    if (tip <= 0) {
+        if (detail)
+            *detail = QStringLiteral("The backend tip height is not known yet, so Nu cannot prove the Explore index is "
+                                     "current.");
+        return false;
+    }
+    if (indexed < tip) {
+        if (detail) {
+            *detail = QStringLiteral("Nu Explore index is at block %1 of %2.")
+                          .arg(QString::number(indexed), QString::number(tip));
+        }
+        return false;
+    }
+    if (detail) {
+        *detail = QStringLiteral("Nu Explore index is current at block %1.").arg(QString::number(indexed));
+    }
+    return true;
+#endif
+}
+
+bool NuRpcService::queryRecoveryAddressesFromExplorerIndex(const QStringList& addresses,
+                                                           QHash<QString, qint64>* unspent_sats_by_address,
+                                                           QString* detail)
+{
+    if (unspent_sats_by_address)
+        unspent_sats_by_address->clear();
+    QStringList unique_addresses;
+    QSet<QString> seen_addresses;
+    for (const QString& address : addresses) {
+        const QString clean = address.trimmed();
+        if (clean.isEmpty() || seen_addresses.contains(clean))
+            continue;
+        seen_addresses.insert(clean);
+        unique_addresses.push_back(clean);
+    }
+    if (unique_addresses.isEmpty()) {
+        if (detail)
+            *detail = QStringLiteral("No derived addresses were available for an Explore index lookup.");
+        return false;
+    }
+
+    int indexed = -1;
+    int tip = -1;
+    QString readiness_detail;
+    if (!explorerIndexReadyForRecovery(&indexed, &tip, &readiness_detail)) {
+        if (detail)
+            *detail = readiness_detail;
+        return false;
+    }
+
+    setRecoveryAddressScanProgress(QStringLiteral("Explore index balance lookup"), 0, unique_addresses.size());
+
+    const QString connection_name =
+        QStringLiteral("nu_recovery_explorer_lookup_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    QString local_error;
+    QHash<QString, qint64> balances;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
+        if (!db.open()) {
+            local_error = db.lastError().text();
+        } else {
+            QSqlQuery pragma(db);
+            pragma.exec(QStringLiteral("PRAGMA query_only=ON"));
+            pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
+
+            ok = true;
+            const int chunk_size = 400;
+            for (int start = 0; ok && start < unique_addresses.size(); start += chunk_size) {
+                const int count = std::min(chunk_size, static_cast<int>(unique_addresses.size() - start));
+                QStringList placeholders;
+                placeholders.reserve(count);
+                for (int i = 0; i < count; ++i)
+                    placeholders.push_back(QStringLiteral("?"));
+
+                QSqlQuery query(db);
+                query.prepare(
+                    QStringLiteral("SELECT address, "
+                                   "COALESCE(SUM(CASE WHEN spent_by_txid IS NULL THEN value_sats ELSE 0 END), 0) "
+                                   "FROM explorer_tx_outputs "
+                                   "WHERE address IN (%1) "
+                                   "GROUP BY address")
+                        .arg(placeholders.join(QLatin1Char(','))));
+                for (int i = 0; i < count; ++i)
+                    query.addBindValue(unique_addresses.at(start + i));
+                if (!query.exec()) {
+                    ok = false;
+                    local_error = query.lastError().text();
+                    break;
+                }
+                while (query.next()) {
+                    const qint64 sats = query.value(1).toLongLong();
+                    if (sats > 0)
+                        balances.insert(query.value(0).toString(), sats);
+                }
+
+                setRecoveryAddressScanProgress(
+                    QStringLiteral("Explore index balance lookup"), start + count, unique_addresses.size());
+                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            }
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+
+    if (!ok) {
+        if (detail)
+            *detail = QStringLiteral("Explore index lookup failed: %1").arg(local_error);
+        return false;
+    }
+
+    if (unspent_sats_by_address)
+        *unspent_sats_by_address = balances;
+    if (detail) {
+        *detail = QStringLiteral("Nu Explore checked %1 derived addresses through block %2.")
+                      .arg(QString::number(unique_addresses.size()), QString::number(indexed));
+        if (tip >= 0 && tip != indexed)
+            *detail += QStringLiteral(" Backend tip: %1.").arg(QString::number(tip));
+    }
+    return true;
+}
+
 void NuRpcService::cancelRecovery()
 {
     if (!m_recovery_active)
@@ -14387,8 +14942,15 @@ void NuRpcService::lockRecoveryWalletIfNeeded()
     });
 }
 
-void NuRpcService::importRecoveryDescriptorsWithRescan(const QVector<QPair<QString, QString>>& descriptors, int range)
+void NuRpcService::importRecoveryDescriptorsWithRescan(const QVector<QPair<QString, QString>>& descriptors,
+                                                       int range,
+                                                       bool skip_zero_balance_addresses)
 {
+    if (skip_zero_balance_addresses) {
+        importRecoveryDescriptorsWithUtxoFilter(descriptors, range);
+        return;
+    }
+
     const int import_range = std::clamp(range, 1, 1000);
     if (descriptors.isEmpty()) {
         setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
@@ -14406,8 +14968,11 @@ void NuRpcService::importRecoveryDescriptorsWithRescan(const QVector<QPair<QStri
     setRecoveryCurrentMethod(descriptors.size() == 1 ?
                                  descriptors.first().first :
                                  QStringLiteral("Fixed scan across %1 methods").arg(descriptors.size()));
+    setRecoveryAddressScanProgress(
+        QStringLiteral("Preparing fixed address import"), 0, descriptors.size() * import_range);
 
     auto pending = std::make_shared<int>(descriptors.size());
+    auto prepared_address_slots = std::make_shared<int>(0);
     auto requests = std::make_shared<QJsonArray>();
     auto labels = std::make_shared<QStringList>();
     auto errors = std::make_shared<QStringList>();
@@ -14419,7 +14984,7 @@ void NuRpcService::importRecoveryDescriptorsWithRescan(const QVector<QPair<QStri
             QStringLiteral("getdescriptorinfo"),
             {descriptor},
             false,
-            [this, import_range, label, descriptor, pending, requests, labels, errors](
+            [this, import_range, label, descriptor, pending, prepared_address_slots, requests, labels, errors](
                 const QJsonValue& result, const QString& descriptor_error) {
                 if (m_recovery_cancel_requested) {
                     --(*pending);
@@ -14451,6 +15016,10 @@ void NuRpcService::importRecoveryDescriptorsWithRescan(const QVector<QPair<QStri
                     }
                 }
 
+                *prepared_address_slots += import_range;
+                setRecoveryAddressScanProgress(QStringLiteral("Preparing fixed address import"),
+                                               *prepared_address_slots,
+                                               (*prepared_address_slots) + ((*pending - 1) * import_range));
                 --(*pending);
                 if (*pending > 0)
                     return;
@@ -14476,6 +15045,9 @@ void NuRpcService::importRecoveryDescriptorsWithRescan(const QVector<QPair<QStri
                             .arg(labels->size())
                             .arg(import_range),
                     -1);
+                setRecoveryAddressScanProgress(QStringLiteral("Address import prepared; Core rescan running"),
+                                               labels->size() * import_range,
+                                               labels->size() * import_range);
                 QJsonArray params;
                 params << *requests << options;
                 rpcCall(QStringLiteral("importmulti"),
@@ -14500,6 +15072,517 @@ void NuRpcService::importRecoveryDescriptorsWithRescan(const QVector<QPair<QStri
                             }
                             summarizeCompletedRecoveryImport(import_range, *labels);
                         });
+            });
+    }
+}
+
+void NuRpcService::importRecoveryDescriptorsToSqlWallet(const QVector<QPair<QString, QString>>& descriptors, int range)
+{
+    const int import_range = std::clamp(std::abs(range), 1, 1000);
+    if (descriptors.isEmpty()) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                           QStringLiteral("No recovery descriptors were available to import."));
+        return;
+    }
+
+    setRecoveryState(
+        true,
+        descriptors.size() == 1 ?
+            QStringLiteral("Preparing SQL descriptor wallet recovery...") :
+            QStringLiteral("Preparing SQL descriptor recovery across %1 methods...").arg(descriptors.size()),
+        35);
+    setRecoveryCurrentMethod(descriptors.size() == 1 ?
+                                 descriptors.first().first :
+                                 QStringLiteral("SQL descriptor import across %1 methods").arg(descriptors.size()));
+    setRecoveryAddressScanProgress(
+        QStringLiteral("Preparing SQL descriptor import"), 0, descriptors.size() * import_range);
+
+    auto pending = std::make_shared<int>(descriptors.size());
+    auto prepared_address_slots = std::make_shared<int>(0);
+    auto requests = std::make_shared<QJsonArray>();
+    auto labels = std::make_shared<QStringList>();
+    auto errors = std::make_shared<QStringList>();
+
+    for (const auto& descriptor_item : descriptors) {
+        const QString label = descriptor_item.first;
+        const QString descriptor = descriptor_item.second;
+        rpcCall(
+            QStringLiteral("getdescriptorinfo"),
+            {descriptor},
+            false,
+            [this, import_range, label, descriptor, pending, prepared_address_slots, requests, labels, errors](
+                const QJsonValue& result, const QString& descriptor_error) {
+                if (m_recovery_cancel_requested) {
+                    --(*pending);
+                    if (*pending == 0)
+                        setRecoveryState(false, QStringLiteral("Recovery canceled before SQL descriptor import."), 0);
+                    return;
+                }
+                if (!descriptor_error.isEmpty() || !result.isObject()) {
+                    errors->push_back(descriptor_error.isEmpty() ?
+                                          QStringLiteral("%1: backend did not return descriptor details").arg(label) :
+                                          QStringLiteral("%1: %2").arg(label, descriptor_error));
+                } else {
+                    const QString checksum = result.toObject().value(QStringLiteral("checksum")).toString();
+                    if (checksum.isEmpty()) {
+                        errors->push_back(
+                            QStringLiteral("%1: backend did not return a descriptor checksum").arg(label));
+                    } else {
+                        const QString checked_descriptor =
+                            descriptor.section(QLatin1Char('#'), 0, 0) + QStringLiteral("#") + checksum;
+                        QJsonObject request;
+                        request.insert(QStringLiteral("desc"), checked_descriptor);
+                        request.insert(QStringLiteral("timestamp"), 0);
+                        request.insert(QStringLiteral("active"), recoveryDescriptorShouldBeActiveSql(label));
+                        request.insert(QStringLiteral("internal"), recoveryDescriptorLikelyInternal(label));
+                        QJsonArray request_range;
+                        request_range << 0 << (import_range - 1);
+                        request.insert(QStringLiteral("range"), request_range);
+                        requests->append(request);
+                        labels->push_back(label);
+                    }
+                }
+
+                *prepared_address_slots += import_range;
+                setRecoveryAddressScanProgress(QStringLiteral("Preparing SQL descriptor import"),
+                                               *prepared_address_slots,
+                                               (*prepared_address_slots) + ((*pending - 1) * import_range));
+                --(*pending);
+                if (*pending > 0)
+                    return;
+
+                if (requests->isEmpty()) {
+                    setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                    Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                                       errors->isEmpty() ? QStringLiteral("No recovery descriptor could be prepared.") :
+                                                           errors->join(QStringLiteral("\n")));
+                    return;
+                }
+
+                setRecoveryState(
+                    true,
+                    labels->size() == 1 ?
+                        QStringLiteral("Importing a SQL recovery descriptor and rescanning the chain. This can take "
+                                       "several minutes.") :
+                        QStringLiteral("Importing %1 SQL recovery descriptors and rescanning the chain. This can take "
+                                       "several minutes.")
+                            .arg(labels->size()),
+                    -1);
+                setRecoveryAddressScanProgress(QStringLiteral("SQL descriptor import prepared; Core rescan running"),
+                                               labels->size() * import_range,
+                                               labels->size() * import_range);
+                rpcCall(QStringLiteral("importdescriptors"),
+                        {*requests},
+                        true,
+                        [this, import_range, labels](const QJsonValue& import_result, const QString& import_error) {
+                            if (m_recovery_cancel_requested) {
+                                setRecoveryState(
+                                    false,
+                                    QStringLiteral("Recovery canceled. Partial imports may remain in the new wallet."),
+                                    0);
+                                Q_EMIT userMessage(
+                                    QStringLiteral("Recovery canceled"),
+                                    QStringLiteral("The active rescan was canceled. Some descriptors may already have "
+                                                   "been imported into the new wallet."));
+                                return;
+                            }
+
+                            QString detail = import_error;
+                            if (detail.isEmpty()) {
+                                if (!import_result.isArray()) {
+                                    detail =
+                                        QStringLiteral("The backend did not return SQL descriptor import results.");
+                                } else {
+                                    const QJsonArray results = import_result.toArray();
+                                    for (const QJsonValue& value : results) {
+                                        const QJsonObject item = value.toObject();
+                                        if (item.value(QStringLiteral("success")).toBool(false))
+                                            continue;
+                                        const QJsonObject error_object = item.value(QStringLiteral("error")).toObject();
+                                        detail = error_object.value(QStringLiteral("message")).toString();
+                                        if (detail.isEmpty())
+                                            detail = QStringLiteral("SQL descriptor import failed.");
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!detail.isEmpty()) {
+                                setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                                Q_EMIT userMessage(QStringLiteral("Wallet not restored"), detail);
+                                return;
+                            }
+                            summarizeCompletedRecoveryImport(import_range, *labels);
+                        });
+            });
+    }
+}
+
+void NuRpcService::importRecoveryDescriptorsWithUtxoFilter(const QVector<QPair<QString, QString>>& descriptors,
+                                                           int range)
+{
+    struct RecoveryUtxoFilterMethod {
+        QString label;
+        QString descriptor;
+        QString checked_descriptor;
+        QStringList addresses;
+        QSet<int> funded_indices;
+        double funded_amount = 0.0;
+    };
+
+    const int import_range = std::clamp(range, 1, 1000);
+    if (descriptors.isEmpty()) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                           QStringLiteral("No recovery descriptors were available to import."));
+        return;
+    }
+
+    setRecoveryState(true,
+                     QStringLiteral("Preparing zero-balance skip scan for %1 derived addresses. This can take longer.")
+                         .arg(descriptors.size() * import_range),
+                     35);
+    setRecoveryCurrentMethod(descriptors.size() == 1 ?
+                                 descriptors.first().first :
+                                 QStringLiteral("UTXO pre-scan across %1 methods").arg(descriptors.size()));
+    const int total_address_slots = descriptors.size() * import_range;
+    setRecoveryAddressScanProgress(QStringLiteral("Deriving addresses for zero-balance check"), 0, total_address_slots);
+
+    auto states = std::make_shared<QVector<RecoveryUtxoFilterMethod>>();
+    states->resize(descriptors.size());
+    auto pending = std::make_shared<int>(descriptors.size());
+    auto derived_address_slots = std::make_shared<int>(0);
+    auto scan_objects = std::make_shared<QJsonArray>();
+    auto address_lookup = std::make_shared<QHash<QString, QVector<QPair<int, int>>>>();
+    auto errors = std::make_shared<QStringList>();
+    auto finish_preparation = std::make_shared<std::function<void()>>();
+
+    *finish_preparation = [this, import_range, states, pending, scan_objects, address_lookup, errors] {
+        --(*pending);
+        if (*pending > 0)
+            return;
+
+        if (m_recovery_cancel_requested) {
+            setRecoveryState(false, QStringLiteral("Recovery canceled before UTXO scan."), 0);
+            return;
+        }
+
+        if (scan_objects->isEmpty()) {
+            setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+            Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                               errors->isEmpty() ? QStringLiteral("No recovery addresses could be derived.") :
+                                                   errors->join(QStringLiteral("\n")));
+            return;
+        }
+
+        const int checked_address_count = scan_objects->size();
+        auto mark_funded_address = [states, address_lookup](
+                                       const QString& address, double amount, QString* recent_hit) {
+            const auto found = address_lookup->constFind(address);
+            if (found == address_lookup->constEnd())
+                return false;
+            bool matched = false;
+            for (const QPair<int, int>& match : found.value()) {
+                const int state_index = match.first;
+                const int derived_index = match.second;
+                if (state_index < 0 || state_index >= states->size())
+                    continue;
+                RecoveryUtxoFilterMethod& state = (*states)[state_index];
+                state.funded_indices.insert(derived_index);
+                state.funded_amount += amount;
+                if (recent_hit) {
+                    *recent_hit = QStringLiteral("%1 index %2 has a current UTXO of %3 DFC")
+                                      .arg(address)
+                                      .arg(derived_index)
+                                      .arg(QString::number(amount, 'f', 8));
+                }
+                matched = true;
+            }
+            return matched;
+        };
+
+        auto import_funded_addresses = [this, import_range, checked_address_count, states, errors](
+                                           double total_found_amount,
+                                           const QString& recent_hit,
+                                           const QString& lookup_source) {
+            auto requests = std::make_shared<QJsonArray>();
+            auto imported_labels = std::make_shared<QStringList>();
+            int imported_address_count = 0;
+            for (const RecoveryUtxoFilterMethod& state : *states) {
+                if (state.checked_descriptor.isEmpty() || state.funded_indices.isEmpty())
+                    continue;
+
+                QList<int> sorted_indexes = state.funded_indices.values();
+                std::sort(sorted_indexes.begin(), sorted_indexes.end());
+                imported_address_count += sorted_indexes.size();
+                if (!imported_labels->contains(state.label))
+                    imported_labels->push_back(state.label);
+
+                int range_start = sorted_indexes.first();
+                int range_end = range_start;
+                auto append_request = [&requests, &state, &range_start, &range_end] {
+                    QJsonObject request;
+                    request.insert(QStringLiteral("desc"), state.checked_descriptor);
+                    request.insert(QStringLiteral("timestamp"), 0);
+                    request.insert(QStringLiteral("label"), state.label);
+                    QJsonArray request_range;
+                    request_range << range_start << range_end;
+                    request.insert(QStringLiteral("range"), request_range);
+                    requests->append(request);
+                };
+
+                for (int i = 1; i < sorted_indexes.size(); ++i) {
+                    const int current = sorted_indexes.at(i);
+                    if (current == range_end + 1) {
+                        range_end = current;
+                        continue;
+                    }
+                    append_request();
+                    range_start = current;
+                    range_end = current;
+                }
+                append_request();
+            }
+
+            if (requests->isEmpty()) {
+                setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                QString message =
+                    QStringLiteral("Skip zero-balance checked %1 derived addresses using %2 and found no current "
+                                   "unspent Defcoin balance. The new wallet was created, but no addresses were "
+                                   "imported. Turn off the option to restore the full fixed range or recover "
+                                   "addresses that only have fully spent historical activity.")
+                        .arg(checked_address_count)
+                        .arg(lookup_source);
+                if (!errors->isEmpty()) {
+                    message += QStringLiteral("\n\nPreparation details:\n%1").arg(errors->join(QStringLiteral("\n")));
+                }
+                Q_EMIT userMessage(QStringLiteral("Wallet not restored"), message);
+                return;
+            }
+
+            m_recovery_found_amount = QStringLiteral("%1 DFC current UTXO value found via %2 before import")
+                                          .arg(QString::number(total_found_amount, 'f', 8), lookup_source);
+            m_recovery_found_address_count = imported_address_count;
+            m_recovery_recent_found_address = recent_hit;
+            m_recovery_detected_method =
+                imported_labels->size() == 1 ?
+                    imported_labels->first() :
+                    QStringLiteral("%1 methods with current UTXOs").arg(imported_labels->size());
+            Q_EMIT recoveryChanged();
+
+            QJsonObject options;
+            options.insert(QStringLiteral("rescan"), true);
+            QJsonArray import_params;
+            import_params << *requests << options;
+            setRecoveryState(true,
+                             QStringLiteral("Importing %1 currently funded derived addresses and rescanning. Empty "
+                                            "derived addresses are being left out of this wallet.")
+                                 .arg(imported_address_count),
+                             -1);
+            setRecoveryAddressScanProgress(QStringLiteral("Funded address import prepared; Core rescan running"),
+                                           imported_address_count,
+                                           imported_address_count);
+            rpcCall(QStringLiteral("importmulti"),
+                    import_params,
+                    true,
+                    [this, import_range, imported_labels, imported_address_count](const QJsonValue&,
+                                                                                  const QString& import_error) {
+                        if (m_recovery_cancel_requested) {
+                            setRecoveryState(
+                                false,
+                                QStringLiteral("Recovery canceled. Partial imports may remain in the new wallet."),
+                                0);
+                            Q_EMIT userMessage(
+                                QStringLiteral("Recovery canceled"),
+                                QStringLiteral("The active rescan was canceled. Some funded derived addresses may "
+                                               "already have been imported into the new wallet."));
+                            return;
+                        }
+                        if (!import_error.isEmpty()) {
+                            setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                            Q_EMIT userMessage(QStringLiteral("Wallet not restored"), import_error);
+                            return;
+                        }
+                        summarizeCompletedRecoveryImport(import_range, *imported_labels, true, imported_address_count);
+                    });
+        };
+
+        QHash<QString, qint64> explorer_balances;
+        QString explorer_detail;
+        setRecoveryCurrentMethod(QStringLiteral("Checking current balances with Nu Explore index."));
+        setRecoveryState(true,
+                         QStringLiteral("Checking %1 derived addresses for current spendable coins before import.")
+                             .arg(checked_address_count),
+                         -1);
+        if (queryRecoveryAddressesFromExplorerIndex(address_lookup->keys(), &explorer_balances, &explorer_detail)) {
+            double total_found_amount = 0.0;
+            QString recent_hit = QStringLiteral("No current unspent outputs found yet.");
+            for (auto it = explorer_balances.constBegin(); it != explorer_balances.constEnd(); ++it) {
+                const double amount = static_cast<double>(it.value()) / 100000000.0;
+                if (mark_funded_address(it.key(), amount, &recent_hit))
+                    total_found_amount += amount;
+            }
+            setRecoveryAddressScanProgress(
+                QStringLiteral("Nu Explore index lookup complete"), checked_address_count, checked_address_count);
+            import_funded_addresses(total_found_amount, recent_hit, QStringLiteral("Nu Explore index"));
+            return;
+        }
+
+        if (!explorer_detail.isEmpty()) {
+            setRecoveryAddressScanProgress(
+                QStringLiteral("%1 Falling back to Core UTXO scan.").arg(explorer_detail), 0, checked_address_count);
+        }
+        setRecoveryCurrentMethod(QStringLiteral("Checking current UTXO set before import."));
+        setRecoveryState(true,
+                         QStringLiteral("Checking %1 derived addresses with Core before import. This can take several "
+                                        "minutes.")
+                             .arg(checked_address_count),
+                         -1);
+
+        QJsonArray scan_params;
+        scan_params << QStringLiteral("start") << *scan_objects;
+        rpcCall(
+            QStringLiteral("scantxoutset"),
+            scan_params,
+            false,
+            [this, mark_funded_address, import_funded_addresses](const QJsonValue& result, const QString& scan_error) {
+                if (m_recovery_cancel_requested) {
+                    setRecoveryState(false, QStringLiteral("Recovery canceled before import."), 0);
+                    return;
+                }
+
+                if (!scan_error.isEmpty() || !result.isObject()) {
+                    setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                    Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                                       scan_error.isEmpty() ?
+                                           QStringLiteral("The backend did not return UTXO scan results.") :
+                                           scan_error);
+                    return;
+                }
+
+                const QJsonObject scan_result = result.toObject();
+                if (!scan_result.value(QStringLiteral("success")).toBool(true)) {
+                    setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                    Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                                       QStringLiteral("The backend UTXO scan did not complete successfully."));
+                    return;
+                }
+
+                double total_found_amount = 0.0;
+                QString recent_hit = QStringLiteral("No current unspent outputs found yet.");
+                const QJsonArray unspents = scan_result.value(QStringLiteral("unspents")).toArray();
+                for (const QJsonValue& value : unspents) {
+                    const QJsonObject unspent = value.toObject();
+                    QString address = unspent.value(QStringLiteral("address")).toString().trimmed();
+                    if (address.isEmpty()) {
+                        address = addressFromScantxoutsetDescriptor(
+                            unspent.value(QStringLiteral("desc")).toString().trimmed());
+                    }
+                    if (address.isEmpty())
+                        continue;
+                    const double amount = unspent.value(QStringLiteral("amount")).toDouble();
+                    if (mark_funded_address(address, amount, &recent_hit))
+                        total_found_amount += amount;
+                }
+                import_funded_addresses(total_found_amount, recent_hit, QStringLiteral("Core UTXO set"));
+            });
+    };
+
+    for (int descriptor_index = 0; descriptor_index < descriptors.size(); ++descriptor_index) {
+        const QString label = descriptors.at(descriptor_index).first;
+        const QString descriptor = descriptors.at(descriptor_index).second;
+        (*states)[descriptor_index].label = label;
+        (*states)[descriptor_index].descriptor = descriptor;
+        rpcCall(
+            QStringLiteral("getdescriptorinfo"),
+            {descriptor},
+            false,
+            [this,
+             import_range,
+             descriptor_index,
+             label,
+             descriptor,
+             total_address_slots,
+             states,
+             derived_address_slots,
+             scan_objects,
+             address_lookup,
+             errors,
+             finish_preparation](const QJsonValue& result, const QString& descriptor_error) {
+                if (m_recovery_cancel_requested) {
+                    (*finish_preparation)();
+                    return;
+                }
+
+                if (!descriptor_error.isEmpty() || !result.isObject()) {
+                    errors->push_back(descriptor_error.isEmpty() ?
+                                          QStringLiteral("%1: backend did not return descriptor details").arg(label) :
+                                          QStringLiteral("%1: %2").arg(label, descriptor_error));
+                    (*finish_preparation)();
+                    return;
+                }
+
+                const QString checksum = result.toObject().value(QStringLiteral("checksum")).toString();
+                if (checksum.isEmpty()) {
+                    errors->push_back(QStringLiteral("%1: backend did not return a descriptor checksum").arg(label));
+                    (*finish_preparation)();
+                    return;
+                }
+
+                const QString checked_descriptor =
+                    descriptor.section(QLatin1Char('#'), 0, 0) + QStringLiteral("#") + checksum;
+                (*states)[descriptor_index].checked_descriptor = checked_descriptor;
+
+                QJsonArray range_param;
+                range_param << 0 << (import_range - 1);
+                rpcCall(
+                    QStringLiteral("deriveaddresses"),
+                    {checked_descriptor, range_param},
+                    false,
+                    [this,
+                     descriptor_index,
+                     label,
+                     import_range,
+                     total_address_slots,
+                     states,
+                     derived_address_slots,
+                     scan_objects,
+                     address_lookup,
+                     errors,
+                     finish_preparation](const QJsonValue& result, const QString& derive_error) {
+                        if (m_recovery_cancel_requested) {
+                            (*finish_preparation)();
+                            return;
+                        }
+
+                        if (!derive_error.isEmpty() || !result.isArray()) {
+                            errors->push_back(derive_error.isEmpty() ?
+                                                  QStringLiteral("%1: backend did not derive addresses").arg(label) :
+                                                  QStringLiteral("%1: %2").arg(label, derive_error));
+                            (*finish_preparation)();
+                            return;
+                        }
+
+                        int derived_index = 0;
+                        for (const QJsonValue& address_value : result.toArray()) {
+                            const QString address = address_value.toString().trimmed();
+                            if (address.isEmpty()) {
+                                ++derived_index;
+                                continue;
+                            }
+                            (*states)[descriptor_index].addresses.push_back(address);
+                            QVector<QPair<int, int>>& matches = (*address_lookup)[address];
+                            if (matches.isEmpty())
+                                scan_objects->append(QStringLiteral("addr(%1)").arg(address));
+                            matches.push_back(qMakePair(descriptor_index, derived_index));
+                            ++derived_index;
+                        }
+                        *derived_address_slots += import_range;
+                        setRecoveryAddressScanProgress(QStringLiteral("Deriving addresses for zero-balance check"),
+                                                       *derived_address_slots,
+                                                       total_address_slots);
+                        (*finish_preparation)();
+                    });
             });
     }
 }
@@ -14836,7 +15919,10 @@ void NuRpcService::importRecoveryDescriptorsUntilEmpty(const QVector<QPair<QStri
     }
 }
 
-void NuRpcService::summarizeCompletedRecoveryImport(int import_range, const QStringList& tried_methods)
+void NuRpcService::summarizeCompletedRecoveryImport(int import_range,
+                                                    const QStringList& tried_methods,
+                                                    bool skipped_zero_balance,
+                                                    int imported_address_count)
 {
     setRecoveryState(
         true, QStringLiteral("Rescan complete. Checking recovered wallet balance and matching addresses..."), 92);
@@ -14845,7 +15931,8 @@ void NuRpcService::summarizeCompletedRecoveryImport(int import_range, const QStr
         QStringLiteral("listreceivedbyaddress"),
         {0, true, true},
         true,
-        [this, import_range, tried_methods](const QJsonValue& received_result, const QString&) {
+        [this, import_range, tried_methods, skipped_zero_balance, imported_address_count](
+            const QJsonValue& received_result, const QString&) {
             int funded_addresses = 0;
             double total_received = 0.0;
             QString recent_hit = QStringLiteral("No received coins found in the imported range.");
@@ -14887,49 +15974,79 @@ void NuRpcService::summarizeCompletedRecoveryImport(int import_range, const QStr
                         QStringLiteral("No received coins found in the %1 methods tried.").arg(tried_methods.size());
             }
 
-            rpcCall(QStringLiteral("getwalletinfo"),
-                    {},
-                    true,
-                    [this, import_range, funded_addresses, total_received, recent_hit, detected_method](
-                        const QJsonValue& wallet_result, const QString&) {
-                        QString balance_text = QStringLiteral("No spendable balance found yet.");
-                        if (wallet_result.isObject()) {
-                            const QJsonObject wallet = wallet_result.toObject();
-                            const double available = wallet.value(QStringLiteral("balance")).toDouble();
-                            const double pending = wallet.value(QStringLiteral("unconfirmed_balance")).toDouble();
-                            const double immature = wallet.value(QStringLiteral("immature_balance")).toDouble();
-                            const double total = available + pending + immature;
-                            balance_text = QStringLiteral("%1 DFC").arg(QString::number(total, 'f', 8));
-                            if (pending > 0.0 || immature > 0.0) {
-                                balance_text += QStringLiteral(" (%1 available, %2 pending, %3 immature)")
-                                                    .arg(QString::number(available, 'f', 8),
-                                                         QString::number(pending, 'f', 8),
-                                                         QString::number(immature, 'f', 8));
-                            }
-                        } else if (total_received > 0.0) {
-                            balance_text = QStringLiteral("%1 DFC received on imported addresses")
-                                               .arg(QString::number(total_received, 'f', 8));
+            rpcCall(
+                QStringLiteral("getwalletinfo"),
+                {},
+                true,
+                [this,
+                 import_range,
+                 funded_addresses,
+                 total_received,
+                 recent_hit,
+                 detected_method,
+                 skipped_zero_balance,
+                 imported_address_count](const QJsonValue& wallet_result, const QString&) {
+                    QString balance_text = QStringLiteral("No spendable balance found yet.");
+                    if (wallet_result.isObject()) {
+                        const QJsonObject wallet = wallet_result.toObject();
+                        const double available = wallet.value(QStringLiteral("balance")).toDouble();
+                        const double pending = wallet.value(QStringLiteral("unconfirmed_balance")).toDouble();
+                        const double immature = wallet.value(QStringLiteral("immature_balance")).toDouble();
+                        const double total = available + pending + immature;
+                        balance_text = QStringLiteral("%1 DFC").arg(QString::number(total, 'f', 8));
+                        if (pending > 0.0 || immature > 0.0) {
+                            balance_text += QStringLiteral(" (%1 available, %2 pending, %3 immature)")
+                                                .arg(QString::number(available, 'f', 8),
+                                                     QString::number(pending, 'f', 8),
+                                                     QString::number(immature, 'f', 8));
                         }
+                    } else if (total_received > 0.0) {
+                        balance_text = QStringLiteral("%1 DFC received on imported addresses")
+                                           .arg(QString::number(total_received, 'f', 8));
+                    }
 
-                        m_recovery_found_amount = balance_text;
-                        m_recovery_found_address_count = funded_addresses;
-                        m_recovery_recent_found_address = recent_hit;
-                        m_recovery_detected_method = detected_method;
-                        refresh();
+                    m_recovery_found_amount = balance_text;
+                    m_recovery_found_address_count = funded_addresses;
+                    m_recovery_recent_found_address = recent_hit;
+                    m_recovery_detected_method = detected_method;
+                    refresh();
+                    const int reported_import_count =
+                        imported_address_count >= 0 ? imported_address_count : funded_addresses;
+                    if (skipped_zero_balance) {
                         setRecoveryState(false,
-                                         QStringLiteral("Recovery complete. Imported up to %1 addresses per method and "
-                                                        "completed the chain rescan. No extra rescan action is needed.")
+                                         QStringLiteral("Recovery complete. Checked up to %1 addresses per method, "
+                                                        "imported %2 currently funded derived addresses, and "
+                                                        "completed the chain rescan.")
+                                             .arg(import_range)
+                                             .arg(reported_import_count),
+                                         100);
+                        Q_EMIT userMessage(
+                            QStringLiteral("Wallet restored"),
+                            QStringLiteral(
+                                "The wallet was created, up to %1 external recovery addresses were checked per "
+                                "method, %2 currently funded derived addresses were imported, and the chain rescan "
+                                "completed. Addresses with zero current balance were left out. Detected method: %3.")
+                                .arg(import_range)
+                                .arg(reported_import_count)
+                                .arg(detected_method));
+                    } else {
+                        setRecoveryState(false,
+                                         QStringLiteral("Recovery complete. Imported up to %1 addresses per method "
+                                                        "and completed the chain rescan. No extra rescan action is "
+                                                        "needed.")
                                              .arg(import_range),
                                          100);
                         Q_EMIT userMessage(
                             QStringLiteral("Wallet restored"),
                             QStringLiteral(
                                 "The wallet was created, up to %1 external recovery addresses were imported per "
-                                "method, and the chain rescan completed. Detected method: %2. No extra recovery action "
-                                "is required; review the wallet balance, Transactions, and Wallet > Addresses.")
+                                "method, and the chain rescan completed. Detected method: %2. No extra recovery "
+                                "action is required; review the wallet balance, Transactions, and Wallet > "
+                                "Addresses.")
                                 .arg(import_range)
                                 .arg(detected_method));
-                    });
+                    }
+                });
         });
 }
 
@@ -15764,6 +16881,34 @@ QString NuRpcService::explorerAddressUrlTemplate(const QString& url) const
     out.replace(QStringLiteral("/tx/%s"), QStringLiteral("/address/%s"), Qt::CaseInsensitive);
     out.replace(QStringLiteral("/transaction/%s"), QStringLiteral("/address/%s"), Qt::CaseInsensitive);
     return out;
+}
+
+QString NuRpcService::recoveryExploreLookupSuggestion() const
+{
+#if DEFCOIN_NU_EXPLORE_APP
+    return QString();
+#else
+    const QFileInfo db_info(explorerDatabasePath());
+    if (!db_info.exists()) {
+        return QStringLiteral("Nu can use Nu Explore's local index for faster zero-balance address checks. Open Nu "
+                              "Explore first and let it finish indexing before restore starts.");
+    }
+
+    int indexed = -1;
+    int tip = -1;
+    QString detail;
+    const bool ready = explorerIndexReadyForRecovery(&indexed, &tip, &detail);
+    if (ready) {
+        return QStringLiteral("Nu will use the current Nu Explore index for faster zero-balance address checks.");
+    }
+    if (indexed >= 0 && tip > 0) {
+        return QStringLiteral("Nu Explore can speed up zero-balance checks, but its index is at block %1 of %2. Open "
+                              "Nu Explore and let indexing finish before starting restore.")
+            .arg(QString::number(indexed), QString::number(tip));
+    }
+    return QStringLiteral("Nu Explore can speed up zero-balance checks once its local index is built and current. Open "
+                          "Nu Explore before starting restore.");
+#endif
 }
 
 QString NuRpcService::explorerDatabasePath() const
@@ -22443,6 +23588,26 @@ void NuRpcService::openExplorerLink(const QString& link)
     }
 }
 
+void NuRpcService::openNuExplore()
+{
+#if DEFCOIN_NU_EXPLORE_APP
+    Q_EMIT userMessage(QStringLiteral("Nu Explore is open"),
+                       QStringLiteral("This window is already the Defcoin Core Nu Explore app."));
+#else
+    if (launchExploreApp()) {
+        Q_EMIT userMessage(
+            QStringLiteral("Nu Explore opened"),
+            QStringLiteral("Let Nu Explore finish indexing before starting recovery for the fastest zero-balance "
+                           "address checks."));
+        return;
+    }
+    Q_EMIT userMessage(
+        QStringLiteral("Nu Explore not found"),
+        QStringLiteral("Nu could not launch the Defcoin Core Nu Explore app. Open it manually if it is installed; "
+                       "otherwise recovery will fall back to the slower Core UTXO scan."));
+#endif
+}
+
 void NuRpcService::copyText(const QString& text)
 {
     if (looksLikeRecoveryPhraseText(text)) {
@@ -22533,34 +23698,35 @@ void NuRpcService::createWallet(const QString& name,
                                 bool descriptor_sql)
 {
     const QString wallet_name = name.trimmed();
+    const auto fail_create = [this](const QString& message) {
+        Q_EMIT walletWorkflowFinished(QStringLiteral("createWallet"), false);
+        Q_EMIT userMessage(QStringLiteral("Wallet not created"), message);
+    };
     if (wallet_name.size() > 128) {
-        Q_EMIT userMessage(
-            QStringLiteral("Wallet not created"),
+        fail_create(
             QStringLiteral("Wallet names can be up to 128 characters. Shorten this name before creating the wallet."));
         return;
     }
     if (!isLikelyCreatableWalletMenuName(wallet_name)) {
-        Q_EMIT userMessage(QStringLiteral("Wallet not created"),
-                           QStringLiteral("Enter a wallet directory name without slashes, colons, control characters, "
-                                          "path segments, backup suffixes, or copy labels."));
+        fail_create(QStringLiteral("Enter a wallet directory name without slashes, colons, control characters, "
+                                   "path segments, backup suffixes, or copy labels."));
         return;
     }
     const QString clean_passphrase = passphrase;
     if (encrypt && clean_passphrase.size() < 8) {
-        Q_EMIT userMessage(
-            QStringLiteral("Wallet not created"),
-            QStringLiteral(
-                "Enter a wallet encryption passphrase of at least 8 characters, or turn off Encrypt Wallet."));
+        fail_create(QStringLiteral(
+            "Enter a wallet encryption passphrase of at least 8 characters, or turn off Encrypt Wallet."));
         return;
     }
     if (disable_private_keys && encrypt) {
-        Q_EMIT userMessage(QStringLiteral("Wallet not created"),
-                           QStringLiteral("A watch-only wallet with private keys disabled cannot be encrypted because "
-                                          "it will not contain private keys."));
+        fail_create(QStringLiteral("A watch-only wallet with private keys disabled cannot be encrypted because "
+                                   "it will not contain private keys."));
         return;
     }
-    if (encrypt && !requireLocalRpcConnection(QStringLiteral("Wallet not created")))
+    if (encrypt && !requireLocalRpcConnection(QStringLiteral("Wallet not created"))) {
+        Q_EMIT walletWorkflowFinished(QStringLiteral("createWallet"), false);
         return;
+    }
 
     QJsonArray params;
     params << wallet_name << disable_private_keys << blank << (encrypt ? QJsonValue(clean_passphrase) : QJsonValue())
@@ -22574,6 +23740,7 @@ void NuRpcService::createWallet(const QString& name,
                     setCurrentWalletInternal(wallet_name);
                     refresh();
                 }
+                Q_EMIT walletWorkflowFinished(QStringLiteral("createWallet"), error.isEmpty());
                 Q_EMIT userMessage(
                     error.isEmpty() ? QStringLiteral("Wallet created") : QStringLiteral("Wallet not created"),
                     error.isEmpty() ?
@@ -22589,8 +23756,146 @@ void NuRpcService::createWalletWithRecoveryPhrase(const QString& wallet_name,
                                                   bool encrypt,
                                                   const QString& passphrase)
 {
-    restoreWalletFromRecoveryPhrase(
-        wallet_name, phrase, QStringLiteral("core"), QString(), QStringLiteral("current"), 0, encrypt, passphrase);
+    const auto fail_create = [this](const QString& message) {
+        Q_EMIT walletWorkflowFinished(QStringLiteral("createWallet"), false);
+        Q_EMIT userMessage(QStringLiteral("Wallet not created"), message);
+    };
+    if (!requireLocalRecoveryRpc(QStringLiteral("Wallet not created"))) {
+        Q_EMIT walletWorkflowFinished(QStringLiteral("createWallet"), false);
+        return;
+    }
+
+    const QString clean_wallet_name = wallet_name.trimmed();
+    if (clean_wallet_name.size() > 128) {
+        fail_create(
+            QStringLiteral("Wallet names can be up to 128 characters. Shorten this name before creating the wallet."));
+        return;
+    }
+    if (!isLikelyCreatableWalletMenuName(clean_wallet_name)) {
+        fail_create(QStringLiteral("Enter a wallet directory name without slashes, colons, control characters, "
+                                   "path segments, backup suffixes, or copy labels."));
+        return;
+    }
+    if (m_available_wallets.contains(clean_wallet_name) || m_loaded_wallets.contains(clean_wallet_name)) {
+        fail_create(QStringLiteral("A wallet with this name already exists. Choose a different wallet name."));
+        return;
+    }
+    if (encrypt && passphrase.size() < 8) {
+        fail_create(QStringLiteral(
+            "Enter a wallet encryption passphrase of at least 8 characters, or turn off Encrypt Wallet."));
+        return;
+    }
+
+    QString normalized_phrase;
+    QString error;
+    if (!validateMnemonic(phrase, &normalized_phrase, &error)) {
+        fail_create(error);
+        return;
+    }
+    QString wif;
+    if (!mnemonicMaterial(normalized_phrase, QStringLiteral("current"), &wif, nullptr, &error)) {
+        fail_create(error);
+        return;
+    }
+
+    QJsonArray create_params;
+    create_params << clean_wallet_name << false << true << (encrypt ? QJsonValue(passphrase) : QJsonValue()) << false
+                  << false << true;
+
+    rpcCall(
+        QStringLiteral("createwallet"),
+        create_params,
+        false,
+        [this, clean_wallet_name, wif, encrypt, passphrase, fail_create](const QJsonValue&,
+                                                                         const QString& create_error) {
+            if (!create_error.isEmpty()) {
+                fail_create(create_error);
+                return;
+            }
+
+            const auto finish_success = [this, clean_wallet_name]() {
+                setCurrentWalletInternal(clean_wallet_name);
+                refresh();
+                Q_EMIT walletWorkflowFinished(QStringLiteral("createWallet"), true);
+                Q_EMIT userMessage(
+                    QStringLiteral("Wallet created"),
+                    QStringLiteral("The BDB legacy wallet was created from a BIP39 recovery phrase, loaded, and "
+                                   "prepared with a fresh keypool. Keep the recovery words offline."));
+            };
+
+            const auto lock_if_needed = [this, encrypt, finish_success]() {
+                if (!encrypt) {
+                    finish_success();
+                    return;
+                }
+                rpcCall(
+                    QStringLiteral("walletlock"),
+                    {},
+                    true,
+                    [this, finish_success](const QJsonValue&, const QString& lock_error) {
+                        if (!lock_error.isEmpty() &&
+                            !lock_error.contains(QStringLiteral("unencrypted wallet"), Qt::CaseInsensitive)) {
+                            appendLaunchDiagnostic(
+                                QStringLiteral("Recovery wallet create lock: walletlock returned: %1").arg(lock_error));
+                        }
+                        finish_success();
+                    });
+            };
+
+            const auto set_seed_and_refill = [this, clean_wallet_name, wif, lock_if_needed, fail_create]() {
+                setCurrentWalletInternal(clean_wallet_name);
+                rpcCall(QStringLiteral("sethdseed"),
+                        {true, wif},
+                        true,
+                        [this, lock_if_needed, fail_create](const QJsonValue&, const QString& seed_error) {
+                            if (!seed_error.isEmpty()) {
+                                fail_create(seed_error);
+                                return;
+                            }
+
+                            QJsonArray refill_params;
+                            refill_params << SEND_KEYPOOL_REFILL_SIZE;
+                            rpcCall(
+                                QStringLiteral("keypoolrefill"),
+                                refill_params,
+                                true,
+                                [this, lock_if_needed, fail_create](const QJsonValue&, const QString& refill_error) {
+                                    if (!refill_error.isEmpty()) {
+                                        fail_create(refill_error);
+                                        return;
+                                    }
+                                    lock_if_needed();
+                                });
+                        });
+            };
+
+            rpcCall(QStringLiteral("loadwallet"),
+                    {clean_wallet_name, true},
+                    false,
+                    [this, clean_wallet_name, encrypt, passphrase, set_seed_and_refill, fail_create](
+                        const QJsonValue&, const QString& load_error) {
+                        if (!load_error.isEmpty() &&
+                            !load_error.contains(QStringLiteral("already loaded"), Qt::CaseInsensitive)) {
+                            fail_create(load_error);
+                            return;
+                        }
+                        setCurrentWalletInternal(clean_wallet_name);
+                        if (!encrypt) {
+                            set_seed_and_refill();
+                            return;
+                        }
+                        rpcCall(QStringLiteral("walletpassphrase"),
+                                {passphrase, 86400},
+                                true,
+                                [set_seed_and_refill, fail_create](const QJsonValue&, const QString& unlock_error) {
+                                    if (!unlock_error.isEmpty()) {
+                                        fail_create(unlock_error);
+                                        return;
+                                    }
+                                    set_seed_and_refill();
+                                });
+                    });
+        });
 }
 
 void NuRpcService::previewRecoveryPhraseAddresses(const QString& phrase,
@@ -22716,7 +24021,9 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
                                                    const QString& wif_mode,
                                                    int range,
                                                    bool encrypt,
-                                                   const QString& passphrase)
+                                                   const QString& passphrase,
+                                                   bool skip_zero_balance_addresses,
+                                                   bool descriptor_sql_wallet)
 {
     if (!requireLocalRecoveryRpc(QStringLiteral("Wallet not restored")))
         return;
@@ -22753,7 +24060,25 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
     const bool auto_mode = mode.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0;
     const bool external_mode = mode.compare(QStringLiteral("external"), Qt::CaseInsensitive) == 0;
     const bool descriptor_scan_mode = auto_mode || external_mode;
+    const bool descriptor_import_mode = descriptor_scan_mode || descriptor_sql_wallet;
     const bool gap_scan_mode = descriptor_scan_mode && range < 0;
+    if (descriptor_sql_wallet && skip_zero_balance_addresses) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                           QStringLiteral("Skip addresses that have a zero balance is only available for legacy "
+                                          "fixed-range imports. SQL descriptor recovery imports ranged descriptors."));
+        return;
+    }
+    if (skip_zero_balance_addresses && (!descriptor_scan_mode || gap_scan_mode)) {
+        setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+        Q_EMIT userMessage(
+            QStringLiteral("Wallet not restored"),
+            QStringLiteral(
+                "Skip addresses that have a zero balance is available only for fixed auto or external "
+                "recovery scans. Choose a fixed scan count first; auto-until-empty imports batches before it "
+                "can observe address activity."));
+        return;
+    }
     setRecoveryState(true,
                      auto_mode ? QStringLiteral("Validating recovery phrase for auto scan...") :
                                  (external_mode ? QStringLiteral("Validating external recovery phrase...") :
@@ -22765,8 +24090,8 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
     const QString effective_wif_mode = external_mode ? wif_mode : QStringLiteral("current");
     if (!mnemonicMaterial(phrase,
                           effective_wif_mode,
-                          descriptor_scan_mode ? nullptr : &wif,
-                          descriptor_scan_mode ? &xprv : nullptr,
+                          descriptor_import_mode ? nullptr : &wif,
+                          descriptor_import_mode ? &xprv : nullptr,
                           &error)) {
         setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
         Q_EMIT userMessage(QStringLiteral("Wallet not restored"), error);
@@ -22774,10 +24099,11 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
     }
 
     QVector<QPair<QString, QString>> descriptors;
-    if (descriptor_scan_mode) {
+    if (descriptor_import_mode) {
         setRecoveryState(true,
                          auto_mode ? QStringLiteral("Preparing common recovery descriptors...") :
-                                     QStringLiteral("Preparing external recovery descriptor..."),
+                                     (external_mode ? QStringLiteral("Preparing external recovery descriptor...") :
+                                                      QStringLiteral("Preparing Nu/Core HD recovery descriptors...")),
                          15);
         QVector<QPair<QString, QString>> path_labels;
         if (auto_mode) {
@@ -22793,11 +24119,22 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
                 {QStringLiteral("Litecoin-family BIP44 external m/44'/2'/0'/0/*"), QStringLiteral("m/44'/2'/0'/0/*")},
                 {QStringLiteral("Litecoin-family BIP44 change m/44'/2'/0'/1/*"), QStringLiteral("m/44'/2'/0'/1/*")},
                 {QStringLiteral("Legacy BIP32 external chain m/0/*"), QStringLiteral("m/0/*")}};
-        } else {
+        } else if (external_mode) {
             path_labels = {{QStringLiteral("Manual external scan %1")
                                 .arg(derivation_path.trimmed().isEmpty() ? QStringLiteral("m/44'/1337'/0'/0/*") :
                                                                            derivation_path.trimmed()),
                             derivation_path}};
+            if (descriptor_sql_wallet) {
+                const QString effective_path = derivation_path.trimmed().isEmpty() ?
+                                                   QStringLiteral("m/44'/1337'/0'/0/*") :
+                                                   derivation_path.trimmed();
+                const QString change_path = inferredRecoveryChangePath(effective_path);
+                if (!change_path.isEmpty())
+                    path_labels.push_back({QStringLiteral("Manual inferred change %1").arg(change_path), change_path});
+            }
+        } else {
+            path_labels = {{QStringLiteral("Nu/Core HD external m/0'/0'/*'"), QStringLiteral("m/0'/0'/*'")},
+                           {QStringLiteral("Nu/Core HD change m/0'/1'/*'"), QStringLiteral("m/0'/1'/*'")}};
         }
 
         for (const auto& item : path_labels) {
@@ -22821,15 +24158,28 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
 
     QJsonArray create_params;
     create_params << clean_wallet_name << false << true << (encrypt ? QJsonValue(passphrase) : QJsonValue()) << false
-                  << false << true;
+                  << descriptor_sql_wallet << true;
 
-    setRecoveryState(true, QStringLiteral("Creating recovery wallet..."), 25);
+    setRecoveryState(true,
+                     descriptor_sql_wallet ? QStringLiteral("Creating SQL descriptor recovery wallet...") :
+                                             QStringLiteral("Creating recovery wallet..."),
+                     25);
     rpcCall(
         QStringLiteral("createwallet"),
         create_params,
         false,
-        [this, clean_wallet_name, wif, descriptors, descriptor_scan_mode, gap_scan_mode, range, encrypt, passphrase](
-            const QJsonValue&, const QString& error) {
+        [this,
+         clean_wallet_name,
+         wif,
+         descriptors,
+         descriptor_scan_mode,
+         descriptor_import_mode,
+         descriptor_sql_wallet,
+         gap_scan_mode,
+         range,
+         encrypt,
+         passphrase,
+         skip_zero_balance_addresses](const QJsonValue&, const QString& error) {
             if (!error.isEmpty()) {
                 setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
                 Q_EMIT userMessage(QStringLiteral("Wallet not restored"), error);
@@ -22837,36 +24187,93 @@ void NuRpcService::restoreWalletFromRecoveryPhrase(const QString& wallet_name,
             }
             m_recovery_lock_after_restore = encrypt;
 
-            const auto continue_restore =
-                [this, clean_wallet_name, wif, descriptors, descriptor_scan_mode, gap_scan_mode, range]() {
-                    setCurrentWalletInternal(clean_wallet_name);
-                    if (!descriptor_scan_mode) {
-                        setRecoveryState(true, QStringLiteral("Setting wallet HD seed from recovery phrase..."), 55);
-                        rpcCall(QStringLiteral("sethdseed"),
-                                {true, wif},
+            const auto continue_restore = [this,
+                                           clean_wallet_name,
+                                           wif,
+                                           descriptors,
+                                           descriptor_scan_mode,
+                                           descriptor_import_mode,
+                                           descriptor_sql_wallet,
+                                           gap_scan_mode,
+                                           range,
+                                           skip_zero_balance_addresses]() {
+                setCurrentWalletInternal(clean_wallet_name);
+                if (!descriptor_import_mode) {
+                    setRecoveryState(true, QStringLiteral("Setting wallet HD seed from recovery phrase..."), 55);
+                    rpcCall(
+                        QStringLiteral("sethdseed"),
+                        {true, wif},
+                        true,
+                        [this, clean_wallet_name](const QJsonValue&, const QString& seed_error) {
+                            if (!seed_error.isEmpty()) {
+                                setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                                Q_EMIT userMessage(QStringLiteral("Wallet not restored"), seed_error);
+                                return;
+                            }
+
+                            QJsonArray refill_params;
+                            refill_params << SEND_KEYPOOL_REFILL_SIZE;
+                            setRecoveryState(true, QStringLiteral("Refilling recovered HD wallet keypool..."), 65);
+                            rpcCall(
+                                QStringLiteral("keypoolrefill"),
+                                refill_params,
                                 true,
-                                [this, clean_wallet_name](const QJsonValue&, const QString& seed_error) {
-                                    if (!seed_error.isEmpty()) {
+                                [this, clean_wallet_name](const QJsonValue&, const QString& refill_error) {
+                                    if (!refill_error.isEmpty()) {
                                         setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
-                                        Q_EMIT userMessage(QStringLiteral("Wallet not restored"), seed_error);
+                                        Q_EMIT userMessage(QStringLiteral("Wallet not restored"), refill_error);
                                         return;
                                     }
-                                    refresh();
-                                    setRecoveryState(false, QStringLiteral("Recovery complete."), 100);
-                                    Q_EMIT userMessage(
-                                        QStringLiteral("Wallet restored"),
-                                        QStringLiteral("The wallet was created from the recovery phrase and loaded. "
-                                                       "Back up the wallet and keep the phrase offline."));
-                                });
-                        return;
-                    }
 
-                    if (gap_scan_mode) {
-                        importRecoveryDescriptorsUntilEmpty(descriptors, std::abs(range));
-                    } else {
-                        importRecoveryDescriptorsWithRescan(descriptors, range);
-                    }
-                };
+                                    setRecoveryState(true,
+                                                     QStringLiteral("Rescanning the chain for recovered transactions. "
+                                                                    "This can take several minutes."),
+                                                     -1);
+                                    rpcCall(QStringLiteral("rescanblockchain"),
+                                            {},
+                                            true,
+                                            [this, clean_wallet_name](const QJsonValue&, const QString& rescan_error) {
+                                                if (m_recovery_cancel_requested) {
+                                                    setRecoveryState(
+                                                        false, QStringLiteral("Recovery canceled during rescan."), 0);
+                                                    Q_EMIT userMessage(QStringLiteral("Recovery canceled"),
+                                                                       QStringLiteral("The new wallet was created and "
+                                                                                      "the rescan was canceled. Run a "
+                                                                                      "rescan before relying on its "
+                                                                                      "balance."));
+                                                    return;
+                                                }
+                                                if (!rescan_error.isEmpty()) {
+                                                    setRecoveryState(false, QStringLiteral("Recovery stopped."), 0);
+                                                    Q_EMIT userMessage(QStringLiteral("Wallet not restored"),
+                                                                       rescan_error);
+                                                    return;
+                                                }
+                                                setCurrentWalletInternal(clean_wallet_name);
+                                                refresh();
+                                                setRecoveryState(false, QStringLiteral("Recovery complete."), 100);
+                                                Q_EMIT userMessage(
+                                                    QStringLiteral("Wallet restored"),
+                                                    QStringLiteral("The wallet was created from the recovery phrase, "
+                                                                   "its keypool was refilled, and the chain was "
+                                                                   "rescanned. Back up the wallet and keep the phrase "
+                                                                   "offline."));
+                                            });
+                                });
+                        });
+                    return;
+                }
+
+                if (descriptor_sql_wallet) {
+                    importRecoveryDescriptorsToSqlWallet(
+                        descriptors,
+                        descriptor_scan_mode ? (range < 0 ? std::abs(range) : range) : SEND_KEYPOOL_REFILL_SIZE);
+                } else if (gap_scan_mode) {
+                    importRecoveryDescriptorsUntilEmpty(descriptors, std::abs(range));
+                } else {
+                    importRecoveryDescriptorsWithRescan(descriptors, range, skip_zero_balance_addresses);
+                }
+            };
 
             const auto load_recovery_wallet = [this, clean_wallet_name, continue_restore, encrypt, passphrase]() {
                 setRecoveryState(true, QStringLiteral("Loading recovery wallet..."), 30);

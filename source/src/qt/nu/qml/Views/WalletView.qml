@@ -11,7 +11,6 @@ ColumnLayout {
     spacing: NuTokens.spaceLg
 
     signal createWalletRequested()
-    signal createRecoveryWalletRequested()
     signal restoreRecoveryWalletRequested()
 
     property var compatibilityResult: ({})
@@ -140,6 +139,7 @@ ColumnLayout {
                 loaded: loaded,
                 state: current ? "Current" : (loaded ? "Loaded" : "Available"),
                 type: root.isRenameableWallet(name) ? "Unknown" : "BDB",
+                encrypted: current ? (NuService.walletEncrypted ? "Yes" : "No") : (loaded ? "Loading" : "Unknown"),
                 total: current ? NuService.totalBalance : (loaded ? "Loading" : "Load to scan"),
                 available: current ? NuService.availableBalance : (loaded ? "Loading" : "-"),
                 pending: current ? NuService.pendingBalance : (loaded ? "Loading" : "-"),
@@ -174,7 +174,12 @@ ColumnLayout {
                            active ? "✓" : "",
                            display,
                            active ? "Current" : (loaded ? "Loaded" : String(item.state || "Available")),
-                           String(item.type || (root.isRenameableWallet(name) ? "Unknown" : "BDB"))
+                           String(item.type || (root.isRenameableWallet(name) ? "Unknown" : "BDB")),
+                           root.statValueText(item.encrypted),
+                           root.statValueText(item.total),
+                           root.statValueText(item.transactions),
+                           root.statValueText(item.addressCount),
+                           root.statValueText(item.nonZeroAddressCount)
                          ]
                        : [
                            active ? "✓" : "",
@@ -197,19 +202,19 @@ ColumnLayout {
 
     function walletTableColumns() {
         return root.walletListViewMode === 0
-               ? ["Active", "Wallet", "State", "Type"]
+               ? ["Active", "Wallet", "State", "Type", "Encrypted", "Total", "Txns", "Addrs", "Non-zero"]
                : ["Active", "Wallet", "State", "Type", "Total", "Available", "Pending", "Immature", "Txns", "Addrs", "Non-zero"]
     }
 
     function walletTableTypes() {
         return root.walletListViewMode === 0
-               ? ["center", "text", "text", "center"]
+               ? ["center", "text", "text", "center", "center", "amount", "number", "number", "number"]
                : ["center", "text", "text", "center", "amount", "amount", "amount", "amount", "number", "number", "number"]
     }
 
     function walletTableSortKeys() {
         return root.walletListViewMode === 0
-               ? ["active", "wallet", "state", "type"]
+               ? ["active", "wallet", "state", "type", "encrypted", "total", "transactions", "addresses", "nonZero"]
                : ["active", "wallet", "state", "type", "total", "available", "pending", "immature", "transactions", "addresses", "nonZero"]
     }
 
@@ -219,7 +224,12 @@ ColumnLayout {
                    "Check mark means this wallet is the active wallet used by Home, Send, Receive, Transactions, and Wallet actions.",
                    "Wallet file or wallet directory. Default wallet (wallet.dat) is Core's legacy unnamed wallet.",
                    "Current is active. Loaded is open in the backend and ready for quick switching. Available is found on disk but not opened yet.",
-                   "Storage format. BDB means Berkeley DB Legacy. SQL means SQLite (Modern). Unknown means Nu could not inspect the file while it is unloaded."
+                   "Storage format. BDB means Berkeley DB Legacy. SQL means SQLite (Modern). Unknown means Nu could not inspect the file while it is unloaded.",
+                   "Whether the loaded wallet reports encryption. Unloaded wallets must be loaded before Nu can inspect this.",
+                   "Total balance reported by the wallet when loaded.",
+                   "Wallet transaction count from getwalletinfo.",
+                   "Known receive addresses returned by the wallet address scan.",
+                   "Known receive addresses with a non-zero received amount."
                  ]
                : [
                    "Check mark means this wallet is the active wallet.",
@@ -238,19 +248,19 @@ ColumnLayout {
 
     function walletTableMinimums() {
         return root.walletListViewMode === 0
-               ? [58, 220, 102, 74]
+               ? [52, 154, 86, 60, 80, 112, 58, 64, 78]
                : [58, 220, 102, 74, 136, 112, 112, 112, 70, 84, 96]
     }
 
     function walletTableMaximums() {
         return root.walletListViewMode === 0
-               ? [72, 900, 180, 120]
+               ? [68, 760, 170, 110, 120, 190, 96, 112, 130]
                : [72, 900, 180, 120, 210, 180, 180, 180, 110, 140, 150]
     }
 
     function walletTableWeights() {
         return root.walletListViewMode === 0
-               ? [0.42, 3.2, 1.0, 0.6]
+               ? [0.34, 2.22, 0.78, 0.52, 0.68, 1.1, 0.5, 0.56, 0.66]
                : [0.42, 3.0, 1.0, 0.6, 1.4, 1.1, 1.1, 1.1, 0.72, 0.82, 0.9]
     }
 
@@ -272,14 +282,14 @@ ColumnLayout {
     function walletPanelIndexForTab(tabIndex) {
         // Panels are kept in their historical declaration order to avoid
         // churning stateful controls; this map keeps visible tabs honest.
-        const panelOrder = [0, 7, 2, 3, 4, 1, 5, 6]
+        const panelOrder = [0, 1, 7, 2, 4, 5, 6]
         return tabIndex >= 0 && tabIndex < panelOrder.length ? panelOrder[tabIndex] : 0
     }
 
     function requestWalletTab(tabIndex) {
         if (tabIndex === walletTabs.currentIndex)
             return
-        if (walletTabs.currentIndex === 1 && NuService.paperWalletReady) {
+        if (walletTabs.currentIndex === 2 && NuService.paperWalletReady) {
             root.pendingWalletTab = tabIndex
             leavePaperWalletTabDialog.open()
             return
@@ -415,14 +425,13 @@ ColumnLayout {
     NuTabBar {
         id: walletTabs
         Layout.fillWidth: true
-        NuTabButton { text: "Files"; onClicked: root.requestWalletTab(0) }
-        NuTabButton { text: "Paper Wallet"; onClicked: root.requestWalletTab(1) }
-        NuTabButton { text: "Recovery"; onClicked: root.requestWalletTab(2) }
-        NuTabButton { text: "Security"; onClicked: root.requestWalletTab(3) }
+        NuTabButton { text: "Wallets"; onClicked: root.requestWalletTab(0) }
+        NuTabButton { text: "Watch-Only Addr."; onClicked: root.requestWalletTab(1) }
+        NuTabButton { text: "Paper Wallet"; onClicked: root.requestWalletTab(2) }
+        NuTabButton { text: "Recovery"; onClicked: root.requestWalletTab(3) }
         NuTabButton { text: "Addresses"; onClicked: root.requestWalletTab(4) }
-        NuTabButton { text: "Tools"; onClicked: root.requestWalletTab(5) }
-        NuTabButton { text: "Messages"; onClicked: root.requestWalletTab(6) }
-        NuTabButton { text: "Compatibility"; onClicked: root.requestWalletTab(7) }
+        NuTabButton { text: "Messages"; onClicked: root.requestWalletTab(5) }
+        NuTabButton { text: "Compatibility"; onClicked: root.requestWalletTab(6) }
     }
 
     StackLayout {
@@ -431,20 +440,26 @@ ColumnLayout {
         currentIndex: root.walletPanelIndexForTab(walletTabs.currentIndex)
 
         NuPanel {
+            clip: true
+
             ColumnLayout {
+                id: walletPanelContent
                 anchors.fill: parent
                 spacing: NuTokens.spaceMd
 
                 RowLayout {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     spacing: NuTokens.spaceLg
 
                     ColumnLayout {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         spacing: NuTokens.spaceSm
 
                         Label {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: NuService.walletSelected
                                   ? "Active wallet: " + NuService.walletDisplayName(NuService.currentWalletName)
                                   : "Active wallet: none selected"
@@ -456,6 +471,7 @@ ColumnLayout {
 
                         Label {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: root.loadedWalletText()
                             color: NuTokens.textSecondary
                             font.pixelSize: NuTokens.fontSmall
@@ -466,28 +482,37 @@ ColumnLayout {
 
                 GridLayout {
                     Layout.fillWidth: true
-                    columns: 7
-                    columnSpacing: NuTokens.spaceXl
+                    Layout.minimumWidth: 0
+                    columns: walletPanelContent.width < 640 ? 2
+                             : (walletPanelContent.width < 820 ? 3
+                             : (walletPanelContent.width < 1080 ? 4 : 7))
+                    columnSpacing: NuTokens.spaceLg
                     rowSpacing: NuTokens.spaceSm
-                    NuMetricRow { label: "Total"; value: NuService.totalBalance }
-                    NuMetricRow { label: "Available"; value: NuService.availableBalance }
-                    NuMetricRow { label: "Pending"; value: NuService.pendingBalance }
-                    NuMetricRow { label: "Immature"; value: NuService.immatureBalance }
-                    NuMetricRow { label: "Transactions"; value: NuService.walletTransactionCount }
+                    NuMetricRow { label: "Total"; value: NuService.totalBalance; labelMaximumWidth: 84; valueMaximumWidth: 150 }
+                    NuMetricRow { label: "Available"; value: NuService.availableBalance; labelMaximumWidth: 84; valueMaximumWidth: 150 }
+                    NuMetricRow { label: "Pending"; value: NuService.pendingBalance; labelMaximumWidth: 84; valueMaximumWidth: 150 }
+                    NuMetricRow { label: "Immature"; value: NuService.immatureBalance; labelMaximumWidth: 84; valueMaximumWidth: 150 }
+                    NuMetricRow { label: "Transactions"; value: NuService.walletTransactionCount; labelMaximumWidth: 100; valueMaximumWidth: 70 }
                     NuMetricRow {
                         label: "Addrs"
                         value: String(NuService.walletAddressCount)
+                        labelMaximumWidth: 70
+                        valueMaximumWidth: 74
                         helpText: "Known receive addresses found by the wallet stats scan. Press Rescan stats after imports or recovery."
                     }
                     NuMetricRow {
                         label: "Non-zero"
                         value: String(NuService.walletNonZeroAddressCount)
+                        labelMaximumWidth: 84
+                        valueMaximumWidth: 68
                         helpText: "Known receive addresses with a non-zero received amount."
                     }
                 }
 
                 Label {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    clip: true
                     text: "Select wallets in the list, then run actions from the toolbar. Click to select one wallet, Cmd-click to select separate wallets, or Shift-click to select a range."
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
@@ -497,8 +522,10 @@ ColumnLayout {
                 Flow {
                     id: walletActionsFlow
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     Layout.preferredHeight: implicitHeight
                     Layout.minimumHeight: implicitHeight
+                    clip: true
                     spacing: NuTokens.spaceMd
                     NuActionButton {
                         text: "Create..."
@@ -529,6 +556,16 @@ ColumnLayout {
                         onClicked: NuService.backupWallet()
                     }
                     NuActionButton {
+                        text: NuService.walletEncrypted ? "Change passphrase..." : "Encrypt..."
+                        width: 150
+                        enabled: NuService.walletSelected
+                        primary: NuService.walletSelected && !NuService.walletEncrypted
+                        helpText: NuService.walletEncrypted
+                                  ? "Change the active wallet passphrase."
+                                  : "Encrypt the active wallet with a passphrase before relying on wallet-file protection."
+                        onClicked: walletSecurityDialog.open()
+                    }
+                    NuActionButton {
                         text: "Close selected"
                         width: 138
                         enabled: root.selectedLoadedWallets().length > 0
@@ -539,7 +576,7 @@ ColumnLayout {
                         text: "Close all"
                         width: 105
                         enabled: NuService.loadedWallets.length > 0
-                        helpText: "Unload every loaded wallet without deleting wallet data."
+                        helpText: "Close every unloadable wallet without deleting wallet data. Core may keep or reopen the legacy default wallet, so Nu will show it again if the backend reports it loaded."
                         onClicked: NuService.closeAllWallets()
                     }
                     NuActionButton {
@@ -559,11 +596,13 @@ ColumnLayout {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     spacing: NuTokens.spaceMd
 
                     NuTabBar {
                         id: walletViewToggle
                         Layout.preferredWidth: 224
+                        Layout.minimumWidth: 0
                         currentIndex: root.walletListViewMode
                         NuTabButton { text: "Simple" }
                         NuTabButton { text: "Detailed" }
@@ -578,6 +617,8 @@ ColumnLayout {
 
                     Label {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        clip: true
                         text: walletViewToggle.currentIndex === 0
                               ? "Loaded wallets are open in the backend; available wallets are discovered on disk."
                               : "Detailed stats are shown for loaded wallets. Load a wallet before scanning its exact stats."
@@ -591,6 +632,8 @@ ColumnLayout {
                     id: walletFilesTable
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.minimumWidth: 0
+                    Layout.minimumHeight: 120
                     tableId: root.walletListViewMode === 0 ? "walletFileListSimple" : "walletFileListDetailed"
                     columns: root.walletTableColumns()
                     columnTypes: root.walletTableTypes()
@@ -601,6 +644,7 @@ ColumnLayout {
                     columnMinimums: root.walletTableMinimums()
                     columnMaximums: root.walletTableMaximums()
                     alwaysShowHorizontalScrollBar: root.walletListViewMode === 1
+                    alwaysShowVerticalScrollBar: true
                     rowSelectionEnabled: true
                     plainClickSelectsRows: true
                     rowKeyMetaField: "key"
@@ -628,6 +672,8 @@ ColumnLayout {
 
                 Label {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    clip: true
                     text: "Default wallet (wallet.dat) is Core's legacy top-level wallet. Nu lists it as Default wallet (wallet.dat), lets you open/select and back it up, and protects it from rename/delete here because its RPC wallet name is empty and older Core code treats it specially."
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontSmall
@@ -651,7 +697,7 @@ ColumnLayout {
 
                     Label {
                         Layout.fillWidth: true
-                        text: "Advanced wallet tools"
+                        text: "Add Watch-Only Addresses"
                         color: NuTokens.textPrimary
                         font.pixelSize: NuTokens.fontBodyLarge
                         font.weight: Font.DemiBold
@@ -694,7 +740,7 @@ ColumnLayout {
                             NuCheckBox {
                                 id: watchOnlyRescan
                                 text: "Scan chain for history"
-                                helpText: "A rescan may take a long time. Leave off to import quickly and track future activity."
+                                helpText: "Use this when the address may already have past transactions. A rescan can take a long time; leave it off to import quickly and track only future activity."
                             }
                             NuTextField {
                                 id: watchOnlyStartHeight
@@ -708,7 +754,7 @@ ColumnLayout {
                     }
 
                     NuActionButton {
-                        text: "Import Watch-only Address"
+                        text: "Add Watch-Only Address"
                         Layout.preferredWidth: 240
                         enabled: NuService.walletSelected
                         helpText: "Import this public address into the selected wallet without any private key."
@@ -748,13 +794,7 @@ ColumnLayout {
                     Layout.fillWidth: true
                     spacing: NuTokens.spaceMd
                     NuActionButton {
-                        text: "Create Wallet w/ Recovery Phrase..."
-                        Layout.preferredWidth: 310
-                        helpText: "Generate a new 12-word BIP39 English phrase and create a Nu/Core HD wallet."
-                        onClicked: root.createRecoveryWalletRequested()
-                    }
-                    NuActionButton {
-                        text: "Restore Wallet fr. Recovery Phrase..."
+                        text: "Restore Wallet from Recovery Phrase"
                         Layout.preferredWidth: 310
                         primary: true
                         helpText: "Restore from 12, 15, 18, 21, or 24 BIP39 words, including Coinomi/Ian Coleman-style external scans."
@@ -774,7 +814,7 @@ ColumnLayout {
                     Label { text: "Nu/Core HD"; color: NuTokens.textPrimary; font.pixelSize: NuTokens.fontBody; font.weight: Font.DemiBold }
                     Label {
                         Layout.fillWidth: true
-                        text: "Use for phrases created by Nu. The phrase sets the wallet HD seed."
+                        text: "Use for phrases created by Nu. Restore sets the wallet HD seed, refills the keypool, and rescans the chain."
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontBody
                         wrapMode: Text.WordWrap
@@ -802,6 +842,7 @@ ColumnLayout {
         }
 
         NuPanel {
+            visible: false
             ColumnLayout {
                 anchors.fill: parent
                 spacing: NuTokens.spaceLg
@@ -868,7 +909,7 @@ ColumnLayout {
                     spacing: NuTokens.spaceMd
 
                     NuCheckBox {
-                        text: "Hide zero-received addresses"
+                        text: "Hide all addresses with zero received"
                         checked: root.hideZeroBalanceAddresses
                         helpText: "Hide every address entry whose received amount is zero, including BIP39 recovery addresses. This only filters the table view; it does not remove addresses from the wallet."
                         onToggled: {
@@ -879,7 +920,7 @@ ColumnLayout {
                         }
                     }
                     NuCheckBox {
-                        text: "Hide zero-received recovery addresses"
+                        text: "Hide only zero-received recovery/import addresses"
                         checked: root.hideZeroBalanceAddresses || root.hideZeroBip39RecoveryAddresses
                         enabled: !root.hideZeroBalanceAddresses
                         helpText: root.hideZeroBalanceAddresses
@@ -892,17 +933,6 @@ ColumnLayout {
                                 root.addressBookShowAll = false
                                 addressBookTable.clearRowSelection()
                             }
-                        }
-                    }
-                    NuActionButton {
-                        text: "Hide imported zero-rec'd"
-                        Layout.preferredWidth: 190
-                        helpText: "Quickly hide zero-received BIP39 recovery/import rows. Nu keeps the wallet records intact so funds cannot be lost by pruning the wrong address."
-                        onClicked: {
-                            root.hideZeroBip39RecoveryAddresses = true
-                            root.addressBookFilterRevision += 1
-                            root.addressBookShowAll = false
-                            addressBookTable.clearRowSelection()
                         }
                     }
                     Item { Layout.fillWidth: true }
@@ -981,7 +1011,15 @@ ColumnLayout {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Sign and verify messages with wallet addresses."
+                    text: "Message signing proves that someone controls the private key for a Defcoin address without sending coins or revealing the private key. Use it when you need to prove address ownership, confirm an instruction, or let someone else verify that a note came from the address holder."
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontBody
+                    wrapMode: Text.WordWrap
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "To sign, choose one of your wallet addresses, type the exact message, and share the message plus signature. To verify, paste the address, original message, and signature you received. Changing even one character makes verification fail."
                     color: NuTokens.textSecondary
                     font.pixelSize: NuTokens.fontBody
                     wrapMode: Text.WordWrap
@@ -1062,7 +1100,7 @@ ColumnLayout {
 
         PaperWalletView {
             embedded: true
-            active: walletTabs.currentIndex === 1
+            active: walletTabs.currentIndex === 2
         }
     }
 

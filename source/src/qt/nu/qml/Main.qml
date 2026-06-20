@@ -101,6 +101,78 @@ ApplicationWindow {
         }
     }
 
+    function passphraseStatus(firstValue, secondValue, enabled) {
+        if (!enabled)
+            return ({ "text": "", "color": NuTokens.textSecondary, "active": false, "ready": true })
+
+        var first = String(firstValue)
+        var second = String(secondValue)
+        if (first.length === 0 && second.length === 0) {
+            return ({
+                "text": qsTr("Enter at least 8 characters."),
+                "color": NuTokens.textSecondary,
+                "active": false,
+                "ready": false
+            })
+        }
+        if (first.length < 8) {
+            return ({
+                "text": qsTr("Too short. Use at least 8 characters."),
+                "color": NuTokens.stateError,
+                "active": true,
+                "ready": false
+            })
+        }
+        if (second.length === 0) {
+            return ({
+                "text": qsTr("Confirm the passphrase."),
+                "color": NuTokens.stateWarning,
+                "active": true,
+                "ready": false
+            })
+        }
+        if (first !== second) {
+            return ({
+                "text": qsTr("Passphrases do not match."),
+                "color": NuTokens.stateError,
+                "active": true,
+                "ready": false
+            })
+        }
+        if (first.length < 12) {
+            return ({
+                "text": qsTr("Accepted. Longer passphrases are stronger."),
+                "color": NuTokens.stateWarning,
+                "active": true,
+                "ready": true
+            })
+        }
+        return ({
+            "text": qsTr("Passphrase length and confirmation look good."),
+            "color": NuTokens.stateConnected,
+            "active": true,
+            "ready": true
+        })
+    }
+
+    function walletNameAlreadyExists(nameValue) {
+        var clean = String(nameValue).trim()
+        if (clean.length === 0)
+            return false
+        var normalized = clean.toLowerCase()
+        var walletPrefix = ("wallets/" + clean).toLowerCase()
+        var lists = [NuService.availableWallets, NuService.loadedWallets]
+        for (var listIndex = 0; listIndex < lists.length; ++listIndex) {
+            var list = lists[listIndex] || []
+            for (var i = 0; i < list.length; ++i) {
+                var item = String(list[i]).trim().toLowerCase()
+                if (item === normalized || item === walletPrefix)
+                    return true
+            }
+        }
+        return false
+    }
+
     function isCopyShortcut(event) {
         return event.key === Qt.Key_C
                && ((Qt.platform.os === "osx" && (event.modifiers & Qt.MetaModifier))
@@ -395,7 +467,6 @@ ApplicationWindow {
         transactionDetailsDialog.close()
         openUriDialog.close()
         createWalletDialog.close()
-        createRecoveryWalletDialog.close()
         restoreRecoveryWalletDialog.close()
         closeWalletDialog.close()
         closeAllWalletsDialog.close()
@@ -422,7 +493,7 @@ ApplicationWindow {
         } else if (target === "create-wallet") {
             createWalletDialog.open()
         } else if (target === "create-recovery-wallet") {
-            createRecoveryWalletDialog.open()
+            createWalletDialog.openWithRecoveryPhrase()
         } else if (target === "restore-recovery-wallet") {
             restoreRecoveryWalletDialog.open()
         } else if (target === "open-uri") {
@@ -448,7 +519,6 @@ ApplicationWindow {
             title: qsTr("File")
             width: Math.max(implicitWidth, 460)
             NuMenuItem { text: qsTr("Create Wallet..."); onTriggered: createWalletDialog.open() }
-            NuMenuItem { text: qsTr("Create Wallet with Recovery Phrase..."); onTriggered: createRecoveryWalletDialog.open() }
             NuMenuItem { text: qsTr("Restore Wallet from Recovery Phrase..."); onTriggered: restoreRecoveryWalletDialog.open() }
             Menu {
                 id: openWalletMenu
@@ -590,7 +660,6 @@ ApplicationWindow {
         anchors.fill: parent
         onAboutRequested: root.openAboutSummary()
         onCreateWalletRequested: createWalletDialog.open()
-        onCreateRecoveryWalletRequested: createRecoveryWalletDialog.open()
         onRestoreRecoveryWalletRequested: restoreRecoveryWalletDialog.open()
     }
 
@@ -684,6 +753,19 @@ ApplicationWindow {
             messageDialog.title = title
             messageDialog.text = message
             messageDialog.open()
+        }
+        function onWalletWorkflowFinished(workflow, success) {
+            if (workflow === "createWallet") {
+                createWalletDialog.createPending = false
+                if (success) {
+                    createWalletDialog.preserveOnClose = false
+                    createWalletDialog.resetFields()
+                } else {
+                    createWalletDialog.preserveOnClose = false
+                    if (!createWalletDialog.visible)
+                        createWalletDialog.open()
+                }
+            }
         }
         function onQuickClonePromptRequested(title, message) {
             quickClonePromptDialog.title = title
@@ -956,6 +1038,23 @@ ApplicationWindow {
                     text: NuService.recoveryCurrentMethod.length > 0
                           ? NuService.recoveryCurrentMethod
                           : (NuService.recoveryActive ? qsTr("Importing derived addresses and rescanning the chain.") : qsTr("Import and chain scan finished."))
+                    color: NuTokens.textPrimary
+                    font.pixelSize: NuTokens.fontSmall
+                    wrapMode: Text.WordWrap
+                }
+
+                Label {
+                    visible: NuService.recoveryAddressScanStatus.length > 0
+                    text: qsTr("Address scan")
+                    color: NuTokens.textSecondary
+                    font.pixelSize: NuTokens.fontSmall
+                    horizontalAlignment: Text.AlignRight
+                    Layout.preferredWidth: 150
+                }
+                Label {
+                    visible: NuService.recoveryAddressScanStatus.length > 0
+                    Layout.fillWidth: true
+                    text: NuService.recoveryAddressScanStatus
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontSmall
                     wrapMode: Text.WordWrap
@@ -1255,13 +1354,93 @@ ApplicationWindow {
         id: createWalletDialog
         title: qsTr("Create Wallet")
         acceptText: qsTr("Create")
-        dialogWidth: 620
+        dialogWidth: createWalletRecoveryEnabled.checked ? 720 : 620
+        property bool showPassphrases: false
+        property bool preserveOnClose: false
+        property bool createPending: false
+        property string generatedRecoveryPhrase: ""
+        property bool savedSqlForRecovery: true
+
+        function currentPassphraseStatus() {
+            return root.passphraseStatus(createWalletPassphrase.text,
+                                         createWalletPassphraseConfirm.text,
+                                         createWalletEncrypt.checked)
+        }
+
+        function normalizedRecoveryPhrase(value) {
+            return String(value || "").toLowerCase().replace(/\s+/g, " ").trim()
+        }
+
+        function ensureRecoveryPhrase() {
+            if (createWalletDialog.generatedRecoveryPhrase.length > 0) {
+                return
+            }
+            createWalletDialog.generatedRecoveryPhrase = NuService.generateRecoveryPhrase()
+            createWalletRecoveryConfirm.text = ""
+            if (createWalletDialog.generatedRecoveryPhrase.length === 0) {
+                messageDialog.title = qsTr("Recovery phrase unavailable")
+                messageDialog.text = qsTr("The BIP39 English word list is not available in this build.")
+                messageDialog.open()
+            }
+        }
+
+        function openWithRecoveryPhrase() {
+            if (!visible)
+                resetFields()
+            createWalletRecoveryEnabled.checked = true
+            open()
+        }
+
+        function resetFields() {
+            createWalletName.text = ""
+            createWalletEncrypt.checked = false
+            createWalletPassphrase.text = ""
+            createWalletPassphraseConfirm.text = ""
+            savedSqlForRecovery = true
+            createWalletRecoveryEnabled.checked = false
+            createWalletDialog.generatedRecoveryPhrase = ""
+            createWalletRecoveryConfirm.text = ""
+            createWalletDisablePrivateKeys.checked = false
+            createWalletBlank.checked = false
+            createWalletSql.checked = true
+            showPassphrases = false
+            preserveOnClose = false
+            createPending = false
+        }
+
         beforeAccept: function() {
-            if (createWalletEncrypt.checked && createWalletPassphrase.text !== createWalletPassphraseConfirm.text) {
+            if (createWalletName.text.trim().length === 0) {
                 messageDialog.title = qsTr("Wallet not created")
-                messageDialog.text = qsTr("The passphrase and confirmation do not match.")
+                messageDialog.text = qsTr("Enter a wallet name before creating the wallet.")
                 messageDialog.open()
                 return false
+            }
+            if (root.walletNameAlreadyExists(createWalletName.text)) {
+                messageDialog.title = qsTr("Wallet not created")
+                messageDialog.text = qsTr("A wallet with this name already exists. Choose a different wallet name.")
+                messageDialog.open()
+                return false
+            }
+            var status = currentPassphraseStatus()
+            if (createWalletEncrypt.checked && !status.ready) {
+                messageDialog.title = qsTr("Wallet not created")
+                messageDialog.text = status.text
+                messageDialog.open()
+                return false
+            }
+            if (createWalletRecoveryEnabled.checked) {
+                if (generatedRecoveryPhrase.length === 0) {
+                    messageDialog.title = qsTr("Wallet not created")
+                    messageDialog.text = qsTr("Generate a recovery phrase before creating the wallet.")
+                    messageDialog.open()
+                    return false
+                }
+                if (normalizedRecoveryPhrase(createWalletRecoveryConfirm.text) !== createWalletDialog.generatedRecoveryPhrase) {
+                    messageDialog.title = qsTr("Wallet not created")
+                    messageDialog.text = qsTr("Confirm the 12 recovery words exactly before Nu creates a wallet from them.")
+                    messageDialog.open()
+                    return false
+                }
             }
             return true
         }
@@ -1290,32 +1469,161 @@ ApplicationWindow {
             text: qsTr("Encrypt Wallet")
             helpText: qsTr("Encrypt the new wallet immediately with a passphrase.")
             enabled: !createWalletDisablePrivateKeys.checked
+            onCheckedChanged: if (checked) createWalletDialog.showPassphrases = false
         }
 
-        NuTextField {
+        NuPassphraseField {
             id: createWalletPassphrase
             Layout.fillWidth: true
             visible: createWalletEncrypt.checked
             enabled: visible
-            echoMode: TextInput.Password
+            passphraseVisible: createWalletDialog.showPassphrases
+            statusActive: createWalletEncrypt.checked && (text.length > 0 || createWalletPassphraseConfirm.text.length > 0)
+            statusColor: createWalletDialog.currentPassphraseStatus().color
             placeholderText: qsTr("Passphrase")
             helpText: qsTr("Use at least 8 characters. This passphrase is required to spend from the wallet.")
+            onVisibilityToggled: (visible) => createWalletDialog.showPassphrases = visible
             onAccepted: createWalletDialog.requestAccept()
             Keys.onReturnPressed: createWalletDialog.requestAccept()
             Keys.onEnterPressed: createWalletDialog.requestAccept()
         }
 
-        NuTextField {
+        NuPassphraseField {
             id: createWalletPassphraseConfirm
             Layout.fillWidth: true
             visible: createWalletEncrypt.checked
             enabled: visible
-            echoMode: TextInput.Password
+            passphraseVisible: createWalletDialog.showPassphrases
+            statusActive: createWalletEncrypt.checked && (createWalletPassphrase.text.length > 0 || text.length > 0)
+            statusColor: createWalletDialog.currentPassphraseStatus().color
             placeholderText: qsTr("Confirm passphrase")
             helpText: qsTr("Re-enter the passphrase to catch typing mistakes before the wallet is created.")
+            onVisibilityToggled: (visible) => createWalletDialog.showPassphrases = visible
             onAccepted: createWalletDialog.requestAccept()
             Keys.onReturnPressed: createWalletDialog.requestAccept()
             Keys.onEnterPressed: createWalletDialog.requestAccept()
+        }
+
+        Label {
+            Layout.fillWidth: true
+            visible: createWalletEncrypt.checked
+            text: createWalletDialog.currentPassphraseStatus().text
+            color: createWalletDialog.currentPassphraseStatus().color
+            font.pixelSize: NuTokens.fontSmall
+            wrapMode: Text.WordWrap
+        }
+
+        NuCheckBox {
+            id: createWalletRecoveryEnabled
+            text: qsTr("Create a BIP39 recovery phrase")
+            helpText: qsTr("Generates 12 BIP39 English words for this new wallet. Write them down and confirm them before creation; Nu does not save the words after this dialog closes.")
+            onCheckedChanged: {
+                if (checked) {
+                    createWalletDialog.savedSqlForRecovery = createWalletSql.checked
+                    createWalletDisablePrivateKeys.checked = false
+                    createWalletBlank.checked = false
+                    createWalletSql.checked = false
+                    createWalletEncrypt.checked = true
+                    createWalletDialog.showPassphrases = false
+                    createWalletDialog.ensureRecoveryPhrase()
+                } else {
+                    createWalletDialog.generatedRecoveryPhrase = ""
+                    createWalletRecoveryConfirm.text = ""
+                    createWalletSql.checked = createWalletDialog.savedSqlForRecovery
+                }
+            }
+        }
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            visible: createWalletRecoveryEnabled.checked
+            spacing: NuTokens.spaceSm
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Write down these 12 words in order. They can recover the wallet's spend keys and funds through Wallet > Recovery. The words are shown only in this dialog.")
+                color: NuTokens.textPrimary
+                font.pixelSize: NuTokens.fontBody
+                wrapMode: Text.WordWrap
+            }
+
+            TextArea {
+                id: createWalletRecoveryWords
+                property bool mnemonicClipboardGuard: true
+                Layout.fillWidth: true
+                Layout.preferredHeight: 84
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextArea.Wrap
+                text: createWalletDialog.generatedRecoveryPhrase
+                color: NuTokens.textPrimary
+                font.family: NuTokens.monoFont
+                font.pixelSize: NuTokens.fontBody
+                background: Rectangle { color: NuTokens.backgroundBase; border.color: NuTokens.lineSubtle; radius: NuTokens.radiusSmall }
+
+                Keys.onPressed: function(event) {
+                    if (root.isSensitiveClipboardShortcut(event)) {
+                        root.requestMnemonicClipboardCopy(createWalletRecoveryWords)
+                        event.accepted = true
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.RightButton
+                    onClicked: {
+                        mnemonicCopyMenu.sourceControl = createWalletRecoveryWords
+                        mnemonicCopyMenu.popup()
+                    }
+                }
+            }
+
+            TextArea {
+                id: createWalletRecoveryConfirm
+                property bool mnemonicClipboardGuard: true
+                Layout.fillWidth: true
+                Layout.preferredHeight: 84
+                placeholderText: qsTr("Type the 12 words again to confirm")
+                selectByMouse: true
+                wrapMode: TextArea.Wrap
+                color: NuTokens.textPrimary
+                font.family: NuTokens.monoFont
+                font.pixelSize: NuTokens.fontBody
+                background: Rectangle { color: NuTokens.panelBase; border.color: NuTokens.lineSubtle; radius: NuTokens.radiusSmall }
+
+                Keys.onPressed: function(event) {
+                    if (root.isSensitiveClipboardShortcut(event)) {
+                        root.requestMnemonicClipboardCopy(createWalletRecoveryConfirm)
+                        event.accepted = true
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.RightButton
+                    onClicked: {
+                        mnemonicCopyMenu.sourceControl = createWalletRecoveryConfirm
+                        mnemonicCopyMenu.popup()
+                    }
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: createWalletRecoveryEnabled.checked
+                text: createWalletRecoveryConfirm.text.length === 0
+                      ? qsTr("Type the words again before creating the wallet.")
+                      : (createWalletDialog.normalizedRecoveryPhrase(createWalletRecoveryConfirm.text) === createWalletDialog.generatedRecoveryPhrase
+                         ? qsTr("Recovery words match.")
+                         : qsTr("Recovery words do not match yet."))
+                color: createWalletRecoveryConfirm.text.length === 0
+                       ? NuTokens.textSecondary
+                       : (createWalletDialog.normalizedRecoveryPhrase(createWalletRecoveryConfirm.text) === createWalletDialog.generatedRecoveryPhrase
+                          ? NuTokens.stateConnected
+                          : NuTokens.stateError)
+                font.pixelSize: NuTokens.fontSmall
+                wrapMode: Text.WordWrap
+            }
         }
 
         Label {
@@ -1342,215 +1650,54 @@ ApplicationWindow {
                     id: createWalletDisablePrivateKeys
                     text: qsTr("Watch-only wallet")
                     helpText: qsTr("Create a wallet for observing addresses without storing private keys. Use this for monitoring balances, imported public keys, or shared audit wallets that should not spend coins.")
+                    enabled: !createWalletRecoveryEnabled.checked
                     onCheckedChanged: if (checked) createWalletEncrypt.checked = false
                 }
 
                 NuCheckBox {
                     id: createWalletBlank
                     text: qsTr("Start empty for imports")
-                    helpText: createWalletSql.checked
+                    enabled: !createWalletRecoveryEnabled.checked
+                    helpText: createWalletRecoveryEnabled.checked
+                              ? qsTr("BIP39 recovery phrase creation needs a normal Core HD wallet seed, so blank import-only wallets are disabled.")
+                              : (createWalletSql.checked
                               ? qsTr("Create an empty SQLite descriptor wallet for importing descriptors, recovery paths, or watch-only data before generating normal receive addresses.")
-                              : qsTr("Create a legacy Berkeley DB wallet without an HD seed. Choose this only when you plan to import keys or set a seed with legacy wallet commands.")
+                              : qsTr("Create a legacy Berkeley DB wallet without an HD seed. Choose this only when you plan to import keys or set a seed with legacy wallet commands."))
                 }
 
                 NuCheckBox {
                     id: createWalletSql
                     text: qsTr("Modern SQL wallet (26.5+)")
                     checked: true
-                    helpText: qsTr("Default for new 26.5 and later wallets. Creates a Bitcoin Core-style descriptor wallet stored in SQLite. Turn off only when you explicitly need a legacy Berkeley DB wallet for compatibility testing.")
+                    enabled: !createWalletRecoveryEnabled.checked
+                    helpText: createWalletRecoveryEnabled.checked
+                              ? qsTr("BIP39 Nu/Core phrase wallets use a legacy Core HD seed so the same words can be restored through Wallet > Recovery.")
+                              : qsTr("Default for new 26.5 and later wallets. Creates a Bitcoin Core-style descriptor wallet stored in SQLite. Turn off only when you explicitly need a legacy Berkeley DB wallet for compatibility testing.")
                 }
             }
         }
 
         onAccepted: {
-            NuService.createWallet(createWalletName.text,
-                                   createWalletEncrypt.checked,
-                                   createWalletPassphrase.text,
-                                   createWalletDisablePrivateKeys.checked,
-                                   createWalletBlank.checked,
-                                   createWalletSql.checked)
+            createPending = true
+            preserveOnClose = true
+            if (createWalletRecoveryEnabled.checked) {
+                NuService.createWalletWithRecoveryPhrase(createWalletName.text,
+                                                         createWalletDialog.generatedRecoveryPhrase,
+                                                         createWalletEncrypt.checked,
+                                                         createWalletPassphrase.text)
+            } else {
+                NuService.createWallet(createWalletName.text,
+                                       createWalletEncrypt.checked,
+                                       createWalletPassphrase.text,
+                                       createWalletDisablePrivateKeys.checked,
+                                       createWalletBlank.checked,
+                                       createWalletSql.checked)
+            }
         }
         onClosed: {
-            createWalletName.text = ""
-            createWalletEncrypt.checked = false
-            createWalletPassphrase.text = ""
-            createWalletPassphraseConfirm.text = ""
-            createWalletDisablePrivateKeys.checked = false
-            createWalletBlank.checked = false
-            createWalletSql.checked = true
-        }
-    }
-
-    NuDialog {
-        id: createRecoveryWalletDialog
-        title: qsTr("Create Wallet with Recovery Phrase")
-        acceptText: qsTr("Create")
-        cancelText: qsTr("Cancel")
-        dialogWidth: 720
-        property string generatedPhrase: ""
-
-        beforeAccept: function() {
-            var phrase = createRecoveryPhraseConfirm.text.toLowerCase().replace(/\s+/g, " ").trim()
-            if (createRecoveryWalletName.text.trim().length === 0) {
-                messageDialog.title = qsTr("Wallet not created")
-                messageDialog.text = qsTr("Enter a wallet name before creating the recovery wallet.")
-                messageDialog.open()
-                return false
-            }
-            if (phrase !== generatedPhrase) {
-                messageDialog.title = qsTr("Wallet not created")
-                messageDialog.text = qsTr("Confirm the 12 recovery words exactly before Nu creates a wallet from them.")
-                messageDialog.open()
-                return false
-            }
-            if (createRecoveryEncrypt.checked && createRecoveryPassphrase.text !== createRecoveryPassphraseConfirm.text) {
-                messageDialog.title = qsTr("Wallet not created")
-                messageDialog.text = qsTr("The wallet passphrase and confirmation do not match.")
-                messageDialog.open()
-                return false
-            }
-            if (createRecoveryEncrypt.checked && createRecoveryPassphrase.text.length < 8) {
-                messageDialog.title = qsTr("Wallet not created")
-                messageDialog.text = qsTr("Enter a wallet passphrase of at least 8 characters, or turn off Encrypt new wallet.")
-                messageDialog.open()
-                return false
-            }
-            return true
-        }
-
-        onOpened: {
-            generatedPhrase = NuService.generateRecoveryPhrase()
-            createRecoveryPhrase.text = generatedPhrase
-            createRecoveryPhraseConfirm.text = ""
-            if (generatedPhrase.length === 0) {
-                messageDialog.title = qsTr("Recovery phrase unavailable")
-                messageDialog.text = qsTr("The BIP39 English word list is not available in this build.")
-                messageDialog.open()
-            }
-        }
-
-        Label {
-            Layout.fillWidth: true
-            text: qsTr("Write down these 12 BIP39 English words in order. Nu will create a Core HD wallet from them. The words are never saved by the app after this dialog closes.")
-            color: NuTokens.textPrimary
-            font.pixelSize: NuTokens.fontBody
-            wrapMode: Text.WordWrap
-        }
-
-        NuTextField {
-            id: createRecoveryWalletName
-            Layout.fillWidth: true
-            placeholderText: qsTr("New wallet name")
-            maximumLength: 128
-            helpText: qsTr("Use a new wallet name up to 128 characters. Recovery phrase creation never overwrites an existing wallet.")
-            onAccepted: createRecoveryWalletDialog.requestAccept()
-        }
-
-        NuCheckBox {
-            id: createRecoveryEncrypt
-            text: qsTr("Encrypt new wallet")
-            checked: true
-            helpText: qsTr("Recommended. Encrypts the new recovery wallet before Nu sets its seed. You will need this passphrase to spend coins.")
-        }
-
-        NuTextField {
-            id: createRecoveryPassphrase
-            Layout.fillWidth: true
-            visible: createRecoveryEncrypt.checked
-            enabled: visible
-            echoMode: TextInput.Password
-            placeholderText: qsTr("Wallet passphrase")
-            helpText: qsTr("Use at least 8 characters. Nu uses it locally to encrypt and temporarily unlock the new wallet for seed setup.")
-            onAccepted: createRecoveryWalletDialog.requestAccept()
-            Keys.onReturnPressed: createRecoveryWalletDialog.requestAccept()
-            Keys.onEnterPressed: createRecoveryWalletDialog.requestAccept()
-        }
-
-        NuTextField {
-            id: createRecoveryPassphraseConfirm
-            Layout.fillWidth: true
-            visible: createRecoveryEncrypt.checked
-            enabled: visible
-            echoMode: TextInput.Password
-            placeholderText: qsTr("Confirm wallet passphrase")
-            helpText: qsTr("Re-enter the passphrase to catch typing mistakes before the recovery wallet is created.")
-            onAccepted: createRecoveryWalletDialog.requestAccept()
-            Keys.onReturnPressed: createRecoveryWalletDialog.requestAccept()
-            Keys.onEnterPressed: createRecoveryWalletDialog.requestAccept()
-        }
-
-        TextArea {
-            id: createRecoveryPhrase
-            property bool mnemonicClipboardGuard: true
-            Layout.fillWidth: true
-            Layout.preferredHeight: 96
-            readOnly: true
-            selectByMouse: true
-            wrapMode: TextArea.Wrap
-            color: NuTokens.textPrimary
-            font.family: NuTokens.monoFont
-            font.pixelSize: NuTokens.fontBody
-            background: Rectangle { color: NuTokens.backgroundBase; border.color: NuTokens.lineSubtle; radius: NuTokens.radiusSmall }
-
-            Keys.onPressed: function(event) {
-                if (root.isSensitiveClipboardShortcut(event)) {
-                    root.requestMnemonicClipboardCopy(createRecoveryPhrase)
-                    event.accepted = true
-                }
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    mnemonicCopyMenu.sourceControl = createRecoveryPhrase
-                    mnemonicCopyMenu.popup()
-                }
-            }
-        }
-
-        TextArea {
-            id: createRecoveryPhraseConfirm
-            property bool mnemonicClipboardGuard: true
-            Layout.fillWidth: true
-            Layout.preferredHeight: 96
-            placeholderText: qsTr("Type the 12 words again to confirm")
-            selectByMouse: true
-            wrapMode: TextArea.Wrap
-            color: NuTokens.textPrimary
-            font.family: NuTokens.monoFont
-            font.pixelSize: NuTokens.fontBody
-            background: Rectangle { color: NuTokens.panelBase; border.color: NuTokens.lineSubtle; radius: NuTokens.radiusSmall }
-
-            Keys.onPressed: function(event) {
-                if (root.isSensitiveClipboardShortcut(event)) {
-                    root.requestMnemonicClipboardCopy(createRecoveryPhraseConfirm)
-                    event.accepted = true
-                }
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
-                    mnemonicCopyMenu.sourceControl = createRecoveryPhraseConfirm
-                    mnemonicCopyMenu.popup()
-                }
-            }
-        }
-
-        onAccepted: NuService.createWalletWithRecoveryPhrase(createRecoveryWalletName.text,
-                                                             generatedPhrase,
-                                                             createRecoveryEncrypt.checked,
-                                                             createRecoveryPassphrase.text)
-        onClosed: {
-            generatedPhrase = ""
-            createRecoveryWalletName.text = ""
-            createRecoveryEncrypt.checked = true
-            createRecoveryPassphrase.text = ""
-            createRecoveryPassphraseConfirm.text = ""
-            createRecoveryPhrase.text = ""
-            createRecoveryPhraseConfirm.text = ""
+            if (preserveOnClose)
+                return
+            resetFields()
         }
     }
 
@@ -1578,8 +1725,15 @@ ApplicationWindow {
         property var bip39WordLookup: ({})
         property var bip39PrefixCache: ({})
         property var bip39SuggestionCache: ({})
+        property bool showPassphrases: false
         readonly property var activeSuggestions: bip39Suggestions(suggestionPrefix, suggestionTarget === "word")
         readonly property var invalidPhraseWords: findInvalidPhraseWords()
+
+        function currentPassphraseStatus() {
+            return root.passphraseStatus(restoreRecoveryPassphrase.text,
+                                         restoreRecoveryPassphraseConfirm.text,
+                                         restoreRecoveryEncrypt.checked)
+        }
 
         Shortcut {
             sequences: [StandardKey.NextChild, "Tab", "Ctrl+I"]
@@ -1928,15 +2082,16 @@ ApplicationWindow {
                 messageDialog.open()
                 return false
             }
-            if (restoreRecoveryEncrypt.checked && restoreRecoveryPassphrase.text !== restoreRecoveryPassphraseConfirm.text) {
-                messageDialog.title = qsTr("Wallet not restored")
-                messageDialog.text = qsTr("The wallet passphrase and confirmation do not match.")
+            if (restoreRecoverySkipZeroBalance.checked && !restoreRecoverySkipZeroBalance.enabled) {
+                messageDialog.title = qsTr("Choose a fixed scan")
+                messageDialog.text = qsTr("Skip addresses that have a zero balance requires a fixed scan count. Choose Quick, Standard, Deep, or a custom address count before restoring.")
                 messageDialog.open()
                 return false
             }
-            if (restoreRecoveryEncrypt.checked && restoreRecoveryPassphrase.text.length < 8) {
+            var status = currentPassphraseStatus()
+            if (restoreRecoveryEncrypt.checked && !status.ready) {
                 messageDialog.title = qsTr("Wallet not restored")
-                messageDialog.text = qsTr("Enter a wallet passphrase of at least 8 characters, or turn off Encrypt recovered wallet.")
+                messageDialog.text = status.text
                 messageDialog.open()
                 return false
             }
@@ -1976,30 +2131,45 @@ ApplicationWindow {
             helpText: qsTr("Recommended. Encrypts the newly created recovery wallet before imported keys are added. Nu temporarily unlocks it only long enough to import and rescan, then locks it again.")
         }
 
-        NuTextField {
+        NuPassphraseField {
             id: restoreRecoveryPassphrase
             Layout.fillWidth: true
             visible: restoreRecoveryEncrypt.checked
             enabled: visible
-            echoMode: TextInput.Password
+            passphraseVisible: restoreRecoveryWalletDialog.showPassphrases
+            statusActive: restoreRecoveryEncrypt.checked && (text.length > 0 || restoreRecoveryPassphraseConfirm.text.length > 0)
+            statusColor: restoreRecoveryWalletDialog.currentPassphraseStatus().color
             placeholderText: qsTr("Wallet passphrase")
             helpText: qsTr("Use at least 8 characters. This protects the recovered private keys stored in the wallet file.")
+            onVisibilityToggled: (visible) => restoreRecoveryWalletDialog.showPassphrases = visible
             onAccepted: restoreRecoveryWalletDialog.requestAccept()
             Keys.onReturnPressed: restoreRecoveryWalletDialog.requestAccept()
             Keys.onEnterPressed: restoreRecoveryWalletDialog.requestAccept()
         }
 
-        NuTextField {
+        NuPassphraseField {
             id: restoreRecoveryPassphraseConfirm
             Layout.fillWidth: true
             visible: restoreRecoveryEncrypt.checked
             enabled: visible
-            echoMode: TextInput.Password
+            passphraseVisible: restoreRecoveryWalletDialog.showPassphrases
+            statusActive: restoreRecoveryEncrypt.checked && (restoreRecoveryPassphrase.text.length > 0 || text.length > 0)
+            statusColor: restoreRecoveryWalletDialog.currentPassphraseStatus().color
             placeholderText: qsTr("Confirm wallet passphrase")
             helpText: qsTr("Re-enter the wallet passphrase to catch typing mistakes before recovery starts.")
+            onVisibilityToggled: (visible) => restoreRecoveryWalletDialog.showPassphrases = visible
             onAccepted: restoreRecoveryWalletDialog.requestAccept()
             Keys.onReturnPressed: restoreRecoveryWalletDialog.requestAccept()
             Keys.onEnterPressed: restoreRecoveryWalletDialog.requestAccept()
+        }
+
+        Label {
+            Layout.fillWidth: true
+            visible: restoreRecoveryEncrypt.checked
+            text: restoreRecoveryWalletDialog.currentPassphraseStatus().text
+            color: restoreRecoveryWalletDialog.currentPassphraseStatus().color
+            font.pixelSize: NuTokens.fontSmall
+            wrapMode: Text.WordWrap
         }
 
         NuComboBox {
@@ -2397,6 +2567,33 @@ ApplicationWindow {
             wrapMode: Text.WordWrap
         }
 
+        NuCheckBox {
+            id: restoreRecoverySql
+            Layout.fillWidth: true
+            text: qsTr("Restore into Modern SQL descriptor wallet")
+            checked: false
+            helpText: qsTr("Optional. Creates a SQLite descriptor wallet and imports ranged descriptors from this phrase. Leave off for the default legacy BDB restore path, especially when recreating a Nu/Core HD phrase wallet exactly.")
+            onCheckedChanged: {
+                if (checked) {
+                    restoreRecoverySkipZeroBalance.checked = false
+                    if (restoreRecoveryMode.currentIndex !== 2 && restoreRecoveryScanPreset.currentIndex === 0)
+                        restoreRecoveryScanPreset.currentIndex = 1
+                }
+            }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: restoreRecoverySql.checked
+                  ? (restoreRecoveryMode.currentIndex === 2
+                     ? qsTr("SQL mode imports descriptor equivalents of Nu/Core HD external and change keychains. The default remains off so legacy BDB seed restore is still the exact old Core-style path.")
+                     : qsTr("SQL mode imports descriptor ranges instead of legacy address imports. Use a fixed scan count; zero-balance skipping is not available for SQL descriptor recovery."))
+                  : qsTr("Default: restore with the legacy BDB path. Turn on SQL only when you want a modern descriptor wallet from the same phrase.")
+            color: restoreRecoverySql.checked ? NuTokens.accentSky : NuTokens.textSecondary
+            font.pixelSize: NuTokens.fontSmall
+            wrapMode: Text.WordWrap
+        }
+
         NuComboBox {
             id: restoreRecoveryPathPreset
             Layout.fillWidth: true
@@ -2459,6 +2656,10 @@ ApplicationWindow {
             ]
             helpText: qsTr("Auto-until-empty is best for wallets where a user mistakenly mined directly into wallet-derived addresses. It keeps scanning a method until it sees 1024 empty derived addresses in a row after the last address with coins. Fixed scans import only the selected address count.")
             onCurrentIndexChanged: {
+                if (restoreRecoverySql.checked && currentIndex === 0) {
+                    currentIndex = 1
+                    return
+                }
                 if (restoreRecoveryWalletDialog.scanPresetSyncing)
                     return
                 var value = ""
@@ -2493,6 +2694,51 @@ ApplicationWindow {
                     restoreRecoveryWalletDialog.scanPresetSyncing = false
                 }
                 restoreRecoveryWalletDialog.clearPreview()
+            }
+        }
+
+        NuCheckBox {
+            id: restoreRecoverySkipZeroBalance
+            visible: restoreRecoveryMode.currentIndex !== 2
+            enabled: visible && restoreRecoveryScanPreset.currentIndex !== 0 && !restoreRecoverySql.checked
+            text: qsTr("Skip addresses that have a zero balance")
+            helpText: qsTr("Fixed scans can check the current UTXO set before import and import only derived addresses with spendable coins. This takes longer and will not recover addresses that only have fully spent historical activity.")
+            onEnabledChanged: if (!enabled) checked = false
+        }
+
+        Label {
+            visible: restoreRecoveryMode.currentIndex !== 2
+            Layout.fillWidth: true
+            text: restoreRecoverySkipZeroBalance.enabled
+                  ? (restoreRecoverySkipZeroBalance.checked
+                     ? qsTr("This will run a slower UTXO pre-scan and import only addresses with current spendable outputs.")
+                     : qsTr("Optional: turn this on to avoid importing fixed-scan addresses that currently have zero balance."))
+                  : (restoreRecoverySql.checked
+                     ? qsTr("Zero-balance skipping is unavailable for SQL descriptor recovery because SQL imports ranged wallet descriptors.")
+                     : qsTr("Zero-balance skipping is available for fixed scan counts, not auto-until-empty."))
+            color: restoreRecoverySkipZeroBalance.checked ? NuTokens.accentSky : NuTokens.textSecondary
+            font.pixelSize: NuTokens.fontSmall
+            wrapMode: Text.WordWrap
+        }
+
+        RowLayout {
+            visible: restoreRecoveryMode.currentIndex !== 2
+                     && restoreRecoverySkipZeroBalance.checked
+                     && NuService.recoveryExploreLookupSuggestion.length > 0
+            Layout.fillWidth: true
+            spacing: NuTokens.spaceSm
+
+            Label {
+                Layout.fillWidth: true
+                text: NuService.recoveryExploreLookupSuggestion
+                color: NuTokens.accentSky
+                font.pixelSize: NuTokens.fontSmall
+                wrapMode: Text.WordWrap
+            }
+
+            NuActionButton {
+                text: qsTr("Open Explore")
+                onClicked: NuService.openNuExplore()
             }
         }
 
@@ -2617,19 +2863,24 @@ ApplicationWindow {
                                                       restoreRecoveryWalletDialog.selectedWifMode(),
                                                       restoreRecoveryWalletDialog.selectedImportRange(),
                                                       restoreRecoveryEncrypt.checked,
-                                                      restoreRecoveryPassphrase.text)
+                                                      restoreRecoveryPassphrase.text,
+                                                      restoreRecoverySkipZeroBalance.checked && restoreRecoverySkipZeroBalance.enabled,
+                                                      restoreRecoverySql.checked)
         }
         onClosed: {
             restoreRecoveryWalletName.text = ""
             restoreRecoveryEncrypt.checked = true
             restoreRecoveryPassphrase.text = ""
             restoreRecoveryPassphraseConfirm.text = ""
+            showPassphrases = false
             restoreRecoveryMode.currentIndex = 0
             restoreRecoveryPathPreset.currentIndex = 0
             restoreRecoveryPath.text = "m/44'/1337'/0'/0/*"
             restoreRecoveryWifFormat.currentIndex = 0
+            restoreRecoverySql.checked = false
             restoreRecoveryScanPreset.currentIndex = 0
             restoreRecoveryRange.text = "1024"
+            restoreRecoverySkipZeroBalance.checked = false
             previewRows = []
             previewDetails = []
             previewData = {}

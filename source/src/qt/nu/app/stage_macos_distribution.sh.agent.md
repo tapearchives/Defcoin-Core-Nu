@@ -20,6 +20,10 @@ Stages macOS Nu distribution bundles, deploys backend/Qt runtime dependencies, s
   `@executable_path` install names. A Homebrew-linked executable plus bundled
   plugins loads two Qt runtimes and aborts at launch.
 - DMG background artwork should be visually verified; generated gradients must fully fade out before image edges.
+- DMG wordmark art must follow `docs/brand-logo-text.md` by using the generated
+  Nu/Explore lockup assets shared with QML and splash. Do not redraw the
+  wordmark with separate font math, and do not add decorative corner coin
+  stacks behind the centered installer layout.
 - Do not treat successful packaging as proof of runtime launch; smoke-test launch separately.
 - Do not ship source-only `.agent.md` companions in staged app bundles.
 

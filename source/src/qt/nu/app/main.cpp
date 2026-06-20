@@ -262,84 +262,23 @@ void drawNuBrandSplash(QPixmap& pixmap, const QString& resourceRoot)
         painter.drawLine(x, panel.top(), x, panel.bottom());
     }
 
-    const QPixmap coinMark(resourceRoot + "/assets/brand/defcoin-v26-coin.png");
-    const int brandTextSize = 58;
-    QFont brandFont(QStringLiteral("Avenir Next Condensed"));
-    brandFont.setPixelSize(brandTextSize);
-    brandFont.setWeight(QFont::ExtraBold);
-    brandFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
-    const double defcoinTracking = brandTextSize * 0.04;
-    const double coreNuTracking = brandTextSize * 0.042;
-    const double fcJoinGap = brandTextSize * 0.0345;
-    const auto trackedTextWidth = [](const QFont& font, const QString& text, double tracking, double fcAdjust) {
-        QFontMetrics metrics(font);
-        double width = 0.0;
-        for (int i = 0; i < text.size(); ++i) {
-            if (i > 0)
-                width += tracking;
-            if (text == QStringLiteral("DEFCOIN") && i == 3)
-                width += fcAdjust;
-            width += metrics.horizontalAdvance(QString(text.at(i)));
-        }
-        return qRound(width);
-    };
-    const auto drawTrackedText =
-        [&painter](int x, int baselineY, const QFont& font, const QString& text, double tracking, double fcAdjust) {
-            QFontMetrics metrics(font);
-            painter.setFont(font);
-            double cursor = x;
-            for (int i = 0; i < text.size(); ++i) {
-                if (i > 0)
-                    cursor += tracking;
-                if (text == QStringLiteral("DEFCOIN") && i == 3)
-                    cursor += fcAdjust;
-                const QString ch(text.at(i));
-                painter.drawText(QPointF(cursor, baselineY), ch);
-                cursor += metrics.horizontalAdvance(ch);
-            }
-        };
-    const int targetWidth = trackedTextWidth(brandFont, QStringLiteral("DEFCOIN"), defcoinTracking, fcJoinGap);
-    const int logoCoinSize = qRound(brandTextSize * 2.12);
-    const int lockupGap = qRound(brandTextSize * 0.32);
-    const int lockupWidth = logoCoinSize + lockupGap + targetWidth;
-    const QRect logoCoinRect(qMax(42, (panel.width() - lockupWidth) / 2), 118, logoCoinSize, logoCoinSize);
-    if (!coinMark.isNull()) {
+    const QPixmap lockup(resourceRoot + (kExploreApp ?
+                                             QStringLiteral("/assets/brand/defcoin-core-nu-explore-lockup.png") :
+                                             QStringLiteral("/assets/brand/defcoin-core-nu-lockup.png")));
+    if (!lockup.isNull()) {
+        constexpr double kBaseWordmarkSize = 256.0;
+        constexpr double kSplashWordmarkSize = 58.0;
+        const QSize targetSize(qRound(lockup.width() * (kSplashWordmarkSize / kBaseWordmarkSize)),
+                               qRound(lockup.height() * (kSplashWordmarkSize / kBaseWordmarkSize)));
+        const int heroBottom = pixmap.height() - 74;
+        const QRect targetRect((panel.width() - targetSize.width()) / 2,
+                               qMax(12, (heroBottom - targetSize.height()) / 2),
+                               targetSize.width(),
+                               targetSize.height());
         painter.setOpacity(0.96);
-        painter.drawPixmap(logoCoinRect, coinMark);
+        painter.drawPixmap(targetRect, lockup);
         painter.setOpacity(1.0);
-    }
-
-    painter.setFont(brandFont);
-    painter.setPen(QColor("#f6f6f2"));
-
-    const int wordX = logoCoinRect.right() + lockupGap;
-    const int lineHeight = qRound(brandTextSize * 0.90);
-    const int lineGap = qMax(0, qRound(brandTextSize * 0.025));
-    const int wordmarkLines = kExploreApp ? 3 : 2;
-    const int wordmarkHeight = (lineHeight * wordmarkLines) + (lineGap * (wordmarkLines - 1));
-    const int wordY = logoCoinRect.top() + qRound((logoCoinRect.height() - wordmarkHeight) / 2.0);
-    const int defcoinBaseline = wordY + QFontMetrics(brandFont).ascent() + 3;
-    drawTrackedText(wordX, defcoinBaseline, brandFont, QStringLiteral("DEFCOIN"), defcoinTracking, fcJoinGap);
-    QFont coreFont = brandFont;
-    coreFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.0);
-    const int coreY = wordY + lineHeight + lineGap;
-    const int coreBaseline = coreY + QFontMetrics(coreFont).ascent() + 3;
-    const int coreWidth = trackedTextWidth(coreFont, QStringLiteral("CORE"), coreNuTracking, 0.0);
-    Q_UNUSED(coreWidth);
-    const int nuWidth = trackedTextWidth(coreFont, QStringLiteral("NU"), coreNuTracking, 0.0);
-    drawTrackedText(wordX, coreBaseline, coreFont, QStringLiteral("CORE"), coreNuTracking, 0.0);
-    drawTrackedText(wordX + targetWidth - nuWidth, coreBaseline, coreFont, QStringLiteral("NU"), coreNuTracking, 0.0);
-    if (kExploreApp) {
-        QFont exploreFont = brandFont;
-        const QString exploreText = QStringLiteral("EXPLORE");
-        const int baseWidth = trackedTextWidth(exploreFont, exploreText, 0.0, 0.0);
-        const double fittedSpacing =
-            exploreText.size() > 1 ?
-                qMax(0.0, static_cast<double>(targetWidth - baseWidth) / static_cast<double>(exploreText.size() - 1)) :
-                1.15;
-        const int exploreY = coreY + lineHeight + lineGap;
-        const int exploreBaseline = exploreY + QFontMetrics(exploreFont).ascent() + 3;
-        drawTrackedText(wordX, exploreBaseline, exploreFont, exploreText, fittedSpacing, 0.0);
+        return;
     }
 }
 
@@ -866,6 +805,7 @@ int main(int argc, char* argv[])
 
     const bool forceRaise = arguments.contains(QStringLiteral("--raise"));
     const int grabIndex = arguments.indexOf("--grab-screenshot");
+    const int grabSplashIndex = arguments.indexOf("--grab-splash");
     const QHash<QString, QString> buildInfo = readBuildInfoProperties(resourceRoot);
     const QString buildId = buildInfo.value(QStringLiteral("build_id"));
     const QString buildTimestamp = buildInfo.value(QStringLiteral("build_timestamp_utc"));
@@ -891,6 +831,10 @@ int main(int argc, char* argv[])
         painter.setPen(QColor("#f6f6f2"));
         painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextWordWrap, splashText);
         painter.end();
+
+        if (grabSplashIndex >= 0 && grabSplashIndex + 1 < arguments.size()) {
+            return displaySplash.save(arguments.at(grabSplashIndex + 1)) ? 0 : 3;
+        }
 
         splash = new QSplashScreen(displaySplash);
         if (forceRaise) {

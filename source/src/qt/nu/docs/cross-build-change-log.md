@@ -52,6 +52,372 @@ Risks / follow-up:
 
 ## Entries
 
+### 26.6.8-alpha - 2026-06-20 - Alpha release rollup for Nu and Explore
+
+Big picture:
+- The visible Nu and Explore release label advances from the local
+  `26.6.7z` candidate to `26.6.8-alpha`.
+- This alpha is the first requested GitHub upload candidate since the public
+  `v26.3.1` release and consolidates the superseded 26.6.x local candidate
+  notes into one release-test line.
+- Nu and Explore remain separate app artifacts. Build both resource targets and
+  stage them into separate `Distribution_Versions` product folders.
+
+Porting notes:
+- Port the final 26.6.7z source state, not an earlier suffix candidate. Earlier
+  notes document intermediate UI/logo/paper-wallet states that were superseded
+  by the locked lockup assets, Wallets tab layout, Create Wallet dialog, and
+  dc903 default-port seed migration.
+- Keep the strict public-version mapping in `defcoin-core-versioning.md`: this
+  suffix build is an alpha, while the canonical release line remains `26.6.8`
+  if the alpha is later promoted.
+
+Changed behavior:
+- Frontend/backend release identity reports `26.6.8-alpha`.
+- CMake package metadata uses project version `26.6.8` and visible release
+  label `26.6.8-alpha`.
+- The release-note rollup now summarizes the public delta from GitHub
+  `v26.3.1` through the current alpha instead of listing every superseded local
+  suffix independently.
+
+Changed files and important details:
+- `src/clientversion.h`: `DEFCOIN_RELEASE_VERSION_STR` advanced to
+  `26.6.8-alpha`.
+- `src/qt/nu/app/CMakeLists.txt`: project version advanced to `26.6.8` and
+  `DEFCOIN_NU_RELEASE_NAME` advanced to `26.6.8-alpha`; the Explore resource
+  target now prunes `.agent.md` QML companion files the same way the Nu
+  resource target does.
+- `src/qt/nu/docs/release-notes-26.6.8-alpha.md`: new consolidated alpha
+  release note.
+
+Build/package notes:
+- Build directory should be `source/build/nu-qml-arm64-26.6.8-alpha`.
+- Nu staging directory should be
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.8-alpha-20260620/apple-silicon`.
+- Explore staging directory should be
+  `Distribution_Versions/Defcoin Core Explore/Explore-26.6.8-alpha-20260620/apple-silicon`.
+- Windows staging should use the same visible `26.6.8-alpha` label and keep
+  Velopack update-feed files separate from ordinary portable/installer output.
+- Nu Apple Silicon DMG:
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.8-alpha-20260620/apple-silicon/Defcoin-Core-Nu-v26.6.8-alpha-macOS-AppleSilicon.dmg`.
+- Explore Apple Silicon DMG:
+  `Distribution_Versions/Defcoin Core Explore/Explore-26.6.8-alpha-20260620/apple-silicon/Defcoin-Core-Nu-Explore-v26.6.8-alpha-macOS-AppleSilicon.dmg`.
+- Nu Windows setup and portable ZIP:
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.8-alpha-20260620/windows11-x86_64/Defcoin-Core-Nu-26.6.8-alpha-win64-Setup.exe`
+  and
+  `Distribution_Versions/Defcoin Core Nu/Nu-26.6.8-alpha-20260620/windows11-x86_64/Defcoin-Core-Nu-26.6.8-alpha-win64-Portable.zip`.
+- Explore Windows setup and portable ZIP:
+  `Distribution_Versions/Defcoin Core Explore/Explore-26.6.8-alpha-20260620/windows11-x86_64/Defcoin-Core-Nu-Explore-26.6.8-alpha-win64-Setup.exe`
+  and
+  `Distribution_Versions/Defcoin Core Explore/Explore-26.6.8-alpha-20260620/windows11-x86_64/Defcoin-Core-Nu-Explore-26.6.8-alpha-win64-Portable.zip`.
+- Final SHA256 values should be generated after packaging and published in the
+  release `SHA256SUMS.txt` asset instead of being committed into this source
+  note.
+
+Verification performed:
+- `make -C src -j6 defcoind defcoin-cli defcoin-tx defcoin-wallet` completed;
+  all Tahoe backend tools report `v26.6.8-alpha`.
+- `cmake --build build/nu-qml-arm64-26.6.8-alpha --target
+  DefcoinCoreNuResources DefcoinCoreExploreResources -- -j1` completed.
+- Staged Apple Silicon Nu and Explore app bundles report
+  `CFBundleShortVersionString` and `CFBundleVersion` as `26.6.8-alpha`, pass
+  `codesign --verify --deep --strict`, and are arm64 Mach-O bundles.
+- `hdiutil verify` passed for the Nu and Explore Apple Silicon DMGs.
+- Windows backend tools built from
+  `source/build-src/windows-backend-26.6.8-alpha-20260620`; `file` reports
+  PE32+ x86_64 console executables.
+- Windows Qt/CMake build completed for `DefcoinCoreNuResources` and
+  `DefcoinCoreExploreResources` using Qt 6.11.1 and the Windows backend
+  secp256k1 archive.
+- Velopack 1.2.0 produced Nu and Explore Windows setup and portable packages.
+- Windows portable ZIPs contain the expected executable, `Qt6PrintSupport.dll`,
+  `nu/BUILD_INFO.txt`, and `nu/qml/Views/PaperWalletView.qml`, and contain no
+  `.agent.md` files or `.DS_Store` metadata.
+
+Risks / follow-up:
+- GitHub upload must authenticate as the `defcoincore` account, not the active
+  local `turnkit` GitHub CLI session.
+- This alpha is expected to be a prerelease unless the user explicitly promotes
+  it to the strict public `26.6.8` release line.
+
+### 26.6.7z - 2026-06-20 - dc903 seed default-port migration
+
+Big picture:
+- Future Nu builds now treat dc903's normal Core endpoint as the default
+  Defcoin P2P port `1337`, matching the live server port split.
+- The server still keeps `10332` open as a compatibility listener for older Nu
+  builds and older operator configs.
+
+Changed behavior:
+- Core DNS/fixed seeds and Nu-managed backend launch arguments no longer hard
+  code `seed.defcoin.dc903.org:10332`.
+- Nu-managed launches use `defcoin.dc903.org` and `seed.defcoin.dc903.org`
+  without explicit ports, so Core uses the chain default `1337`.
+
+Changed files and important details:
+- `src/chainparams.cpp`: dc903 DNS seed changed to the portless seed name.
+- `src/chainparamsseeds.h`: fixed seed bytes for `50.116.19.40` changed from
+  port `10332` to port `1337`.
+- `src/qt/utilitydialog.cpp`: About/help seed list now shows the portless dc903
+  seed name.
+- `src/qt/nu/app/NuRpcService.cpp`: Nu backend launch seednodes now use the
+  default dc903 Core port.
+
+Compatibility notes:
+- Existing deployed builds that still seed `:10332` remain compatible while the
+  live server keeps the `10332` listener active.
+- Other P2Pool operators should use `defcoin.dc903.org:13370` for the P2Pool
+  share network; that is intentionally separate from wallet/Core `1337`.
+
+Verification performed:
+- Live dc903 services verified active after the port split.
+- Direct DNS query against `@50.116.19.40 seed.defcoin.dc903.org A` returned
+  Defcoin peer addresses.
+- External TCP checks succeeded for `1337`, `10332`, `13370`, and `13372`.
+
+### 26.6.7x - 2026-06-20 - Locked logo ratios, Finder icon, and Explore package
+
+Big picture:
+- Tahoe advances the local publish-candidate suffix from `26.6.7w` to
+  `26.6.7x` and stages both Nu and Explore Apple Silicon DMGs.
+- The user-approved DEFCOIN / CORE NU lockup ratios are now the durable brand
+  contract for QML, splash/About artwork, navigation mastheads, and DMG art.
+- Explore uses the complete Nu logo as the parent identity and adds `EXPLORE`
+  as a separated third line, rather than altering the Nu mark.
+- The macOS Finder icon now uses a clean Icon Composer foreground coin sized by
+  transparent alpha bounds, not by the square source canvas.
+
+Porting notes:
+- Port `NuBrandLockup.qml`, `NuAboutSummary.qml`, `main.cpp`, and
+  `brand-logo-text.md` together for platforms with splash/About/nav branding.
+- When regenerating the macOS icon, crop and scale the foreground from the
+  coin's alpha bbox. Do not measure or scale from the full square coin image.
+- Explore bundles are not implied by the Nu resource target; build
+  `DefcoinCoreExploreResources` explicitly when producing Explore artifacts.
+
+Changed behavior:
+- Wallet > Files is now Wallet > Wallets.
+- Wallet > Messages includes introductory guidance explaining message signing,
+  verification, and why a user would use it.
+- Explore staged apps include the real executable and smoke-launch successfully.
+
+Changed files and important details:
+- `src/clientversion.h`: `DEFCOIN_RELEASE_VERSION_STR` advanced to
+  `26.6.7x`.
+- `src/qt/nu/app/CMakeLists.txt`: `DEFCOIN_NU_RELEASE_NAME` advanced to
+  `26.6.7x`; Icon Composer asset flow remains active.
+- `src/qt/nu/qml/Components/NuBrandLockup.qml`: locked coin/text ratio,
+  text gap, `CORE NU` tracking, and optional third-line spacing.
+- `src/qt/nu/qml/Components/NuAboutSummary.qml`: passes optional third-line
+  text through the shared lockup for Explore About.
+- `src/qt/nu/qml/ExploreMain.qml`: Explore About uses `thirdLine: "EXPLORE"`.
+- `src/qt/nu/app/main.cpp`: splash painter mirrors the locked QML ratios and
+  draws Explore's third line below the complete Nu lockup.
+- `src/qt/nu/app/stage_macos_distribution.sh`: DMG wordmark helper mirrors the
+  locked ratios and Explore third-line treatment.
+- `src/qt/nu/docs/brand-logo-text.md`: durable logo and icon sizing spec now
+  records the approved ratios and alpha-bound icon measurement rule.
+- `src/qt/nu/assets/brand/AppIcon.icon/Assets/foreground.png`: resized clean
+  foreground coin alpha bbox to `832x832` on a `1024x1024` canvas.
+- `src/qt/nu/qml/Views/WalletView.qml`: Wallet tab label and Messages signing
+  copy updated.
+
+Build/package notes:
+- Nu staged at
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.7x-20260620/apple-silicon`.
+- Explore staged at
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Explore/Explore-26.6.7x-20260620/apple-silicon`.
+- Nu DMG SHA-256:
+  `1a37ae54a0f5c9057a4effcb2bc776ca55ee1eb6185c9a28336491b1c049f645`.
+- Explore DMG SHA-256:
+  `b3a858293e849f9e6b9a7e26cae7c850fb660f36e6161d22b41cb76a5dbbc6d5`.
+
+Verification performed:
+- `make -C source/src -j8 defcoind defcoin-cli defcoin-tx defcoin-wallet`:
+  built backend tools reporting `v26.6.7x`.
+- `cmake --build source/build/nu-qml-arm64-26.6.7x --target
+  DefcoinCoreNuResources DefcoinCoreExploreResources -- -j1`: succeeded.
+- Built and staged Nu/Explore apps pass `--smoke-test` with backend autostart
+  disabled.
+- Built and staged Nu/Explore apps pass `codesign --verify --deep --strict`.
+- Staged Nu/Explore DMGs pass `hdiutil verify`.
+- `git diff --check`: pass.
+- `bash -n source/src/qt/nu/app/stage_macos_distribution.sh`: pass.
+- `python3 -m json.tool source/src/qt/nu/assets/brand/AppIcon.icon/icon.json`:
+  pass.
+- `spctl --assess --type execute`: rejects both staged apps because they are
+  local ad-hoc signed candidates, not Developer ID notarized releases.
+
+Risks / follow-up:
+- Notarization/Developer ID signing is still required before calling this a
+  public macOS release.
+
+### 26.6.7w - 2026-06-20 - SQL recovery option and tighter brand lockup
+
+Big picture:
+- Tahoe advances the local publish-candidate suffix from `26.6.7v` to
+  `26.6.7w` before building a fresh Apple Silicon/Tahoe app.
+- The shared brand lockup and splash painter now use matching tight vertical
+  spacing so the DEFCOIN / CORE NU line gap reads smaller than the horizontal
+  gap between `CORE` and `NU`.
+- Restore Wallet keeps the default Nu/Core HD seed recovery path, but offers a
+  default-off SQL descriptor wallet recovery option for phrase recovery when the
+  user wants the newer backend.
+
+Porting notes:
+- Port `NuBrandLockup.qml`, `main.cpp`, and `brand-logo-text.md` together when
+  bringing the tighter logo lockup to Lion, Windows, or installer art. The
+  negative spacing compensates for font line boxes; do not translate it into a
+  visually large positive gap.
+- The optional SQL phrase recovery path imports checked ranged descriptors into
+  a blank SQLite wallet. Keep the legacy BDB/Core HD seed path as the default
+  until platform parity is confirmed.
+
+Changed behavior:
+- Home/navigation/About shared lockups and the splash screen now show a tighter
+  DEFCOIN / CORE NU line gap.
+- The app/backend visible label for this local build is `26.6.7w`.
+
+Changed files and important details:
+- `src/clientversion.h`: `DEFCOIN_RELEASE_VERSION_STR` advanced to
+  `26.6.7w`.
+- `src/qt/nu/app/CMakeLists.txt`: `DEFCOIN_NU_RELEASE_NAME` advanced to
+  `26.6.7w`; the passphrase visibility icon assets are now part of the runtime
+  asset list so the packaged app does not warn on `eye.svg`.
+- `src/qt/nu/qml/Components/NuBrandLockup.qml`: default line spacing changed
+  to `-0.06em` so Qt text boxes do not create an oversized visible gap without
+  making the lockup look cramped.
+- `src/qt/nu/app/main.cpp`: splash wordmark uses the same negative line-box
+  spacing ratio and supports `--grab-splash <path>` for exact splash-art
+  verification without macOS screen-recording permission.
+- `src/qt/nu/docs/brand-logo-text.md`: brand construction note updated with
+  the tighter spacing rule.
+- `src/qt/nu/app/stage_macos_distribution.sh`: DMG wordmark helper now follows
+  the same measured `DEFCOIN` / spread `CORE` + `NU` construction instead of
+  drawing a plain `CORE NU` line.
+
+Build/package notes:
+- Build and staging paths should use `26.6.7w` so the new artifact is visibly
+  distinct from the existing `26.6.7v` package.
+
+Verification performed:
+- Pending during the 26.6.7w Tahoe build.
+
+Risks / follow-up:
+- Visually confirm the built splash and About dialog if a launch smoke test is
+  requested; this pass intentionally keeps verification focused unless asked
+  otherwise.
+
+### 26.6.7v-followup - 2026-06-20 - Wallet create and paper import safeguards
+
+Big picture:
+- Tahoe fixes Create Wallet failure recovery and paper-wallet import before the
+  next publish candidate is staged.
+- The user can now see wallet passphrase fields on demand, receives red/yellow/
+  green passphrase feedback, and keeps entered Create Wallet fields when the
+  backend reports an async create failure.
+- Receive > Import can import Nu-generated BIP38 paper-wallet keys by collecting
+  the BIP38 passphrase, decrypting locally, and routing the resulting WIF through
+  the correct wallet import RPC for legacy or descriptor wallets.
+- Restore Wallet can skip current zero-balance derived addresses during fixed
+  external/auto recovery scans by checking current balances before import. When
+  the Nu Explore SQLite index is current to the backend tip, restore uses that
+  local index for faster checks; otherwise it falls back to Core's UTXO set.
+- Wallet > Files now shows compact encrypted status, total balance, transaction
+  count, and non-zero address count columns in the simple wallet table.
+- BIP39 wallet creation moved into the normal Create Wallet dialog as an
+  optional phrase subform; the Recovery tab now focuses on restoring phrases.
+- Nu-created BIP39/Core HD phrase restore now refills the derived-key keypool
+  and rescans after setting the HD seed, so a recovered phrase wallet can find
+  existing transactions and spendable keys.
+- Restore Wallet now offers an explicit, default-off SQL descriptor wallet path
+  for phrase recovery. It imports checked ranged descriptors into a blank SQLite
+  wallet instead of using the legacy-only `sethdseed` path.
+
+Porting notes:
+- Port `NuPassphraseField.qml` and the eye/eye-off icon assets with any
+  Create/Restore wallet passphrase fields that exist on Lion or Windows.
+- Port `walletWorkflowFinished("createWallet", success)` or an equivalent typed
+  async completion path. Do not infer Create Wallet state by matching translated
+  message strings.
+- Port BIP38 import as a local-only backend operation. Descriptor wallets must
+  import via checked `combo(WIF)` descriptors and `importdescriptors`; legacy
+  wallets can keep `importprivkey`.
+- Port fixed-scan zero-balance skipping as a pre-import current-balance filter.
+  Use a local Nu Explore SQLite index only when it is caught up to the backend
+  tip; otherwise fall back to local `scantxoutset`. Keep the option disabled for
+  auto-until-empty scans because that mode imports/rescans batches before it can
+  observe address activity.
+- Port the merged Create Wallet BIP39 option with its SQL/watch-only/blank
+  disablement. The current Nu/Core phrase wallet path intentionally creates a
+  legacy BDB HD-seed wallet, not a SQL descriptor wallet.
+- Port Nu/Core HD phrase restore with `sethdseed`, `keypoolrefill`, and
+  `rescanblockchain` in that order for the default BDB path. Port the optional
+  SQL phrase restore path with `importdescriptors` over ranged descriptors, not
+  `sethdseed`.
+
+Changed behavior:
+- Create Wallet no longer closes permanently on short passphrase, mismatch, name
+  collision, or late backend create failure. Known validation failures are
+  blocked before accept; backend failures reopen the preserved form.
+- BIP38 paper-wallet import asks for the BIP38 passphrase instead of sending the
+  encrypted `6P...` payload to Core as if it were WIF.
+- Fixed Restore Wallet scans now offer "Skip addresses that have a zero
+  balance." This derives the candidate addresses, shows address scan progress
+  with elapsed time and ETA, checks a current Nu Explore index when available,
+  falls back to a local `scantxoutset` current-UTXO scan, and imports only
+  funded descriptor index ranges. It does not recover addresses that have only
+  fully spent historical activity.
+- Files > Create can optionally generate a 12-word BIP39 phrase inside the
+  standard Create Wallet dialog. The old separate "Create Wallet with Recovery
+  Phrase" button/menu item is removed; self-test compatibility opens the
+  combined dialog with the option selected.
+- Nu/Core HD recovery no longer stops immediately after `sethdseed`; it refills
+  the keypool and rescans before reporting completion.
+- Restore Wallet can recover the same phrase into a Modern SQL descriptor wallet
+  when the new checkbox is selected. SQL recovery uses fixed ranged descriptors
+  and disables zero-balance skip/auto-until-empty combinations.
+- Wallet > Files simple view includes Encrypted, Total, Txns, and Non-zero
+  columns. Unloaded wallet encryption status is shown as Unknown until the
+  wallet is loaded.
+
+Changed files and important details:
+- `src/qt/nu/qml/Components/NuPassphraseField.qml`: shared passphrase field with
+  visibility toggle and status border.
+- `src/qt/nu/qml/Main.qml`: wallet passphrase status helpers, duplicate wallet
+  name preflight, Create Wallet async preserve/reopen behavior, merged BIP39
+  phrase creation subform, fixed-scan zero-balance skip UI/copy, Nu Explore
+  pre-start suggestion, and recovery progress address-scan status.
+- `src/qt/nu/qml/Views/WalletView.qml`: compact wallet table columns for
+  encrypted status, total, transactions, and non-zero address counts; Recovery
+  tab now exposes restore only.
+- `src/qt/nu/qml/Views/ReceiveView.qml`: BIP38 passphrase collection for
+  encrypted paper-wallet keys.
+- `src/qt/nu/app/NuRpcService.cpp`: BIP38 non-EC-multiply decryption, descriptor
+  wallet paper-key import, typed Create Wallet workflow completion signal,
+  fixed-scan recovery current-balance prefilter/import, Nu Explore index
+  shortcut with Core fallback, and address-count recovery timing. BIP39 create
+  now sets the HD seed and refills keypool directly; Nu/Core restore now refills
+  keypool and rescans.
+
+Compatibility notes:
+- BIP38 import supports the non-EC-multiply BIP38 format generated by Nu and
+  rejects unsupported EC-multiply BIP38 keys with a clear message.
+- Imported key/passphrase material remains local-only and must not be logged,
+  persisted, or reused by funding/preview flows.
+
+Verification performed:
+- `xcrun clang-format --dry-run --Werror source/src/qt/nu/app/NuRpcService.cpp source/src/qt/nu/app/NuRpcService.h` passed.
+- `git diff --check` passed.
+- `cmake --build build/nu-qml-syntax-check --target DefcoinCoreNu -j 8` passed.
+- `cmake --build build/nu-qml-arm64-26.6.5 --target DefcoinCoreNu -j 8` passed.
+
+Risks / follow-up:
+- Live import of a BIP38 key into a descriptor wallet was compile-verified but
+  not exercised against a funded test paper wallet in this pass.
+- This is a current-balance filter, not a full historical-use detector. A full
+  historical scan would require a heavier indexed chain/block-filter workflow.
+
 ### 26.6.7v - 2026-06-19 - Post-review packaging and UI polish
 
 Big picture:
@@ -4705,3 +5071,48 @@ Implementation:
 Cross-build note:
 - Port the same two-line private-key lane and narrowed secret panel geometry to
   Lion and Windows before exposing Paper Wallet there.
+
+## 26.6.7w - 2026-06-20 - Tahoe wallet recovery and brand package polish
+
+Scope:
+- Tahoe label moves to `26.6.7w` for the next Apple Silicon candidate.
+- Create Wallet keeps its dialog open on validation/RPC errors, adds
+  show-passphrase controls, and gives immediate passphrase length/match
+  feedback.
+- BIP39 phrase recovery adds a selectable SQL descriptor-wallet backend while
+  keeping the legacy Nu/Core HD seed path as the default.
+- Wallet Files shows richer wallet metadata columns, and BIP39 create-wallet
+  options move into the normal Create Wallet flow.
+- Restore-from-phrase progress now exposes elapsed time and an updating
+  estimated time remaining for address scans.
+- The DEFCOIN / CORE NU lockup gets a moderated line gap across QML surfaces,
+  the startup splash, About artwork, and macOS DMG artwork.
+
+Implementation:
+- `brand-logo-text.md` is the source of truth for the lockup ratios:
+  `2.12em` coin, `0.32em` coin/text gap, `0.04em` DEFCOIN tracking,
+  `0.042em` CORE/NU tracking, `0.0345em` DEF-to-COIN join, and `-0.06em`
+  line-box correction.
+- `NuBrandLockup.qml`, `main.cpp`, and `stage_macos_distribution.sh` mirror
+  those ratios instead of using independent typed text blocks.
+- `main.cpp` supports `--grab-splash <path>` so splash-only artwork can be
+  verified without relying on macOS screen-recording permission.
+- Runtime resources now bundle the eye/eye-off SVGs used by passphrase fields.
+
+Verification:
+- Tahoe backend tools and the Nu app bundle were built as `26.6.7w`.
+- Built and staged bundles report `26.6.7w` metadata and all bundled Core tools
+  report `v26.6.7w`.
+- Built and staged bundles pass ad-hoc `codesign --verify --deep --strict`.
+- The staged DMG verifies with `hdiutil verify`; SHA-256:
+  `5cb93107593e84c8feee9e3645fc283a6f1220fff7beaf397573aa8d6c4a8009`.
+- `spctl --assess` rejects the staged app because it is not Developer ID signed
+  and notarized.
+
+Cross-build note:
+- Port the wallet dialog/recovery QML and bridge changes to Lion/Windows with
+  platform-appropriate Qt syntax.
+- Keep legacy Core HD recovery as the conservative default, but preserve the
+  SQL descriptor recovery option wherever descriptor wallets are supported.
+- Keep splash/About/package logo renderers tied to `brand-logo-text.md`; do not
+  reintroduce platform-local wordmark spacing constants.

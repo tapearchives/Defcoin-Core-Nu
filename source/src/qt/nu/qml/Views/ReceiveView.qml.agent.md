@@ -13,6 +13,9 @@ import entry points.
 - Adds an Import tab for paper-wallet WIF/private-key entry. This tab hands the
   key to the local backend import path, then clears the field; it does not show
   or persist the private key in Receive state.
+- When the import key looks like BIP38 encrypted text, the tab collects a
+  transient BIP38 passphrase and clears it after submission. The passphrase is
+  only for local decryption in the backend import path.
 
 ## Do Not Break
 
@@ -20,6 +23,8 @@ import entry points.
 - Long addresses and URI text must not clip; wrap or make copy fields scroll/selectable.
 - Do not log, display, cache, or persist imported private-key text. The import
   field must be password-style and clear after submission.
+- Do not retain the BIP38 passphrase after import submission; it must stay
+  password-style unless the user explicitly toggles visibility.
 
 ## Verification
 

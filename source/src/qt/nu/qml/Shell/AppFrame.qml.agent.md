@@ -8,6 +8,9 @@ Owns the main Nu shell frame, route switching, left navigation placement, status
 
 - Hides Advanced tools by default for new users while preserving advanced routes when enabled.
 - Keeps wallet pages and advanced technical pages separated after Explorer/Forensics moved out.
+- Keeps a single Create Wallet route. Optional BIP39 phrase creation lives
+  inside Main.qml's combined Create Wallet dialog, not as a separate shell
+  signal.
 - Guards route changes while Paper Wallet private keys remain in memory. The
   user must either return to Paper Wallet or accept key clearing before Nu
   switches routes.

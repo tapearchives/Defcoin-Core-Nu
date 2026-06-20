@@ -154,7 +154,7 @@ public:
         // release ASAP to avoid it where possible.
         vSeeds.emplace_back("seed.defcoin.io");
         vSeeds.emplace_back("seed.defcoin.mikej.tech");
-        vSeeds.emplace_back("seed.defcoin.dc903.org:10332");
+        vSeeds.emplace_back("seed.defcoin.dc903.org");
         vSeeds.emplace_back("seed.defcoincore.org");
         vSeeds.emplace_back("seed.defcoin-ng.org");
 

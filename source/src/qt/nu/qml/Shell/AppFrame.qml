@@ -19,7 +19,6 @@ Item {
 
     signal aboutRequested
     signal createWalletRequested
-    signal createRecoveryWalletRequested
     signal restoreRecoveryWalletRequested
 
     function routeIndex(route) {
@@ -43,7 +42,7 @@ Item {
 
     function uiSelfTestOpenPaperWalletTab() {
         root.currentRoute = "wallet"
-        walletView.requestWalletTab(1)
+        walletView.requestWalletTab(2)
     }
 
     function uiSelfTestOpenSettingsTab(tabName) {
@@ -107,7 +106,6 @@ Item {
                     WalletView {
                         id: walletView
                         onCreateWalletRequested: root.createWalletRequested()
-                        onCreateRecoveryWalletRequested: root.createRecoveryWalletRequested()
                         onRestoreRecoveryWalletRequested: root.restoreRecoveryWalletRequested()
                     }
                     MiningView {}

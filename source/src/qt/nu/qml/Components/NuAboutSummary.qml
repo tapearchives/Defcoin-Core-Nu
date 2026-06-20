@@ -15,6 +15,7 @@ ColumnLayout {
     property string buildVersion: NuBuildVersion
     property string buildId: typeof NuBuildId !== "undefined" ? NuBuildId : ""
     property string codeName: "Core Memories"
+    property string thirdLine: ""
     property int heroHeight: 184
     property int textHeight: 126
 
@@ -28,7 +29,6 @@ ColumnLayout {
         Layout.minimumHeight: 130
 
         readonly property int brandWordmarkSize: Math.round(Math.max(30, Math.min(58, width * 0.074, height * 0.145)))
-        readonly property int brandCoinWidth: Math.round(brandWordmarkSize * 2.12)
 
         Rectangle {
             anchors.fill: parent
@@ -90,10 +90,8 @@ ColumnLayout {
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: root.showOverlayText ? -24 : 0
-            coinWidth: hero.brandCoinWidth
-            coinHeight: hero.brandCoinWidth
             wordmarkSize: hero.brandWordmarkSize
-            gap: 30
+            thirdLine: root.thirdLine
         }
 
         Rectangle {

@@ -11,6 +11,11 @@ ColumnLayout {
     spacing: NuTokens.spaceLg
     property var currentRequest: ({})
     property int receiveTab: 0
+    property bool paperBip38PassphraseVisible: false
+
+    function paperKeyLooksBip38() {
+        return paperPrivateKeyField.text.trim().indexOf("6P") === 0
+    }
 
     function currentDisplayAddress() {
         var selected = root.currentRequest.address || ""
@@ -182,7 +187,7 @@ ColumnLayout {
 
             Label {
                 Layout.fillWidth: true
-                text: "Import a paper-wallet private key into the active wallet. The key is sent only to the local backend RPC for import."
+                text: "Import a paper-wallet WIF or BIP38 private key into the active wallet. The key is sent only to the local backend RPC for import."
                 color: NuTokens.textSecondary
                 font.pixelSize: NuTokens.fontBody
                 wrapMode: Text.WordWrap
@@ -190,15 +195,43 @@ ColumnLayout {
 
             FieldBlock {
                 title: "Private key"
-                detail: "Paste the WIF private key from the paper wallet. Anyone who sees this key can spend the funds."
+                detail: "Paste the WIF private key, or the BIP38 encrypted key if the paper wallet was passphrase protected. Anyone who sees an unencrypted key can spend the funds."
 
                 NuTextField {
                     id: paperPrivateKeyField
                     Layout.fillWidth: true
                     echoMode: TextInput.Password
-                    placeholderText: "Paper wallet private key"
+                    placeholderText: "Paper wallet private key or BIP38 key"
                     helpText: "Paste the private key from a Defcoin paper wallet. Keep it off shared screens and clear it after import."
                 }
+            }
+
+            FieldBlock {
+                visible: root.paperKeyLooksBip38()
+                title: "BIP38 passphrase"
+                detail: "Required only for encrypted BIP38 paper-wallet keys."
+
+                NuPassphraseField {
+                    id: paperBip38PassphraseField
+                    Layout.fillWidth: true
+                    passphraseVisible: root.paperBip38PassphraseVisible
+                    statusActive: root.paperKeyLooksBip38()
+                    statusColor: text.length > 0 ? NuTokens.stateConnected : NuTokens.stateError
+                    placeholderText: "BIP38 passphrase"
+                    helpText: "Enter the passphrase used when this BIP38 paper-wallet key was generated."
+                    onVisibilityToggled: (visible) => root.paperBip38PassphraseVisible = visible
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: root.paperKeyLooksBip38()
+                text: paperBip38PassphraseField.text.length > 0
+                      ? "BIP38 passphrase will be used locally to decrypt the key before import."
+                      : "Enter the BIP38 passphrase before importing this encrypted key."
+                color: paperBip38PassphraseField.text.length > 0 ? NuTokens.stateConnected : NuTokens.stateError
+                font.pixelSize: NuTokens.fontSmall
+                wrapMode: Text.WordWrap
             }
 
             FieldBlock {
@@ -240,14 +273,19 @@ ColumnLayout {
                 NuActionButton {
                     text: "Import Private Key"
                     primary: true
-                    enabled: paperPrivateKeyField.text.trim().length > 0 && NuService.walletSelected
+                    enabled: paperPrivateKeyField.text.trim().length > 0
+                             && NuService.walletSelected
+                             && (!root.paperKeyLooksBip38() || paperBip38PassphraseField.text.length > 0)
                     Layout.preferredWidth: 190
                     helpText: "Import the paper-wallet private key into the active wallet and start a rescan."
                     onClicked: {
                         NuService.importPaperWalletPrivateKey(paperPrivateKeyField.text,
                                                               sweepPaperKeyCheck.checked,
-                                                              paperImportLabelField.text)
+                                                              paperImportLabelField.text,
+                                                              paperBip38PassphraseField.text)
                         paperPrivateKeyField.text = ""
+                        paperBip38PassphraseField.text = ""
+                        root.paperBip38PassphraseVisible = false
                     }
                 }
 

@@ -8,9 +8,9 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     endif()
 endif()
 
-project(DefcoinCoreNuQml VERSION 26.6.7 LANGUAGES CXX)
+project(DefcoinCoreNuQml VERSION 26.6.8 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.6.7v" CACHE STRING "Visible Defcoin Core Nu release label")
+set(DEFCOIN_NU_RELEASE_NAME "26.6.8-alpha" CACHE STRING "Visible Defcoin Core Nu release label")
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")
@@ -360,6 +360,8 @@ set(DEFCOIN_NU_EXPLORE_ONLY_QML_PATHS
 set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/DefcoinCoreNu.ico"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/bip39/english.txt"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-core-nu-explore-lockup.png"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-core-nu-lockup.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-coin-stack-hires.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-icon-1024.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-v26-coin.png"
@@ -374,6 +376,8 @@ set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/activity.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/copy.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/external-link.svg"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/eye-off.svg"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/eye.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/explorer.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/forensics.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/home.svg"
@@ -561,11 +565,20 @@ foreach(nu_asset IN LISTS DEFCOIN_NU_RUNTIME_ASSET_FILES)
     )
 endforeach()
 
+set(DEFCOIN_NU_EXPLORE_QML_AGENT_NOTE_REMOVE_COMMANDS)
+foreach(nu_agent_note IN LISTS DEFCOIN_NU_QML_AGENT_NOTE_FILES)
+    file(RELATIVE_PATH nu_agent_note_rel "${CMAKE_CURRENT_LIST_DIR}/../qml" "${nu_agent_note}")
+    list(APPEND DEFCOIN_NU_EXPLORE_QML_AGENT_NOTE_REMOVE_COMMANDS
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/qml/${nu_agent_note_rel}"
+    )
+endforeach()
+
 add_custom_target(DefcoinCoreExploreResources
     DEPENDS ${DEFCOIN_NU_QML_FILES} ${DEFCOIN_NU_RUNTIME_ASSET_FILES}
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_LIST_DIR}/../qml" "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/qml"
+    ${DEFCOIN_NU_EXPLORE_QML_AGENT_NOTE_REMOVE_COMMANDS}
     ${DEFCOIN_NU_EXPLORE_ASSET_COPY_COMMANDS}
 )
 

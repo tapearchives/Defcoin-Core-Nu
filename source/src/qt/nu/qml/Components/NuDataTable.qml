@@ -33,6 +33,7 @@ Rectangle {
     property bool autoFitOnRowsChanged: false
     property bool autoFitOnFontChanged: false
     property bool alwaysShowHorizontalScrollBar: false
+    property bool alwaysShowVerticalScrollBar: false
     property bool fitColumnsToViewport: false
     property bool wrapBodyText: false
     property int maxWrappedBodyLines: 4
@@ -1138,7 +1139,7 @@ Rectangle {
             contentWidth: root.totalWidth()
             contentHeight: tableViewport.implicitHeight
             Basic.ScrollBar.horizontal.policy: root.alwaysShowHorizontalScrollBar ? Basic.ScrollBar.AlwaysOn : Basic.ScrollBar.AsNeeded
-            Basic.ScrollBar.vertical.policy: Basic.ScrollBar.AsNeeded
+            Basic.ScrollBar.vertical.policy: root.alwaysShowVerticalScrollBar ? Basic.ScrollBar.AlwaysOn : Basic.ScrollBar.AsNeeded
 
             Column {
                 id: tableViewport

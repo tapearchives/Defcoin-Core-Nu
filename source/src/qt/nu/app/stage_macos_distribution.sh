@@ -20,6 +20,7 @@ if [[ "$BUILT_APP_BASENAME" == *Explore* || "$BUILT_APP" == *DefcoinCoreExplore*
   DEST_DMG_BACKGROUND_BASENAME="defcoin-core-nu-explore-dmg-background.png"
   DMG_STAGE_TEMPLATE="/tmp/defcoin-explore-dmg-stage.XXXXXX"
   WORDMARK_THIRD_LINE="EXPLORE"
+  LOCKUP_ASSET_BASENAME="defcoin-core-nu-explore-lockup.png"
 else
   PRODUCT_NAME="Defcoin Core Nu"
   PRODUCT_SLUG="Defcoin-Core-Nu"
@@ -27,6 +28,7 @@ else
   DEST_DMG_BACKGROUND_BASENAME="defcoin-core-nu-dmg-background.png"
   DMG_STAGE_TEMPLATE="/tmp/defcoin-nu-dmg-stage.XXXXXX"
   WORDMARK_THIRD_LINE=""
+  LOCKUP_ASSET_BASENAME="defcoin-core-nu-lockup.png"
 fi
 DEST_APP="$DEST_PLATFORM_DIR/${PRODUCT_NAME}.app"
 DEST_DMG="$DEST_PLATFORM_DIR/${PRODUCT_SLUG}-v${RELEASE_VERSION}-${DMG_SUFFIX}.dmg"
@@ -215,12 +217,12 @@ find_python_module() {
 
 PYTHON_PIL="$(find_python_module PIL || true)"
 if [ -n "$PYTHON_PIL" ]; then
-  "$PYTHON_PIL" - "$DEST_DMG_BACKGROUND" "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" "$PRODUCT_NAME" "$WORDMARK_THIRD_LINE" <<'PY'
+  "$PYTHON_PIL" - "$DEST_DMG_BACKGROUND" "$SCRIPT_DIR/../assets/brand/$LOCKUP_ASSET_BASENAME" "$PRODUCT_NAME" "$WORDMARK_THIRD_LINE" <<'PY'
 import os
 import sys
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-out_path, logo_path, product_name, third_line = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+out_path, lockup_path, product_name, third_line = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 width, height, scale = 640, 420, 2
 rw, rh = width * scale, height * scale
 base = Image.new("RGBA", (rw, rh), (18, 7, 28, 255))
@@ -266,21 +268,6 @@ for radius, alpha in [(360, 54), (275, 62), (205, 64), (135, 54)]:
     purple_glow.alpha_composite(blurred_ellipse((rw, rh), (-74, -22), radius, (92, 41, 138, alpha), 40))
 base.alpha_composite(purple_glow)
 
-if os.path.exists(logo_path):
-    logo = Image.open(logo_path).convert("RGBA")
-    logo = ImageEnhance.Contrast(logo).enhance(1.05)
-    logo.thumbnail((292 * scale, 292 * scale), Image.Resampling.LANCZOS)
-    coin_x = -72 * scale
-    coin_y = -28 * scale
-    coin_layer = Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
-    alpha_composite_clipped(coin_layer, logo, coin_x, coin_y)
-    glow_alpha = coin_layer.getchannel("A").filter(ImageFilter.GaussianBlur(58 * scale))
-    glow_layer = Image.new("RGBA", (rw, rh), (215, 196, 62, 0))
-    glow_layer.putalpha(glow_alpha.point(lambda p: int(p * 0.14)))
-    base.alpha_composite(glow_layer)
-    # Keep the coin stack clearly in the corner and away from the app icon.
-    alpha_composite_clipped(base, logo, coin_x, coin_y)
-
 def font(size, bold=False):
     candidates = [
         "/System/Library/Fonts/Avenir Next Condensed.ttc",
@@ -308,46 +295,15 @@ def ui_font(size):
 title_font = font(58, True)
 subtitle_font = ui_font(15)
 
-def draw_logo_wordmark(draw, x, y, fill, shadow=None):
-    # Mirrors main.cpp splash construction: Avenir Next Condensed ExtraBold,
-    # absolute letter spacing 1.15, DEF + COIN as separate runs with a 2 px join.
-    letter_spacing = 1.15 * scale
-    join_gap = 2 * scale
-    line_gap = 50 * scale
-    def draw_spaced(text, tx, ty, color, spacing=letter_spacing):
-        cursor = tx
-        for ch in text:
-            draw.text((cursor, ty), ch, font=title_font, fill=color)
-            cursor += draw.textlength(ch, font=title_font) + spacing
-        return cursor
-    def measure_spaced(text, spacing=letter_spacing):
-        if not text:
-            return 0
-        return sum(draw.textlength(ch, font=title_font) for ch in text) + spacing * max(0, len(text) - 1)
-    core_width = measure_spaced("CORE NU")
-    coin_width = measure_spaced("COIN")
-    def_width = measure_spaced("DEF")
-    target_width = max(def_width + join_gap + coin_width, core_width)
-    if third_line and len(third_line) > 1:
-        third_base_width = measure_spaced(third_line, 0)
-        third_spacing = max(0, (target_width - third_base_width) / (len(third_line) - 1))
-    else:
-        third_spacing = letter_spacing
-    third_width = measure_spaced(third_line, third_spacing)
-    def draw_lines(offset_x, offset_y, color):
-        draw_spaced("DEF", x + offset_x, y + offset_y, color)
-        draw_spaced("COIN", x + offset_x + def_width + join_gap, y + offset_y, color)
-        draw_spaced("CORE NU", x + offset_x, y + line_gap + offset_y, color)
-        if third_line:
-            draw_spaced(third_line, x + offset_x, y + (line_gap * 2) + offset_y, color, third_spacing)
-    if shadow:
-        draw_lines(3 * scale, 3 * scale, shadow)
-    draw_lines(0, 0, fill)
-    return max(def_width + join_gap + coin_width, core_width, third_width)
-
-word_x = 254 * scale
-word_y = (34 if third_line else 58) * scale
-draw_logo_wordmark(draw, word_x, word_y, (246, 246, 242, 255), (0, 0, 0, 110))
+if os.path.exists(lockup_path):
+    lockup = Image.open(lockup_path).convert("RGBA")
+    target_wordmark_size = 35 if third_line else 44
+    lockup_scale = target_wordmark_size / 256.0
+    lockup_size = (int(lockup.width * lockup_scale * scale), int(lockup.height * lockup_scale * scale))
+    lockup = lockup.resize(lockup_size, Image.Resampling.LANCZOS)
+    lockup_x = int((width * scale - lockup.width) / 2)
+    lockup_y = (16 if third_line else 30) * scale
+    base.alpha_composite(lockup, (lockup_x, lockup_y))
 
 # Finder draws icon labels in dark text. Add quiet light label fields behind
 # the text so names remain readable on the dark purple background. These
@@ -360,6 +316,10 @@ FINDER_ICON_SIZE = 96
 FINDER_LABEL_GAP = 10
 FINDER_LABEL_PAD_X = 9
 FINDER_LABEL_PAD_Y = 5
+APP_ICON_CENTER_X = 188
+APPLICATIONS_ICON_CENTER_X = 452
+INSTALL_ROW_CENTER_X = 320
+INSTALL_ICON_CENTER_Y = 258
 
 def finder_label_backplate(icon_center_x, icon_center_y, label):
     text_bbox = draw.textbbox((0, 0), label, font=label_font)
@@ -381,22 +341,22 @@ def finder_label_backplate(icon_center_x, icon_center_y, label):
     )
 
 for box in [
-    finder_label_backplate(220, 250, f"{product_name}.app"),
-    finder_label_backplate(512, 250, "Applications"),
+    finder_label_backplate(APP_ICON_CENTER_X, INSTALL_ICON_CENTER_Y, f"{product_name}.app"),
+    finder_label_backplate(APPLICATIONS_ICON_CENTER_X, INSTALL_ICON_CENTER_Y, "Applications"),
 ]:
     label_draw.rounded_rectangle(box, radius=7 * scale, fill=(246, 246, 242, 174))
 label_bg = label_bg.filter(ImageFilter.GaussianBlur(0.2 * scale))
 base.alpha_composite(label_bg)
 
-arrow_y = 250 * scale
+arrow_y = INSTALL_ICON_CENTER_Y * scale
 arrow = [
-    (286 * scale, arrow_y - 7 * scale),
-    (406 * scale, arrow_y - 7 * scale),
-    (406 * scale, arrow_y - 20 * scale),
-    (440 * scale, arrow_y),
-    (406 * scale, arrow_y + 20 * scale),
-    (406 * scale, arrow_y + 7 * scale),
-    (286 * scale, arrow_y + 7 * scale),
+    (252 * scale, arrow_y - 7 * scale),
+    (382 * scale, arrow_y - 7 * scale),
+    (382 * scale, arrow_y - 20 * scale),
+    (418 * scale, arrow_y),
+    (382 * scale, arrow_y + 20 * scale),
+    (382 * scale, arrow_y + 7 * scale),
+    (252 * scale, arrow_y + 7 * scale),
 ]
 draw.polygon([(x + 3 * scale, y + 3 * scale) for x, y in arrow], fill=(0, 0, 0, 70))
 draw.polygon(arrow, fill=(93, 169, 246, 232))
@@ -404,7 +364,7 @@ draw.polygon(arrow, fill=(93, 169, 246, 232))
 subtitle = "Drag to Applications"
 subtitle_box = draw.textbbox((0, 0), subtitle, font=subtitle_font)
 subtitle_width = subtitle_box[2] - subtitle_box[0]
-draw.text(((360 * scale) - (subtitle_width // 2), 197 * scale), subtitle, font=subtitle_font, fill=(220, 211, 236, 232))
+draw.text(((INSTALL_ROW_CENTER_X * scale) - (subtitle_width // 2), 200 * scale), subtitle, font=subtitle_font, fill=(220, 211, 236, 232))
 
 solid = Image.new("RGBA", (rw, rh), (18, 7, 28, 255))
 solid.alpha_composite(base)
@@ -417,18 +377,13 @@ else
   if command -v magick >/dev/null 2>&1; then
     if [ -n "$WORDMARK_THIRD_LINE" ]; then
       magick -size 640x420 gradient:'#12071c-#210d2e' \
-        "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -72-28 -composite \
-        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+34 'DEFCOIN' \
-        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+84 'CORE NU' \
-        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+134 "$WORDMARK_THIRD_LINE" \
-        -fill '#dccfee' -pointsize 17 -gravity NorthWest -annotate +294+197 'Drag to Applications' \
+        "$SCRIPT_DIR/../assets/brand/$LOCKUP_ASSET_BASENAME" -resize 226x -gravity North -geometry +0+16 -composite \
+        -fill '#dccfee' -pointsize 17 -gravity North -annotate +0+200 'Drag to Applications' \
         "$DEST_DMG_BACKGROUND"
     else
       magick -size 640x420 gradient:'#12071c-#210d2e' \
-        "$SCRIPT_DIR/../assets/brand/defcoin-nu-coin-stack-hires.png" -resize 292x292 -gravity NorthWest -geometry -72-28 -composite \
-        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+58 'DEFCOIN' \
-        -fill '#f6f6f2' -pointsize 58 -gravity NorthWest -annotate +254+108 'CORE NU' \
-        -fill '#dccfee' -pointsize 17 -gravity NorthWest -annotate +294+197 'Drag to Applications' \
+        "$SCRIPT_DIR/../assets/brand/$LOCKUP_ASSET_BASENAME" -resize 284x -gravity North -geometry +0+30 -composite \
+        -fill '#dccfee' -pointsize 17 -gravity North -annotate +0+200 'Drag to Applications' \
         "$DEST_DMG_BACKGROUND"
     fi
   else
@@ -454,8 +409,8 @@ icon_size = 96
 text_size = 13
 arrange_by = None
 icon_locations = {
-    '${PRODUCT_NAME}.app': (220, 250),
-    'Applications': (512, 250),
+    '${PRODUCT_NAME}.app': (188, 258),
+    'Applications': (452, 258),
 }
 EOF
 

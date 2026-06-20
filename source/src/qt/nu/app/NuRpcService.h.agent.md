@@ -22,8 +22,20 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
 - Exposes `fundPaperWallets()` for the reviewed active-wallet funding stage; it
   accepts public address/amount rows only.
 - Exposes `importPaperWalletPrivateKey()` for the Receive > Import paper-wallet
-  flow. The parameter is private key material and must remain a one-way local
-  import request, not frontend state.
+  flow. The key and optional BIP38 passphrase parameters are private material
+  and must remain a one-way local import request, not frontend state.
+- Exposes `restoreWalletFromRecoveryPhrase()` with optional fixed-scan
+  zero-balance skip and SQL descriptor-wallet flags plus recovery progress
+  fields for address scan status, elapsed time, ETA, and Nu Explore lookup
+  guidance. QML must pass the skip flag only for fixed legacy auto/external
+  scans, never for Nu/Core HD seed creation, SQL descriptor recovery, or
+  auto-until-empty recovery.
+- Exposes `createWalletWithRecoveryPhrase()` as a Create Wallet workflow, not a
+  Restore Wallet workflow; it must emit `walletWorkflowFinished()` so the
+  combined create dialog can preserve fields on backend failures.
+- Exposes `walletWorkflowFinished()` so QML wallet dialogs can distinguish
+  backend async create success from create failure without parsing generic
+  user-message text.
 - Exposes an internal paper-wallet placeholder installer for `--ui-self-test`;
   it is not a user-facing wallet API.
 - Owns the miner-log throttle timer state used to batch high-volume miner output before notifying QML.
@@ -38,6 +50,8 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
   QML must never pass WIF/private-key values into funding.
 - Keep paper-wallet import invokables separate from funding and preview state;
   QML may submit the private key for import, but must not retain or echo it.
+- Keep workflow completion signals narrow and typed; QML must not infer wallet
+  creation state by matching translated message titles.
 - Keep `generatePaperWallet()` as the compatibility single-entry path and route
   new paper-sheet controls through `generatePaperWallets()`.
 - Keep self-test-only invokables visibly gated in the implementation before
@@ -46,6 +60,12 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
   display entries in memory, but must not generate or persist private keys.
 - Preserve the miner-log throttle members when changing miner properties; QML must not be signaled once per miner output chunk.
 - Keep transaction and address explorer template properties distinct.
+- Keep recovery-scan flags explicit in the invokable signature; do not overload
+  negative range values with additional meanings beyond auto-until-empty. SQL
+  descriptor recovery must remain an explicit boolean.
+- Keep Nu Explore recovery lookup guidance separate from the restore flag. The
+  service decides whether the local index is current enough and must fall back
+  to Core scanning when it is not.
 - Keep `prepareForApplicationQuit()` available to QML so the shutdown overlay
   can start backend/process cleanup before the app disappears.
 

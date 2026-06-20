@@ -164,6 +164,7 @@ Rectangle {
                 id: brandLockup
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
+                wordmarkSize: 21
                 thirdLine: "EXPLORE"
             }
 

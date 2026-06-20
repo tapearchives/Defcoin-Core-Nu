@@ -5,7 +5,7 @@
         {
           "image-name": "foreground.png",
           "name": "glyph",
-          "glass": true,
+          "glass": false,
           "position": {
             "scale": 1,
             "translation-in-points": [
@@ -19,7 +19,7 @@
       "specular": false,
       "shadow": {
         "kind": "neutral",
-        "opacity": 0.12
+        "opacity": 0
       },
       "blur-material": null
     }

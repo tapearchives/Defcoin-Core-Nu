@@ -18,17 +18,24 @@ CORE NU
 The renderer may draw `DEF` and `COIN` as separate runs only to reproduce the
 legacy kerning join.
 
-The Explore app variant keeps the same first two lines and adds a third line in
-the same type family and weight:
+The Explore app variant keeps the same first two lines and adds an extension
+signature below a visible compass divider:
 
 ```text
 DEFCOIN
 CORE NU
-EXPLORE
+-- north-star ornament --
+Explore
 ```
 
-The app name is `Defcoin Core Nu Explore`, and the third logo line is set as
-`EXPLORE` to match the DEFCOIN / CORE NU lockup.
+The app name is `Defcoin Core Nu Explore`, and the extension signature is set
+as title-case `Explore` in Playball Regular from Google Fonts, licensed under
+the SIL Open Font License. The script gives Explore its own product identity
+without changing the locked Defcoin Core Nu parent mark. The divider is a
+centered compass connector, not another wordmark line: use two restrained
+off-white/gold horizontal rule segments, cyan horizon accents, and a sky-blue
+north-star mark in the center gap. Do not add a second underline or decorative
+rule below the `Explore` signature.
 
 ## Coin Mark
 
@@ -39,13 +46,19 @@ The app name is `Defcoin Core Nu Explore`, and the third logo line is set as
 - The canonical source art has a white outside background. Runtime app assets
   must use a transparent-background derivative so the coin can sit cleanly on
   purple, black, white, paper-wallet, and icon surfaces.
-- `defcoin-nu-icon-1024.png` and `DefcoinCoreNuNuIcon.icns` should be generated
-  from the same v26 coin mark for app-icon contexts. Wordmark lockups should
-  still reference `defcoin-v26-coin.png` directly.
-- For macOS app icons, use the transparent coin mark directly: no white tile, no
-  gray tile, no ring, and no artificial margin. The coin should fill the square
-  canvas edge-to-edge at the four cardinal points while preserving the full rim
-  and keeping the corner pixels alpha-transparent.
+- `defcoin-nu-icon-1024.png` is the rounded-tile runtime icon used by Qt for
+  Dock, Command-Tab, and window icon contexts. It should visually match the
+  Finder/AppIcon composition, not the transparent foreground coin alone.
+- `DefcoinCoreNuNuIcon.icns` and the Icon Composer foreground should be
+  generated from the same v26 coin mark for app-icon contexts. Wordmark lockup
+  generation should still start from `defcoin-v26-coin.png`.
+- For macOS app icons, use the transparent coin mark as the Icon Composer
+  foreground over the system rounded white tile. Crop the source coin by its
+  alpha bounds before scaling. The foreground coin alpha-edge diameter should
+  be `0.8125` of the Finder white tile diameter, matching the measured Chrome
+  circle-to-tile ratio from Finder screenshots. Do not measure the whole square
+  PNG canvas as the coin diameter. Do not add haze, glow, or shadow at the
+  bottom of the coin foreground.
 - The old `defcoin-nu-coin-stack-hires.png` artwork is legacy decorative art and
   is not part of the current product logo lockup.
 - The coin always appears to the left of the wordmark when the wordmark is
@@ -58,44 +71,108 @@ The app name is `Defcoin Core Nu Explore`, and the third logo line is set as
 - Fallbacks: `Arial Bold`, then `Helvetica Bold`.
 - Color on dark surfaces: `#f6f6f2`.
 - Shadow: low-alpha black, offset by roughly 3 px at 2x render scale.
+- Explore extension signature: Playball Regular, title-case `Explore`, cream
+  fill with a restrained gold edge and low-alpha black shadow.
 
 ## Spacing and Ratios
 
-The website prototype and reusable QML lockup are the current construction
-reference. Expressed as ratios of the wordmark font size:
+This section is the source of truth for the coin + wordmark lockup. Express
+runtime values as ratios of the wordmark font size, where `1em` equals the
+rendered wordmark pixel size.
 
-- Coin size: `2.12em` square, so the coin is just taller than the two-line
-  DEFCOIN / CORE NU text block.
-- Gap between coin and wordmark: `0.32em`, with a practical minimum of the
-  local small spacing token in QML.
+- Coin size: derive the square coin box from the visible wordmark, not from a
+  fixed em multiplier. First compute the old locked size as `(DEFCOIN visible
+  height + CORE NU visible height + 2 * visible inter-line gap) * 1.045`. Then
+  compute the inner-circle-match size as `visible two-line wordmark height /
+  0.7039`, where `0.7039` is the measured diameter ratio of the coin's inner
+  circle to the full visible coin. The final coin size is halfway between
+  those two sizes. This keeps the coin more substantial than the earlier
+  lockup without letting it dominate the wordmark.
+- Coin alignment: vertically center the coin against the full wordmark block.
+  The coin should extend just beyond the top and bottom of the combined text,
+  not sit as a small badge next to oversized words.
+- Gap between the visible right edge of the coin and the left edge of the
+  wordmark: use five-sixths of the measured horizontal gap that separates
+  `CORE` and `NU` after the second line is fitted to the `DEFCOIN` width. In
+  QML/C++ approximations this is `0.25em` before minimum sizing. Keep `CORE`
+  and `NU` distinct words at small sizes.
 - `DEFCOIN` tracking: `0.04em`.
-- `CORE` and `NU` tracking: `0.042em`.
+- `CORE` and `NU` tracking: `0.038em`.
 - `DEF` to `COIN` join gap: `0.0345em`.
-- Inter-line gap between `DEFCOIN` and `CORE NU`: `0.025em`.
+- Visual inter-line gap between `DEFCOIN` and `CORE NU`: `0.213em`, measured
+  between the visible bottom edge of the first-line glyphs and the visible top
+  edge of the second-line glyphs. Runtime layout values may be negative because
+  Qt/font line boxes include extra ascender/descender space; tune them until
+  this visible glyph gap is reached.
+- The letters must never touch or look stacked into one shape. The visible row
+  gap should be tighter than the horizontal `CORE`/`NU` word gap.
 - The `CORE NU` line is not a normal text string. Draw `CORE` and `NU` as
-  separate runs spread across the exact measured width of the `DEFCOIN` line so
-  the left edge of `CORE` aligns with `DEFCOIN` and the right edge of `NU`
-  aligns with the `N` in `DEFCOIN`.
-- In the Explore variant, the `EXPLORE` line is fit to the first two-line
-  lockup width by increasing only positive tracking. Do not use negative
-  tracking or horizontal scaling.
+  separate runs spread across the exact measured width of the `DEFCOIN` line:
+  the left edge of `CORE` aligns with the left edge of `DEFCOIN`, and the
+  right edge of `NU` aligns with the right edge of `DEFCOIN`.
+- In the Explore variant, the title-case `Explore` signature is set below the
+  complete two-line Nu logo lockup, separated by the extension divider. It is
+  not horizontally stretched. Size it to roughly `0.88` of the span from the
+  visible left edge of the gold coin to the right edge of the parent wordmark.
+- Explore optical centering: after measuring the parent span, shift both the
+  compass divider and `Explore` signature right by `74px` at the base
+  `256px` wordmark size. This compensates for the heavy left swash in
+  Playball so the child mark appears centered.
+- Explore divider: center the divider on the same optically shifted axis as
+  the `Explore` signature. Use a restrained off-white/gold rule approximately
+  `0.78` of the `Explore` signature width, broken around a sky-blue north-star
+  mark. Cyan should appear only in the divider/horizon accents, not as a second
+  underline below `Explore`.
+
+## Runtime Implementations
+
+- `src/qt/nu/assets/brand/defcoin-core-nu-lockup.png` and
+  `src/qt/nu/assets/brand/defcoin-core-nu-explore-lockup.png` are generated
+  transparent lockup assets from the construction rules above. QML, splash,
+  About, navigation, and DMG art should reuse these assets instead of
+  reconstructing the wordmark independently.
+- `src/qt/nu/qml/Components/NuBrandLockup.qml` is the canonical QML wrapper for
+  the navigation rail, Home, About, and other in-app QML surfaces. It scales
+  the generated lockup assets from a base `256px` wordmark size.
+- `src/qt/nu/app/main.cpp` renders the startup splash by drawing the same
+  generated lockup asset at the splash wordmark size.
+- `stage_macos_distribution.sh` owns DMG background art. If it renders the
+  product wordmark, use the same generated lockup asset instead of typing a
+  separate approximation.
+- When the ratios change, update this file, `NuBrandLockup.qml`, the splash
+  renderer, the generated lockup PNGs, and any packaging renderer in the same
+  build.
 
 Practical PIL reproduction:
 
 1. Draw each character separately using Avenir Next Condensed ExtraBold.
 2. Advance by the measured character width plus `0.04em` for `DEFCOIN`.
 3. Draw `DEF`, then draw `COIN` at `measure("DEF") + 0.0345em`.
-4. Draw `CORE` and `NU` as separate runs at the same x position and at the
-   measured right edge of `DEFCOIN`, using `0.042em` tracking.
-5. Place the v26 coin mark left of the wordmark at `2.12em` square.
+4. Draw the second row so the visible glyph gap between rows is `0.213em`.
+5. Draw `CORE` and `NU` as separate runs using `0.038em` tracking; place
+   `CORE` at the same x position as `DEFCOIN`, and place `NU` so its measured
+   right edge aligns with the measured right edge of `DEFCOIN`. The gap
+   between `CORE` and `NU` is therefore whatever remains after that alignment,
+   with a `0.30em` minimum.
+6. Place the v26 coin mark left of the wordmark and center it against the
+   combined two-line wordmark block. Set its square size halfway between the
+   old locked size and the inner-circle-match size described above.
+7. Set the visible gap between the coin's right edge and the wordmark's left
+   edge to five-sixths of the measured `CORE`/`NU` word gap.
+8. For Explore, leave a dedicated ornament band below the two-line Nu wordmark,
+   draw the optically shifted north-star divider in that band, then draw the
+   title-case Playball `Explore` signature below it. Use the same optically
+   shifted axis for divider and signature.
 
 ## DMG Layout Notes
 
-- The logo lockup should sit in clean negative space.
+- The logo lockup should sit in clean negative space and be centered left to
+  right in the DMG window.
 - `stage_macos_distribution.sh` must render the third `EXPLORE` line when
   staging `DefcoinCoreExplore.app`; the Nu installer remains the two-line
   DEFCOIN / CORE NU lockup.
-- The corner coin stack is decorative and must not crowd the draggable app icon.
+- Do not place decorative coin stacks in the top-left corner of the DMG
+  background; they compete with the centered product logo.
 - Finder icon labels are dark by default, so dark DMG backgrounds need a quiet
   light label field behind the app and Applications labels.
 - Any glow or shine layer must fade to full transparency before it reaches the
