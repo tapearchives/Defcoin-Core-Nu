@@ -27,6 +27,8 @@ This folder owns the Tahoe Nu frontend, QML views/components, bridge services, N
 - Use `.clang-format` for Nu app C/C++/Obj-C++ touched hunks or new Nu-owned files. On Tahoe, `/usr/bin/xcrun clang-format` is the expected Xcode formatter path. Do not use it as a global QML formatter.
 - For frontend changes, check both layout density and text clipping at realistic window sizes.
 - For service changes, keep C++ bridge APIs narrow and explicit.
+- For Tahoe CMake app builds, build the default target or `DefcoinCoreNuResources` before launch verification. Building only `DefcoinCoreNu` creates the executable but can leave QML/assets/tools unstaged, producing a backend-only launch.
+- For new Tahoe app launches, run `tools/macos_click_lan_allow.sh` against the fresh app PID within a few seconds of `open`; do not rediscover the Local Network permission click workflow each time.
 - If a QML, C++, or build file has a sibling `[full filename].agent.md`, read that companion before editing the file and keep it current with durable behavior changes.
 
 ## Verification

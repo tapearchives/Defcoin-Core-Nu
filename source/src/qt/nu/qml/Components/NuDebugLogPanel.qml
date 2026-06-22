@@ -14,6 +14,10 @@ ColumnLayout {
     property string logFilterError: ""
     property int shownLogLineCount: 0
     property var logFilterPresetModel: []
+    property bool logAutoFollow: true
+    property bool logRecentFirst: false
+    property bool logAutoFollowBeforeRecentFirst: true
+    property bool adjustingLogScroll: false
 
     function logVerbosityName(level) {
         const names = ["All details", "Standard", "Important", "Warnings"]
@@ -166,6 +170,8 @@ ColumnLayout {
                    ? "No debug log lines match the current Filter, Remove, and Verbosity settings."
                    : "No debug log lines have been recorded yet. Nu startup diagnostics should appear here shortly."
         }
+        if (root.logRecentFirst)
+            out.reverse()
         return root.numberedLogText(out)
     }
 
@@ -178,6 +184,26 @@ ColumnLayout {
         debugLogText.cursorPosition = Math.min(oldCursor, debugLogText.length)
         if (hadSelection)
             debugLogText.select(Math.min(oldSelectionStart, debugLogText.length), Math.min(oldSelectionEnd, debugLogText.length))
+        else if (root.logRecentFirst)
+            root.followLogHead()
+        else if (root.logAutoFollow)
+            root.followLogTail()
+    }
+
+    function followLogTail() {
+        Qt.callLater(function() {
+            root.adjustingLogScroll = true
+            debugLogText.cursorPosition = debugLogText.length
+            Qt.callLater(function() { root.adjustingLogScroll = false })
+        })
+    }
+
+    function followLogHead() {
+        Qt.callLater(function() {
+            root.adjustingLogScroll = true
+            debugLogText.cursorPosition = 0
+            Qt.callLater(function() { root.adjustingLogScroll = false })
+        })
     }
 
     function findInLog(backward) {
@@ -224,6 +250,35 @@ ColumnLayout {
         }
         Label { text: root.logVerbosityName(NuService.logVerbosity); color: NuTokens.textPrimary; font.pixelSize: NuTokens.fontSmall }
         Label { text: "Lines: " + root.shownLogLineCount; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontSmall }
+        NuCheckBox {
+            text: "Follow tail"
+            checked: !root.logRecentFirst && root.logAutoFollow
+            enabled: !root.logRecentFirst
+            helpText: "Keep the newest debug log output visible at the bottom."
+            onToggled: {
+                root.logAutoFollow = checked
+                if (checked)
+                    root.followLogTail()
+            }
+        }
+        NuCheckBox {
+            text: "Recent Logs to Top"
+            checked: root.logRecentFirst
+            helpText: "Show new debug log output at the top instead of following the bottom tail."
+            onToggled: {
+                if (checked) {
+                    root.logAutoFollowBeforeRecentFirst = root.logAutoFollow
+                    root.logRecentFirst = true
+                    root.followLogHead()
+                } else {
+                    root.logRecentFirst = false
+                    root.logAutoFollow = root.logAutoFollowBeforeRecentFirst
+                    if (root.logAutoFollow)
+                        root.followLogTail()
+                }
+                root.updateLogText()
+            }
+        }
         Label {
             Layout.fillWidth: true
             text: root.logFilterError
@@ -283,12 +338,17 @@ ColumnLayout {
     }
 
     Basic.ScrollView {
+        id: debugLogScroll
         Layout.fillWidth: true
         Layout.fillHeight: true
         clip: true
+        Basic.ScrollBar.vertical.policy: Basic.ScrollBar.AlwaysOn
+        Basic.ScrollBar.horizontal.policy: Basic.ScrollBar.AlwaysOn
 
         TextArea {
             id: debugLogText
+            width: Math.max(implicitWidth, debugLogScroll.availableWidth)
+            height: Math.max(implicitHeight, debugLogScroll.availableHeight)
             readOnly: true
             selectByMouse: true
             persistentSelection: true

@@ -13,6 +13,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QDnsLookup>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
@@ -310,6 +311,38 @@ QString normalizedFastSyncHost(const QHostAddress& address)
     if (ipv4_ok)
         return QHostAddress(ipv4).toString().toLower();
     QString host = address.toString().toLower();
+    const int scope = host.indexOf(QLatin1Char('%'));
+    if (scope >= 0 && address.protocol() != QAbstractSocket::IPv6Protocol)
+        host.truncate(scope);
+    if (scope >= 0 && address.protocol() == QAbstractSocket::IPv6Protocol) {
+        const Q_IPV6ADDR bytes = address.toIPv6Address();
+        const bool link_local = bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80;
+        if (!link_local)
+            host.truncate(scope);
+    }
+    return host;
+}
+
+bool isIpv6LinkLocalAddress(const QHostAddress& address)
+{
+    if (address.protocol() != QAbstractSocket::IPv6Protocol)
+        return false;
+    const Q_IPV6ADDR bytes = address.toIPv6Address();
+    return bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80;
+}
+
+QString scopedIpv6AllNodesAddress(const QString& scope_id)
+{
+    if (scope_id.trimmed().isEmpty())
+        return QString();
+    QHostAddress address(QStringLiteral("ff02::1"));
+    address.setScopeId(scope_id.trimmed());
+    return address.toString();
+}
+
+QString normalizeCoreAddNodeHost(const QHostAddress& address)
+{
+    QString host = normalizedFastSyncHost(address);
     const int scope = host.indexOf(QLatin1Char('%'));
     if (scope >= 0)
         host.truncate(scope);
@@ -2565,6 +2598,100 @@ QString formatMinerHashrateText(const QString& amount, const QString& unit)
     return QStringLiteral("%1 H/s").arg(amount);
 }
 
+double minerHashrateTextToKh(QString text)
+{
+    text.remove(QLatin1Char(','));
+    const QRegularExpression hashrate_re(QStringLiteral(R"(([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?)(?:H/s|hash/s)?)"),
+                                         QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch match = hashrate_re.match(text.trimmed());
+    if (!match.hasMatch())
+        return 0.0;
+    bool ok = false;
+    double value = match.captured(1).toDouble(&ok);
+    if (!ok || !std::isfinite(value) || value <= 0.0)
+        return 0.0;
+    const QString unit = match.captured(2).trimmed().toUpper();
+    if (unit == QLatin1String("M"))
+        value *= 1000.0;
+    else if (unit == QLatin1String("G"))
+        value *= 1000000.0;
+    else if (unit == QLatin1String("T"))
+        value *= 1000000000.0;
+    else if (unit.isEmpty() && text.contains(QStringLiteral("H/s"), Qt::CaseInsensitive))
+        value /= 1000.0;
+    return value;
+}
+
+QString formatBenchmarkDuration(qint64 seconds)
+{
+    seconds = std::max<qint64>(0, seconds);
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    const qint64 secs = seconds % 60;
+    if (hours > 0) {
+        return QStringLiteral("%1h %2m %3s")
+            .arg(hours)
+            .arg(minutes, 2, 10, QLatin1Char('0'))
+            .arg(secs, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("%1m %2s").arg(minutes).arg(secs, 2, 10, QLatin1Char('0'));
+}
+
+QString formatBenchmarkClock(qint64 seconds)
+{
+    seconds = std::max<qint64>(0, seconds);
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    const qint64 secs = seconds % 60;
+    if (hours > 0) {
+        return QStringLiteral("%1:%2:%3")
+            .arg(hours)
+            .arg(minutes, 2, 10, QLatin1Char('0'))
+            .arg(secs, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("%1:%2").arg(minutes, 2, 10, QLatin1Char('0')).arg(secs, 2, 10, QLatin1Char('0'));
+}
+
+QString stratumHostForBenchmark(QString pool_url)
+{
+    pool_url = pool_url.trimmed();
+    pool_url.remove(
+        QRegularExpression(QStringLiteral(R"(^stratum\+(?:tcp|ssl)://)"), QRegularExpression::CaseInsensitiveOption));
+    if (pool_url.startsWith(QLatin1Char('['))) {
+        const int close = pool_url.indexOf(QLatin1Char(']'));
+        if (close > 1)
+            return pool_url.mid(1, close - 1);
+    }
+    const int colon = pool_url.indexOf(QLatin1Char(':'));
+    const int slash = pool_url.indexOf(QLatin1Char('/'));
+    int end = pool_url.size();
+    if (colon >= 0)
+        end = std::min(end, colon);
+    if (slash >= 0)
+        end = std::min(end, slash);
+    return pool_url.left(end).trimmed();
+}
+
+QString benchmarkPoolColor(int index)
+{
+    static const QStringList colors{
+        QStringLiteral("#51a7f9"),
+        QStringLiteral("#33c481"),
+        QStringLiteral("#f7b84b"),
+        QStringLiteral("#e85d75"),
+        QStringLiteral("#a77cf2"),
+        QStringLiteral("#19b8c7"),
+        QStringLiteral("#d98534"),
+        QStringLiteral("#6fcf97"),
+    };
+    return colors.at(index % colors.size());
+}
+
+QString benchmarkFileStamp(const QDateTime& utc)
+{
+    return utc.toUTC().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+}
+
 QString formatSyncEtaSeconds(qint64 seconds)
 {
     if (seconds <= 0)
@@ -3456,6 +3583,11 @@ NuRpcService::NuRpcService(QObject* parent)
     m_miner_signal_timer->setInterval(250);
     connect(m_miner_signal_timer, &QTimer::timeout, this, &NuRpcService::emitPendingMinerChanged);
 
+    m_mining_benchmark_timer = new QTimer(this);
+    m_mining_benchmark_timer->setInterval(1000);
+    connect(m_mining_benchmark_timer, &QTimer::timeout, this, &NuRpcService::miningBenchmarkTick);
+    loadLatestMiningBenchmarkArtifacts();
+
     QTimer::singleShot(0, this, &NuRpcService::refresh);
     QTimer::singleShot(250, this, &NuRpcService::sampleTraffic);
     QTimer::singleShot(500, this, &NuRpcService::lanFastSyncTick);
@@ -3527,9 +3659,18 @@ void NuRpcService::loadLocalSettings()
     m_lan_quick_clone_provide_enabled = nu_settings.value(QStringLiteral("LanQuickCloneProvideEnabled"), true).toBool();
     m_quick_clone_auto_validate_after =
         nu_settings.value(QStringLiteral("QuickCloneAutoValidateAfter"), false).toBool();
-    m_lan_quick_clone_status = m_lan_quick_clone_enabled ?
-                                   QStringLiteral("Quick Clone armed; waiting for a LAN clone source when needed.") :
-                                   QStringLiteral("Quick Clone off.");
+    if (m_lan_quick_clone_enabled && m_lan_quick_clone_provide_enabled) {
+        m_lan_quick_clone_status =
+            QStringLiteral("Quick Clone receive-ready; also listening for trusted LAN clone requests from your nodes.");
+    } else if (m_lan_quick_clone_enabled) {
+        m_lan_quick_clone_status =
+            QStringLiteral("Quick Clone receive-ready; Nu will ask trusted LAN providers if this node needs a clone.");
+    } else if (m_lan_quick_clone_provide_enabled) {
+        m_lan_quick_clone_status =
+            QStringLiteral("Quick Clone provider listening for trusted LAN requests from your nodes.");
+    } else {
+        m_lan_quick_clone_status = QStringLiteral("Quick Clone off.");
+    }
     m_advanced_tools_visible = nu_settings.value(QStringLiteral("AdvancedToolsVisible"), false).toBool();
     m_explorer_top100_focused_indexing =
         nu_settings.value(QStringLiteral("ExplorerTop100FocusedIndexing"), false).toBool();
@@ -5479,9 +5620,7 @@ void NuRpcService::refreshNode()
             if (!m_lan_fast_sync_enabled) {
                 fast_sync_available = QStringLiteral("Off");
             } else if (nu_fast_sync_candidate) {
-                if (!udp_fast_sync_host_key.isEmpty() &&
-                    (m_udp_fast_sync_available_peer_hosts.contains(udp_fast_sync_host_key) ||
-                     m_udp_fast_sync_used_peer_hosts.contains(udp_fast_sync_host_key))) {
+                if (!udp_fast_sync_host_key.isEmpty() && isUdpFastSyncHostVerified(udp_fast_sync_host_key)) {
                     fast_sync_available = QStringLiteral("Yes");
                 } else if (!udp_fast_sync_host_key.isEmpty() &&
                            m_udp_fast_sync_failed_peer_hosts.contains(udp_fast_sync_host_key)) {
@@ -5506,7 +5645,7 @@ void NuRpcService::refreshNode()
             const QString received = formatBytes(peer_bytes_received);
             const bool tcp_used = peer_bytes_sent > 0 || peer_bytes_received > 0;
             const bool udp_used =
-                !udp_fast_sync_host_key.isEmpty() && m_udp_fast_sync_used_peer_hosts.contains(udp_fast_sync_host_key);
+                !udp_fast_sync_host_key.isEmpty() && isUdpFastSyncHostVerified(udp_fast_sync_host_key);
             const QString transport_methods =
                 tcp_used && udp_used ?
                     QStringLiteral("TCP+UDP") :
@@ -5581,11 +5720,16 @@ void NuRpcService::refreshNode()
                 if (!association_group_by_key.contains(association_key))
                     association_group_by_key.insert(association_key, next_association_group++);
                 association_group = association_group_by_key.value(association_key);
-                display_node_id = QStringLiteral("%1 (g%2)").arg(node_id, QString::number(association_group));
                 association_group_tooltip =
-                    QStringLiteral("Core peer id %1. The (g%2) suffix means Nu grouped this row with another peer row "
+                    QStringLiteral("Core peer id %1. The G%2 label means Nu grouped this row with another peer row "
                                    "that appears to be the same running node. Clue: %3.")
                         .arg(node_id, QString::number(association_group), association_reason);
+            }
+            QString source_or_lan_display = source_or_lan_name;
+            if (association_group > 0 && lan_peer && source_or_lan_name != QLatin1String("-") &&
+                source_or_lan_name != QLatin1String("Scanning...")) {
+                source_or_lan_display =
+                    QStringLiteral("G%1: %2").arg(QString::number(association_group), source_or_lan_name);
             }
 
             const QVariantMap peer_meta{
@@ -5610,7 +5754,7 @@ void NuRpcService::refreshNode()
                 {QStringLiteral("servicesHex"), services_hex},
                 {QStringLiteral("serviceDetails"), service_details},
                 {QStringLiteral("reverseDns"), reverse_dns},
-                {QStringLiteral("seedLanSource"), source_or_lan_name},
+                {QStringLiteral("seedLanSource"), source_or_lan_display},
                 {QStringLiteral("lanTooltip"), lan_tooltip},
                 {QStringLiteral("isLanPeer"), lan_peer},
                 {QStringLiteral("nodeUniqueId"), node_unique_id},
@@ -5659,9 +5803,11 @@ void NuRpcService::refreshNode()
             for (int i = 0; i < 28; ++i)
                 cell_tooltips << QString();
             if (!association_group_tooltip.isEmpty())
-                cell_tooltips[0] = association_group_tooltip;
+                cell_tooltips[5] = association_group_tooltip;
             if (!lan_tooltip.isEmpty())
-                cell_tooltips[5] = lan_tooltip;
+                cell_tooltips[5] = cell_tooltips[5].toString().isEmpty() ?
+                                       lan_tooltip :
+                                       cell_tooltips[5].toString() + QLatin1Char('\n') + lan_tooltip;
             cell_tooltips[8] = service_details;
 
             QVariantMap detailed_peer_meta = peer_meta;
@@ -5669,7 +5815,7 @@ void NuRpcService::refreshNode()
             detailed_peer_meta.insert(
                 QStringLiteral("knownDnsSort"),
                 (lan_peer ? QStringLiteral("0|") : QStringLiteral("1|")) +
-                    (lan_peer ? source_or_lan_name.toLower() : reverseDomainSortNotation(source_or_lan_name)));
+                    (lan_peer ? source_or_lan_display.toLower() : reverseDomainSortNotation(source_or_lan_name)));
             detailed_peer_meta.insert(QStringLiteral("cellTooltips"), cell_tooltips);
 
             detailed_rows.push_back(tableRow({display_node_id,
@@ -5677,7 +5823,7 @@ void NuRpcService::refreshNode()
                                               peerIpDisplay(endpoint),
                                               peer_meta.value(QStringLiteral("peerPort")),
                                               reverse_dns,
-                                              source_or_lan_name,
+                                              source_or_lan_display,
                                               protocol_version,
                                               magic,
                                               services,
@@ -6303,6 +6449,24 @@ void NuRpcService::ensureLanFastSyncSocket()
         return;
     }
     m_lan_fast_sync_socket->setSocketOption(QAbstractSocket::MulticastTtlOption, 1);
+    const QHostAddress all_nodes(QStringLiteral("ff02::1"));
+    for (const QNetworkInterface& iface : QNetworkInterface::allInterfaces()) {
+        const QNetworkInterface::InterfaceFlags flags = iface.flags();
+        if (!(flags & QNetworkInterface::IsUp) || !(flags & QNetworkInterface::IsRunning) ||
+            (flags & QNetworkInterface::IsLoopBack)) {
+            continue;
+        }
+        bool has_usable_ipv6 = false;
+        for (const QNetworkAddressEntry& entry : iface.addressEntries()) {
+            const QHostAddress local = entry.ip();
+            if (local.protocol() == QAbstractSocket::IPv6Protocol && !isInvalidLanDiscoveryAddress(local)) {
+                has_usable_ipv6 = true;
+                break;
+            }
+        }
+        if (has_usable_ipv6)
+            m_lan_fast_sync_socket->joinMulticastGroup(all_nodes, iface);
+    }
     m_lan_fast_sync_status = QStringLiteral("UDP fast sync listening on port %1.").arg(LAN_FAST_SYNC_PORT);
     rebuildNodeMetrics();
     Q_EMIT stateChanged();
@@ -6421,6 +6585,28 @@ void NuRpcService::sendLanDiscoveryAnnouncement()
     message.insert(QStringLiteral("quick_clone_snapshot_available"), false);
     message.insert(QStringLiteral("quick_clone_export_status"), QStringLiteral("not-prepared"));
 
+    QJsonArray advertised_addresses;
+    QSet<QString> advertised_address_keys;
+    for (const QNetworkInterface& iface : QNetworkInterface::allInterfaces()) {
+        const QNetworkInterface::InterfaceFlags flags = iface.flags();
+        if (!(flags & QNetworkInterface::IsUp) || (flags & QNetworkInterface::IsLoopBack))
+            continue;
+        for (const QNetworkAddressEntry& entry : iface.addressEntries()) {
+            const QHostAddress local = entry.ip();
+            if (local.isNull() || isInvalidLanDiscoveryAddress(local) || local.isLoopback())
+                continue;
+            if (!isPrivateOrLocalFastSyncAddress(local) && !isOnLocalInterfaceSubnet(local.toString()))
+                continue;
+            const QString local_key = normalizedFastSyncHost(local);
+            if (local_key.isEmpty() || advertised_address_keys.contains(local_key))
+                continue;
+            advertised_address_keys.insert(local_key);
+            advertised_addresses.push_back(local_key);
+        }
+    }
+    if (!advertised_addresses.isEmpty())
+        message.insert(QStringLiteral("addresses"), advertised_addresses);
+
     const QByteArray payload = QJsonDocument(message).toJson(QJsonDocument::Compact);
     if (payload.isEmpty() || payload.size() > LAN_DISCOVERY_ANNOUNCE_MAX_BYTES)
         return;
@@ -6456,6 +6642,27 @@ void NuRpcService::sendLanDiscoveryAnnouncement()
         }
     }
 
+    for (const QNetworkInterface& iface : QNetworkInterface::allInterfaces()) {
+        const QNetworkInterface::InterfaceFlags flags = iface.flags();
+        if (!(flags & QNetworkInterface::IsUp) || !(flags & QNetworkInterface::IsRunning) ||
+            (flags & QNetworkInterface::IsLoopBack)) {
+            continue;
+        }
+        bool has_usable_ipv6 = false;
+        for (const QNetworkAddressEntry& entry : iface.addressEntries()) {
+            const QHostAddress local = entry.ip();
+            if (local.protocol() == QAbstractSocket::IPv6Protocol && !isInvalidLanDiscoveryAddress(local)) {
+                has_usable_ipv6 = true;
+                break;
+            }
+        }
+        if (!has_usable_ipv6)
+            continue;
+        const QString all_nodes = scopedIpv6AllNodesAddress(iface.name());
+        if (!all_nodes.isEmpty())
+            targets.insert(all_nodes);
+    }
+
     for (const QString& target_text : std::as_const(targets)) {
         QHostAddress target(target_text);
         if (target.isNull())
@@ -6470,10 +6677,12 @@ void NuRpcService::queueLanDiscoveryAddNode(const QString& host, quint16 p2p_por
     if (!address.setAddress(host.trimmed()) || isInvalidLanDiscoveryAddress(address) ||
         isLocalInterfaceAddress(address))
         return;
+    if (isIpv6LinkLocalAddress(address))
+        return;
     if (!isPrivateOrLocalFastSyncAddress(address) && !isOnLocalInterfaceSubnet(address.toString()))
         return;
 
-    const QString normalized = normalizedFastSyncHost(address);
+    const QString normalized = normalizeCoreAddNodeHost(address);
     const QString endpoint = address.protocol() == QAbstractSocket::IPv6Protocol ?
                                  QStringLiteral("[%1]:%2").arg(normalized, QString::number(p2p_port)) :
                                  QStringLiteral("%1:%2").arg(normalized, QString::number(p2p_port));
@@ -6544,23 +6753,45 @@ void NuRpcService::handleLanDiscoveryAnnouncement(const QJsonObject& message, co
         return;
     const bool quick_clone_provider_enabled =
         message.value(QStringLiteral("quick_clone_provider_enabled")).toBool(true);
-    if (quick_clone_provider_enabled) {
-        m_lan_quick_clone_candidate_hosts.insert(sender_key);
-    } else {
-        m_lan_quick_clone_candidate_hosts.remove(sender_key);
-        m_quick_clone_snapshot_candidate_hosts.remove(sender_key);
-    }
-    if (quick_clone_provider_enabled && message.value(QStringLiteral("quick_clone_snapshot_available")).toBool(false)) {
-        m_quick_clone_snapshot_candidate_hosts.insert(sender_key);
-    } else {
-        m_quick_clone_snapshot_candidate_hosts.remove(sender_key);
-    }
     const QString message_node_unique_id = message.value(QStringLiteral("node_unique_id"))
                                                .toString(message.value(QStringLiteral("node_id")).toString())
                                                .trimmed();
     const QString local_node_unique_id = ensureNodeUniqueId();
     if (!local_node_unique_id.isEmpty() && message_node_unique_id == local_node_unique_id) {
         return;
+    }
+
+    QSet<QString> announced_host_keys;
+    announced_host_keys.insert(sender_key);
+    const QJsonArray announced_addresses = message.value(QStringLiteral("addresses")).toArray();
+    for (const QJsonValue& address_value : announced_addresses) {
+        QHostAddress announced_address;
+        if (!announced_address.setAddress(address_value.toString().trimmed()))
+            continue;
+        if (isInvalidLanDiscoveryAddress(announced_address) || isLocalInterfaceAddress(announced_address))
+            continue;
+        if (!isPrivateOrLocalFastSyncAddress(announced_address) &&
+            !isOnLocalInterfaceSubnet(announced_address.toString())) {
+            continue;
+        }
+        const QString announced_key = normalizedFastSyncHost(announced_address);
+        if (!announced_key.isEmpty())
+            announced_host_keys.insert(announced_key);
+    }
+
+    for (const QString& host_key : std::as_const(announced_host_keys)) {
+        if (quick_clone_provider_enabled) {
+            m_lan_quick_clone_candidate_hosts.insert(host_key);
+        } else {
+            m_lan_quick_clone_candidate_hosts.remove(host_key);
+            m_quick_clone_snapshot_candidate_hosts.remove(host_key);
+        }
+        if (quick_clone_provider_enabled &&
+            message.value(QStringLiteral("quick_clone_snapshot_available")).toBool(false)) {
+            m_quick_clone_snapshot_candidate_hosts.insert(host_key);
+        } else {
+            m_quick_clone_snapshot_candidate_hosts.remove(host_key);
+        }
     }
 
     const QString announced_name = lanWorkstationNameFromCandidate(
@@ -6570,34 +6801,39 @@ void NuRpcService::handleLanDiscoveryAnnouncement(const QJsonObject& message, co
 
     bool changed = false;
     if (!message_node_unique_id.isEmpty()) {
-        if (m_peer_node_unique_id_by_host.value(sender_key) != message_node_unique_id) {
-            m_peer_node_unique_id_by_host.insert(sender_key, message_node_unique_id);
-            changed = true;
-        }
         const QString source = QStringLiteral("Nu LAN beacon node_unique_id");
-        if (m_peer_node_unique_source_by_host.value(sender_key) != source) {
-            m_peer_node_unique_source_by_host.insert(sender_key, source);
-            changed = true;
+        for (const QString& host_key : std::as_const(announced_host_keys)) {
+            if (m_peer_node_unique_id_by_host.value(host_key) != message_node_unique_id) {
+                m_peer_node_unique_id_by_host.insert(host_key, message_node_unique_id);
+                changed = true;
+            }
+            if (m_peer_node_unique_source_by_host.value(host_key) != source) {
+                m_peer_node_unique_source_by_host.insert(host_key, source);
+                changed = true;
+            }
         }
     }
     if (!announced_name.isEmpty()) {
-        if (m_peer_lan_name_by_host.value(sender_key) != announced_name) {
-            m_peer_lan_name_by_host.insert(sender_key, announced_name);
-            changed = true;
-        }
         const QString info = QStringLiteral("Nu LAN beacon | %1").arg(announced_name);
-        if (m_peer_lan_info_by_host.value(sender_key) != info) {
-            m_peer_lan_info_by_host.insert(sender_key, info);
-            changed = true;
+        for (const QString& host_key : std::as_const(announced_host_keys)) {
+            if (m_peer_lan_name_by_host.value(host_key) != announced_name) {
+                m_peer_lan_name_by_host.insert(host_key, announced_name);
+                changed = true;
+            }
+            if (m_peer_lan_info_by_host.value(host_key) != info) {
+                m_peer_lan_info_by_host.insert(host_key, info);
+                changed = true;
+            }
+            m_peer_lan_lookup_pending.remove(host_key);
         }
-        m_peer_lan_lookup_pending.remove(sender_key);
     } else {
         // Bad or ambiguous announced names are display-only failures. Keep the
         // endpoint usable for normal P2P/Fast Sync and let the older probes try.
         scheduleLanPeerNameLookups(sender.toString());
     }
 
-    queueLanDiscoveryAddNode(sender.toString(), p2p_port);
+    for (const QString& host_key : std::as_const(announced_host_keys))
+        queueLanDiscoveryAddNode(host_key, p2p_port);
     evaluateQuickClonePrompt();
     if (changed)
         refreshNode();
@@ -6689,19 +6925,17 @@ QString NuRpcService::syncTransportSpeedSummary() const
         const double percent = (100.0 * static_cast<double>(part)) / static_cast<double>(total);
         return QStringLiteral("%1%").arg(QString::number(percent, 'f', percent >= 10.0 ? 0 : 1));
     };
-    const double udp_rate_bytes = udp_seconds > 0.0 ? udp_total / qMax(1.0, udp_seconds) : 0.0;
-    const double core_rate_bytes = core_block_seconds > 0.0 ? core_block_total / qMax(1.0, core_block_seconds) : 0.0;
     const double combined_rate_bytes =
         combined_seconds > 0.0 ? block_transport_total / qMax(1.0, combined_seconds) : 0.0;
-    QString best;
-    if (udp_rate_bytes <= 0.0 && core_rate_bytes <= 0.0) {
-        best = QStringLiteral("collecting samples");
-    } else if (udp_rate_bytes > core_rate_bytes * 1.15) {
-        best = QStringLiteral("UDP faster now");
-    } else if (core_rate_bytes > udp_rate_bytes * 1.15) {
-        best = QStringLiteral("Core/TCP faster now");
+    QString block_outcome;
+    if (block_total <= 0) {
+        block_outcome = QStringLiteral("no accepted blocks yet; UDP/Core tied");
+    } else if (udp_blocks == core_blocks) {
+        block_outcome = QStringLiteral("UDP/Core tied on accepted blocks");
+    } else if (udp_blocks > core_blocks) {
+        block_outcome = QStringLiteral("UDP accepted more blocks");
     } else {
-        best = QStringLiteral("Core/TCP and UDP similar");
+        block_outcome = QStringLiteral("Core/TCP accepted more blocks");
     }
     QSet<QString> failed_sources = m_udp_fast_sync_block_failed_peer_hosts;
     for (const QString& host : m_udp_fast_sync_block_success_peer_hosts) {
@@ -6711,14 +6945,16 @@ QString NuRpcService::syncTransportSpeedSummary() const
     attempted_sources.unite(m_udp_fast_sync_block_success_peer_hosts);
     attempted_sources.unite(failed_sources);
 
-    QString summary = QStringLiteral("Working: %1. Blocks UDP %2/%3 (%4), Core/TCP %5/%3 (%6); combined %7.")
-                          .arg(best,
-                               QString::number(udp_blocks),
-                               QString::number(block_total),
-                               percent_text(udp_blocks, block_total),
-                               QString::number(core_blocks),
-                               percent_text(core_blocks, block_total),
-                               formatBitRate(combined_rate_bytes));
+    QString summary =
+        QStringLiteral("Working: %1. Accepted blocks by path: UDP %2, Core/TCP %3, total %4; split UDP %5, Core/TCP "
+                       "%6; combined %7.")
+            .arg(block_outcome,
+                 QString::number(udp_blocks),
+                 QString::number(core_blocks),
+                 QString::number(block_total),
+                 percent_text(udp_blocks, block_total),
+                 percent_text(core_blocks, block_total),
+                 formatBitRate(combined_rate_bytes));
     summary += QStringLiteral("\nRates UDP %1, Core/TCP %2; UDP peers %3/%4 ok, %5 failed, %6 protocol failures.")
                    .arg(volume_rate(udp_total, udp_seconds),
                         volume_rate(core_block_total, core_block_seconds),
@@ -7124,21 +7360,24 @@ QString NuRpcService::coreSchedulingWaitStatus(const QString& feature, const QSt
                              reason == QLatin1String("no-downloadable-block");
 
     if (header_gate && headers_ahead) {
-        return QStringLiteral("%1 waiting for headers: %2 known, %3 accepted. %4")
+        return QStringLiteral("%1 is waiting for this node's headers: %2 known, %3 accepted. %4")
             .arg(feature, QString::number(m_header_height), QString::number(m_block_height), suffix);
     }
     if (reason == QLatin1String("waiting-for-block-window")) {
-        return QStringLiteral("%1 waiting for Core's block window. %2").arg(feature, suffix);
+        return QStringLiteral("%1 is waiting for this node's backend to open the next block-request window. %2")
+            .arg(feature, suffix);
     }
     if (reason == QLatin1String("peer-in-flight-full") ||
         reason == QLatin1String("fast-sync-reservation-already-claimed") ||
         reason == QLatin1String("block-already-in-flight")) {
-        return QStringLiteral("%1 waiting for an in-flight Core block to finish. %2").arg(feature, suffix);
+        return QStringLiteral("%1 is waiting for this node's current backend block request to finish. %2")
+            .arg(feature, suffix);
     }
     if (reason == QLatin1String("fast-sync-udp-transport-unverified")) {
-        return QStringLiteral("%1 waiting for UDP probe acknowledgement. %2").arg(feature, suffix);
+        return QStringLiteral("%1 is waiting for a UDP reply from the selected peer. %2").arg(feature, suffix);
     }
-    return QStringLiteral("%1 waiting for Core scheduling (%2). %3").arg(feature, reason, suffix);
+    return QStringLiteral("%1 is waiting for this node's backend to reserve the next safe block (%2). %3")
+        .arg(feature, reason, suffix);
 }
 
 QString NuRpcService::udpFastSyncEndpointText(const QHostAddress& address, quint16 port) const
@@ -8028,7 +8267,8 @@ void NuRpcService::lanQuickCloneTick()
 
     if (node_id < 0) {
         m_lan_quick_clone_status =
-            QStringLiteral("Quick Clone found LAN source %1; waiting for Core peer selection before requesting blocks.")
+            QStringLiteral("Quick Clone found LAN source %1. This node is waiting for its backend to identify that "
+                           "same peer connection before requesting blocks.")
                 .arg(host);
         rebuildNodeMetrics();
         Q_EMIT stateChanged();
@@ -8048,7 +8288,7 @@ void NuRpcService::lanQuickCloneTick()
     }
 
     m_lan_fast_sync_reserve_in_flight = true;
-    if (!m_lan_quick_clone_status.startsWith(QStringLiteral("Quick Clone waiting on Core scheduling"))) {
+    if (!m_lan_quick_clone_status.startsWith(QStringLiteral("Quick Clone is waiting for this node's backend"))) {
         m_lan_quick_clone_status =
             QStringLiteral("Quick Clone reserving LAN block %1 from %2.").arg(wanted_height).arg(host);
         m_lan_fast_sync_status = m_lan_quick_clone_status;
@@ -8224,8 +8464,24 @@ void NuRpcService::lanFastSyncTick()
 
 bool NuRpcService::isUdpFastSyncHostVerified(const QString& host) const
 {
-    return !host.isEmpty() &&
-           (m_udp_fast_sync_available_peer_hosts.contains(host) || m_udp_fast_sync_used_peer_hosts.contains(host));
+    const QString host_key = normalizedFastSyncHostText(host);
+    if (host_key.isEmpty())
+        return false;
+    if (m_udp_fast_sync_available_peer_hosts.contains(host_key) || m_udp_fast_sync_used_peer_hosts.contains(host_key))
+        return true;
+
+    const QString logical_key = fastSyncLogicalPeerKey(host_key);
+    if (logical_key.isEmpty())
+        return false;
+    for (const QString& candidate : m_udp_fast_sync_available_peer_hosts) {
+        if (fastSyncLogicalPeerKey(candidate) == logical_key)
+            return true;
+    }
+    for (const QString& candidate : m_udp_fast_sync_used_peer_hosts) {
+        if (fastSyncLogicalPeerKey(candidate) == logical_key)
+            return true;
+    }
+    return false;
 }
 
 bool NuRpcService::isPrivateLocalOrProvenUdpFastSyncTarget(const QString& host) const
@@ -8246,10 +8502,14 @@ void NuRpcService::setUdpFastSyncPeerTransportVerified(const QString& host, bool
 
     QSet<int> live_node_ids;
     QSet<int> node_ids;
+    const QString logical_key = fastSyncLogicalPeerKey(host_key);
     auto add_live_match = [&](const QString& candidate, int node_id) {
         if (node_id < 0)
             return;
-        if (normalizedFastSyncHostText(candidate) == host_key) {
+        const QString candidate_key = normalizedFastSyncHostText(candidate);
+        const bool same_host = candidate_key == host_key;
+        const bool same_logical_peer = !logical_key.isEmpty() && fastSyncLogicalPeerKey(candidate_key) == logical_key;
+        if (same_host || same_logical_peer) {
             live_node_ids.insert(node_id);
             node_ids.insert(node_id);
         }
@@ -8499,7 +8759,9 @@ QString NuRpcService::selectUdpFastSyncTargetHost(int* node_id) const
         if (peer_node_id < 0)
             return false;
         const int peer_tip = m_udp_fast_sync_peer_tips_by_host.value(host, -1);
-        if (peer_tip <= m_block_height)
+        const bool peer_tip_ahead = peer_tip > m_block_height;
+        const bool local_headers_ahead = m_header_height > m_block_height;
+        if (!peer_tip_ahead && !local_headers_ahead)
             return false;
         if (m_udp_fast_sync_failed_peer_hosts.contains(host) && !m_udp_fast_sync_available_peer_hosts.contains(host) &&
             !m_udp_fast_sync_used_peer_hosts.contains(host) && !isUdpFastSyncProbeAllowed(host, now)) {
@@ -8538,6 +8800,7 @@ QString NuRpcService::selectUdpFastSyncTargetHost(int* node_id) const
         if (!is_eligible_host(host, &peer_node_id, &address))
             continue;
         const int peer_tip = m_udp_fast_sync_peer_tips_by_host.value(host, -1);
+        const int effective_tip = peer_tip > m_block_height ? peer_tip : m_header_height;
         const bool lan_candidate = isPrivateOrLocalFastSyncAddress(address) || isOnLocalInterfaceSubnet(host);
         if (has_lan_candidate && !lan_candidate)
             continue;
@@ -8552,7 +8815,7 @@ QString NuRpcService::selectUdpFastSyncTargetHost(int* node_id) const
             score += 50;
         if (local_or_proven)
             score += 25;
-        score += qMin(200, qMax(0, peer_tip - m_block_height) / 1000);
+        score += qMin(200, qMax(0, effective_tip - m_block_height) / 1000);
         score -= qMin(48, m_udp_fast_sync_peer_inflight_counts_by_host.value(host, 0) * 3);
         score -= qMin(500, local_inflight * 500);
         if (address.protocol() == QAbstractSocket::IPv4Protocol)
@@ -10668,6 +10931,83 @@ void NuRpcService::refreshPeer(const QString& node_id)
             });
 }
 
+void NuRpcService::requestQuickCloneFromPeers(const QVariantList& node_ids)
+{
+    if (m_debug_disable_quick_clone) {
+        Q_EMIT userMessage(QStringLiteral("Quick Clone unavailable"),
+                           QStringLiteral("Quick Clone is disabled by the debug launch switch."));
+        return;
+    }
+    if (node_ids.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Quick Clone not requested"),
+                           QStringLiteral("Select one or more LAN peer rows first."));
+        return;
+    }
+
+    if (!m_lan_fast_sync_enabled && !m_debug_disable_fast_sync)
+        setLanFastSyncEnabled(true);
+    if (!m_lan_node_discovery_enabled)
+        setLanNodeDiscoveryEnabled(true);
+    if (!m_lan_quick_clone_enabled)
+        setLanQuickCloneEnabled(true);
+    ensureLanFastSyncSocket();
+
+    QStringList requested_hosts;
+    QStringList skipped_hosts;
+    for (const QVariant& node_value : node_ids) {
+        bool ok = false;
+        const int id = node_value.toString().trimmed().toInt(&ok);
+        if (!ok || id < 0)
+            continue;
+        const QString host = m_peer_host_by_node_id.value(id).trimmed();
+        QHostAddress address;
+        if (host.isEmpty() || !address.setAddress(host) ||
+            !(isPrivateOrLocalFastSyncAddress(address) || isOnLocalInterfaceSubnet(host))) {
+            skipped_hosts.push_back(QString::number(id));
+            continue;
+        }
+
+        const QString host_key = normalizedFastSyncHost(address);
+        if (host_key.isEmpty()) {
+            skipped_hosts.push_back(QString::number(id));
+            continue;
+        }
+        m_lan_quick_clone_candidate_hosts.insert(host_key);
+        m_udp_fast_sync_peer_hosts.insert(host_key);
+        m_udp_fast_sync_peer_node_ids_by_host.insert(host_key, id);
+        requested_hosts.push_back(host_key);
+        if (!isUdpFastSyncHostVerified(host_key))
+            sendUdpFastSyncProbe(host_key, id);
+    }
+
+    if (requested_hosts.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Quick Clone not requested"),
+                           QStringLiteral("None of the selected peers are trusted-LAN Quick Clone candidates."));
+        return;
+    }
+
+    m_lan_quick_clone_requested = true;
+    m_lan_quick_clone_status =
+        QStringLiteral("Quick Clone re-requested from %1 selected LAN peer%2; waiting for UDP response.")
+            .arg(requested_hosts.size())
+            .arg(requested_hosts.size() == 1 ? QString() : QStringLiteral("s"));
+    m_lan_fast_sync_status = m_lan_quick_clone_status;
+    sendLanDiscoveryAnnouncement();
+    rebuildNodeMetrics();
+    Q_EMIT stateChanged();
+    QTimer::singleShot(0, this, &NuRpcService::lanFastSyncTick);
+
+    if (!skipped_hosts.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Some peers skipped"),
+                           QStringLiteral("%1 selected peer%2 were not trusted-LAN Quick Clone candidates. Nu still "
+                                          "requested Quick Clone from %3 LAN peer%4.")
+                               .arg(skipped_hosts.size())
+                               .arg(skipped_hosts.size() == 1 ? QString() : QStringLiteral("s"))
+                               .arg(requested_hosts.size())
+                               .arg(requested_hosts.size() == 1 ? QString() : QStringLiteral("s")));
+    }
+}
+
 void NuRpcService::banPeer(const QString& node_id)
 {
     bool ok = false;
@@ -10753,13 +11093,43 @@ void NuRpcService::tracePeer(const QString& node_id)
         };
         const bool supports_tui_page_flags = trip_supports_option(trip, QStringLiteral("--tui-preserve-screen")) &&
                                              trip_supports_option(trip, QStringLiteral("--tui-custom-columns"));
-        tool_name = supports_tui_page_flags ? QStringLiteral("Trippy") : QStringLiteral("Trippy legacy stream mode");
+        if (supports_tui_page_flags) {
+            QStringList tui_args{QStringLiteral("-u"),
+                                 QStringLiteral("--mode"),
+                                 QStringLiteral("tui"),
+                                 QStringLiteral("--tui-preserve-screen"),
+                                 QStringLiteral("--tui-custom-columns"),
+                                 QStringLiteral("holsravbwdt"),
+                                 host};
+            const QString tui_command = processCommandForDisplay(trip, tui_args);
+#if defined(Q_OS_MACOS)
+            const QString script = QStringLiteral("tell application \"Terminal\" to do script %1\nactivate")
+                                       .arg(appleScriptStringLiteral(tui_command));
+            if (QProcess::startDetached(QStringLiteral("/usr/bin/osascript"), {QStringLiteral("-e"), script})) {
+                Q_EMIT userMessage(
+                    QStringLiteral("Trippy opened"),
+                    QStringLiteral("Interactive Trippy opened in Terminal for %1. Use Up/Down to inspect hops, d for "
+                                   "hop details, and q to quit.")
+                        .arg(host));
+                return;
+            }
+#elif defined(Q_OS_WIN)
+            QStringList start_args{QStringLiteral("/C"), QStringLiteral("start"), QStringLiteral("Defcoin Trippy")};
+            start_args << trip << tui_args;
+            if (QProcess::startDetached(QStringLiteral("cmd.exe"), start_args)) {
+                Q_EMIT userMessage(
+                    QStringLiteral("Trippy opened"),
+                    QStringLiteral("Interactive Trippy opened in a terminal for %1. Use Up/Down to inspect hops, d for "
+                                   "hop details, and q to quit.")
+                        .arg(host));
+                return;
+            }
+#endif
+        }
+        tool_name = supports_tui_page_flags ? QStringLiteral("Trippy fallback stream mode") :
+                                              QStringLiteral("Trippy legacy stream mode");
         program = trip;
         args = {QStringLiteral("-u"), QStringLiteral("--mode"), QStringLiteral("stream")};
-        if (supports_tui_page_flags) {
-            args << QStringLiteral("--tui-preserve-screen") << QStringLiteral("--tui-custom-columns")
-                 << QStringLiteral("holsravbwdt");
-        }
         args << QStringLiteral("--report-cycles") << QStringLiteral("16") << host;
     } else {
 #if defined(Q_OS_WIN)
@@ -12155,8 +12525,8 @@ bool NuRpcService::renderPaperWalletPages(QPainter& painter,
         // base strip 486x261, public QR near 17/52, private QR near 360/104,
         // address/key lanes rotated, and dotted fold/tear guides.
         const QRectF base(0, 0, liteaddress_width, liteaddress_height);
-        const QRectF public_security(1, 1, 113, 259);
-        const QRectF public_qr(6, 32, 105, 105);
+        const QRectF public_security(1, 1, 111, 259);
+        const QRectF public_qr(4, 32, 105, 105);
         const QRectF private_security(386, 1, 99, 259);
         const QRectF private_qr(private_security.center().x() - 45, 31, 90, 90);
         const QRectF address_panel(112, 0, 48, liteaddress_height);
@@ -12201,12 +12571,10 @@ bool NuRpcService::renderPaperWalletPages(QPainter& painter,
         }
 
         painter.fillRect(address_panel, QColor(255, 255, 255, 190));
-        painter.fillRect(QRectF(334, 0, 34, liteaddress_height), QColor(255, 255, 255, 235));
-        painter.setPen(QPen(QColor(60, 60, 60, 190), 1, Qt::DotLine));
-        painter.drawLine(QPointF(154, 1), QPointF(154, 260)); // fold guide
-        painter.drawLine(QPointF(160, 1), QPointF(160, 260)); // trim/fold lane edge
         painter.setPen(QPen(QColor("#8e68cc"), 1.5, Qt::DotLine));
-        painter.drawLine(QPointF(334, 1), QPointF(334, 260)); // fold guide
+        painter.drawLine(QPointF(160, 1), QPointF(160, 260)); // trim/fold lane edge
+        painter.fillRect(private_panel, QColor(255, 255, 255, 235));
+        painter.drawLine(QPointF(333, 1), QPointF(333, 260)); // fold guide
         painter.setPen(QPen(QColor("#7b5db2"), 1.0));
         painter.drawLine(QPointF(private_security.left(), 1),
                          QPointF(private_security.left(), 260)); // private QR panel edge
@@ -13433,7 +13801,11 @@ void NuRpcService::setLanQuickCloneEnabled(bool enabled)
         m_lan_quick_clone_status =
             m_lan_quick_clone_requested ?
                 QStringLiteral("Quick Clone requested. Nu will use LAN sources only; wallet data is never copied.") :
-                QStringLiteral("Quick Clone armed; waiting for a LAN clone source when needed.");
+                (m_lan_quick_clone_provide_enabled ?
+                     QStringLiteral(
+                         "Quick Clone receive-ready; also listening for trusted LAN clone requests from your nodes.") :
+                     QStringLiteral("Quick Clone receive-ready; Nu will ask trusted LAN providers if this node needs "
+                                    "a clone."));
         if (m_lan_quick_clone_requested) {
             appendLaunchDiagnostic(
                 QStringLiteral("Quick Clone requested for this session. Wallet data is not copied; LAN public-chain "
@@ -13468,8 +13840,22 @@ void NuRpcService::setLanQuickCloneProvideEnabled(bool enabled)
             setLanFastSyncEnabled(true);
         ensureLanFastSyncSocket();
         sendLanDiscoveryAnnouncement();
+        if (!m_lan_quick_clone_requested) {
+            m_lan_quick_clone_status =
+                m_lan_quick_clone_enabled ?
+                    QStringLiteral(
+                        "Quick Clone receive-ready; also listening for trusted LAN clone requests from your nodes.") :
+                    QStringLiteral("Quick Clone provider listening for trusted LAN requests from your nodes.");
+        }
         appendLaunchDiagnostic(QStringLiteral("Quick Clone LAN provider enabled."));
     } else {
+        if (!m_lan_quick_clone_requested) {
+            m_lan_quick_clone_status =
+                m_lan_quick_clone_enabled ?
+                    QStringLiteral("Quick Clone receive-ready; Nu will ask trusted LAN providers if this node needs "
+                                   "a clone.") :
+                    QStringLiteral("Quick Clone off.");
+        }
         appendLaunchDiagnostic(QStringLiteral("Quick Clone LAN provider disabled."));
     }
     rebuildNodeMetrics();
@@ -13943,10 +14329,11 @@ QString NuRpcService::minerSummaryText() const
 {
     if (!minerRunning())
         return QString();
-    return QStringLiteral("%1 | %2 | A: %3 | R: %4")
+    return QStringLiteral("%1 | %2 | A: %3 | %4 | R: %5")
         .arg(miningStateText(),
              m_miner_hashrate_text.isEmpty() ? QStringLiteral("-") : m_miner_hashrate_text,
              QString::number(m_miner_accepted_shares),
+             minerAcceptedRateText(),
              QString::number(m_miner_rejected_shares));
 }
 
@@ -13972,7 +14359,31 @@ void NuRpcService::resetMinerRuntimeStats()
     m_miner_hashrate_text = QStringLiteral("-");
     m_miner_accepted_shares = 0;
     m_miner_rejected_shares = 0;
+    m_miner_accepted_share_difficulty = 0.0;
+    m_miner_submitted_share_difficulty_by_id.clear();
+    m_miner_pending_accepted_share_ids.clear();
+    m_miner_started_ms = 0;
+    m_miner_accepted_share_times_ms.clear();
     m_miner_parse_buffer.clear();
+}
+
+void NuRpcService::updateMinerAcceptedShares(int accepted)
+{
+    if (accepted <= m_miner_accepted_shares) {
+        m_miner_accepted_shares = std::max(m_miner_accepted_shares, accepted);
+        return;
+    }
+
+    const int delta = std::min(accepted - m_miner_accepted_shares, 256);
+    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+    for (int i = 0; i < delta; ++i)
+        m_miner_accepted_share_times_ms.push_back(now_ms);
+    const qint64 oldest_kept_ms = now_ms - 10 * 60 * 1000;
+    while (!m_miner_accepted_share_times_ms.isEmpty() && m_miner_accepted_share_times_ms.first() < oldest_kept_ms)
+        m_miner_accepted_share_times_ms.removeFirst();
+    while (m_miner_accepted_share_times_ms.size() > 4096)
+        m_miner_accepted_share_times_ms.removeFirst();
+    m_miner_accepted_shares = accepted;
 }
 
 void NuRpcService::parseMinerLogChunk(const QString& text)
@@ -13981,17 +14392,33 @@ void NuRpcService::parseMinerLogChunk(const QString& text)
     static const QRegularExpression hashrate_re(
         QStringLiteral(R"(\bHash rate\s+([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?H/s)\b)"),
         QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression local_hashrate_re(
+        QStringLiteral(R"(^Hash rate\s+([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?H/s)\b)"),
+        QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression ttf_hashrate_re(
         QStringLiteral(R"(\bTTF\s*@\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?H/s)\b)"),
         QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression accepted_re(QStringLiteral(R"(\bAccepted\s+(\d+)\s+S\d+\s+R(\d+)\s+B\d+\b)"),
                                                 QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression accepted_with_id_re(
+        QStringLiteral(R"((?:^|\]\s*)(\d+)\s+Accepted\s+(\d+)\s+S\d+\s+R(\d+)\s+B\d+\b)"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression submitted_diff_re(
+        QStringLiteral(R"((?:^|\]\s*)(\d+)\s+Submitted\s+Diff\s+([0-9]+(?:\.[0-9]+)?(?:e[+-]?\d+)?))"),
+        QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression rejected_re(QStringLiteral(R"(\bA(\d+)\s+S\d+\s+Rejected\s+(\d+)\s+B\d+\b)"),
                                                 QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression periodic_accepted_re(QStringLiteral(R"(^Accepted\s+\d+\s+(\d+)\b)"),
                                                          QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression periodic_rejected_re(QStringLiteral(R"(^Rejected\s+\d+\s+(\d+)\b)"),
                                                          QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression cpuminer_accepted_re(QStringLiteral(R"(\baccepted:\s*(\d+)(?:\s*/\s*(\d+))?)"),
+                                                         QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression cpuminer_rejected_re(QStringLiteral(R"(\brejected:\s*(\d+)(?:\s*/\s*(\d+))?)"),
+                                                         QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression broad_hashrate_re(
+        QStringLiteral(R"(\b([0-9]+(?:\.[0-9]+)?)\s*([KMGT]?)\s*(?:hash/s|h/s)\b)"),
+        QRegularExpression::CaseInsensitiveOption);
 
     QString combined = m_miner_parse_buffer + clean;
     combined.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
@@ -14009,9 +14436,18 @@ void NuRpcService::parseMinerLogChunk(const QString& text)
         const QString line = raw_line.trimmed();
         if (line.isEmpty())
             continue;
+        const bool is_pool_estimate = line.contains(QStringLiteral("Net hash rate"), Qt::CaseInsensitive) ||
+                                      line.contains(QStringLiteral("Lost hash rate"), Qt::CaseInsensitive);
+
+        const QRegularExpressionMatch local_hashrate_match = local_hashrate_re.match(line);
+        if (local_hashrate_match.hasMatch()) {
+            m_miner_hashrate_text =
+                formatMinerHashrateText(local_hashrate_match.captured(1), local_hashrate_match.captured(2));
+            continue;
+        }
 
         const QRegularExpressionMatch hashrate_match = hashrate_re.match(line);
-        if (hashrate_match.hasMatch()) {
+        if (!is_pool_estimate && hashrate_match.hasMatch()) {
             m_miner_hashrate_text = formatMinerHashrateText(hashrate_match.captured(1), hashrate_match.captured(2));
         }
 
@@ -14021,29 +14457,81 @@ void NuRpcService::parseMinerLogChunk(const QString& text)
                 formatMinerHashrateText(ttf_hashrate_match.captured(1), ttf_hashrate_match.captured(2));
         }
 
+        const QRegularExpressionMatch broad_hashrate_match = broad_hashrate_re.match(line);
+        if (!is_pool_estimate && broad_hashrate_match.hasMatch()) {
+            const QString unit = broad_hashrate_match.captured(2).trimmed().toUpper() + QStringLiteral("H/s");
+            m_miner_hashrate_text = formatMinerHashrateText(broad_hashrate_match.captured(1), unit);
+        }
+
+        const QRegularExpressionMatch submitted_diff_match = submitted_diff_re.match(line);
+        if (submitted_diff_match.hasMatch()) {
+            const int share_id = submitted_diff_match.captured(1).toInt();
+            const double share_difficulty = submitted_diff_match.captured(2).toDouble();
+            if (share_id > 0 && std::isfinite(share_difficulty) && share_difficulty > 0.0) {
+                if (m_miner_pending_accepted_share_ids.remove(share_id) > 0)
+                    m_miner_accepted_share_difficulty += share_difficulty;
+                else
+                    m_miner_submitted_share_difficulty_by_id.insert(share_id, share_difficulty);
+                if (m_miner_submitted_share_difficulty_by_id.size() > 8192)
+                    m_miner_submitted_share_difficulty_by_id.clear();
+                if (m_miner_pending_accepted_share_ids.size() > 8192)
+                    m_miner_pending_accepted_share_ids.clear();
+            }
+            continue;
+        }
+
+        const QRegularExpressionMatch accepted_with_id_match = accepted_with_id_re.match(line);
+        if (accepted_with_id_match.hasMatch()) {
+            const int share_id = accepted_with_id_match.captured(1).toInt();
+            updateMinerAcceptedShares(accepted_with_id_match.captured(2).toInt());
+            m_miner_rejected_shares = std::max(m_miner_rejected_shares, accepted_with_id_match.captured(3).toInt());
+            const double share_difficulty = m_miner_submitted_share_difficulty_by_id.take(share_id);
+            if (std::isfinite(share_difficulty) && share_difficulty > 0.0)
+                m_miner_accepted_share_difficulty += share_difficulty;
+            else if (share_id > 0)
+                m_miner_pending_accepted_share_ids.insert(share_id);
+            continue;
+        }
+
         const QRegularExpressionMatch accepted_match = accepted_re.match(line);
         if (accepted_match.hasMatch()) {
-            m_miner_accepted_shares = std::max(m_miner_accepted_shares, accepted_match.captured(1).toInt());
+            updateMinerAcceptedShares(accepted_match.captured(1).toInt());
             m_miner_rejected_shares = std::max(m_miner_rejected_shares, accepted_match.captured(2).toInt());
             continue;
         }
 
         const QRegularExpressionMatch rejected_match = rejected_re.match(line);
         if (rejected_match.hasMatch()) {
-            m_miner_accepted_shares = std::max(m_miner_accepted_shares, rejected_match.captured(1).toInt());
+            updateMinerAcceptedShares(rejected_match.captured(1).toInt());
             m_miner_rejected_shares = std::max(m_miner_rejected_shares, rejected_match.captured(2).toInt());
             continue;
         }
 
         const QRegularExpressionMatch periodic_accepted_match = periodic_accepted_re.match(line);
         if (periodic_accepted_match.hasMatch()) {
-            m_miner_accepted_shares = std::max(m_miner_accepted_shares, periodic_accepted_match.captured(1).toInt());
+            updateMinerAcceptedShares(periodic_accepted_match.captured(1).toInt());
             continue;
         }
 
         const QRegularExpressionMatch periodic_rejected_match = periodic_rejected_re.match(line);
         if (periodic_rejected_match.hasMatch()) {
             m_miner_rejected_shares = std::max(m_miner_rejected_shares, periodic_rejected_match.captured(1).toInt());
+            continue;
+        }
+
+        const QRegularExpressionMatch cpuminer_accepted_match = cpuminer_accepted_re.match(line);
+        if (cpuminer_accepted_match.hasMatch()) {
+            const int accepted = cpuminer_accepted_match.captured(1).toInt();
+            const int total = cpuminer_accepted_match.captured(2).toInt();
+            updateMinerAcceptedShares(accepted);
+            if (total >= accepted)
+                m_miner_rejected_shares = std::max(m_miner_rejected_shares, total - accepted);
+            continue;
+        }
+
+        const QRegularExpressionMatch cpuminer_rejected_match = cpuminer_rejected_re.match(line);
+        if (cpuminer_rejected_match.hasMatch()) {
+            m_miner_rejected_shares = std::max(m_miner_rejected_shares, cpuminer_rejected_match.captured(1).toInt());
         }
     }
 }
@@ -14060,6 +14548,17 @@ void NuRpcService::appendMinerLog(const QString& line)
     constexpr int max_chars = 256 * 1024;
     if (m_miner_log.size() > max_chars)
         m_miner_log = m_miner_log.right(max_chars);
+    constexpr int max_lines = 4000;
+    int line_count = 0;
+    int cut_pos = -1;
+    for (int i = m_miner_log.size() - 1; i >= 0; --i) {
+        if (m_miner_log.at(i) == QLatin1Char('\n') && ++line_count > max_lines) {
+            cut_pos = i + 1;
+            break;
+        }
+    }
+    if (cut_pos > 0)
+        m_miner_log.remove(0, cut_pos);
     scheduleMinerChanged();
 }
 
@@ -15615,42 +16114,59 @@ void NuRpcService::saveMinerConfiguration(
 
 void NuRpcService::startConfiguredMiner()
 {
+    launchConfiguredMiner(true, true);
+}
+
+bool NuRpcService::launchConfiguredMiner(bool clear_log, bool show_user_messages)
+{
     if (minerRunning())
-        return;
+        return false;
     if (m_miner_executable.isEmpty() || !QFileInfo(m_miner_executable).isExecutable()) {
-        Q_EMIT userMessage(QStringLiteral("Miner not started"),
-                           QStringLiteral("Select a miner executable before starting local mining."));
-        return;
+        if (show_user_messages) {
+            Q_EMIT userMessage(QStringLiteral("Miner not started"),
+                               QStringLiteral("Select a miner executable before starting local mining."));
+        }
+        return false;
     }
     if (m_miner_pool_url.trimmed().isEmpty() || m_miner_payout_address.trimmed().isEmpty()) {
-        Q_EMIT userMessage(QStringLiteral("Miner not started"),
-                           QStringLiteral("Enter a stratum pool URL and payout address before starting local mining."));
-        return;
+        if (show_user_messages) {
+            Q_EMIT userMessage(
+                QStringLiteral("Miner not started"),
+                QStringLiteral("Enter a stratum pool URL and payout address before starting local mining."));
+        }
+        return false;
     }
     if (!isValidStratumUrl(singleLineLimited(m_miner_pool_url, 512))) {
-        Q_EMIT userMessage(
-            QStringLiteral("Miner not started"),
-            QStringLiteral(
-                "Pool URL must be a stratum+tcp:// or stratum+ssl:// URL with a valid host and optional port."));
-        return;
+        if (show_user_messages) {
+            Q_EMIT userMessage(
+                QStringLiteral("Miner not started"),
+                QStringLiteral(
+                    "Pool URL must be a stratum+tcp:// or stratum+ssl:// URL with a valid host and optional port."));
+        }
+        return false;
     }
     if (!isLikelyBase58AddressText(singleLineLimited(m_miner_payout_address, 128))) {
-        Q_EMIT userMessage(QStringLiteral("Miner not started"),
-                           QStringLiteral("Enter a valid Defcoin payout address before starting local mining."));
-        return;
+        if (show_user_messages) {
+            Q_EMIT userMessage(QStringLiteral("Miner not started"),
+                               QStringLiteral("Enter a valid Defcoin payout address before starting local mining."));
+        }
+        return false;
     }
 
     QString wrapper_note;
     const QString miner_program = resolvedCpuminerExecutable(m_miner_executable, &wrapper_note);
     if (QFileInfo(miner_program).suffix().compare(QStringLiteral("sh"), Qt::CaseInsensitive) == 0) {
-        Q_EMIT userMessage(QStringLiteral("Miner not started"), wrapper_note);
-        return;
+        if (show_user_messages)
+            Q_EMIT userMessage(QStringLiteral("Miner not started"), wrapper_note);
+        return false;
     }
     if (!QFileInfo(miner_program).isExecutable()) {
-        Q_EMIT userMessage(QStringLiteral("Miner not started"),
-                           QStringLiteral("Nu could not find an executable cpuminer binary at:\n%1")
-                               .arg(QDir::toNativeSeparators(miner_program)));
-        return;
+        if (show_user_messages) {
+            Q_EMIT userMessage(QStringLiteral("Miner not started"),
+                               QStringLiteral("Nu could not find an executable cpuminer binary at:\n%1")
+                                   .arg(QDir::toNativeSeparators(miner_program)));
+        }
+        return false;
     }
 
     QStringList miner_args{QStringLiteral("-a"),
@@ -15700,10 +16216,13 @@ void NuRpcService::startConfiguredMiner()
                 m_miner_status = QStringLiteral("Miner stopped with exit code %1.").arg(exit_code);
                 m_miner_process->deleteLater();
                 m_miner_process = nullptr;
+                m_miner_started_ms = 0;
                 Q_EMIT minerChanged();
             });
     resetMinerRuntimeStats();
-    m_miner_log.clear();
+    m_miner_started_ms = QDateTime::currentMSecsSinceEpoch();
+    if (clear_log)
+        m_miner_log.clear();
     if (!wrapper_note.isEmpty())
         appendMinerLog(wrapper_note);
     appendMinerLog(
@@ -15715,14 +16234,17 @@ void NuRpcService::startConfiguredMiner()
         const QString start_error = m_miner_process->errorString();
         m_miner_process->deleteLater();
         m_miner_process = nullptr;
+        m_miner_started_ms = 0;
         m_miner_status = QStringLiteral("Miner failed to start.");
         Q_EMIT minerChanged();
-        Q_EMIT userMessage(QStringLiteral("Miner not started"), start_error);
-        return;
+        if (show_user_messages)
+            Q_EMIT userMessage(QStringLiteral("Miner not started"), start_error);
+        return false;
     }
     assignProcessToNuJobObject(m_miner_process);
     m_miner_status = QStringLiteral("Miner running.");
     Q_EMIT minerChanged();
+    return true;
 }
 
 void NuRpcService::stopMiner()
@@ -15738,6 +16260,862 @@ void NuRpcService::clearMinerLog()
 {
     m_miner_log.clear();
     Q_EMIT minerChanged();
+}
+
+QString NuRpcService::miningBenchmarkChartSource() const
+{
+    if (m_mining_benchmark_last_chart_path.isEmpty())
+        return QString();
+    return QUrl::fromLocalFile(m_mining_benchmark_last_chart_path).toString() +
+           QStringLiteral("?v=%1").arg(m_mining_benchmark_chart_serial);
+}
+
+QString NuRpcService::miningBenchmarkDirectory() const
+{
+    const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
+    return data_dir.filePath(QStringLiteral("nu-mining-benchmarks"));
+}
+
+void NuRpcService::loadLatestMiningBenchmarkArtifacts()
+{
+    const QString latest_path = QDir(miningBenchmarkDirectory()).filePath(QStringLiteral("latest.json"));
+    if (QFileInfo::exists(latest_path))
+        loadMiningBenchmarkJson(latest_path);
+}
+
+void NuRpcService::startMiningBenchmark(const QVariantList& pools, int seconds_per_pool, int cycles)
+{
+    if (m_mining_benchmark_running) {
+        Q_EMIT userMessage(QStringLiteral("Pool benchmark already running"),
+                           QStringLiteral("Stop the current benchmark before starting another one."));
+        return;
+    }
+    if (m_miner_executable.isEmpty() || !QFileInfo(m_miner_executable).isExecutable()) {
+        Q_EMIT userMessage(QStringLiteral("Pool benchmark not started"),
+                           QStringLiteral("Select a cpuminer-compatible executable before benchmarking pools."));
+        return;
+    }
+    if (!isLikelyBase58AddressText(singleLineLimited(m_miner_payout_address, 128))) {
+        Q_EMIT userMessage(QStringLiteral("Pool benchmark not started"),
+                           QStringLiteral("Save a valid Defcoin payout address before benchmarking pools."));
+        return;
+    }
+
+    QVariantList clean_pools;
+    QSet<QString> seen_urls;
+    int color_index = 0;
+    for (const QVariant& pool_value : pools) {
+        QVariantMap pool = pool_value.toMap();
+        QString name = singleLineLimited(pool.value(QStringLiteral("name")).toString(), 80).trimmed();
+        const QString url = singleLineLimited(pool.value(QStringLiteral("url")).toString(), 512).trimmed();
+        if (url.isEmpty() || !isValidStratumUrl(url))
+            continue;
+        const QString key = url.toLower();
+        if (seen_urls.contains(key))
+            continue;
+        seen_urls.insert(key);
+        if (name.isEmpty())
+            name = stratumHostForBenchmark(url);
+        pool.insert(QStringLiteral("name"), name);
+        pool.insert(QStringLiteral("url"), url);
+        pool.insert(QStringLiteral("color"),
+                    pool.value(QStringLiteral("color")).toString().isEmpty() ?
+                        benchmarkPoolColor(color_index) :
+                        pool.value(QStringLiteral("color")).toString());
+        clean_pools.push_back(pool);
+        ++color_index;
+    }
+
+    if (clean_pools.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Pool benchmark not started"),
+                           QStringLiteral("No valid stratum pool URLs were available to benchmark."));
+        return;
+    }
+
+    if (minerRunning())
+        stopMiner();
+
+    m_mining_benchmark_running = true;
+    m_mining_benchmark_pools = clean_pools;
+    m_mining_benchmark_runs.clear();
+    m_mining_benchmark_seconds_per_pool = std::clamp(seconds_per_pool, 15, 24 * 60 * 60);
+    m_mining_benchmark_cycles = std::clamp(cycles, 1, 100);
+    m_mining_benchmark_current_cycle = 0;
+    m_mining_benchmark_current_pool_index = 0;
+    m_mining_benchmark_completed_runs = 0;
+    m_mining_benchmark_total_runs = m_mining_benchmark_pools.size() * m_mining_benchmark_cycles;
+    m_mining_benchmark_restart_total_ms = 0;
+    m_mining_benchmark_restart_samples = 0;
+    m_mining_benchmark_original_pool_url = m_miner_pool_url;
+    m_mining_benchmark_started_at_utc = QDateTime::currentDateTimeUtc();
+    m_mining_benchmark_started_ms = QDateTime::currentMSecsSinceEpoch();
+    m_mining_benchmark_run_id = benchmarkFileStamp(m_mining_benchmark_started_at_utc);
+    m_mining_benchmark_last_run_label =
+        QStringLiteral("Last run's chart - %1")
+            .arg(m_mining_benchmark_started_at_utc.toLocalTime().toString(QStringLiteral("yyyy-MM-dd h:mm AP")));
+    m_mining_benchmark_start_accepted_shares = 0;
+    m_mining_benchmark_start_rejected_shares = 0;
+    m_mining_benchmark_start_accepted_share_difficulty = 0.0;
+    m_mining_benchmark_progress = 0;
+    m_mining_benchmark_eta = QStringLiteral("calculating");
+    m_mining_benchmark_status = QStringLiteral("Starting pool benchmark.");
+    saveMiningBenchmarkArtifacts();
+    scheduleMinerChanged();
+    startNextMiningBenchmarkPool();
+}
+
+void NuRpcService::stopMiningBenchmark()
+{
+    if (!m_mining_benchmark_running)
+        return;
+    finishMiningBenchmark(true);
+}
+
+void NuRpcService::startNextMiningBenchmarkPool()
+{
+    if (!m_mining_benchmark_running)
+        return;
+    if (m_mining_benchmark_completed_runs >= m_mining_benchmark_total_runs) {
+        finishMiningBenchmark(false);
+        return;
+    }
+
+    if (m_mining_benchmark_current_pool_index >= m_mining_benchmark_pools.size()) {
+        m_mining_benchmark_current_pool_index = 0;
+        ++m_mining_benchmark_current_cycle;
+    }
+    if (m_mining_benchmark_current_cycle >= m_mining_benchmark_cycles) {
+        finishMiningBenchmark(false);
+        return;
+    }
+
+    const QVariantMap pool = m_mining_benchmark_pools.at(m_mining_benchmark_current_pool_index).toMap();
+    const qint64 restart_start = QDateTime::currentMSecsSinceEpoch();
+    if (minerRunning())
+        stopMiner();
+    const int restart_ms = int(std::max<qint64>(0, QDateTime::currentMSecsSinceEpoch() - restart_start));
+    if (restart_ms > 0) {
+        m_mining_benchmark_restart_total_ms += restart_ms;
+        ++m_mining_benchmark_restart_samples;
+    }
+    startMiningBenchmarkPing(pool, restart_ms);
+}
+
+void NuRpcService::startMiningBenchmarkPing(const QVariantMap& pool, int restart_ms)
+{
+    m_mining_benchmark_pending_pool = pool;
+    m_mining_benchmark_current_restart_ms = restart_ms;
+    const QString host = stratumHostForBenchmark(pool.value(QStringLiteral("url")).toString());
+    if (host.isEmpty()) {
+        beginMiningBenchmarkPool(pool, -1.0, restart_ms);
+        return;
+    }
+
+    if (m_mining_benchmark_ping_process) {
+        m_mining_benchmark_ping_process->kill();
+        m_mining_benchmark_ping_process->deleteLater();
+        m_mining_benchmark_ping_process = nullptr;
+    }
+
+    m_mining_benchmark_status =
+        QStringLiteral("Pinging %1 before mining on %2.").arg(host, pool.value(QStringLiteral("name")).toString());
+    scheduleMinerChanged();
+
+    m_mining_benchmark_ping_process = new QProcess(this);
+    m_mining_benchmark_ping_process->setProcessChannelMode(QProcess::MergedChannels);
+#if defined(Q_OS_WIN)
+    m_mining_benchmark_ping_process->setProgram(QStringLiteral("ping"));
+    m_mining_benchmark_ping_process->setArguments({QStringLiteral("-n"), QStringLiteral("10"), host});
+#else
+    m_mining_benchmark_ping_process->setProgram(QStringLiteral("/sbin/ping"));
+    m_mining_benchmark_ping_process->setArguments(
+        {QStringLiteral("-c"), QStringLiteral("10"), QStringLiteral("-n"), host});
+#endif
+    connect(m_mining_benchmark_ping_process,
+            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+            this,
+            &NuRpcService::finishMiningBenchmarkPing);
+    m_mining_benchmark_ping_process->start();
+    if (!m_mining_benchmark_ping_process->waitForStarted(1000)) {
+        m_mining_benchmark_ping_process->deleteLater();
+        m_mining_benchmark_ping_process = nullptr;
+        beginMiningBenchmarkPool(pool, -1.0, restart_ms);
+    }
+}
+
+void NuRpcService::finishMiningBenchmarkPing(int, QProcess::ExitStatus)
+{
+    if (!m_mining_benchmark_ping_process)
+        return;
+
+    const QString output = QString::fromLocal8Bit(m_mining_benchmark_ping_process->readAll());
+    double ping_avg_ms = -1.0;
+    QRegularExpression unix_avg_re(QStringLiteral(R"(=\s*[0-9.]+/([0-9.]+)/[0-9.]+)"));
+    QRegularExpressionMatch match = unix_avg_re.match(output);
+    if (match.hasMatch()) {
+        ping_avg_ms = match.captured(1).toDouble();
+    } else {
+        QRegularExpression win_avg_re(QStringLiteral(R"(Average\s*=\s*([0-9]+)ms)"),
+                                      QRegularExpression::CaseInsensitiveOption);
+        match = win_avg_re.match(output);
+        if (match.hasMatch())
+            ping_avg_ms = match.captured(1).toDouble();
+    }
+
+    const QVariantMap pool = m_mining_benchmark_pending_pool;
+    const int restart_ms = m_mining_benchmark_current_restart_ms;
+    m_mining_benchmark_ping_process->deleteLater();
+    m_mining_benchmark_ping_process = nullptr;
+    beginMiningBenchmarkPool(pool, ping_avg_ms, restart_ms);
+}
+
+void NuRpcService::beginMiningBenchmarkPool(const QVariantMap& pool, double ping_avg_ms, int restart_ms)
+{
+    if (!m_mining_benchmark_running)
+        return;
+
+    m_miner_pool_url = pool.value(QStringLiteral("url")).toString();
+    const qint64 launch_start = QDateTime::currentMSecsSinceEpoch();
+    const bool started = launchConfiguredMiner(true, true);
+    const int launch_ms = int(std::max<qint64>(0, QDateTime::currentMSecsSinceEpoch() - launch_start));
+    const int total_restart_ms = restart_ms + launch_ms;
+    if (launch_ms > 0) {
+        m_mining_benchmark_restart_total_ms += launch_ms;
+        ++m_mining_benchmark_restart_samples;
+    }
+    if (!started) {
+        QVariantMap row;
+        row.insert(QStringLiteral("cycle"), m_mining_benchmark_current_cycle + 1);
+        row.insert(QStringLiteral("poolIndex"), m_mining_benchmark_current_pool_index);
+        row.insert(QStringLiteral("poolName"), pool.value(QStringLiteral("name")).toString());
+        row.insert(QStringLiteral("poolUrl"), pool.value(QStringLiteral("url")).toString());
+        row.insert(QStringLiteral("color"), pool.value(QStringLiteral("color")).toString());
+        row.insert(QStringLiteral("startedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+        row.insert(QStringLiteral("durationSeconds"), 0);
+        row.insert(QStringLiteral("accepted"), 0);
+        row.insert(QStringLiteral("rejected"), 0);
+        row.insert(QStringLiteral("acceptedPerSecond"), 0.0);
+        row.insert(QStringLiteral("acceptedDifficulty"), 0.0);
+        row.insert(QStringLiteral("acceptedDifficultyPerSecond"), 0.0);
+        row.insert(QStringLiteral("hashrateKh"), 0.0);
+        row.insert(QStringLiteral("hashrateText"), QStringLiteral("-"));
+        row.insert(QStringLiteral("pingAvgMs"), ping_avg_ms);
+        row.insert(QStringLiteral("restartMs"), total_restart_ms);
+        row.insert(QStringLiteral("status"), QStringLiteral("failed to start"));
+        m_mining_benchmark_runs.push_back(row);
+        ++m_mining_benchmark_completed_runs;
+        ++m_mining_benchmark_current_pool_index;
+        saveMiningBenchmarkArtifacts();
+        startNextMiningBenchmarkPool();
+        return;
+    }
+
+    m_mining_benchmark_pool_started_ms = QDateTime::currentMSecsSinceEpoch();
+    m_mining_benchmark_start_accepted_shares = m_miner_accepted_shares;
+    m_mining_benchmark_start_rejected_shares = m_miner_rejected_shares;
+    m_mining_benchmark_start_accepted_share_difficulty = m_miner_accepted_share_difficulty;
+    m_mining_benchmark_current_restart_ms = total_restart_ms;
+    m_mining_benchmark_pending_pool = pool;
+    m_mining_benchmark_pending_pool.insert(QStringLiteral("pingAvgMs"), ping_avg_ms);
+    updateMiningBenchmarkProgress();
+    if (m_mining_benchmark_timer && !m_mining_benchmark_timer->isActive())
+        m_mining_benchmark_timer->start();
+    scheduleMinerChanged();
+}
+
+void NuRpcService::miningBenchmarkTick()
+{
+    if (!m_mining_benchmark_running)
+        return;
+    updateMiningBenchmarkProgress();
+    const qint64 elapsed_ms = QDateTime::currentMSecsSinceEpoch() - m_mining_benchmark_pool_started_ms;
+    if (m_mining_benchmark_pool_started_ms > 0 && elapsed_ms >= qint64(m_mining_benchmark_seconds_per_pool) * 1000) {
+        finishCurrentMiningBenchmarkPool();
+        return;
+    }
+    scheduleMinerChanged();
+}
+
+void NuRpcService::finishCurrentMiningBenchmarkPool()
+{
+    if (!m_mining_benchmark_running || m_mining_benchmark_pool_started_ms <= 0)
+        return;
+
+    const qint64 finished_ms = QDateTime::currentMSecsSinceEpoch();
+    const int duration_seconds = std::max(1, int((finished_ms - m_mining_benchmark_pool_started_ms + 500) / 1000));
+    const QVariantMap pool = m_mining_benchmark_pending_pool;
+    const int accepted_shares = std::max(0, m_miner_accepted_shares - m_mining_benchmark_start_accepted_shares);
+    const int rejected_shares = std::max(0, m_miner_rejected_shares - m_mining_benchmark_start_rejected_shares);
+    const double accepted_difficulty =
+        std::max(0.0, m_miner_accepted_share_difficulty - m_mining_benchmark_start_accepted_share_difficulty);
+
+    QVariantMap row;
+    row.insert(QStringLiteral("cycle"), m_mining_benchmark_current_cycle + 1);
+    row.insert(QStringLiteral("poolIndex"), m_mining_benchmark_current_pool_index);
+    row.insert(QStringLiteral("poolName"), pool.value(QStringLiteral("name")).toString());
+    row.insert(QStringLiteral("poolUrl"), pool.value(QStringLiteral("url")).toString());
+    row.insert(QStringLiteral("color"), pool.value(QStringLiteral("color")).toString());
+    row.insert(QStringLiteral("startedAt"),
+               QDateTime::fromMSecsSinceEpoch(m_mining_benchmark_pool_started_ms).toUTC().toString(Qt::ISODate));
+    row.insert(QStringLiteral("finishedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    row.insert(QStringLiteral("durationSeconds"), duration_seconds);
+    row.insert(QStringLiteral("accepted"), accepted_shares);
+    row.insert(QStringLiteral("rejected"), rejected_shares);
+    row.insert(QStringLiteral("acceptedPerSecond"), double(accepted_shares) / double(duration_seconds));
+    row.insert(QStringLiteral("acceptedDifficulty"), accepted_difficulty);
+    row.insert(QStringLiteral("acceptedDifficultyPerSecond"), accepted_difficulty / double(duration_seconds));
+    row.insert(QStringLiteral("hashrateKh"), minerHashrateTextToKh(m_miner_hashrate_text));
+    row.insert(QStringLiteral("hashrateText"), m_miner_hashrate_text);
+    row.insert(QStringLiteral("pingAvgMs"),
+               pool.contains(QStringLiteral("pingAvgMs")) ? pool.value(QStringLiteral("pingAvgMs")).toDouble() : -1.0);
+    row.insert(QStringLiteral("restartMs"), m_mining_benchmark_current_restart_ms);
+    row.insert(QStringLiteral("status"), QStringLiteral("complete"));
+    m_mining_benchmark_runs.push_back(row);
+
+    ++m_mining_benchmark_completed_runs;
+    ++m_mining_benchmark_current_pool_index;
+    m_mining_benchmark_pool_started_ms = 0;
+    m_mining_benchmark_start_accepted_shares = 0;
+    m_mining_benchmark_start_rejected_shares = 0;
+    m_mining_benchmark_start_accepted_share_difficulty = 0.0;
+    updateMiningBenchmarkProgress();
+    saveMiningBenchmarkArtifacts();
+    startNextMiningBenchmarkPool();
+}
+
+void NuRpcService::finishMiningBenchmark(bool canceled)
+{
+    if (m_mining_benchmark_timer)
+        m_mining_benchmark_timer->stop();
+    if (m_mining_benchmark_ping_process) {
+        m_mining_benchmark_ping_process->kill();
+        m_mining_benchmark_ping_process->deleteLater();
+        m_mining_benchmark_ping_process = nullptr;
+    }
+    if (minerRunning())
+        stopMiner();
+    m_miner_pool_url =
+        m_mining_benchmark_original_pool_url.isEmpty() ? m_miner_pool_url : m_mining_benchmark_original_pool_url;
+    m_mining_benchmark_running = false;
+    m_mining_benchmark_pool_started_ms = 0;
+    m_mining_benchmark_progress = canceled ? m_mining_benchmark_progress : 100;
+    m_mining_benchmark_eta = QStringLiteral("00:00");
+    m_mining_benchmark_status =
+        canceled ? QStringLiteral("Pool benchmark stopped by user.") : QStringLiteral("Pool benchmark complete.");
+    saveMiningBenchmarkArtifacts();
+    Q_EMIT minerChanged();
+}
+
+void NuRpcService::updateMiningBenchmarkProgress()
+{
+    if (m_mining_benchmark_total_runs <= 0) {
+        m_mining_benchmark_progress = 0;
+        m_mining_benchmark_eta = QStringLiteral("-");
+        return;
+    }
+    double completed_units = m_mining_benchmark_completed_runs;
+    double current_fraction = 0.0;
+    if (m_mining_benchmark_running && m_mining_benchmark_pool_started_ms > 0) {
+        const qint64 elapsed_seconds_rounded =
+            std::clamp<qint64>((QDateTime::currentMSecsSinceEpoch() - m_mining_benchmark_pool_started_ms) / 1000,
+                               0,
+                               m_mining_benchmark_seconds_per_pool);
+        const double elapsed_seconds = double(elapsed_seconds_rounded);
+        current_fraction = std::clamp(elapsed_seconds / double(m_mining_benchmark_seconds_per_pool), 0.0, 1.0);
+        const qint64 pool_seconds_remaining =
+            std::max<qint64>(0, qint64(m_mining_benchmark_seconds_per_pool) - elapsed_seconds_rounded);
+        const QVariantMap pool = m_mining_benchmark_pending_pool;
+        const QString configured_name = pool.value(QStringLiteral("name")).toString().trimmed();
+        const QString pool_name = configured_name.isEmpty() ?
+                                      stratumHostForBenchmark(pool.value(QStringLiteral("url")).toString()) :
+                                      configured_name;
+        m_mining_benchmark_status = QStringLiteral("Cycle %1 of %2, pool %3 of %4: %5. Elapsed %6 of %7; left %8.")
+                                        .arg(m_mining_benchmark_current_cycle + 1)
+                                        .arg(m_mining_benchmark_cycles)
+                                        .arg(m_mining_benchmark_current_pool_index + 1)
+                                        .arg(m_mining_benchmark_pools.size())
+                                        .arg(pool_name.isEmpty() ? QStringLiteral("current pool") : pool_name,
+                                             formatBenchmarkClock(elapsed_seconds_rounded),
+                                             formatBenchmarkClock(m_mining_benchmark_seconds_per_pool),
+                                             formatBenchmarkClock(pool_seconds_remaining));
+    }
+    completed_units += current_fraction;
+    m_mining_benchmark_progress =
+        std::clamp(int(std::round((completed_units / double(m_mining_benchmark_total_runs)) * 100.0)), 0, 100);
+
+    const double remaining_pool_seconds = std::max(
+        0.0, (double(m_mining_benchmark_total_runs) - completed_units) * double(m_mining_benchmark_seconds_per_pool));
+    const double average_restart_seconds =
+        m_mining_benchmark_restart_samples > 0 ?
+            double(m_mining_benchmark_restart_total_ms) / double(m_mining_benchmark_restart_samples) / 1000.0 :
+            2.5;
+    const double remaining_starts = std::max(0, m_mining_benchmark_total_runs - m_mining_benchmark_completed_runs);
+    const qint64 eta_seconds =
+        qint64(std::ceil(remaining_pool_seconds + remaining_starts * (average_restart_seconds + 10.0)));
+    m_mining_benchmark_eta = formatBenchmarkClock(eta_seconds);
+}
+
+QVariantMap NuRpcService::miningBenchmarkSummaryObject() const
+{
+    double accepted_per_second_total = 0.0;
+    double accepted_difficulty_per_second_total = 0.0;
+    double accepted_difficulty_total = 0.0;
+    double hashrate_total = 0.0;
+    double ping_total = 0.0;
+    int ping_count = 0;
+    int hashrate_count = 0;
+    int total_accepted = 0;
+    for (const QVariant& value : m_mining_benchmark_runs) {
+        const QVariantMap row = value.toMap();
+        accepted_per_second_total += row.value(QStringLiteral("acceptedPerSecond")).toDouble();
+        accepted_difficulty_per_second_total += row.value(QStringLiteral("acceptedDifficultyPerSecond")).toDouble();
+        accepted_difficulty_total += row.value(QStringLiteral("acceptedDifficulty")).toDouble();
+        total_accepted += row.value(QStringLiteral("accepted")).toInt();
+        const double hashrate = row.value(QStringLiteral("hashrateKh")).toDouble();
+        if (hashrate > 0.0) {
+            hashrate_total += hashrate;
+            ++hashrate_count;
+        }
+        const double ping =
+            row.contains(QStringLiteral("pingAvgMs")) ? row.value(QStringLiteral("pingAvgMs")).toDouble() : -1.0;
+        if (ping >= 0.0) {
+            ping_total += ping;
+            ++ping_count;
+        }
+    }
+
+    QVariantMap summary;
+    summary.insert(QStringLiteral("runId"), m_mining_benchmark_run_id);
+    summary.insert(QStringLiteral("label"), m_mining_benchmark_last_run_label);
+    summary.insert(QStringLiteral("startedAt"), m_mining_benchmark_started_at_utc.toString(Qt::ISODate));
+    summary.insert(QStringLiteral("secondsPerPool"), m_mining_benchmark_seconds_per_pool);
+    summary.insert(QStringLiteral("cycles"), m_mining_benchmark_cycles);
+    summary.insert(QStringLiteral("completedRuns"), m_mining_benchmark_runs.size());
+    summary.insert(QStringLiteral("totalRuns"), m_mining_benchmark_total_runs);
+    summary.insert(QStringLiteral("totalAccepted"), total_accepted);
+    summary.insert(QStringLiteral("totalAcceptedDifficulty"), accepted_difficulty_total);
+    summary.insert(
+        QStringLiteral("averageAcceptedPerSecond"),
+        m_mining_benchmark_runs.isEmpty() ? 0.0 : accepted_per_second_total / m_mining_benchmark_runs.size());
+    summary.insert(QStringLiteral("averageAcceptedDifficultyPerSecond"),
+                   m_mining_benchmark_runs.isEmpty() ?
+                       0.0 :
+                       accepted_difficulty_per_second_total / m_mining_benchmark_runs.size());
+    summary.insert(QStringLiteral("averageHashrateKh"), hashrate_count > 0 ? hashrate_total / hashrate_count : 0.0);
+    summary.insert(QStringLiteral("averagePingMs"), ping_count > 0 ? ping_total / ping_count : -1.0);
+    summary.insert(QStringLiteral("averageRestartMs"),
+                   m_mining_benchmark_restart_samples > 0 ?
+                       double(m_mining_benchmark_restart_total_ms) / double(m_mining_benchmark_restart_samples) :
+                       0.0);
+    return summary;
+}
+
+void NuRpcService::saveMiningBenchmarkArtifacts()
+{
+    if (m_mining_benchmark_run_id.isEmpty() && m_mining_benchmark_runs.isEmpty())
+        return;
+
+    QDir dir(miningBenchmarkDirectory());
+    dir.mkpath(QStringLiteral("."));
+    const QString stem = m_mining_benchmark_run_id.isEmpty() ? benchmarkFileStamp(QDateTime::currentDateTimeUtc()) :
+                                                               m_mining_benchmark_run_id;
+    const QString stats_path = dir.filePath(stem + QStringLiteral(".json"));
+    const QString chart_path = dir.filePath(stem + QStringLiteral(".png"));
+    const QString latest_stats_path = dir.filePath(QStringLiteral("latest.json"));
+    const QString latest_chart_path = dir.filePath(QStringLiteral("latest.png"));
+
+    QJsonObject object;
+    object.insert(QStringLiteral("schema"), QStringLiteral("defcoin-nu-mining-pool-benchmark-v1"));
+    object.insert(QStringLiteral("summary"), QJsonObject::fromVariantMap(miningBenchmarkSummaryObject()));
+    object.insert(QStringLiteral("pools"), QJsonArray::fromVariantList(m_mining_benchmark_pools));
+    object.insert(QStringLiteral("runs"), QJsonArray::fromVariantList(m_mining_benchmark_runs));
+    object.insert(QStringLiteral("status"), m_mining_benchmark_status);
+    object.insert(QStringLiteral("progress"), m_mining_benchmark_progress);
+    object.insert(QStringLiteral("eta"), m_mining_benchmark_eta);
+
+    const QByteArray payload = QJsonDocument(object).toJson(QJsonDocument::Indented);
+    for (const QString& path : {stats_path, latest_stats_path}) {
+        QSaveFile file(path);
+        if (file.open(QIODevice::WriteOnly)) {
+            file.write(payload);
+            file.commit();
+        }
+    }
+
+    renderMiningBenchmarkChart(chart_path);
+    renderMiningBenchmarkChart(latest_chart_path);
+    m_mining_benchmark_last_stats_path = latest_stats_path;
+    m_mining_benchmark_last_chart_path = latest_chart_path;
+    ++m_mining_benchmark_chart_serial;
+}
+
+bool NuRpcService::loadMiningBenchmarkJson(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    QJsonParseError parse_error;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parse_error);
+    if (parse_error.error != QJsonParseError::NoError || !doc.isObject())
+        return false;
+    const QJsonObject object = doc.object();
+    if (object.value(QStringLiteral("schema")).toString() != QLatin1String("defcoin-nu-mining-pool-benchmark-v1")) {
+        return false;
+    }
+    const QJsonObject summary = object.value(QStringLiteral("summary")).toObject();
+    m_mining_benchmark_run_id = summary.value(QStringLiteral("runId")).toString();
+    m_mining_benchmark_last_run_label = summary.value(QStringLiteral("label")).toString();
+    m_mining_benchmark_seconds_per_pool = summary.value(QStringLiteral("secondsPerPool")).toInt(300);
+    m_mining_benchmark_cycles = summary.value(QStringLiteral("cycles")).toInt(3);
+    m_mining_benchmark_total_runs = summary.value(QStringLiteral("totalRuns")).toInt();
+    m_mining_benchmark_completed_runs = summary.value(QStringLiteral("completedRuns")).toInt();
+    m_mining_benchmark_runs = object.value(QStringLiteral("runs")).toArray().toVariantList();
+    m_mining_benchmark_pools = object.value(QStringLiteral("pools")).toArray().toVariantList();
+    m_mining_benchmark_status =
+        object.value(QStringLiteral("status")).toString(QStringLiteral("Loaded saved pool benchmark."));
+    m_mining_benchmark_progress = object.value(QStringLiteral("progress")).toInt(100);
+    m_mining_benchmark_eta = object.value(QStringLiteral("eta")).toString(QStringLiteral("00:00:00"));
+    m_mining_benchmark_last_stats_path = path;
+    QString chart_path = path;
+    chart_path.replace(QRegularExpression(QStringLiteral("\\.json$")), QStringLiteral(".png"));
+    if (!QFileInfo::exists(chart_path))
+        chart_path = QDir(QFileInfo(path).absolutePath()).filePath(QStringLiteral("latest.png"));
+    m_mining_benchmark_last_chart_path = QFileInfo::exists(chart_path) ? chart_path : QString();
+    ++m_mining_benchmark_chart_serial;
+    Q_EMIT minerChanged();
+    return true;
+}
+
+void NuRpcService::loadMiningBenchmarkRun()
+{
+    const QString path = QFileDialog::getOpenFileName(nullptr,
+                                                      QStringLiteral("Load mining pool benchmark"),
+                                                      miningBenchmarkDirectory(),
+                                                      QStringLiteral("Benchmark JSON (*.json)"));
+    if (path.isEmpty())
+        return;
+    if (!loadMiningBenchmarkJson(path)) {
+        Q_EMIT userMessage(QStringLiteral("Benchmark not loaded"),
+                           QStringLiteral("Nu could not read that benchmark JSON file."));
+    }
+}
+
+void NuRpcService::exportMiningBenchmarkStats()
+{
+    if (m_mining_benchmark_runs.isEmpty() || m_mining_benchmark_last_stats_path.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Nothing to export"), QStringLiteral("Run or load a pool benchmark first."));
+        return;
+    }
+    const QString path =
+        QFileDialog::getSaveFileName(nullptr,
+                                     QStringLiteral("Export mining pool benchmark stats"),
+                                     QStringLiteral("defcoin-pool-benchmark-%1.json").arg(m_mining_benchmark_run_id),
+                                     QStringLiteral("Benchmark JSON (*.json)"));
+    if (path.isEmpty())
+        return;
+    QFile::remove(path);
+    if (!QFile::copy(m_mining_benchmark_last_stats_path, path)) {
+        Q_EMIT userMessage(QStringLiteral("Export failed"),
+                           QStringLiteral("Nu could not write the benchmark stats file."));
+    }
+}
+
+void NuRpcService::exportMiningBenchmarkChart()
+{
+    if (m_mining_benchmark_runs.isEmpty() || m_mining_benchmark_last_chart_path.isEmpty()) {
+        Q_EMIT userMessage(QStringLiteral("Nothing to export"), QStringLiteral("Run or load a pool benchmark first."));
+        return;
+    }
+    const QString path =
+        QFileDialog::getSaveFileName(nullptr,
+                                     QStringLiteral("Export mining pool benchmark chart"),
+                                     QStringLiteral("defcoin-pool-benchmark-%1.png").arg(m_mining_benchmark_run_id),
+                                     QStringLiteral("PNG image (*.png)"));
+    if (path.isEmpty())
+        return;
+    QFile::remove(path);
+    if (!QFile::copy(m_mining_benchmark_last_chart_path, path)) {
+        Q_EMIT userMessage(QStringLiteral("Export failed"),
+                           QStringLiteral("Nu could not write the benchmark chart image."));
+    }
+}
+
+void NuRpcService::openMiningBenchmarkFolder()
+{
+    QDir(miningBenchmarkDirectory()).mkpath(QStringLiteral("."));
+    QDesktopServices::openUrl(QUrl::fromLocalFile(miningBenchmarkDirectory()));
+}
+
+bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
+{
+    QImage image(QSize(1280, 720), QImage::Format_ARGB32_Premultiplied);
+    image.fill(QColor(QStringLiteral("#080b12")));
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QColor(QStringLiteral("#f5f7fb")));
+    QFont title_font = painter.font();
+    title_font.setPointSize(22);
+    title_font.setBold(true);
+    painter.setFont(title_font);
+    painter.drawText(
+        QRect(36, 28, 900, 34), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Defcoin Pool Benchmark"));
+
+    QFont body_font = painter.font();
+    body_font.setPointSize(10);
+    body_font.setBold(false);
+    painter.setFont(body_font);
+    painter.setPen(QColor(QStringLiteral("#aeb7c8")));
+    painter.drawText(QRect(36, 62, 1180, 24),
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     m_mining_benchmark_last_run_label.isEmpty() ? QStringLiteral("No completed runs yet.") :
+                                                                   m_mining_benchmark_last_run_label);
+    painter.drawText(
+        QRect(36, 80, 1180, 22),
+        Qt::AlignLeft | Qt::AlignVCenter,
+        QStringLiteral(
+            "Accepted work/s is accepted share difficulty per second; higher is better when comparing pools."));
+
+    struct PoolSlot {
+        QString name;
+        QString url;
+        QString color;
+        QVector<QVariantMap> runs;
+    };
+
+    QVector<PoolSlot> pool_slots;
+    QHash<QString, int> slot_by_key;
+    auto slot_key = [](const QString& name, const QString& url) {
+        const QString clean_url = url.trimmed().toLower();
+        return clean_url.isEmpty() ? name.trimmed().toLower() : clean_url;
+    };
+    auto ensure_slot = [&](const QString& name, const QString& url, const QString& color) {
+        const QString key = slot_key(name, url);
+        if (!key.isEmpty() && slot_by_key.contains(key))
+            return slot_by_key.value(key);
+        PoolSlot slot;
+        slot.name = name.trimmed();
+        slot.url = url.trimmed();
+        slot.color = color.trimmed().isEmpty() ? benchmarkPoolColor(pool_slots.size()) : color.trimmed();
+        pool_slots.push_back(slot);
+        const int index = pool_slots.size() - 1;
+        if (!key.isEmpty())
+            slot_by_key.insert(key, index);
+        return index;
+    };
+
+    for (const QVariant& value : m_mining_benchmark_pools) {
+        const QVariantMap pool = value.toMap();
+        ensure_slot(pool.value(QStringLiteral("name")).toString(),
+                    pool.value(QStringLiteral("url")).toString(),
+                    pool.value(QStringLiteral("color")).toString());
+    }
+    for (const QVariant& value : m_mining_benchmark_runs) {
+        const QVariantMap row = value.toMap();
+        bool ok = false;
+        int pool_index = row.value(QStringLiteral("poolIndex")).toInt(&ok);
+        if (!ok || pool_index < 0 || pool_index >= pool_slots.size()) {
+            pool_index = ensure_slot(row.value(QStringLiteral("poolName")).toString(),
+                                     row.value(QStringLiteral("poolUrl")).toString(),
+                                     row.value(QStringLiteral("color")).toString());
+        }
+        if (pool_index < 0)
+            continue;
+        if (pool_slots[pool_index].name.isEmpty())
+            pool_slots[pool_index].name = row.value(QStringLiteral("poolName")).toString();
+        if (pool_slots[pool_index].color.isEmpty())
+            pool_slots[pool_index].color = row.value(QStringLiteral("color")).toString();
+        pool_slots[pool_index].runs.push_back(row);
+    }
+    for (int i = 0; i < pool_slots.size(); ++i) {
+        if (pool_slots[i].name.isEmpty())
+            pool_slots[i].name = QStringLiteral("Pool %1").arg(i + 1);
+        if (pool_slots[i].color.isEmpty())
+            pool_slots[i].color = benchmarkPoolColor(i);
+        std::sort(pool_slots[i].runs.begin(), pool_slots[i].runs.end(), [](const QVariantMap& a, const QVariantMap& b) {
+            const int a_cycle = a.value(QStringLiteral("cycle")).toInt();
+            const int b_cycle = b.value(QStringLiteral("cycle")).toInt();
+            if (a_cycle != b_cycle)
+                return a_cycle < b_cycle;
+            return a.value(QStringLiteral("startedAt")).toString() < b.value(QStringLiteral("startedAt")).toString();
+        });
+    }
+
+    int legend_x = 36;
+    int legend_y = 106;
+    for (const PoolSlot& slot : pool_slots) {
+        const QColor color(slot.color);
+        painter.setBrush(color);
+        painter.setPen(Qt::NoPen);
+        painter.drawEllipse(QPointF(legend_x + 7, legend_y + 7), 6, 6);
+        painter.setPen(QColor(QStringLiteral("#dfe6f4")));
+        painter.drawText(QRect(legend_x + 18, legend_y - 2, 220, 20), Qt::AlignLeft | Qt::AlignVCenter, slot.name);
+        legend_x += 235;
+        if (legend_x > 1060) {
+            legend_x = 36;
+            legend_y += 24;
+        }
+    }
+
+    struct SeriesConfig {
+        QString key;
+        QString title;
+        QRect rect;
+        bool bars;
+    };
+    const QVector<SeriesConfig> charts{
+        {QStringLiteral("acceptedDifficultyPerSecond"),
+         QStringLiteral("Accepted work/s"),
+         QRect(36, 150, 580, 210),
+         true},
+        {QStringLiteral("hashrateKh"), QStringLiteral("Hashrate (KH/s)"), QRect(664, 150, 580, 210), false},
+        {QStringLiteral("accepted"), QStringLiteral("Accepted shares"), QRect(36, 420, 580, 210), true},
+        {QStringLiteral("pingAvgMs"), QStringLiteral("Ping avg (ms)"), QRect(664, 420, 580, 210), false},
+    };
+
+    struct ChartValue {
+        double value = 0.0;
+        bool valid = false;
+    };
+    auto value_for = [](const QVariantMap& row, const QString& key) {
+        if (key == QLatin1String("acceptedDifficultyPerSecond") && !row.contains(key))
+            return ChartValue{0.0, false};
+        const double value = row.value(key).toDouble();
+        if (!std::isfinite(value))
+            return ChartValue{0.0, false};
+        if (key == QLatin1String("pingAvgMs") && value < 0.0)
+            return ChartValue{0.0, false};
+        return value >= 0.0 ? ChartValue{value, true} : ChartValue{0.0, false};
+    };
+    auto axis_label = [](double value) {
+        return QString::number(value, 'f', value >= 100.0 ? 0 : (value >= 10.0 ? 1 : 2));
+    };
+    auto bar_value_label = [](const QString& key, double value) {
+        if (key == QLatin1String("accepted"))
+            return QString::number(int(std::round(value)));
+        if (key == QLatin1String("acceptedDifficultyPerSecond"))
+            return QString::number(value, 'g', 3);
+        if (key == QLatin1String("acceptedPerSecond"))
+            return QString::number(value, 'f', value >= 10.0 ? 1 : (value >= 1.0 ? 2 : 3));
+        return QString::number(value, 'f', value >= 10.0 ? 1 : 2);
+    };
+
+    for (const SeriesConfig& chart : charts) {
+        painter.setPen(QColor(QStringLiteral("#283044")));
+        painter.setBrush(QColor(QStringLiteral("#101522")));
+        painter.drawRoundedRect(chart.rect, 8, 8);
+        painter.setPen(QColor(QStringLiteral("#f5f7fb")));
+        QFont chart_font = painter.font();
+        chart_font.setBold(true);
+        painter.setFont(chart_font);
+        painter.drawText(
+            chart.rect.adjusted(14, 8, -14, -chart.rect.height() + 34), Qt::AlignLeft | Qt::AlignVCenter, chart.title);
+        chart_font.setBold(false);
+        painter.setFont(chart_font);
+
+        QRect plot = chart.rect.adjusted(46, 42, -22, -54);
+        painter.setPen(QColor(QStringLiteral("#2f3a51")));
+        painter.drawLine(plot.bottomLeft(), plot.bottomRight());
+        painter.drawLine(plot.bottomLeft(), plot.topLeft());
+
+        double max_value = 0.0;
+        for (const PoolSlot& slot : pool_slots) {
+            for (const QVariantMap& row : slot.runs) {
+                const ChartValue chart_value = value_for(row, chart.key);
+                if (chart_value.valid)
+                    max_value = std::max(max_value, chart_value.value);
+            }
+        }
+        if (max_value <= 0.0)
+            max_value = 1.0;
+
+        painter.setPen(QColor(QStringLiteral("#9aa6ba")));
+        painter.drawText(QRect(chart.rect.left() + 10, plot.top() - 8, 70, 18),
+                         Qt::AlignLeft | Qt::AlignVCenter,
+                         axis_label(max_value));
+        painter.drawText(QRect(chart.rect.left() + 10, plot.bottom() - 8, 36, 18),
+                         Qt::AlignLeft | Qt::AlignVCenter,
+                         QStringLiteral("0"));
+
+        const int pool_count = std::max(1, int(pool_slots.size()));
+        const double x_step = double(plot.width()) / double(pool_count);
+        QFont small_font = painter.font();
+        small_font.setPointSize(7);
+        QFont label_font = painter.font();
+        label_font.setPointSize(8);
+        for (int pool_index = 0; pool_index < pool_slots.size(); ++pool_index) {
+            const PoolSlot& slot = pool_slots.at(pool_index);
+            const QColor color(slot.color);
+            const double slot_center = plot.left() + x_step * (double(pool_index) + 0.5);
+            const double group_width = std::max(18.0, x_step * 0.72);
+            const int run_count = std::max(1, int(slot.runs.size()));
+            auto x_for_run = [&](int run_index) {
+                if (run_count <= 1)
+                    return slot_center;
+                const double left = slot_center - group_width / 2.0;
+                return left + group_width * (double(run_index) + 0.5) / double(run_count);
+            };
+
+            double valid_total = 0.0;
+            int valid_count = 0;
+            QPointF previous;
+            bool have_previous = false;
+            for (int run_index = 0; run_index < slot.runs.size(); ++run_index) {
+                const QVariantMap row = slot.runs.at(run_index);
+                const ChartValue chart_value = value_for(row, chart.key);
+                if (!chart_value.valid)
+                    continue;
+                valid_total += chart_value.value;
+                ++valid_count;
+                const double normalized = std::clamp(chart_value.value / max_value, 0.0, 1.0);
+                const double x = x_for_run(run_index);
+                const double y = plot.bottom() - normalized * plot.height();
+                const double visible_y = chart_value.value > 0.0 ? y : plot.bottom() - 2.0;
+
+                if (chart.bars) {
+                    const double bar_width = std::max(4.0, std::min(18.0, group_width / double(run_count + 1)));
+                    QRectF bar(x - bar_width / 2.0, visible_y, bar_width, plot.bottom() - visible_y);
+                    painter.setPen(Qt::NoPen);
+                    painter.setBrush(color);
+                    painter.drawRoundedRect(bar, 3, 3);
+                    painter.setFont(small_font);
+                    painter.setPen(QColor(QStringLiteral("#dfe6f4")));
+                    const double label_width = std::max(24.0, group_width / double(run_count));
+                    painter.drawText(QRectF(x - label_width / 2.0, plot.bottom() + 4.0, label_width, 14.0),
+                                     Qt::AlignHCenter | Qt::AlignTop,
+                                     bar_value_label(chart.key, chart_value.value));
+                    painter.setFont(label_font);
+                } else {
+                    painter.setPen(QPen(color, 2.5));
+                    if (have_previous)
+                        painter.drawLine(previous, QPointF(x, y));
+                    painter.setBrush(color);
+                    painter.drawEllipse(QPointF(x, y), 4.5, 4.5);
+                    previous = QPointF(x, y);
+                    have_previous = true;
+                }
+            }
+
+            if (valid_count > 1) {
+                const double average = valid_total / double(valid_count);
+                const double average_y = plot.bottom() - std::clamp(average / max_value, 0.0, 1.0) * plot.height();
+                painter.setPen(QPen(QColor(QStringLiteral("#f5f7fb")), chart.bars ? 1.5 : 1.0, Qt::DashLine));
+                painter.drawLine(QPointF(slot_center - group_width * 0.38, average_y),
+                                 QPointF(slot_center + group_width * 0.38, average_y));
+            }
+
+            painter.setFont(small_font);
+            painter.setPen(QColor(QStringLiteral("#8d98ab")));
+            const QString pool_label =
+                QFontMetrics(painter.font()).elidedText(slot.name, Qt::ElideRight, int(std::max(34.0, x_step - 8.0)));
+            painter.drawText(QRectF(slot_center - x_step / 2.0 + 2.0, plot.bottom() + 20.0, x_step - 4.0, 16.0),
+                             Qt::AlignHCenter | Qt::AlignTop,
+                             pool_label);
+            painter.setFont(label_font);
+        }
+    }
+
+    painter.end();
+    return image.save(path, "PNG");
 }
 
 QString NuRpcService::normalizedVersionString(QString version)
@@ -21847,12 +23225,33 @@ void NuRpcService::stopOwnedBackend()
     if (m_backend_process && m_backend_process->state() != QProcess::NotRunning) {
         if (!stop_requested)
             m_backend_process->terminate();
-        if (!m_backend_process->waitForFinished(BACKEND_GRACEFUL_SHUTDOWN_MS)) {
+        QElapsedTimer shutdown_wait;
+        shutdown_wait.start();
+        qint64 last_status_ms = -1000;
+        while (m_backend_process->state() != QProcess::NotRunning &&
+               shutdown_wait.elapsed() < BACKEND_GRACEFUL_SHUTDOWN_MS) {
+            m_backend_process->waitForFinished(250);
+            if (shutdown_wait.elapsed() - last_status_ms >= 1000) {
+                last_status_ms = shutdown_wait.elapsed();
+                m_shutdown_status =
+                    QStringLiteral("Waiting for backend database and network shutdown (%1s elapsed, up to %2s).")
+                        .arg(shutdown_wait.elapsed() / 1000)
+                        .arg(BACKEND_GRACEFUL_SHUTDOWN_MS / 1000);
+                Q_EMIT shutdownChanged();
+            }
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+        }
+        if (m_backend_process->state() != QProcess::NotRunning) {
             appendDebugLogLineFromNu(
                 QStringLiteral("Nu shutdown: backend did not exit after %1 seconds; forcing process termination.")
                     .arg(BACKEND_GRACEFUL_SHUTDOWN_MS / 1000));
             m_backend_process->kill();
-            m_backend_process->waitForFinished(3000);
+            QElapsedTimer force_wait;
+            force_wait.start();
+            while (m_backend_process->state() != QProcess::NotRunning && force_wait.elapsed() < 3000) {
+                m_backend_process->waitForFinished(150);
+                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+            }
         }
     }
 
@@ -22278,7 +23677,9 @@ QVariantList NuRpcService::suggestedTableColumnWidths(const QVariantList& column
             if (type == QLatin1String("seedLanSource")) {
                 const QVariantMap meta = row_value.toMap().value(QStringLiteral("meta")).toMap();
                 if (meta.value(QStringLiteral("isLanPeer")).toBool()) {
-                    extra_padding = compact ? 28 : 32;
+                    extra_padding = qMax(compact ? 42 : 50,
+                                         cell_metrics.horizontalAdvance(QStringLiteral("\u2014\u2014")) +
+                                             cell_metrics.horizontalAdvance(QStringLiteral("  ")));
                 }
             }
             data_wanted =

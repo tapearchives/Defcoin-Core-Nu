@@ -25,6 +25,21 @@ void PrepareDefcoinNuMacLaunchState()
             URLByAppendingPathComponent:@"org.defcoincore.DefcoinCoreNu.savedState"
                             isDirectory:YES];
         [[NSFileManager defaultManager] removeItemAtURL:savedStateURL error:nil];
+
+        NSURL* temporarySavedStateURL =
+            [NSURL fileURLWithPath:[NSTemporaryDirectory()
+                                       stringByAppendingPathComponent:@"org.defcoincore.DefcoinCoreNu.savedState"]
+                       isDirectory:YES];
+        [[NSFileManager defaultManager] removeItemAtURL:temporarySavedStateURL error:nil];
+    }
+}
+
+void ActivateDefcoinNuMacApplication()
+{
+    @autoreleasepool {
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        [NSApp unhide:nil];
+        [NSApp activateIgnoringOtherApps:YES];
     }
 }
 

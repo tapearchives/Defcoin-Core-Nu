@@ -60,8 +60,12 @@ Rectangle {
     function syncMastValue() {
         if (!NuService.syncing) return "Ready"
         const tip = Number(NuService.headerHeight || 0)
+        const block = Number(NuService.blockHeight || 0)
+        const blocksBehind = Math.max(0, tip - block)
         const mode = String(NuService.syncTransportMode || "Syncing")
         if (tip <= 0) return mode
+        if (blocksBehind <= 1)
+            return "Catching up | " + NuService.syncProgressPercent + "%"
         return mode + " | " + NuService.syncProgressPercent + "%, ETA " + NuService.syncEta
     }
 
@@ -334,7 +338,7 @@ Rectangle {
             RowLayout {
                 id: miningRow
                 anchors.fill: parent
-                anchors.leftMargin: NuTokens.spaceMd
+                anchors.leftMargin: 0
                 anchors.rightMargin: NuTokens.spaceMd
                 anchors.topMargin: NuTokens.spaceXs
                 anchors.bottomMargin: NuTokens.spaceXs
@@ -373,6 +377,13 @@ Rectangle {
                 NuMetricRow {
                     label: "Accepted:"
                     value: String(NuService.minerAcceptedShares)
+                }
+
+                NuMetricRow {
+                    label: "Accepted/s:"
+                    value: NuService.minerAcceptedRateText
+                    labelMaximumWidth: 88
+                    valueMaximumWidth: 86
                 }
 
                 NuMetricRow {

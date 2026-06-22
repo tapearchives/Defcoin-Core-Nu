@@ -32,6 +32,8 @@ ApplicationWindow {
     property bool syncProgressHiddenThisLaunch: false
     property bool shutdownInProgress: false
     property int shutdownStepIndex: 0
+    property double shutdownStartedAtMs: 0
+    property int shutdownElapsedSeconds: 0
     readonly property var shutdownSteps: [
         qsTr("Preparing shutdown..."),
         qsTr("Stopping background network and helper tasks..."),
@@ -86,6 +88,8 @@ ApplicationWindow {
         }
         root.shutdownInProgress = true
         root.shutdownStepIndex = 0
+        root.shutdownStartedAtMs = Date.now()
+        root.shutdownElapsedSeconds = 0
         root.show()
         root.raise()
         shutdownTimer.restart()
@@ -93,12 +97,23 @@ ApplicationWindow {
     }
 
     function refreshSyncProgressWindow() {
-        if (NuService.syncing && !root.syncProgressHiddenThisLaunch) {
+        if (root.shouldShowSyncProgressWindow() && !root.syncProgressHiddenThisLaunch) {
             if (!syncProgressWindow.visible)
                 syncProgressWindow.show()
-        } else if (!NuService.syncing && syncProgressWindow.visible) {
+        } else if (!root.shouldShowSyncProgressWindow() && syncProgressWindow.visible) {
             syncProgressWindow.hide()
         }
+    }
+
+    function syncBlocksBehind() {
+        return Math.max(0, Number(NuService.headerHeight || 0) - Number(NuService.blockHeight || 0))
+    }
+
+    function shouldShowSyncProgressWindow() {
+        if (!NuService.syncing)
+            return false
+        const behind = root.syncBlocksBehind()
+        return behind >= 5 || NuService.syncProgressPercent < 99
     }
 
     function passphraseStatus(firstValue, secondValue, enabled) {
@@ -512,6 +527,10 @@ ApplicationWindow {
         frame.uiSelfTestOpenSettingsTab(tabName)
     }
 
+    function uiSelfTestOpenMiningTab(tabName) {
+        frame.uiSelfTestOpenMiningTab(tabName)
+    }
+
     menuBar: MenuBar {
         Menu {
             id: fileMenu
@@ -667,6 +686,8 @@ ApplicationWindow {
         interval: 650
         repeat: true
         onTriggered: {
+            if (root.shutdownStartedAtMs > 0)
+                root.shutdownElapsedSeconds = Math.max(0, Math.floor((Date.now() - root.shutdownStartedAtMs) / 1000))
             if (root.shutdownStepIndex < root.shutdownSteps.length - 1) {
                 root.shutdownStepIndex += 1
                 return
@@ -736,7 +757,8 @@ ApplicationWindow {
 
                 Label {
                     Layout.fillWidth: true
-                    text: NuService.shutdownStatus.length > 0 ? NuService.shutdownStatus : root.shutdownSteps[root.shutdownStepIndex]
+                    text: (NuService.shutdownStatus.length > 0 ? NuService.shutdownStatus : root.shutdownSteps[root.shutdownStepIndex])
+                          + qsTr(" Elapsed: %1s.").arg(root.shutdownElapsedSeconds)
                     color: NuTokens.textPrimary
                     font.pixelSize: NuTokens.fontBody
                     horizontalAlignment: Text.AlignHCenter

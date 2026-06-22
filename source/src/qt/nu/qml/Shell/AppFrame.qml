@@ -51,6 +51,11 @@ Item {
         settingsView.openTab(clean === "display" ? 1 : clean === "updates" ? 2 : 0)
     }
 
+    function uiSelfTestOpenMiningTab(tabName) {
+        root.currentRoute = "mining"
+        miningView.requestMiningTab(tabName)
+    }
+
     function requestRoute(route) {
         if (route === root.currentRoute)
             return
@@ -108,7 +113,9 @@ Item {
                         onCreateWalletRequested: root.createWalletRequested()
                         onRestoreRecoveryWalletRequested: root.restoreRecoveryWalletRequested()
                     }
-                    MiningView {}
+                    MiningView {
+                        id: miningView
+                    }
                     RpcConsoleView {}
                     NodeView {
                         initialTab: root.nodeInitialTab

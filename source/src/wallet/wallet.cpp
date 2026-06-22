@@ -401,9 +401,10 @@ bool CWallet::Unlock(const SecureString& strWalletPassphrase, bool accept_no_key
                 // Now that we've unlocked, upgrade the key metadata
                 UpgradeKeyMetadata();
 
-                // MWEB: Load MWEB keychain
-                auto mweb_spk_man = GetScriptPubKeyMan(OutputType::MWEB, false);
-                if (mweb_spk_man) {
+                // MWEB: Load MWEB keychain when an inherited MWEB manager is actually active.
+                auto mweb_spk_man_it = m_external_spk_managers.find(OutputType::MWEB);
+                if (mweb_spk_man_it != m_external_spk_managers.end() && mweb_spk_man_it->second) {
+                    auto mweb_spk_man = mweb_spk_man_it->second;
                     mweb_spk_man->LoadMWEBKeychain();
                     mweb_wallet->UpgradeCoins();
                 }
@@ -4304,13 +4305,14 @@ bool CWallet::Lock()
         vMasterKey.clear();
     }
 
-    // MWEB: Unload MWEB keychain
-    auto mweb_spk_man = GetScriptPubKeyMan(OutputType::MWEB, false);
-    if (mweb_spk_man) {
+    // MWEB: Unload MWEB keychain when an inherited MWEB manager is actually active.
+    auto mweb_spk_man_it = m_external_spk_managers.find(OutputType::MWEB);
+    if (mweb_spk_man_it != m_external_spk_managers.end() && mweb_spk_man_it->second) {
+        auto mweb_spk_man = mweb_spk_man_it->second;
         const mw::Keychain::Ptr& keychain = mweb_spk_man->GetMWEBKeychain();
-		if (keychain) {
-        	keychain->Lock();
-		}
+        if (keychain) {
+            keychain->Lock();
+        }
     }
 
     NotifyStatusChanged(this);
@@ -4335,14 +4337,15 @@ bool CWallet::Unlock(const CKeyingMaterial& vMasterKeyIn, bool accept_no_keys)
 std::set<ScriptPubKeyMan*> CWallet::GetActiveScriptPubKeyMans() const
 {
     std::set<ScriptPubKeyMan*> spk_mans;
-    for (bool internal : {false, true}) {
-        for (OutputType t : OUTPUT_TYPES) {
-            auto spk_man = GetScriptPubKeyMan(t, internal);
-            if (spk_man) {
-                spk_mans.insert(spk_man);
+    const auto collect_active = [&spk_mans](const std::map<OutputType, ScriptPubKeyMan*>& managers) {
+        for (const auto& spk_man_pair : managers) {
+            if (spk_man_pair.second) {
+                spk_mans.insert(spk_man_pair.second);
             }
         }
-    }
+    };
+    collect_active(m_external_spk_managers);
+    collect_active(m_internal_spk_managers);
     return spk_mans;
 }
 
@@ -4360,7 +4363,6 @@ ScriptPubKeyMan* CWallet::GetScriptPubKeyMan(const OutputType& type, bool intern
     const std::map<OutputType, ScriptPubKeyMan*>& spk_managers = internal ? m_internal_spk_managers : m_external_spk_managers;
     std::map<OutputType, ScriptPubKeyMan*>::const_iterator it = spk_managers.find(type);
     if (it == spk_managers.end()) {
-        WalletLogPrintf("%s scriptPubKey Manager for output type %d does not exist\n", internal ? "Internal" : "External", static_cast<int>(type));
         return nullptr;
     }
     return it->second;
@@ -4482,12 +4484,17 @@ void CWallet::SetupDescriptorScriptPubKeyMans()
     CExtKey master_key;
     master_key.SetSeed(seed_key.begin(), seed_key.size());
 
-    // Defcoin SQL descriptor wallets start with canonical P2PKH descriptors.
-    // The inherited Litecoin descriptor set also includes MWEB, but that path
-    // requires a separate Defcoin-specific port before it is safe to enable.
-    static constexpr std::array<OutputType, 1> DEFAULT_DESCRIPTOR_OUTPUT_TYPES{OutputType::LEGACY};
+    // Defcoin SQL descriptor wallets mirror Bitcoin Core's receive/change
+    // manager shape for currently spendable Defcoin address types. Inherited
+    // Litecoin MWEB descriptors are stored inactive so later Defcoin MWEB work
+    // can activate the same wallet root without rewriting old SQL wallets.
+    static constexpr std::array<OutputType, 3> ACTIVE_DESCRIPTOR_OUTPUT_TYPES{
+        OutputType::LEGACY,
+        OutputType::P2SH_SEGWIT,
+        OutputType::BECH32};
+    static constexpr std::array<OutputType, 1> RESERVED_DESCRIPTOR_OUTPUT_TYPES{OutputType::MWEB};
     for (bool internal : {false, true}) {
-        for (OutputType t : DEFAULT_DESCRIPTOR_OUTPUT_TYPES) {
+        for (OutputType t : ACTIVE_DESCRIPTOR_OUTPUT_TYPES) {
             auto spk_manager = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(*this, internal));
             if (IsCrypted()) {
                 if (IsLocked()) {
@@ -4501,6 +4508,20 @@ void CWallet::SetupDescriptorScriptPubKeyMans()
             uint256 id = spk_manager->GetID();
             m_spk_managers[id] = std::move(spk_manager);
             AddActiveScriptPubKeyMan(id, t, internal);
+        }
+        for (OutputType t : RESERVED_DESCRIPTOR_OUTPUT_TYPES) {
+            auto spk_manager = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(*this, internal));
+            if (IsCrypted()) {
+                if (IsLocked()) {
+                    throw std::runtime_error(std::string(__func__) + ": Wallet is locked, cannot setup reserved descriptors");
+                }
+                if (!spk_manager->CheckDecryptionKey(vMasterKey) && !spk_manager->Encrypt(vMasterKey, nullptr)) {
+                    throw std::runtime_error(std::string(__func__) + ": Could not encrypt reserved descriptors");
+                }
+            }
+            spk_manager->SetupDescriptorGeneration(master_key, t, false);
+            uint256 id = spk_manager->GetID();
+            m_spk_managers[id] = std::move(spk_manager);
         }
     }
 }
@@ -4569,16 +4590,12 @@ ScriptPubKeyMan* CWallet::AddWalletDescriptor(WalletDescriptor& desc, const Flat
 
         // Remove from maps of active spkMans
         auto old_spk_man_id = old_spk_man->GetID();
-        for (bool internal : {false, true}) {
-            for (OutputType t : OUTPUT_TYPES) {
-                auto active_spk_man = GetScriptPubKeyMan(t, internal);
-                if (active_spk_man && active_spk_man->GetID() == old_spk_man_id) {
-                    if (internal) {
-                        m_internal_spk_managers.erase(t);
-                    } else {
-                        m_external_spk_managers.erase(t);
-                    }
-                    break;
+        for (auto managers : {&m_external_spk_managers, &m_internal_spk_managers}) {
+            for (auto it = managers->begin(); it != managers->end();) {
+                if (it->second && it->second->GetID() == old_spk_man_id) {
+                    it = managers->erase(it);
+                } else {
+                    ++it;
                 }
             }
         }

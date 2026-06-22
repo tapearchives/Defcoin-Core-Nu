@@ -5,7 +5,7 @@
 <h1 align="center">Defcoin Core Nu</h1>
 
 <p align="center">
-  <strong>Full-node Defcoin wallet, local network tools, paper wallets, recovery workflows, and peer diagnostics.</strong>
+  <strong>Full-node Defcoin wallet with local network tools, paper wallets, recovery workflows, peer diagnostics, and modern wallet management.</strong>
 </p>
 
 <p align="center">
@@ -36,10 +36,10 @@ Download packages from
 
 | Platform | Package |
 | --- | --- |
-| macOS Apple Silicon / Tahoe | [Nu DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8d-alpha-macOS-AppleSilicon-Tahoe.dmg) |
+| macOS Apple Silicon / Tahoe | [Nu DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8e-alpha-macOS-AppleSilicon-Tahoe.dmg) |
 | OS X Lion 10.7 | [Nu DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-26.6.8-alpha-osx107.dmg) |
-| Windows 11 x86_64 | [Nu Installer](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-26.6.8-alpha-win64-Setup.exe) |
-| Windows 11 x86_64 | [Current Nu Portable ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8c-alpha-Windows-11-x86_64-Portable.zip) |
+| Windows 11 x86_64 | [Nu Installer](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8e-alpha-Windows-11-x86_64-Setup.exe) |
+| Windows 11 x86_64 | [Nu Portable ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8e-alpha-Windows-11-x86_64-Portable.zip) |
 | Verification | [SHA256SUMS.txt](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/SHA256SUMS.txt) |
 
 This is an alpha prerelease. The macOS Apple Silicon DMGs are ad-hoc signed and
@@ -74,7 +74,8 @@ before relying on balances or recent transactions.
   Trippy route tracing when available.
 - A restored Debug Log surface under the RPC Console area with line-numbered log
   inspection alongside the RPC command console.
-- URL presets for Defcoin transaction and address lookups.
+- Block explorer presets for Defcoin services, including transaction and
+  address URL templates.
 - Local mining setup and monitoring helpers that let users select an external
   miner executable rather than bundling mining code inside the wallet.
 - Defcoin network migration support: upgraded peers use `defc014e`; compatibility

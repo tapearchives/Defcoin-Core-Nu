@@ -16,6 +16,8 @@ Owns the top-level Nu QML window, global dialogs, menus, wallet selector helpers
   the Wallet > Paper Wallet surface directly.
 - Provides `uiSelfTestOpenSettingsTab()` so focused screenshots can cover
   Settings > Display and Settings > Updates without manual clicks.
+- Provides `uiSelfTestOpenMiningTab()` so focused screenshots can cover Mining
+  subtabs without manual clicks.
 - Shows the shutdown overlay while Nu starts service cleanup. The overlay text
   should surface `NuService.shutdownStatus` so users understand which backend
   process or helper is still closing.
@@ -34,6 +36,10 @@ Owns the top-level Nu QML window, global dialogs, menus, wallet selector helpers
 - Restore Wallet exposes an opt-in SQL descriptor wallet checkbox that defaults
   off. When enabled, the UI must keep zero-balance skip unavailable and avoid
   auto-until-empty scans because the backend imports ranged descriptors.
+- The blockchain sync progress window is for real backlog, not ordinary
+  near-tip catch-up. When the backend is only one block behind and verification
+  is at least 99%, keep the popup hidden and let the mast/Metrics update in the
+  background.
 
 ## Do Not Break
 
@@ -57,6 +63,8 @@ Owns the top-level Nu QML window, global dialogs, menus, wallet selector helpers
 - Do not hide the local-address-index suggestion when zero-balance skip is
   selected; it is the user's pre-start cue that a current local index can speed
   up safe lookups.
+- Do not reintroduce automatic sync popups for one-block-behind catch-up; that
+  makes normal post-launch background sync look stalled.
 
 ## Verification
 

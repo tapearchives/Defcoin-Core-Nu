@@ -12,6 +12,9 @@ Initializes the Nu QML app, command-line switches, backend/service objects, sing
 - Loads bundled Nu fonts from `Resources/nu/assets/fonts` before QML starts so
   Atkinson Hyperlegible Mono is available to QML and C++ paper-wallet rendering
   without depending on system font installs.
+- On macOS, startup clears stale saved-state records and native activation
+  explicitly unhides/activates `NSApp` after the Qt Quick main window is
+  created. Do not remove this when changing splash or background-tray behavior.
 - Shows launch progress on the splash screen with one centered top status line so loading text does not collide with the logo/title artwork.
 - Supports `--grab-splash <path>` as a focused diagnostic that writes the exact
   generated startup splash pixmap and exits before backend startup.
@@ -36,6 +39,9 @@ Initializes the Nu QML app, command-line switches, backend/service objects, sing
 - When `DEFCOIN_NU_UI_SELF_TEST_SETTINGS_TAB=display` or `updates` is combined
   with `DEFCOIN_NU_UI_SELF_TEST_ROUTE=settings`, the self-test captures that
   Settings tab instead of the default Network tab.
+- When `DEFCOIN_NU_UI_SELF_TEST_MINING_TAB=benchmark` is combined with
+  `DEFCOIN_NU_UI_SELF_TEST_ROUTE=mining`, the self-test captures the Mining
+  > Benchmark Pools tab instead of the default Setup tab.
 - `DEFCOIN_NU_UI_SELF_TEST_ROUTE=<route>` narrows the self-test route walk to
   one route for focused layout debugging.
 
@@ -44,6 +50,9 @@ Initializes the Nu QML app, command-line switches, backend/service objects, sing
 - Always re-check the lock after the user acknowledges a duplicate-instance warning; do not allow two Nu instances to use one datadir.
 - Do not make debug isolation switches default behavior.
 - Keep app bundle identity stable enough for macOS Local Network permission behavior and build testing.
+- Keep the macOS startup activation path intact; background-close/menu-bar mode
+  may hide the window after a real close event, but a fresh launch must create
+  and activate the main window.
 - Keep bundled font loading early and non-fatal. Missing fonts may warn, but
   must not block startup or paper-wallet key safety behavior.
 - Keep splash status text short; long wrapped splash text can collide with branding and makes slow startup look broken.

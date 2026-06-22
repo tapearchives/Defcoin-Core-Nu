@@ -623,7 +623,7 @@ public:
     bool IsHDEnabled() const override;
 
     //! Setup descriptors based on the given CExtkey
-    bool SetupDescriptorGeneration(const CExtKey& master_key, OutputType addr_type);
+    bool SetupDescriptorGeneration(const CExtKey& master_key, OutputType addr_type, bool cache_now = true);
 
     bool HavePrivateKeys() const override;
 

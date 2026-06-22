@@ -10,6 +10,7 @@
 #include <QObject>
 #include <QPair>
 #include <QPointer>
+#include <QProcess>
 #include <QSet>
 #include <QStringList>
 #include <QUrl>
@@ -17,6 +18,7 @@
 #include <QVariantMap>
 #include <QVector>
 
+#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -29,7 +31,6 @@ class QHostAddress;
 class QJsonObject;
 class QLockFile;
 class QPainter;
-class QProcess;
 class QRectF;
 class QTimer;
 class QUdpSocket;
@@ -175,8 +176,18 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString miningMethodText READ miningMethodText NOTIFY minerChanged)
     Q_PROPERTY(QString minerHashrateText READ minerHashrateText NOTIFY minerChanged)
     Q_PROPERTY(int minerAcceptedShares READ minerAcceptedShares NOTIFY minerChanged)
+    Q_PROPERTY(QString minerAcceptedRateText READ minerAcceptedRateText NOTIFY minerChanged)
     Q_PROPERTY(int minerRejectedShares READ minerRejectedShares NOTIFY minerChanged)
     Q_PROPERTY(QString minerSummaryText READ minerSummaryText NOTIFY minerChanged)
+    Q_PROPERTY(bool miningBenchmarkRunning READ miningBenchmarkRunning NOTIFY minerChanged)
+    Q_PROPERTY(QString miningBenchmarkStatus READ miningBenchmarkStatus NOTIFY minerChanged)
+    Q_PROPERTY(int miningBenchmarkProgress READ miningBenchmarkProgress NOTIFY minerChanged)
+    Q_PROPERTY(QString miningBenchmarkEta READ miningBenchmarkEta NOTIFY minerChanged)
+    Q_PROPERTY(QString miningBenchmarkLastRunLabel READ miningBenchmarkLastRunLabel NOTIFY minerChanged)
+    Q_PROPERTY(QString miningBenchmarkLastStatsPath READ miningBenchmarkLastStatsPath NOTIFY minerChanged)
+    Q_PROPERTY(QString miningBenchmarkLastChartPath READ miningBenchmarkLastChartPath NOTIFY minerChanged)
+    Q_PROPERTY(QString miningBenchmarkChartSource READ miningBenchmarkChartSource NOTIFY minerChanged)
+    Q_PROPERTY(QVariantList miningBenchmarkRuns READ miningBenchmarkRuns NOTIFY minerChanged)
     Q_PROPERTY(bool maskBalances READ maskBalances WRITE setMaskBalances NOTIFY settingsChanged)
     Q_PROPERTY(bool thirdPartyTxUrlsEnabled READ thirdPartyTxUrlsEnabled WRITE setThirdPartyTxUrlsEnabled NOTIFY
                    settingsChanged)
@@ -687,11 +698,74 @@ public:
     {
         return m_miner_accepted_shares;
     }
+    QString minerAcceptedRateText() const
+    {
+        if (m_miner_accepted_shares <= 0 || m_miner_started_ms <= 0)
+            return QStringLiteral("0/s");
+        const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+        double rate = 0.0;
+        if (m_miner_accepted_share_times_ms.size() >= 2) {
+            const qint64 window_start_ms = now_ms - 5 * 60 * 1000;
+            qint64 first_ms = 0;
+            int count = 0;
+            for (const qint64 sample_ms : m_miner_accepted_share_times_ms) {
+                if (sample_ms < window_start_ms)
+                    continue;
+                if (first_ms <= 0)
+                    first_ms = sample_ms;
+                ++count;
+            }
+            if (count >= 2 && first_ms > 0) {
+                const double seconds = double(std::max<qint64>(1000, now_ms - first_ms)) / 1000.0;
+                rate = double(count) / seconds;
+            }
+        }
+        if (rate <= 0.0) {
+            const double seconds = double(now_ms - m_miner_started_ms) / 1000.0;
+            if (seconds <= 0.0)
+                return QStringLiteral("0/s");
+            rate = double(m_miner_accepted_shares) / seconds;
+        }
+        return QStringLiteral("%1/s").arg(QString::number(rate, 'f', rate >= 1.0 ? 2 : 4));
+    }
     int minerRejectedShares() const
     {
         return m_miner_rejected_shares;
     }
     QString minerSummaryText() const;
+    bool miningBenchmarkRunning() const
+    {
+        return m_mining_benchmark_running;
+    }
+    QString miningBenchmarkStatus() const
+    {
+        return m_mining_benchmark_status;
+    }
+    int miningBenchmarkProgress() const
+    {
+        return m_mining_benchmark_progress;
+    }
+    QString miningBenchmarkEta() const
+    {
+        return m_mining_benchmark_eta;
+    }
+    QString miningBenchmarkLastRunLabel() const
+    {
+        return m_mining_benchmark_last_run_label;
+    }
+    QString miningBenchmarkLastStatsPath() const
+    {
+        return m_mining_benchmark_last_stats_path;
+    }
+    QString miningBenchmarkLastChartPath() const
+    {
+        return m_mining_benchmark_last_chart_path;
+    }
+    QString miningBenchmarkChartSource() const;
+    QVariantList miningBenchmarkRuns() const
+    {
+        return m_mining_benchmark_runs;
+    }
     QString walletMiningPayoutAddress() const;
     bool maskBalances() const
     {
@@ -835,6 +909,7 @@ public:
     Q_INVOKABLE void validateExistingBlockchain();
     Q_INVOKABLE void pingPeers();
     Q_INVOKABLE void refreshPeer(const QString& node_id);
+    Q_INVOKABLE void requestQuickCloneFromPeers(const QVariantList& node_ids);
     Q_INVOKABLE void banPeer(const QString& node_id);
     Q_INVOKABLE void unbanPeer(const QString& address);
     Q_INVOKABLE void refreshBannedPeers();
@@ -984,6 +1059,12 @@ public:
     Q_INVOKABLE void startConfiguredMiner();
     Q_INVOKABLE void stopMiner();
     Q_INVOKABLE void clearMinerLog();
+    Q_INVOKABLE void startMiningBenchmark(const QVariantList& pools, int seconds_per_pool, int cycles);
+    Q_INVOKABLE void stopMiningBenchmark();
+    Q_INVOKABLE void loadMiningBenchmarkRun();
+    Q_INVOKABLE void exportMiningBenchmarkStats();
+    Q_INVOKABLE void exportMiningBenchmarkChart();
+    Q_INVOKABLE void openMiningBenchmarkFolder();
 
 public Q_SLOTS:
     void setOnlyDefcoinUserAgents(bool enabled);
@@ -1074,6 +1155,21 @@ private:
     void stopOwnedBackend();
     void scheduleMinerChanged();
     void emitPendingMinerChanged();
+    bool launchConfiguredMiner(bool clear_log = true, bool show_user_messages = true);
+    void loadLatestMiningBenchmarkArtifacts();
+    QString miningBenchmarkDirectory() const;
+    void startNextMiningBenchmarkPool();
+    void miningBenchmarkTick();
+    void finishCurrentMiningBenchmarkPool();
+    void startMiningBenchmarkPing(const QVariantMap& pool, int restart_ms);
+    void finishMiningBenchmarkPing(int exit_code, QProcess::ExitStatus exit_status);
+    void beginMiningBenchmarkPool(const QVariantMap& pool, double ping_avg_ms, int restart_ms);
+    void finishMiningBenchmark(bool canceled);
+    void updateMiningBenchmarkProgress();
+    void saveMiningBenchmarkArtifacts();
+    bool loadMiningBenchmarkJson(const QString& path);
+    bool renderMiningBenchmarkChart(const QString& path) const;
+    QVariantMap miningBenchmarkSummaryObject() const;
     void appendLaunchDiagnostic(const QString& message);
     int appendDebugLogLineFromNu(const QString& message);
     void beginBackendDebugLogSection(bool write_to_debug_log);
@@ -1300,6 +1396,7 @@ private:
     void appendMinerLog(const QString& line);
     void parseMinerLogChunk(const QString& text);
     void resetMinerRuntimeStats();
+    void updateMinerAcceptedShares(int accepted);
     void setRecoveryState(bool active, const QString& status, int progress = -1);
     void setRecoveryCurrentMethod(const QString& method);
     void setRecoveryAddressScanProgress(const QString& phase, int completed, int total);
@@ -1402,6 +1499,41 @@ private:
     QString m_miner_hashrate_text = QStringLiteral("-");
     int m_miner_accepted_shares = 0;
     int m_miner_rejected_shares = 0;
+    double m_miner_accepted_share_difficulty = 0.0;
+    QHash<int, double> m_miner_submitted_share_difficulty_by_id;
+    QSet<int> m_miner_pending_accepted_share_ids;
+    qint64 m_miner_started_ms = 0;
+    QVector<qint64> m_miner_accepted_share_times_ms;
+    QTimer* m_mining_benchmark_timer = nullptr;
+    QProcess* m_mining_benchmark_ping_process = nullptr;
+    bool m_mining_benchmark_running = false;
+    QVariantList m_mining_benchmark_pools;
+    QVariantList m_mining_benchmark_runs;
+    QVariantMap m_mining_benchmark_pending_pool;
+    QString m_mining_benchmark_status = QStringLiteral("No pool benchmark has run yet.");
+    int m_mining_benchmark_progress = 0;
+    QString m_mining_benchmark_eta = QStringLiteral("-");
+    QString m_mining_benchmark_last_run_label;
+    QString m_mining_benchmark_last_stats_path;
+    QString m_mining_benchmark_last_chart_path;
+    QString m_mining_benchmark_run_id;
+    QString m_mining_benchmark_original_pool_url;
+    QDateTime m_mining_benchmark_started_at_utc;
+    qint64 m_mining_benchmark_started_ms = 0;
+    qint64 m_mining_benchmark_pool_started_ms = 0;
+    qint64 m_mining_benchmark_restart_total_ms = 0;
+    int m_mining_benchmark_start_accepted_shares = 0;
+    int m_mining_benchmark_start_rejected_shares = 0;
+    double m_mining_benchmark_start_accepted_share_difficulty = 0.0;
+    int m_mining_benchmark_seconds_per_pool = 300;
+    int m_mining_benchmark_cycles = 3;
+    int m_mining_benchmark_current_cycle = 0;
+    int m_mining_benchmark_current_pool_index = 0;
+    int m_mining_benchmark_completed_runs = 0;
+    int m_mining_benchmark_total_runs = 0;
+    int m_mining_benchmark_current_restart_ms = 0;
+    int m_mining_benchmark_restart_samples = 0;
+    int m_mining_benchmark_chart_serial = 0;
     bool m_have_pending_network_active = false;
     bool m_pending_network_active = true;
     bool m_applying_pending_network_active = false;

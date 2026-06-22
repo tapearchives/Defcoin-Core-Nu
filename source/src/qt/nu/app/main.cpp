@@ -319,6 +319,9 @@ void activateWindowForUser(QQuickWindow* window)
 {
     if (!window)
         return;
+#if defined(Q_OS_MACOS)
+    ActivateDefcoinNuMacApplication();
+#endif
     if (QScreen* screen = QGuiApplication::primaryScreen()) {
         window->setScreen(screen);
         const QRect available = screen->availableGeometry();
@@ -363,6 +366,9 @@ void activateWindowForUser(QQuickWindow* window)
 
 void activateTopLevelWindowsForUser()
 {
+#if defined(Q_OS_MACOS)
+    ActivateDefcoinNuMacApplication();
+#endif
     for (QWindow* window : QGuiApplication::topLevelWindows()) {
         if (!window || !window->isVisible())
             continue;
@@ -600,6 +606,16 @@ int runQtQuickUiSelfTest(QApplication& app, QObject* rootObject, QQuickWindow* r
             if (!opened) {
                 ok = false;
                 writeLaunchLogLine(QStringLiteral("UI self-test failed: Settings tab hook missing."));
+            }
+            uiSelfTestSettle(app, 450);
+        } else if (route == QLatin1String("mining") &&
+                   !qEnvironmentVariableIsEmpty("DEFCOIN_NU_UI_SELF_TEST_MINING_TAB")) {
+            const QString miningTab = qEnvironmentVariable("DEFCOIN_NU_UI_SELF_TEST_MINING_TAB").trimmed();
+            const bool opened =
+                QMetaObject::invokeMethod(rootObject, "uiSelfTestOpenMiningTab", Q_ARG(QVariant, QVariant(miningTab)));
+            if (!opened) {
+                ok = false;
+                writeLaunchLogLine(QStringLiteral("UI self-test failed: Mining tab hook missing."));
             }
             uiSelfTestSettle(app, 450);
         }

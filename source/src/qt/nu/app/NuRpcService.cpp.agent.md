@@ -8,8 +8,16 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 
 - Implements UDP Fast Sync probe/ack/request/chunk handling using capability string `defcoin-nu-udp-fast-sync-v1`.
 - Calls `reservefastsyncblock` so UDP block transfer follows Core peer/block reservation and normal Core validation.
+- Fast Sync target selection must not reject a connected/probe-verified peer
+  solely because Nu's cached peer tip is stale while local headers are ahead of
+  accepted blocks. Let `reservefastsyncblock reserve-next` decide whether Core
+  can schedule a block for that peer.
 - Tracks TCP totals from Core `getnettotals`, UDP totals from Nu Fast Sync/Quick Clone sockets, and Quick Clone as a subset of UDP for diagnostics/CSV.
 - Implements Quick Clone user prompt/status scaffolding as trusted LAN public-chain copy only; wallet/private/config data must never be copied.
+- LAN discovery/Fast Sync must support IPv4 and IPv6. Preserve IPv6
+  link-local scope ids for Nu UDP discovery, probes, and Quick Clone block
+  requests, join/send IPv6 all-nodes multicast per active interface, and do
+  not hand scoped link-local endpoints to Core `addnode`.
 - Provides the standalone Nu RPC Console parser, peer table enrichment, workstation discovery display, paper wallet generation/printing, watch-only import, and selectable diagnostic output.
 - Restores the Debug Log surface as a reusable QML panel under RPC Console while
   keeping the existing backend log buffer, line-number data, font sizing, find,
@@ -78,6 +86,19 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 - Refuses non-loopback RPC targets by default for Nu UI operations; remote RPC is an explicit operator override via `DEFCOIN_NU_ALLOW_REMOTE_RPC=1`.
 - Limits automatic update download/apply to Velopack-managed installs. GitHub release fallback opens the release page for manual download instead of trusting package and checksum from the same release channel.
 - Throttles in-app miner log UI updates so high-volume miner output does not force continuous QML text re-rendering.
+- Keeps the in-app miner log capped to the newest 4K lines and exposes a
+  recent-window accepted-share rate text for the mast/Monitor. The parser must
+  recognize both Nu summary lines and common cpuminer
+  accepted/rejected/hashrate output.
+- Owns the Mining > Benchmark Pools runner. It reuses the saved miner
+  executable, payout, password, thread, and nice settings; iterates validated
+  preset/custom stratum endpoints; pings each host before mining; records
+  hashrate, raw accepted shares, accepted share-difficulty work/s, ping,
+  restart timing, and status; shows current-pool elapsed/left timing while a run
+  is active; and autosaves both latest and timestamped JSON/PNG chart artifacts
+  under the Defcoin data directory. Pool comparison must use accepted work/s
+  rather than raw accepted share count because pools may assign different share
+  difficulty.
 - On Windows, assigns Nu-owned backend, miner, traceroute, and helper child processes to a kill-on-close job object so crash paths do not leave mining/backend processes running unattended.
 - Seed/source attribution may include protocol-verified fixed address aliases for public Defcoin operators. These aliases affect peer display only and must not silently become Core bootstrap seeds.
 - Seed/source attribution for configured DNS seeds must survive IPv6 DNS
@@ -167,7 +188,12 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 - Do not copy wallets, keys, passphrases, configs, peers, bans, address books, or RPC cookies in Quick Clone code.
 - When `node_unique_id` identifies two host paths as the same Nu install, Fast Sync/Quick Clone should count them as one logical in-flight source; the alternate host is fallback, not a second independent sender.
 - Keep status strings concise in normal mode and put verbose diagnostics behind Details.
-- Keep miner log updates throttled and capped; do not emit `minerChanged` for every raw miner output chunk.
+- Sync method status must describe accepted blocks as the primary transport outcome. Do not report UDP or Core/TCP as "faster" when accepted-block counts are tied or still zero; rate details can remain secondary diagnostics.
+- Keep miner log updates throttled and capped to bounded memory; do not emit
+  `minerChanged` for every raw miner output chunk.
+- Keep pool benchmarking on the same Nu-owned miner process path as ordinary
+  local mining so validation, wrapper handling, redaction, Windows job
+  containment, and bounded log parsing do not fork into a second behavior.
 - Keep Windows child-process job containment on every Nu-owned `QProcess` start path.
 - During Tahoe UDP testing, macOS Local Network "Allow" is a hard external gate; failed probes before Allow are not code evidence.
 - Do not make backup UI imply a different wallet than the active one. If wallet naming/storage detection changes, update `walletBackupDefaultFileName()` and smoke-test both BDB and SQL wallet names.
@@ -190,7 +216,10 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   the same address also matches a more specific configured seed name.
 - Do not pass newer Trippy `--tui-*` flags to arbitrary PATH binaries without a
   help-output capability check or fallback.
-- Peer table grouping is display-only: the visible Node cell may append `(gN)` when multiple current rows appear to be the same running Nu node, but row metadata and peer actions must keep Core's real numeric peer id.
+- Peer table grouping is display-only: the visible Node cell stays Core's raw
+  numeric peer id. When multiple current rows appear to be the same running Nu
+  node, the source/workstation cell may show `G1: Name`, but row metadata and
+  peer actions must keep Core's real numeric peer id.
 - Do not let paper-wallet self-test placeholders run outside
   `DEFCOIN_NU_UI_SELF_TEST_ACTIVE`.
 - Keep `DEFCOIN_NU_PAPER_WALLET_PDF` test-only. It may render the print sheet

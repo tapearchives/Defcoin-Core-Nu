@@ -4,7 +4,7 @@
 
 Reusable Debug Log panel restored from the earlier Metrics log surface. It owns
 log verbosity, filter presets, search, line-number controls, font sizing, copy,
-save, open-log, and selectable output.
+save, open-log, follow-tail/recent-first, and selectable output.
 
 ## Nu Divergence
 
@@ -17,6 +17,9 @@ save, open-log, and selectable output.
 
 - Keep log output selectable and copyable.
 - Keep line-number controls and search/filter behavior wired to `NuService`.
+- Keep Follow tail visually unchecked while Recent Logs to Top is active, but
+  preserve the previous follow-tail preference and restore it when recent-first
+  mode is turned off.
 - Do not expose private key, passphrase, or wallet-secret material in log UI.
 
 ## Verification

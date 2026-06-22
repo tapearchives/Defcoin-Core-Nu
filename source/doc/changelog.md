@@ -1,10 +1,13 @@
 # Defcoin Core Nu Changelog
 
-## 26.6.8-alpha Core Memories
+## 26.6.8e-alpha Core Memories
 
-Defcoin Core Nu `26.6.8-alpha` is a wallet, mining, networking, and packaging
-polish release.
+Defcoin Core Nu `26.6.8e-alpha` is a wallet, mining, networking, and packaging
+polish release over the public `26.6.8-alpha` line.
 
+- Rebuilds the current Tahoe and Windows packages from a Nu-only source tree
+  after removing stale sibling-product source, assets, changelog entries, and
+  packaging rules from this repository.
 - Refreshes the Defcoin Core Nu logo, splash, About panel, app icon, and DMG
   presentation so the visible brand system uses one locked Nu identity.
 - Expands Wallets with clearer wallet status columns, address counts, better

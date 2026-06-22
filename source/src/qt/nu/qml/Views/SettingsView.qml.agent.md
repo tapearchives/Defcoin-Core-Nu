@@ -21,6 +21,9 @@ Owns Settings tabs, network/connectivity controls, Quick Clone controls, display
 - Metrics must remain read-only; controls belong here or in a dedicated tool page.
 - Quick Clone wording must keep the trust boundary explicit: public chain data only, never wallet/private/config data.
 - LAN discovery permission text must not imply UDP Fast Sync over the public internet depends on LAN broadcast permission.
+- macOS Local Network permission cannot be silently re-granted by Nu. The
+  Settings button should open the user's Local Network Privacy pane so they can
+  re-enable access and relaunch Nu.
 - Do not collapse custom explorer transaction and address templates into one
   field; explorers can require different path prefixes.
 

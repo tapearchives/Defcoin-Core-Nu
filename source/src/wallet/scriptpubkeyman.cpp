@@ -2071,7 +2071,7 @@ bool DescriptorScriptPubKeyMan::AddDescriptorKeyWithDB(WalletBatch& batch, const
     }
 }
 
-bool DescriptorScriptPubKeyMan::SetupDescriptorGeneration(const CExtKey& master_key, OutputType addr_type)
+bool DescriptorScriptPubKeyMan::SetupDescriptorGeneration(const CExtKey& master_key, OutputType addr_type, bool cache_now)
 {
     LOCK(cs_desc_man);
     assert(m_storage.IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
@@ -2092,12 +2092,13 @@ bool DescriptorScriptPubKeyMan::SetupDescriptorGeneration(const CExtKey& master_
         throw std::runtime_error(std::string(__func__) + ": writing descriptor failed");
     }
 
-    if (addr_type == OutputType::MWEB) {
+    if (cache_now && addr_type == OutputType::MWEB) {
         LoadMWEBKeychain();
     }
 
-    // TopUp
-    TopUp();
+    if (cache_now) {
+        TopUp();
+    }
 
     m_storage.UnsetBlankWalletFlag(batch);
     return true;

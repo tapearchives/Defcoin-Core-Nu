@@ -38,7 +38,14 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
   user-message text.
 - Exposes an internal paper-wallet placeholder installer for `--ui-self-test`;
   it is not a user-facing wallet API.
-- Owns the miner-log throttle timer state used to batch high-volume miner output before notifying QML.
+- Owns the miner-log throttle timer state used to batch high-volume miner
+  output before notifying QML and exposes the accepted-share rate text used by
+  the mast and Mining Monitor.
+- Exposes Mining > Benchmark Pools state and actions: running/status/progress,
+  ETA, last chart/stat paths, chart image source, completed run rows, and
+  start/stop/load/export/open-folder invokables. Benchmark run rows include raw
+  accepted shares for diagnostics and accepted share-difficulty work/s for fair
+  pool comparison.
 
 ## Do Not Break
 
@@ -58,7 +65,10 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
   changing any wallet state.
 - Keep preview-page invokables read-only. They may construct placeholder
   display entries in memory, but must not generate or persist private keys.
-- Preserve the miner-log throttle members when changing miner properties; QML must not be signaled once per miner output chunk.
+- Preserve the miner-log throttle/rate members when changing miner properties;
+  QML must not be signaled once per miner output chunk.
+- Keep benchmark properties read-only from QML; the service owns sequencing,
+  pinging, miner process switching, autosave paths, and chart generation.
 - Keep transaction and address explorer template properties distinct.
 - Keep recovery-scan flags explicit in the invokable signature; do not overload
   negative range values with additional meanings beyond auto-until-empty. SQL

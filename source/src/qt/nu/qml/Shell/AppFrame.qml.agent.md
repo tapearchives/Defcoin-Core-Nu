@@ -15,8 +15,8 @@ Owns the main Nu shell frame, route switching, left navigation placement, status
 - Guards route changes while Paper Wallet private keys remain in memory. The
   user must either return to Paper Wallet or accept key clearing before Nu
   switches routes.
-- Exposes a self-test-only helper for opening Wallet > Paper Wallet so layout
-  screenshots can be captured without manual navigation.
+- Exposes self-test-only helpers for opening Wallet > Paper Wallet and focused
+  Mining tabs so layout screenshots can be captured without manual navigation.
 
 ## Do Not Break
 

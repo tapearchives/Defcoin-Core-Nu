@@ -161,6 +161,14 @@ ColumnLayout {
                             onToggled: NuService.lanNodeDiscoveryEnabled = checked
                         }
 
+                        NuActionButton {
+                            visible: Qt.platform.os === "osx"
+                            text: "Open macOS Local Network Privacy"
+                            Layout.preferredWidth: 270
+                            helpText: "If Local Network access was denied or missed, macOS requires you to re-enable it in System Settings. Reopen Nu after changing the permission."
+                            onClicked: Qt.openUrlExternally("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")
+                        }
+
                         NuCheckBox {
                             text: "Enable UDP fast sync"
                             checked: NuService.lanFastSyncEnabled

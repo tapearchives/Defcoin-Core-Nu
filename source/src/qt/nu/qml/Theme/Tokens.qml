@@ -48,7 +48,7 @@ QtObject {
     readonly property int spaceXl: 24
 
     readonly property int tooltipDelay: 850
-    readonly property int tooltipTimeout: 6000
+    readonly property int tooltipTimeout: -1
 
     readonly property int motionFast: 110
     readonly property int motionNormal: 170

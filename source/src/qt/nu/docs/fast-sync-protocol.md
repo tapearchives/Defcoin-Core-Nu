@@ -32,6 +32,11 @@ reserve-next` must still return a scheduling reason such as
 `peer-best-block-unknown`, `peer-chain-not-ahead`, or
 `headers-below-minimum-chain-work`. Those reasons are not UDP packet failures;
 they mean Core has not yet opened a validated block reservation for that peer.
+Nu's frontend must therefore avoid treating a stale cached peer tip as a local
+veto while the local header chain is ahead of the accepted block height. A
+connected peer that advertises Fast Sync and has passed UDP probe verification
+may be offered to `reservefastsyncblock reserve-next`; Core remains the
+authority for deciding whether the peer has a schedulable block.
 
 Starting with the 26.6.4r line, Core can also offer a short UDP transport claim
 window during normal block scheduling. When Core selects a block from a connected

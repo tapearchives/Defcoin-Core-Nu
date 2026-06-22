@@ -15,6 +15,8 @@ Reusable Nu table component with selectable rows, sortable columns, copy behavio
 - Preserve selectable/copyable text behavior for diagnostic/status/error rows.
 - Keep sort callbacks stable so view switches can preserve sort order.
 - Avoid row heights that double for single-line content without reason.
+- LAN workstation/source cells reserve extra width for the inline LAN glyph;
+  keep the C++ suggested widths and QML delegate margins in sync.
 
 ## Verification
 

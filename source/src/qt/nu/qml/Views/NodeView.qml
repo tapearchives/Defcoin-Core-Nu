@@ -41,7 +41,7 @@ ColumnLayout {
     property var simplePeerMinimums: [58, 34, 132, 66, 52, 58, 58, 92]
     property var simplePeerMaximums: [86, 42, 390, 92, 74, 82, 82, 280]
     property var simplePeerTooltips: [
-        "Backend peer connection ID for this session. When a suffix like (g1) appears, Nu has grouped that row with another current peer row that appears to be the same running node.",
+        "Backend peer connection ID for this session. Same-node group labels such as G1 appear in the LAN workstation/source column when available.",
         "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
         "Peer endpoint, including IP address and TCP port. Port 10332 is the current Nu/Defcoin default P2P port; 1337 is a legacy/alternate Defcoin port often seen on public nodes; high random ports are usually inbound source ports behind NAT.",
         "Transport methods that have successfully exchanged data with this peer during this Nu session: TCP, UDP, or TCP+UDP.",
@@ -60,12 +60,12 @@ ColumnLayout {
     property var detailedPeerMinimums: [58, 34, 128, 46, 90, 164, 62, 74, 68, 58, 58, 58, 58, 58, 58, 92, 130, 70, 130, 130, 130, 130, 80, 80, 84, 64, 76, 90]
     property var detailedPeerMaximums: [88, 42, 330, 70, 240, 340, 82, 92, 108, 68, 68, 78, 84, 82, 82, 260, 168, 96, 168, 168, 168, 168, 108, 108, 136, 110, 108, 130]
     property var detailedPeerTooltips: [
-        "Backend peer connection ID for this session. When a suffix like (g1) appears, Nu has grouped that row with another current peer row that appears to be the same running node.",
+        "Backend peer connection ID for this session. Same-node group labels such as G1 appear in the LAN workstation/source column when available.",
         "Litecoin/Core getpeerinfo convention. In = inbound: the remote peer opened the connection into this node. Out = outbound: this node opened the connection to the peer.",
         "Peer IP address without the port. IPv4 values use fixed-width octet spacing so dots align.",
         "Peer TCP port. Port 10332 is the current Nu/Defcoin default P2P port; 1337 is a legacy/alternate Defcoin port often seen on public nodes; high random ports are usually inbound source ports behind NAT.",
         "Best-effort reverse DNS name for the peer IP address. Blank means no reverse DNS name has resolved yet.",
-        "Configured seed/source domain or confirmed LAN workstation name associated with this peer address. LAN rows show a small local-network icon before the name; hover the cell for the discovery source such as Bonjour, SMB/NetBIOS, host-name resolution, or optional nmap output.",
+        "Configured seed/source domain or confirmed LAN workstation name associated with this peer address. LAN rows show a small local-network icon before the name; G1/G2 labels group likely same-node rows. Hover the cell for the discovery source such as Bonjour, SMB/NetBIOS, host-name resolution, or optional nmap output.",
         "P2P protocol version reported by the peer.",
         "Actual network message-start bytes selected for this peer, such as defc014e or fbc0b6db.",
         "Compact service flags advertised by the peer. Hover an entry for the full service-bit names and meanings.",
@@ -183,7 +183,7 @@ ColumnLayout {
     function peerDetailHelp(label) {
         const text = String(label || "")
         const help = {
-            "Node": "Backend peer connection ID for this Nu session. A suffix like (g1) means Nu has grouped this row with another current peer row that appears to be the same running node.",
+            "Node": "Backend peer connection ID for this Nu session. Same-node group labels such as G1 appear in the LAN workstation/source field when available.",
             "Direction": "Inbound means the remote peer opened the connection into this node; outbound means this node opened the connection to the peer.",
             "Endpoint": "The peer address and TCP port used by Core for the P2P connection.",
             "Network": "Transport family reported by Core, such as ipv4, ipv6, onion, or i2p.",
@@ -788,18 +788,48 @@ ColumnLayout {
                 }
 
                 NuActionButton {
-                    text: "Ban peer"
-                    Layout.preferredWidth: 104
-                    enabled: root.hasSinglePeerRowSelection()
-                    helpText: "Add the selected peer address to Core's ban list and disconnect it."
-                    onClicked: NuService.banPeer(root.selectedSinglePeerRowId())
+                    text: "Re-request Quick Clone"
+                    Layout.preferredWidth: 176
+                    enabled: root.selectedPeerRowIds().length > 0
+                    helpText: "Ask the selected trusted-LAN peer or peers to provide Quick Clone blocks if they advertise or answer Nu UDP Fast Sync."
+                    onClicked: NuService.requestQuickCloneFromPeers(root.selectedPeerRowIds())
+                }
+
+                NuActionButton {
+                    text: root.selectedPeerRowIds().length > 1 ? "Ban peers" : "Ban peer"
+                    Layout.preferredWidth: 112
+                    enabled: root.selectedPeerRowIds().length > 0
+                    helpText: "Add the selected peer address or addresses to Core's ban list and disconnect them."
+                    onClicked: {
+                        const ids = root.selectedPeerRowIds()
+                        for (let i = 0; i < ids.length; ++i) NuService.banPeer(ids[i])
+                    }
                 }
             }
 
-            NuDataTable {
-                id: peersTable
+            SplitView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                orientation: Qt.Vertical
+
+                handle: Rectangle {
+                    implicitHeight: 7
+                    color: SplitHandle.hovered || SplitHandle.pressed ? Qt.rgba(0.36, 0.13, 0.55, 0.48) : Qt.rgba(0.22, 0.16, 0.28, 0.20)
+                    Rectangle {
+                        width: 42
+                        height: 2
+                        radius: 1
+                        anchors.centerIn: parent
+                        color: Qt.rgba(0.36, 0.13, 0.55, 0.72)
+                    }
+                }
+
+                NuDataTable {
+                id: peersTable
+                SplitView.fillWidth: true
+                SplitView.fillHeight: true
+                SplitView.minimumHeight: 116
+                SplitView.preferredHeight: Math.min(520, Math.max(116, peersTable.headerHeight() + Math.min(14, peersTable.renderedRowCount()) * peersTable.baseRowHeight() + 20))
                 compact: true
                 fontPixelSize: NuTokens.fontTiny
                 rowSelectionEnabled: true
@@ -807,6 +837,7 @@ ColumnLayout {
                 rowKeyMetaField: "nodeId"
                 selectedRowKeys: root.selectedPeerNodeIds
                 alwaysShowHorizontalScrollBar: root.detailsMode
+                alwaysShowVerticalScrollBar: true
                 tableId: root.detailsMode ? "nodePeersDetailed" : "nodePeersSimple"
                 restoreSavedColumnWidths: false
                 columns: root.detailsMode ? root.detailedPeerColumns : root.simplePeerColumns
@@ -844,6 +875,12 @@ ColumnLayout {
                 }
             }
 
+                ColumnLayout {
+                    SplitView.fillWidth: true
+                    SplitView.minimumHeight: 112
+                    SplitView.preferredHeight: Math.min(240, Math.max(112, 42 + NuService.bannedPeerRows.length * 24))
+                    spacing: NuTokens.spaceSm
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: NuTokens.spaceMd
@@ -879,13 +916,14 @@ ColumnLayout {
             NuDataTable {
                 id: bannedPeersTable
                 Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(156, Math.max(78, 34 + NuService.bannedPeerRows.length * 24))
+                Layout.fillHeight: true
                 compact: true
                 fontPixelSize: NuTokens.fontTiny
                 rowSelectionEnabled: true
                 plainClickSelectsRows: true
                 rowKeyMetaField: "address"
                 selectedRowKeys: root.selectedBannedPeerKeys
+                alwaysShowVerticalScrollBar: true
                 columns: ["Banned Address", "Reason", "Created", "Expires"]
                 columnTypes: ["ipport", "text", "date", "date"]
                 sortColumnKeys: ["address", "reason", "created", "expires"]
@@ -896,6 +934,8 @@ ColumnLayout {
                 rows: NuService.bannedPeerRows
                 emptyText: "No banned peers."
                 onRowSelectionChanged: (keys) => root.selectedBannedPeerKeys = keys
+            }
+                }
             }
         }
 

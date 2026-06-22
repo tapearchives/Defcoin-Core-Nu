@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Declares the macOS native help-book opening helper.
+Declares the macOS native launch-state, activation, and help-book opening helpers.
 
 ## Nu Risk
 
-- Exposes a small platform bridge used by `NuRpcService` and QML help actions.
+- Exposes a small platform bridge used by app startup, `NuRpcService`, and QML help actions.
 
 ## Do Not Break
 

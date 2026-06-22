@@ -33,7 +33,8 @@ supplying data, or receiving data.
 ## 3. Receiving A Clone
 
 - `Quick Clone armed. Nu will use LAN sources only after request; wallet data is never copied.`
-- `Quick Clone found LAN source <host>; waiting for Core peer selection before requesting blocks.`
+- `Quick Clone found LAN source <host>. This node is waiting for its backend to identify that same peer connection before requesting blocks.`
+- `Quick Clone is waiting for this node's backend to reserve the next safe block (<reason>). Core sync remains active.`
 - `Quick Clone asking Core to reserve the next missing block from <host>.`
 - `Quick Clone receiving blockchain over LAN.`
 - `Quick Clone receiving blockchain over LAN: requesting reserved block <height> from <host>.`

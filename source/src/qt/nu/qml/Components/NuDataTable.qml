@@ -301,7 +301,8 @@ Rectangle {
         if (explicit.length > 0) return explicit
         const value = valueAt(row, index)
         if (value === undefined || value === null || String(value).length === 0) return ""
-        const available = Math.max(24, Number(cellWidth) - textPadding() * 2)
+        const iconPad = cellHasLanIcon(row, index) ? lanIconPadding() : 0
+        const available = Math.max(24, Number(cellWidth) - textPadding() * 2 - iconPad)
         return roughTextWidth(value, index) > available ? String(value) : ""
     }
 
@@ -522,6 +523,10 @@ Rectangle {
         return compact ? 8 : 14
     }
 
+    function lanIconPadding() {
+        return compact ? 42 : 50
+    }
+
     function baseRowHeight() {
         const base = Math.max(compact ? 22 : 28, Math.ceil(cellFontSize() * (compact ? 1.35 : 1.5)) + (compact ? 4 : 6))
         return base
@@ -535,7 +540,7 @@ Rectangle {
         for (let c = 0; c < columns.length; ++c) {
             if (isActionColumn(c) || columnType(c) === "swatch" || columnType(c) === "lan") continue
             const cellWidth = Number(columnWidths[c] || columnMin(c))
-            const iconPad = cellHasLanIcon(row, c) ? (compact ? 30 : 34) : 0
+            const iconPad = cellHasLanIcon(row, c) ? lanIconPadding() : 0
             const available = Math.max(28, cellWidth - textPadding() * 2 - iconPad)
             const text = String(valueAt(row, c) === undefined || valueAt(row, c) === null ? "" : valueAt(row, c))
             const segments = text.split("\n")
@@ -611,7 +616,7 @@ Rectangle {
             for (let r = 0; r < measuredRows.length; ++r) {
                 const row = rowCells(measuredRows[r])
                 if (row && row.length > c) {
-                    const iconPad = cellHasLanIcon(measuredRows[r], c) ? (compact ? 30 : 34) : 0
+                    const iconPad = cellHasLanIcon(measuredRows[r], c) ? lanIconPadding() : 0
                     wanted = Math.max(wanted, roughTextWidth(row[c], c) + iconPad)
                 }
             }
@@ -1431,7 +1436,7 @@ Rectangle {
                                     anchors.fill: parent
                                     anchors.margins: root.compact ? NuTokens.spaceXs : NuTokens.spaceSm
                                     anchors.leftMargin: root.cellHasLanIcon(bodyRow.modelData, bodyCell.index)
-                                                        ? (root.compact ? 28 : 32)
+                                                        ? root.lanIconPadding()
                                                         : (root.compact ? NuTokens.spaceXs : NuTokens.spaceSm)
                                     visible: !root.isActionColumn(bodyCell.index)
                                              && root.columnType(bodyCell.index) !== "swatch"
