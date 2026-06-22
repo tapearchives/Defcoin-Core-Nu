@@ -15,7 +15,6 @@ ColumnLayout {
     property string buildVersion: NuBuildVersion
     property string buildId: typeof NuBuildId !== "undefined" ? NuBuildId : ""
     property string codeName: "Core Memories"
-    property string thirdLine: ""
     property int heroHeight: 184
     property int textHeight: 126
 
@@ -91,7 +90,6 @@ ColumnLayout {
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: root.showOverlayText ? -24 : 0
             wordmarkSize: hero.brandWordmarkSize
-            thirdLine: root.thirdLine
         }
 
         Rectangle {

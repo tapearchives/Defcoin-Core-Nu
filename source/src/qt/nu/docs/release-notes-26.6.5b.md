@@ -9,9 +9,9 @@
   or failed Windows launch has a concrete trace.
 - Added startup splash phase text with elapsed seconds while Nu prepares the
   service, platform integration, and Qt Quick interface.
-- Stopped the wallet app from opening the separated Explorer SQLite cache during
-  Nu startup. Explorer/Forensics now remain in the separate Explore app, and Nu
-  no longer touches the large `nu-explorer/explorer.sqlite` just to launch.
+- Stopped the wallet app from opening the local public-chain SQLite cache during
+  Nu startup. Nu no longer touches the large `nu-explorer/explorer.sqlite` just
+  to launch.
 - Removed heavyweight `NuService.refresh()` calls from menu-open handlers so a
   File/Open Wallet menu click cannot trigger backend startup/RPC refresh work on
   the UI thread.
@@ -23,8 +23,7 @@
 
 - Port `main.cpp`, `NuRpcService.cpp`, `Main.qml`, and `NuMenuItem.qml` to
   Windows/Catalina/Lion builds that carry the same Qt Quick wallet frontend.
-- The Explore app still loads Explorer recent lookups and contact sets; only the
-  main wallet app skips that startup work.
+- The main wallet app skips startup work for recent lookups and contact sets.
 - Windows packages should include the new code using the installed Qt 6.10.1
   MinGW runtime unless the Windows Qt toolchain is explicitly upgraded.
 

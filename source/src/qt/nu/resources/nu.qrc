@@ -29,8 +29,6 @@
         <file>../qml/Theme/Tokens.qml</file>
         <file>../qml/Theme/qmldir</file>
         <file>../qml/Views/ActivityView.qml</file>
-        <file>../qml/Views/ExplorerView.qml</file>
-        <file>../qml/Views/ForensicsView.qml</file>
         <file>../qml/Views/HomeView.qml</file>
         <file>../qml/Views/MiningView.qml</file>
         <file>../qml/Views/NodeView.qml</file>
@@ -42,8 +40,6 @@
         <file>../assets/icons/activity.svg</file>
         <file>../assets/icons/copy.svg</file>
         <file>../assets/icons/external-link.svg</file>
-        <file>../assets/icons/explorer.svg</file>
-        <file>../assets/icons/forensics.svg</file>
         <file>../assets/icons/home.svg</file>
         <file>../assets/icons/isolated.svg</file>
         <file>../assets/icons/lock.svg</file>
@@ -57,9 +53,6 @@
         <file>../assets/icons/sync.svg</file>
         <file>../assets/icons/wallet.svg</file>
         <file>../assets/icons/warning.svg</file>
-        <file>../assets/data/coindroids_dc25_chain_forensics.json</file>
-        <file>../assets/data/defcoin_reddit_timeline.json</file>
-        <file>../assets/brand/defcoin-core-nu-explore-lockup.png</file>
         <file>../assets/brand/defcoin-core-nu-lockup.png</file>
         <file>../assets/brand/defcoin-nu-icon-1024.png</file>
         <file>../assets/brand/defcoin-nu-coin-stack-hires.png</file>

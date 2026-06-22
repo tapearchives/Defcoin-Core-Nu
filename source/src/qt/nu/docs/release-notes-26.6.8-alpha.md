@@ -29,13 +29,9 @@ whether the strict public `26.6.8` line is ready.
   default-port seed migration, DNS seed source attribution, IPv6 seed display,
   Trippy non-scrolling output mode, Atkinson Hypermobile Mono traceroute font,
   and clearer peer inspection/copy behavior.
-- Refreshes branding across Nu and Explore: locked DEFCOIN / CORE NU logo
-  ratios, corrected splash/About/navigation lockups, updated Tahoe-style app
-  icons, cleaned DMG artwork, and a separate Explore lockup built from the Nu
-  family mark.
-- Adds Explore Apple Silicon packaging as a separate app/release artifact using
-  the shared Nu runtime and the Explore-specific splash/About/navigation
-  identity.
+- Refreshes Nu branding: locked DEFCOIN / CORE NU logo ratios, corrected
+  splash/About/navigation lockups, updated Tahoe-style app icons, and cleaned
+  DMG artwork.
 - Improves update and packaging behavior across macOS and Windows staging,
   including Velopack-aware update checks, Windows child-process containment,
   clearer fallback installer handling, and release metadata consistency.
@@ -49,34 +45,26 @@ whether the strict public `26.6.8` line is ready.
 - Visible release label: `26.6.8-alpha`.
 - Nu Tahoe build output:
   `source/build/nu-qml-arm64-26.6.8-alpha/DefcoinCoreNu.app`.
-- Explore Tahoe build output:
-  `source/build/nu-qml-arm64-26.6.8-alpha/DefcoinCoreExplore.app`.
 - Staged Nu Apple Silicon artifact:
   `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.8-alpha-20260620/apple-silicon/`.
-- Staged Explore Apple Silicon artifact:
-  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Explore/Explore-26.6.8-alpha-20260620/apple-silicon/`.
 - Staged Nu Windows 11 x86_64 artifacts:
   `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.8-alpha-20260620/windows11-x86_64/Defcoin-Core-Nu-26.6.8-alpha-win64-Setup.exe`
   and
   `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.8-alpha-20260620/windows11-x86_64/Defcoin-Core-Nu-26.6.8-alpha-win64-Portable.zip`.
-- Staged Explore Windows 11 x86_64 artifacts:
-  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Explore/Explore-26.6.8-alpha-20260620/windows11-x86_64/Defcoin-Core-Nu-Explore-26.6.8-alpha-win64-Setup.exe`
-  and
-  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Explore/Explore-26.6.8-alpha-20260620/windows11-x86_64/Defcoin-Core-Nu-Explore-26.6.8-alpha-win64-Portable.zip`.
-- Velopack update-feed files are staged under each Windows artifact folder's
+- Velopack update-feed files are staged under the Windows artifact folder's
   `velopack/` subdirectory.
 
 ## Verification
 
 - Tahoe backend tools report `v26.6.8-alpha`.
-- Nu and Explore Apple Silicon app bundles report `CFBundleShortVersionString`
-  and `CFBundleVersion` as `26.6.8-alpha`, pass
-  `codesign --verify --deep --strict`, and contain arm64 Mach-O binaries.
-- Nu and Explore Apple Silicon DMGs pass `hdiutil verify`.
-- Windows backend tools and app launchers are PE32+ x86_64 binaries.
-- Windows Nu and Explore portable ZIPs contain the expected app executable,
+- Nu Apple Silicon app bundle reports `CFBundleShortVersionString` and
+  `CFBundleVersion` as `26.6.8-alpha`, passes
+  `codesign --verify --deep --strict`, and contains arm64 Mach-O binaries.
+- Nu Apple Silicon DMG passes `hdiutil verify`.
+- Windows backend tools and app launcher are PE32+ x86_64 binaries.
+- Windows Nu portable ZIP contains the expected app executable,
   `Qt6PrintSupport.dll`, `nu/BUILD_INFO.txt`, and `PaperWalletView.qml`, and
-  do not contain `.agent.md` companion files or `.DS_Store` metadata.
+  does not contain `.agent.md` companion files or `.DS_Store` metadata.
 - Final SHA256 values are generated after packaging and published in the
   release's `SHA256SUMS.txt` asset.
 

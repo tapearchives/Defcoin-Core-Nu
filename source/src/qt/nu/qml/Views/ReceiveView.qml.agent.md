@@ -9,7 +9,8 @@ import entry points.
 ## Nu Divergence
 
 - Generated request selection updates the main QR/address display and details dialog.
-- Details dialog routes Inspect Address to the local Explore app/path when available.
+- Details dialog routes Inspect Address to the configured external block
+  explorer URL.
 - Adds an Import tab for paper-wallet WIF/private-key entry. This tab hands the
   key to the local backend import path, then clears the field; it does not show
   or persist the private key in Receive state.

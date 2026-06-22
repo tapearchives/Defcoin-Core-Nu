@@ -2,7 +2,10 @@
 
 ## Purpose
 
-Owns the Paper Wallet view used by Nu Wallet and, until replaced by a bulk workflow, Explore: staged paper-wallet setup, entropy capture, multi-address paper-wallet sheet controls, generated Defcoin address/private-key state, full-sheet preview, pop-out preview, print action, and clear controls.
+Owns the Paper Wallet view used by Nu Wallet: staged paper-wallet setup,
+entropy capture, multi-address paper-wallet sheet controls, generated Defcoin
+address/private-key state, full-sheet preview, pop-out preview, print action,
+and clear controls.
 
 ## Nu Divergence
 
@@ -63,10 +66,11 @@ Owns the Paper Wallet view used by Nu Wallet and, until replaced by a bulk workf
 ## Do Not Break
 
 - Keep Nu focused on disposable single-sheet generation. Larger funding/bulk
-  distribution workflows belong in Explore and should not share private-key
-  persistence assumptions with this route. Nu may fund the generated public
-  addresses through one reviewed active-wallet transaction, but bulk split,
-  template import, and large distribution workflows belong in Explore.
+  distribution workflows need a dedicated reviewed workflow and should not
+  share private-key persistence assumptions with this route. Nu may fund the
+  generated public addresses through one reviewed active-wallet transaction,
+  but bulk split, template import, and large distribution workflows remain out
+  of scope for this tab.
 - Do not write WIF/private-key material to files, settings, logs, temp QR images, or external URLs.
 - Keep private-key copy behind the sensitive clipboard path and keep Clear wired to the service clear action.
 - Do not auto-print after generation; the print offer must remain user-confirmed.
@@ -93,11 +97,9 @@ Owns the Paper Wallet view used by Nu Wallet and, until replaced by a bulk workf
 ## Verification
 
 - `git diff --check`
-- Build the Nu/Explore frontend after bridge or QML changes.
+- Build the Nu frontend after bridge or QML changes.
 - For layout changes, render at least the affected design through the preview or
   `DEFCOIN_NU_PAPER_WALLET_PDF` self-test path and inspect the resulting image.
   Prefer `render_paper_wallet_previews.sh <app> <out> <count> <hide-art> <design>`
   for fast design-only checks.
 - Launch Nu, open Wallet > Paper Wallet, generate with local entropy on a disposable backend, verify pop-out/print dialog opens, then Clear removes address/WIF/QR fields.
-- Run Explore `--ui-self-test --allow-multiple` and verify the Paper Wallet
-  route plus pop-out preview complete without a crash.

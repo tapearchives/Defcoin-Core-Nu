@@ -7,7 +7,8 @@ Owns the main Nu shell frame, route switching, left navigation placement, status
 ## Nu Divergence
 
 - Hides Advanced tools by default for new users while preserving advanced routes when enabled.
-- Keeps wallet pages and advanced technical pages separated after Explorer/Forensics moved out.
+- Keeps wallet pages and advanced technical pages separated from unrelated
+  product surfaces.
 - Keeps a single Create Wallet route. Optional BIP39 phrase creation lives
   inside Main.qml's combined Create Wallet dialog, not as a separate shell
   signal.
@@ -20,7 +21,8 @@ Owns the main Nu shell frame, route switching, left navigation placement, status
 ## Do Not Break
 
 - Keep route IDs aligned with `Main.qml`, `NavigationRail.qml`, and view file names.
-- Do not put Explorer/Forensics back into Nu unless explicitly requested; those belong in Explore/ExpFor.
+- Do not add unrelated product surfaces back into Nu unless explicitly
+  requested.
 - Preserve enough width for the navigation rail and status mast at common Mac/Lion window sizes.
 - Do not route away from Wallet > Paper Wallet with generated keys silently
   alive; keep the warning/clear behavior synchronized with WalletView.

@@ -6,7 +6,7 @@ Owns the top-level Nu QML window, global dialogs, menus, wallet selector helpers
 
 ## Nu Divergence
 
-- Keeps Nu wallet-first while Explorer and Forensics live in the separate Explore app.
+- Keeps Nu wallet-first and does not expose sibling-product preview surfaces.
 - Provides the visible build notes text, Local Network permission explanation, UDP Fast Sync description, and Quick Clone safety wording.
 - Centralizes sensitive clipboard confirmation for recovery phrases and private key material.
 - Provides internal `uiSelfTestOpenMenuDialog()` and
@@ -27,8 +27,8 @@ Owns the top-level Nu QML window, global dialogs, menus, wallet selector helpers
   resets.
 - Restore Wallet exposes zero-balance skipping only for fixed address-count
   scans. The UI must explain that this checks current balances, does not recover
-  addresses with only fully spent historical activity, and can use a current Nu
-  Explore index for faster lookup before falling back to Core's UTXO scan.
+  addresses with only fully spent historical activity, and can use a current
+  local address index for faster lookup before falling back to Core's UTXO scan.
   Recovery progress must keep address scan status, elapsed time, and ETA visible
   after restore starts.
 - Restore Wallet exposes an opt-in SQL descriptor wallet checkbox that defaults
@@ -54,9 +54,9 @@ Owns the top-level Nu QML window, global dialogs, menus, wallet selector helpers
 - Do not enable restore zero-balance skip while SQL descriptor wallet recovery is
   selected; SQL restore imports wallet descriptors rather than individual
   pre-filtered legacy address ranges.
-- Do not hide the Nu Explore suggestion when zero-balance skip is selected; it
-  is the user's pre-start cue to refresh the local index for faster safe
-  lookups.
+- Do not hide the local-address-index suggestion when zero-balance skip is
+  selected; it is the user's pre-start cue that a current local index can speed
+  up safe lookups.
 
 ## Verification
 

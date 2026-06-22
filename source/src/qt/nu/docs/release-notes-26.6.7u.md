@@ -44,7 +44,7 @@ Internal Tahoe Apple Silicon publish candidate after `26.6.7t`.
 - SHA-256:
   `174b40d94297732795111771874703bce745244a2ef13c7ca9315756df28274a`.
 - The staging script now removes source-only `.agent.md` companions and
-  wallet-app Explore-only QML from final app bundles.
+  non-wallet QML from final app bundles.
 
 ## Verification
 
@@ -56,7 +56,7 @@ Internal Tahoe Apple Silicon publish candidate after `26.6.7t`.
 - Built-app and staged-app UI self-tests passed with backend autostart disabled.
 - Staged app codesign verification passed.
 - `hdiutil verify` passed for the DMG.
-- Staged app contains no `.agent.md` files and no wallet-app Explore-only QML.
+- Staged app contains no `.agent.md` files and no non-wallet QML.
 
 ## Remaining Notes
 

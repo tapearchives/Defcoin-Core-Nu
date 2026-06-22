@@ -34,8 +34,6 @@ the manifest before swapping public chain folders.
 
 - `git diff --check` passed.
 - Apple Silicon `DefcoinCoreNu` built from `build/nu-qml-arm64-26.6.4u`.
-- Apple Silicon `DefcoinCoreExplore` also built because the shared service
-  layer changed.
 - Bundle metadata reports `26.6.4u`.
 - QML lint found no new syntax errors; existing context-property warnings
   remain.

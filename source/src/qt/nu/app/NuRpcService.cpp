@@ -97,10 +97,6 @@
 #include <windows.h>
 #endif
 
-#ifndef DEFCOIN_NU_EXPLORE_APP
-#define DEFCOIN_NU_EXPLORE_APP 0
-#endif
-
 #if !defined(Q_OS_WIN)
 #include <pwd.h>
 #include <sys/resource.h>
@@ -127,8 +123,6 @@ constexpr int EXPLORER_TOP100_MIN_PLAYBACK_CHECKPOINTS = 250;
 constexpr int EXPLORER_TOP100_LARGE_PLAYBACK_CHECKPOINTS = 500;
 constexpr int EXPLORER_TOP100_EVENT_WRITE_BATCH_ROWS = 5000;
 constexpr qint64 EXPLORER_TOP100_UI_REFRESH_MS = 5000;
-constexpr int DROIDTRAILS_CACHE_SCHEMA_VERSION = 5;
-constexpr int DEFCOIN_REDDIT_TIMELINE_SCHEMA_VERSION = 1;
 constexpr quint16 LAN_FAST_SYNC_PORT = 10334;
 constexpr int LAN_FAST_SYNC_SAFE_DATAGRAM_BYTES = 1232;
 constexpr int LAN_FAST_SYNC_INTERNET_PROBE_DATAGRAM_BYTES = 1472;
@@ -277,69 +271,6 @@ QString explorerTop100Color(int rank)
     if (rank <= 0)
         return EXPLORER_TOP100_COLORS.last();
     return EXPLORER_TOP100_COLORS.at((rank - 1) % EXPLORER_TOP100_COLORS.size());
-}
-
-bool launchExploreLookup(const QString& option, const QString& value)
-{
-#if DEFCOIN_NU_EXPLORE_APP
-    Q_UNUSED(option);
-    Q_UNUSED(value);
-    return false;
-#else
-    if (option.trimmed().isEmpty() || value.trimmed().isEmpty())
-        return false;
-    const QStringList lookup_args{option, value.trimmed()};
-#if defined(Q_OS_MACOS)
-    QStringList open_args;
-    open_args << QStringLiteral("-b") << QStringLiteral("org.defcoincore.DefcoinCoreNuExplore")
-              << QStringLiteral("--args") << lookup_args;
-    if (QProcess::startDetached(QStringLiteral("/usr/bin/open"), open_args))
-        return true;
-    open_args.clear();
-    open_args << QStringLiteral("-b") << QStringLiteral("org.defcoincore.DefcoinCoreExplore")
-              << QStringLiteral("--args") << lookup_args;
-    if (QProcess::startDetached(QStringLiteral("/usr/bin/open"), open_args))
-        return true;
-#endif
-    const QDir app_dir(QCoreApplication::applicationDirPath());
-#if defined(Q_OS_WIN)
-    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExplore.exe"));
-#else
-    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExplore"));
-#endif
-    const QFileInfo candidate_info(candidate);
-    if (candidate_info.exists() && candidate_info.isExecutable())
-        return QProcess::startDetached(candidate, lookup_args);
-    return false;
-#endif
-}
-
-bool launchExploreApp()
-{
-#if DEFCOIN_NU_EXPLORE_APP
-    return false;
-#else
-#if defined(Q_OS_MACOS)
-    QStringList open_args;
-    open_args << QStringLiteral("-b") << QStringLiteral("org.defcoincore.DefcoinCoreNuExplore");
-    if (QProcess::startDetached(QStringLiteral("/usr/bin/open"), open_args))
-        return true;
-    open_args.clear();
-    open_args << QStringLiteral("-b") << QStringLiteral("org.defcoincore.DefcoinCoreExplore");
-    if (QProcess::startDetached(QStringLiteral("/usr/bin/open"), open_args))
-        return true;
-#endif
-    const QDir app_dir(QCoreApplication::applicationDirPath());
-#if defined(Q_OS_WIN)
-    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExplore.exe"));
-#else
-    const QString candidate = app_dir.filePath(QStringLiteral("DefcoinCoreExplore"));
-#endif
-    const QFileInfo candidate_info(candidate);
-    if (candidate_info.exists() && candidate_info.isExecutable())
-        return QProcess::startDetached(candidate, {});
-    return false;
-#endif
 }
 
 QString firstExistingExecutable(const QStringList& candidates)
@@ -3629,8 +3560,6 @@ void NuRpcService::loadLocalSettings()
     m_log_remove_pattern.clear();
     nu_settings.remove(QStringLiteral("LogSearchPattern"));
     nu_settings.remove(QStringLiteral("LogRemovePattern"));
-    m_forensics_accept_bip141_as_regular =
-        nu_settings.value(QStringLiteral("ForensicsAcceptBip141AsRegular"), true).toBool();
     m_background_close_enabled = nu_settings.value(QStringLiteral("KeepRunningWhenClosedEnabled"), false).toBool();
     m_show_startup_splash_status_indicator =
         nu_settings.value(QStringLiteral("ShowStartupSplashStatusIndicator"), false).toBool();
@@ -3656,44 +3585,28 @@ void NuRpcService::loadLocalSettings()
     if (m_third_party_address_url.isEmpty() && !m_third_party_tx_url.isEmpty())
         m_third_party_address_url = explorerAddressUrlTemplate(m_third_party_tx_url);
     m_explorer_mode =
-        nu_settings.value(QStringLiteral("ExplorerMode"), QStringLiteral("internal")).toString().trimmed().toLower();
-    if (!QStringList{QStringLiteral("internal"),
-                     QStringLiteral("dc903"),
-                     QStringLiteral("legacy"),
-                     QStringLiteral("fun"),
-                     QStringLiteral("custom")}
-             .contains(m_explorer_mode)) {
-        m_explorer_mode = QStringLiteral("internal");
+        nu_settings.value(QStringLiteral("ExplorerMode"), QStringLiteral("dc903")).toString().trimmed().toLower();
+    if (!QStringList{QStringLiteral("dc903"), QStringLiteral("fun"), QStringLiteral("custom")}.contains(
+            m_explorer_mode)) {
+        m_explorer_mode = QStringLiteral("dc903");
     }
-    if (m_explorer_mode == QLatin1String("internal")) {
-        m_third_party_tx_urls_enabled = false;
-    } else {
-        m_third_party_tx_urls_enabled = true;
-        if (m_explorer_mode == QLatin1String("dc903"))
-            m_third_party_tx_url = explorerPresetUrl(1);
-        if (m_explorer_mode == QLatin1String("legacy"))
-            m_third_party_tx_url = explorerPresetUrl(2);
-        if (m_explorer_mode == QLatin1String("fun"))
-            m_third_party_tx_url = explorerPresetUrl(3);
-        if (m_explorer_mode != QLatin1String("custom"))
-            m_third_party_address_url = explorerPresetAddressUrl(m_explorer_mode == QLatin1String("dc903")  ? 1 :
-                                                                 m_explorer_mode == QLatin1String("legacy") ? 2 :
-                                                                 m_explorer_mode == QLatin1String("fun")    ? 3 :
-                                                                                                              0);
-        if (m_third_party_address_url.isEmpty() && !m_third_party_tx_url.isEmpty())
-            m_third_party_address_url = explorerAddressUrlTemplate(m_third_party_tx_url);
-        if (m_explorer_mode == QLatin1String("custom") && !hasValidExternalExplorerTemplates()) {
-            m_explorer_mode = QStringLiteral("internal");
-            m_third_party_tx_urls_enabled = false;
-        }
+    m_third_party_tx_urls_enabled = true;
+    if (m_explorer_mode == QLatin1String("dc903"))
+        m_third_party_tx_url = explorerPresetUrl(1);
+    if (m_explorer_mode == QLatin1String("fun"))
+        m_third_party_tx_url = explorerPresetUrl(3);
+    if (m_explorer_mode != QLatin1String("custom")) {
+        m_third_party_address_url = explorerPresetAddressUrl(m_explorer_mode == QLatin1String("fun") ? 3 : 1);
     }
-#if DEFCOIN_NU_EXPLORE_APP
-    loadExplorerRecentLookups();
-    loadExplorerContacts();
-#else
+    if (m_third_party_address_url.isEmpty() && !m_third_party_tx_url.isEmpty())
+        m_third_party_address_url = explorerAddressUrlTemplate(m_third_party_tx_url);
+    if (m_explorer_mode == QLatin1String("custom") && !hasValidExternalExplorerTemplates()) {
+        m_explorer_mode = QStringLiteral("dc903");
+        m_third_party_tx_url = explorerPresetUrl(1);
+        m_third_party_address_url = explorerPresetAddressUrl(1);
+    }
     m_explorer_recent_lookups.clear();
     m_explorer_contacts.clear();
-#endif
 }
 
 QString NuRpcService::defaultDataDir() const
@@ -4009,7 +3922,7 @@ bool NuRpcService::ensureBackendStarted()
         nu_settings.sync();
         appendLaunchDiagnostic(
             QStringLiteral("Cleared legacy startup witness repair request. Witness storage inspection now runs from "
-                           "the Forensics scan only after user confirmation."));
+                           "the manual witness repair flow only after user confirmation."));
     }
 
     QStringList args;
@@ -4694,9 +4607,6 @@ void NuRpcService::handleReply(QNetworkReply* reply)
 void NuRpcService::setError(const QString& message)
 {
     m_rpc_connected = false;
-    m_forensics_witness_capability_known = false;
-    m_forensics_witness_inspection_available = false;
-    m_forensics_witness_capability_probe_in_flight = false;
     m_connection_status = QStringLiteral("RPC not connected");
     m_last_error = message;
     m_syncing = false;
@@ -4719,7 +4629,6 @@ void NuRpcService::setError(const QString& message)
         trimLogLines();
         Q_EMIT logChanged();
     }
-    Q_EMIT forensicsChanged();
     Q_EMIT stateChanged();
 }
 
@@ -4740,41 +4649,6 @@ void NuRpcService::clearError()
         const bool active = m_pending_network_active;
         QTimer::singleShot(0, this, [this, active] { setNetworkActive(active); });
     }
-}
-
-void NuRpcService::probeBackendCapabilities()
-{
-    if (!m_rpc_connected || m_forensics_witness_capability_known || m_forensics_witness_capability_probe_in_flight)
-        return;
-    m_forensics_witness_capability_probe_in_flight = true;
-    m_forensics_witness_repair_status = QStringLiteral("Checking backend witness-inspection support.");
-    Q_EMIT forensicsChanged();
-    rpcCall(
-        QStringLiteral("help"),
-        {QStringLiteral("scanwitnessblockdata")},
-        false,
-        [this](const QJsonValue& result, const QString& error) {
-            m_forensics_witness_capability_probe_in_flight = false;
-            m_forensics_witness_capability_known = true;
-            m_forensics_witness_inspection_available =
-                error.isEmpty() && result.isString() &&
-                result.toString().contains(QStringLiteral("scanwitnessblockdata"));
-            if (m_forensics_witness_inspection_available) {
-                if (m_forensics_witness_repair_status ==
-                    QLatin1String("Checking backend witness-inspection support.")) {
-                    m_forensics_witness_repair_status = QStringLiteral("Witness data inspection is available.");
-                }
-                appendLaunchDiagnostic(QStringLiteral("Backend supports scanwitnessblockdata witness inspection RPC."));
-            } else {
-                m_forensics_witness_repair_status =
-                    QStringLiteral("This backend does not support witness inspection. Stop older defcoind instances "
-                                   "and launch the bundled Nu backend.");
-                appendLaunchDiagnostic(
-                    QStringLiteral("Backend does not support scanwitnessblockdata witness inspection RPC: %1")
-                        .arg(error.isEmpty() ? QStringLiteral("help text did not include method") : error));
-            }
-            Q_EMIT forensicsChanged();
-        });
 }
 
 void NuRpcService::clearWalletScopedState()
@@ -5312,7 +5186,6 @@ void NuRpcService::refreshNode()
             return;
         }
         clearError();
-        probeBackendCapabilities();
         const QJsonObject info = result.toObject();
         const bool active = info.value(QStringLiteral("networkactive")).toBool();
         m_peer_count = info.value(QStringLiteral("connections")).toInt();
@@ -5420,29 +5293,10 @@ void NuRpcService::refreshNode()
         m_metric_difficulty = chain.value(QStringLiteral("difficulty")).isDouble() ?
                                   formatCompactDifficulty(chain.value(QStringLiteral("difficulty")).toDouble()) :
                                   QStringLiteral("Unknown");
-#if DEFCOIN_NU_EXPLORE_APP
-        refreshRecentAverageBlockTimeFromIndex();
-#endif
         refreshRecentAverageBlockTimeFromRpc(m_block_height);
         rebuildNodeMetrics();
         evaluateQuickClonePrompt();
         Q_EMIT stateChanged();
-
-#if DEFCOIN_NU_EXPLORE_APP
-        if (!m_explorer_indexing && !m_explorer_index_paused_by_user && !m_explorer_auto_index_requested &&
-            m_block_height > 0) {
-            const int indexed_height = explorerHighestIndexedBlock();
-            if (indexed_height < m_block_height) {
-                m_explorer_auto_index_requested = true;
-                QTimer::singleShot(750, this, [this] {
-                    m_explorer_auto_index_requested = false;
-                    if (!m_explorer_indexing && !m_explorer_index_paused_by_user && m_rpc_connected) {
-                        startExplorerIndexing();
-                    }
-                });
-            }
-        }
-#endif
     });
 
     rpcCall(
@@ -10727,252 +10581,6 @@ void NuRpcService::scheduleWitnessBlockRepair(int start_height)
                            .arg(height));
 }
 
-void NuRpcService::repairWitnessBlockDataNow(int start_height, bool fix_missing_witness)
-{
-    int height = start_height;
-    if (height <= 0)
-        height = 903168;
-
-    if (m_block_height > 0 && height > m_block_height) {
-        m_forensics_witness_repair_running = false;
-        m_forensics_witness_repair_start_height = height;
-        m_forensics_witness_repair_inspected_blocks = 0;
-        m_forensics_witness_repair_first_missing_height = -1;
-        m_forensics_witness_repair_status =
-            QStringLiteral("Inspection not started. Requested start height %1 is above the current active-chain height "
-                           "%2, so there are no local blocks in that range to inspect yet.")
-                .arg(QString::number(height), QString::number(m_block_height));
-        Q_EMIT forensicsChanged();
-        Q_EMIT userMessage(QStringLiteral("Blockchain inspection not started"), m_forensics_witness_repair_status);
-        return;
-    }
-
-    if (m_forensics_witness_repair_running) {
-        Q_EMIT userMessage(
-            QStringLiteral("Inspection already running"),
-            QStringLiteral(
-                "A witness data inspection is already running. Wait for it to finish before starting another one."));
-        return;
-    }
-    if (m_forensics_witness_capability_known && !m_forensics_witness_inspection_available) {
-        const QString message = QStringLiteral("This backend does not support witness inspection. Stop older defcoind "
-                                               "instances and launch the bundled Nu backend.");
-        m_forensics_witness_repair_status = message;
-        Q_EMIT forensicsChanged();
-        Q_EMIT userMessage(QStringLiteral("Witness inspection unavailable"), message);
-        return;
-    }
-    if (!m_forensics_witness_capability_known) {
-        probeBackendCapabilities();
-        Q_EMIT userMessage(QStringLiteral("Checking backend capability"),
-                           QStringLiteral("Nu is checking whether the active backend supports witness inspection. Try "
-                                          "Inspect again after the check completes."));
-        return;
-    }
-
-    appendLaunchDiagnostic(
-        QStringLiteral("Live witness block data inspection requested from height %1. Fix missing witness data: %2.")
-            .arg(height)
-            .arg(fix_missing_witness ? QStringLiteral("yes") : QStringLiteral("no")));
-    m_forensics_witness_repair_running = true;
-    m_forensics_witness_repair_start_height = height;
-    m_forensics_witness_repair_inspected_blocks = 0;
-    m_forensics_witness_repair_first_missing_height = -1;
-    m_forensics_witness_repair_status =
-        fix_missing_witness ?
-            QStringLiteral("Inspecting witness-form block storage from height %1. If missing witness data is found, Nu "
-                           "will rewind from the first affected block and resume normal sync.")
-                .arg(height) :
-            QStringLiteral("Inspecting witness-form block storage from height %1 without changing stored blocks.")
-                .arg(height);
-    m_last_error =
-        fix_missing_witness ?
-            QStringLiteral(
-                "Inspecting witness block data from height %1. Networking pauses only if a rewind is required.")
-                .arg(height) :
-            QStringLiteral("Inspecting witness block data from height %1 without changing stored blocks.").arg(height);
-    m_metric_network_active = QStringLiteral("Inspecting");
-    rebuildNodeMetrics();
-    Q_EMIT forensicsChanged();
-    Q_EMIT stateChanged();
-
-    const int chunk_size = 20000;
-    auto total_required_blocks = std::make_shared<int>(0);
-    auto total_block_bodies_read = std::make_shared<int>(0);
-    auto missing_count = std::make_shared<int>(0);
-    auto run_next = std::make_shared<std::function<void(int)>>();
-    *run_next = [this,
-                 height,
-                 fix_missing_witness,
-                 chunk_size,
-                 total_required_blocks,
-                 total_block_bodies_read,
-                 missing_count,
-                 run_next](int current_height) mutable {
-        rpcCall(
-            QStringLiteral("scanwitnessblockdata"),
-            {current_height, -1, chunk_size},
-            false,
-            [this,
-             height,
-             fix_missing_witness,
-             total_required_blocks,
-             total_block_bodies_read,
-             missing_count,
-             run_next](const QJsonValue& result, const QString& error) mutable {
-                if (!m_forensics_witness_repair_running)
-                    return;
-                if (!error.isEmpty()) {
-                    m_forensics_witness_repair_running = false;
-                    appendLaunchDiagnostic(
-                        QStringLiteral("Live witness block data inspection failed from height %1: %2")
-                            .arg(height)
-                            .arg(error));
-                    const bool method_missing =
-                        error.contains(QStringLiteral("Method not found"), Qt::CaseInsensitive) ||
-                        error.contains(QStringLiteral("scanwitnessblockdata"), Qt::CaseInsensitive);
-                    if (method_missing) {
-                        m_forensics_witness_capability_known = true;
-                        m_forensics_witness_inspection_available = false;
-                        m_forensics_witness_repair_status =
-                            QStringLiteral("This backend does not support witness inspection. Stop older defcoind "
-                                           "instances and launch the bundled Nu backend.");
-                    } else {
-                        m_forensics_witness_repair_status =
-                            QStringLiteral("Inspection failed from block %1: %2").arg(QString::number(height), error);
-                    }
-                    Q_EMIT forensicsChanged();
-                    Q_EMIT userMessage(QStringLiteral("Blockchain inspection failed"),
-                                       m_forensics_witness_repair_status);
-                    refreshNode();
-                    return;
-                }
-
-                const QJsonObject obj = result.toObject();
-                const int inspected = obj.value(QStringLiteral("inspected_blocks")).toInt();
-                const int required = obj.value(QStringLiteral("witness_required_blocks")).toInt();
-                const int bodies_read = obj.value(QStringLiteral("block_bodies_read")).toInt();
-                const int worker_threads = obj.value(QStringLiteral("worker_threads")).toInt(1);
-                const int next_height = obj.value(QStringLiteral("next_height")).toInt();
-                const int end_height = obj.value(QStringLiteral("end_height")).toInt();
-                const bool complete = obj.value(QStringLiteral("complete")).toBool();
-                const bool missing_found = obj.value(QStringLiteral("missing_witness_found")).toBool();
-                const int first_missing = obj.value(QStringLiteral("first_missing_witness_height")).toInt(-1);
-                const int chunk_missing = obj.value(QStringLiteral("missing_witness_count")).toInt();
-
-                m_forensics_witness_repair_inspected_blocks += inspected;
-                *total_required_blocks += required;
-                *total_block_bodies_read += bodies_read;
-                *missing_count += chunk_missing;
-                if (first_missing > 0 && m_forensics_witness_repair_first_missing_height < 0) {
-                    m_forensics_witness_repair_first_missing_height = first_missing;
-                }
-                const double pct =
-                    end_height >= height ?
-                        100.0 *
-                            static_cast<double>(std::min(end_height, std::max(height, next_height) - 1) - height + 1) /
-                            static_cast<double>(std::max(1, end_height - height + 1)) :
-                        100.0;
-                m_forensics_witness_repair_status =
-                    QStringLiteral("Inspecting witness-form block storage from height %1. Checked through %2 of %3 "
-                                   "(%4%). Blocks inspected: %5. Witness-required blocks: %6. Block bodies read: %7. "
-                                   "Missing witness blocks found: %8. Workers: %9.")
-                        .arg(QString::number(height),
-                             QString::number(std::max(height, next_height) - 1),
-                             QString::number(end_height),
-                             QString::number(std::min(100.0, std::max(0.0, pct)), 'f', 2),
-                             QString::number(m_forensics_witness_repair_inspected_blocks),
-                             QString::number(*total_required_blocks),
-                             QString::number(*total_block_bodies_read),
-                             QString::number(*missing_count),
-                             QString::number(worker_threads));
-                Q_EMIT forensicsChanged();
-
-                if (missing_found && fix_missing_witness) {
-                    m_forensics_witness_repair_status +=
-                        QStringLiteral("\n\nMissing witness data begins at block %1. Rewinding from that height now so "
-                                       "normal sync can redownload clean witness-form blocks.")
-                            .arg(QString::number(first_missing));
-                    Q_EMIT forensicsChanged();
-                    rpcCall(
-                        QStringLiteral("repairwitnessblockdata"),
-                        {first_missing, true, true},
-                        false,
-                        [this, height, first_missing](const QJsonValue& repair_result, const QString& repair_error) {
-                            m_forensics_witness_repair_running = false;
-                            if (!repair_error.isEmpty()) {
-                                m_forensics_witness_repair_status =
-                                    QStringLiteral("Repair failed after finding missing witness data at block %1: %2")
-                                        .arg(QString::number(first_missing), repair_error);
-                                Q_EMIT forensicsChanged();
-                                Q_EMIT userMessage(QStringLiteral("Blockchain repair failed"), repair_error);
-                                refreshNode();
-                                return;
-                            }
-                            const QJsonObject repair = repair_result.toObject();
-                            const int before = repair.value(QStringLiteral("height_before")).toInt();
-                            const int after = repair.value(QStringLiteral("height_after_rewind")).toInt();
-                            const QString next_step = repair.value(QStringLiteral("next_step")).toString();
-                            m_forensics_witness_repair_status =
-                                QStringLiteral(
-                                    "%1\n\nStart height: %2\nFirst missing witness block: %3\nBlocks inspected before "
-                                    "repair: %4\nHeight before: %5\nHeight after rewind: %6")
-                                    .arg(next_step.isEmpty() ? QStringLiteral("Witness block repair completed.") :
-                                                               next_step,
-                                         QString::number(height),
-                                         QString::number(first_missing),
-                                         QString::number(m_forensics_witness_repair_inspected_blocks),
-                                         QString::number(before),
-                                         QString::number(after));
-                            Q_EMIT forensicsChanged();
-                            Q_EMIT userMessage(QStringLiteral("Blockchain repair complete"),
-                                               m_forensics_witness_repair_status);
-                            refreshNode();
-                        });
-                    return;
-                }
-
-                if (!complete) {
-                    QTimer::singleShot(0, this, [run_next, next_height] { (*run_next)(next_height); });
-                    return;
-                }
-
-                m_forensics_witness_repair_running = false;
-                const QString finding =
-                    m_forensics_witness_repair_first_missing_height > 0 ?
-                        QStringLiteral("Missing witness data was found beginning at block %1. No data was changed "
-                                       "because Fix missing witness data was off.")
-                            .arg(QString::number(m_forensics_witness_repair_first_missing_height)) :
-                        QStringLiteral("No missing witness block data was found in the selected active-chain range.");
-                m_forensics_witness_repair_status =
-                    QStringLiteral("%1\n\nStart height: %2\nBlocks inspected: %3\nWitness-required blocks: %4\nBlock "
-                                   "bodies read: %5\nMissing witness blocks found: %6")
-                        .arg(finding,
-                             QString::number(height),
-                             QString::number(m_forensics_witness_repair_inspected_blocks),
-                             QString::number(*total_required_blocks),
-                             QString::number(*total_block_bodies_read),
-                             QString::number(*missing_count));
-                appendLaunchDiagnostic(
-                    QStringLiteral(
-                        "Live witness block data inspection completed from height %1. Inspected: %2. Witness-required: "
-                        "%3. Block bodies read: %4. Missing witness count: %5. First missing witness height: %6.")
-                        .arg(height)
-                        .arg(m_forensics_witness_repair_inspected_blocks)
-                        .arg(*total_required_blocks)
-                        .arg(*total_block_bodies_read)
-                        .arg(*missing_count)
-                        .arg(m_forensics_witness_repair_first_missing_height > 0 ?
-                                 QString::number(m_forensics_witness_repair_first_missing_height) :
-                                 QStringLiteral("none")));
-                Q_EMIT forensicsChanged();
-                Q_EMIT userMessage(QStringLiteral("Blockchain inspection complete"), m_forensics_witness_repair_status);
-                refreshNode();
-            });
-    };
-    (*run_next)(height);
-}
-
 void NuRpcService::pingPeers()
 {
     rpcCall(QStringLiteral("ping"), {}, false, [this](const QJsonValue&, const QString& error) {
@@ -14024,15 +13632,6 @@ void NuRpcService::setLogRemovePattern(const QString& pattern)
     Q_EMIT settingsChanged();
 }
 
-void NuRpcService::setForensicsAcceptBip141AsRegular(bool enabled)
-{
-    if (m_forensics_accept_bip141_as_regular == enabled)
-        return;
-    m_forensics_accept_bip141_as_regular = enabled;
-    QSettings().setValue(QStringLiteral("ForensicsAcceptBip141AsRegular"), enabled);
-    Q_EMIT settingsChanged();
-}
-
 void NuRpcService::setBackgroundCloseEnabled(bool enabled)
 {
     if (m_background_close_enabled == enabled)
@@ -14064,119 +13663,6 @@ QString NuRpcService::nuResourceRoot() const
 #else
     return QDir(app_dir).filePath(QStringLiteral("nu"));
 #endif
-}
-
-void NuRpcService::loadDefcoinTimeline()
-{
-    if (m_defcoin_timeline_loaded)
-        return;
-
-    m_defcoin_timeline_rows.clear();
-    m_defcoin_timeline_summary.clear();
-    m_defcoin_timeline_criteria = QStringLiteral("Timeline not loaded yet.");
-    m_defcoin_timeline_status = QStringLiteral("Loading /r/Defcoin timeline.");
-
-    const QString relative_path = QStringLiteral("assets/data/defcoin_reddit_timeline.json");
-    QStringList candidates;
-    candidates << QDir(nuResourceRoot()).filePath(relative_path)
-               << QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("nu/%1").arg(relative_path))
-               << QDir(QCoreApplication::applicationDirPath())
-                      .filePath(QStringLiteral("../Resources/nu/%1").arg(relative_path))
-               << QStringLiteral(":/nu/assets/data/defcoin_reddit_timeline.json");
-
-    QFile file;
-    QString opened_path;
-    for (const QString& candidate : candidates) {
-        file.setFileName(candidate);
-        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            opened_path = candidate;
-            break;
-        }
-    }
-    if (!file.isOpen()) {
-        m_defcoin_timeline_status = QStringLiteral("Could not load bundled /r/Defcoin timeline data.");
-        m_defcoin_timeline_loaded = true;
-        return;
-    }
-
-    QJsonParseError parse_error;
-    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parse_error);
-    if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
-        m_defcoin_timeline_status =
-            QStringLiteral("/r/Defcoin timeline JSON parse error: %1").arg(parse_error.errorString());
-        m_defcoin_timeline_loaded = true;
-        return;
-    }
-
-    const QJsonObject object = doc.object();
-    const int schema_version = object.value(QStringLiteral("schemaVersion")).toInt();
-    if (schema_version != DEFCOIN_REDDIT_TIMELINE_SCHEMA_VERSION) {
-        m_defcoin_timeline_status =
-            QStringLiteral("/r/Defcoin timeline schema %1 is not supported by this build.").arg(schema_version);
-        m_defcoin_timeline_loaded = true;
-        return;
-    }
-
-    const QJsonObject summary_object = object.value(QStringLiteral("summary")).toObject();
-    m_defcoin_timeline_summary = summary_object.toVariantMap();
-    m_defcoin_timeline_summary.insert(QStringLiteral("dataPath"), opened_path);
-    const QJsonArray rows = object.value(QStringLiteral("rows")).toArray();
-    for (const QJsonValue& value : rows) {
-        if (value.isObject())
-            m_defcoin_timeline_rows.push_back(value.toObject().toVariantMap());
-    }
-
-    QString criteria = summary_object.value(QStringLiteral("criteriaText")).toString();
-    if (criteria.isEmpty()) {
-        const QJsonObject criteria_object = object.value(QStringLiteral("criteria")).toObject();
-        QStringList parts;
-        for (const QJsonValue& value : criteria_object.value(QStringLiteral("included")).toArray())
-            parts.push_back(value.toString());
-        for (const QJsonValue& value : criteria_object.value(QStringLiteral("removed")).toArray())
-            parts.push_back(value.toString());
-        criteria = parts.join(QStringLiteral(" "));
-    }
-    m_defcoin_timeline_criteria =
-        criteria.isEmpty() ? QStringLiteral("Timeline criteria are bundled with the generated data file.") : criteria;
-    m_defcoin_timeline_status =
-        QStringLiteral("Loaded /r/Defcoin timeline: %1 included events, %2 subreddit rows, %3 DEF CON anchors, %4 "
-                       "removed as noise or duplicates.")
-            .arg(QString::number(m_defcoin_timeline_rows.size()),
-                 QString::number(m_defcoin_timeline_summary.value(QStringLiteral("includedSubredditRows")).toInt()),
-                 QString::number(m_defcoin_timeline_summary.value(QStringLiteral("includedHistoryRows")).toInt()),
-                 QString::number(m_defcoin_timeline_summary.value(QStringLiteral("removedRows")).toInt()));
-    m_defcoin_timeline_loaded = true;
-}
-
-void NuRpcService::refreshDefcoinTimeline()
-{
-    loadDefcoinTimeline();
-    Q_EMIT explorerChanged();
-}
-
-void NuRpcService::refreshNetworkPulseHistory(int window_blocks)
-{
-    QString error;
-    const QVariantMap analysis = networkPulseHistoryFromDb(window_blocks, &error);
-    if (!error.isEmpty()) {
-        m_network_pulse_summary = QVariantMap{{QStringLiteral("windowBlocks"), qBound(10, window_blocks, 20160)}};
-        m_network_pulse_history_rows.clear();
-        m_network_pulse_status = error;
-    } else {
-        m_network_pulse_summary = analysis.value(QStringLiteral("summary")).toMap();
-        m_network_pulse_history_rows = analysis.value(QStringLiteral("rows")).toList();
-        m_network_pulse_status = analysis.value(QStringLiteral("status")).toString();
-        if (m_network_pulse_status.isEmpty())
-            m_network_pulse_status = QStringLiteral("Network Pulse history loaded.");
-        const QString average_block_time =
-            m_network_pulse_summary.value(QStringLiteral("currentAvgBlockTime")).toString();
-        if (!average_block_time.isEmpty() && average_block_time != QLatin1String("-")) {
-            m_metric_average_block_time = average_block_time;
-            rebuildNodeMetrics();
-            Q_EMIT stateChanged();
-        }
-    }
-    Q_EMIT explorerChanged();
 }
 
 QStringList NuRpcService::loadBip39Words() const
@@ -14759,19 +14245,10 @@ void NuRpcService::scheduleRecoveryScanPoll()
 
 bool NuRpcService::explorerIndexReadyForRecovery(int* indexed_height, int* tip_height, QString* detail) const
 {
-#if DEFCOIN_NU_EXPLORE_APP
-    if (detail)
-        *detail = QStringLiteral("Explore index lookup is not available inside the Explore app.");
-    if (indexed_height)
-        *indexed_height = -1;
-    if (tip_height)
-        *tip_height = -1;
-    return false;
-#else
     const QFileInfo db_info(explorerDatabasePath());
     if (!db_info.exists()) {
         if (detail)
-            *detail = QStringLiteral("Nu Explore has not built a local address index yet.");
+            *detail = QStringLiteral("Nu has not built a local address index yet.");
         if (indexed_height)
             *indexed_height = -1;
         if (tip_height)
@@ -14787,27 +14264,26 @@ bool NuRpcService::explorerIndexReadyForRecovery(int* indexed_height, int* tip_h
         *tip_height = tip;
     if (indexed < 0) {
         if (detail)
-            *detail = QStringLiteral("Nu Explore has not indexed any blocks yet.");
+            *detail = QStringLiteral("Nu has not indexed any blocks yet.");
         return false;
     }
     if (tip <= 0) {
         if (detail)
-            *detail = QStringLiteral("The backend tip height is not known yet, so Nu cannot prove the Explore index is "
+            *detail = QStringLiteral("The backend tip height is not known yet, so Nu cannot prove the local index is "
                                      "current.");
         return false;
     }
     if (indexed < tip) {
         if (detail) {
-            *detail = QStringLiteral("Nu Explore index is at block %1 of %2.")
+            *detail = QStringLiteral("The local address index is at block %1 of %2.")
                           .arg(QString::number(indexed), QString::number(tip));
         }
         return false;
     }
     if (detail) {
-        *detail = QStringLiteral("Nu Explore index is current at block %1.").arg(QString::number(indexed));
+        *detail = QStringLiteral("The local address index is current at block %1.").arg(QString::number(indexed));
     }
     return true;
-#endif
 }
 
 bool NuRpcService::queryRecoveryAddressesFromExplorerIndex(const QStringList& addresses,
@@ -14899,14 +14375,14 @@ bool NuRpcService::queryRecoveryAddressesFromExplorerIndex(const QStringList& ad
 
     if (!ok) {
         if (detail)
-            *detail = QStringLiteral("Explore index lookup failed: %1").arg(local_error);
+            *detail = QStringLiteral("Local address index lookup failed: %1").arg(local_error);
         return false;
     }
 
     if (unspent_sats_by_address)
         *unspent_sats_by_address = balances;
     if (detail) {
-        *detail = QStringLiteral("Nu Explore checked %1 derived addresses through block %2.")
+        *detail = QStringLiteral("The local address index checked %1 derived addresses through block %2.")
                       .arg(QString::number(unique_addresses.size()), QString::number(indexed));
         if (tip >= 0 && tip != indexed)
             *detail += QStringLiteral(" Backend tip: %1.").arg(QString::number(tip));
@@ -15409,7 +14885,7 @@ void NuRpcService::importRecoveryDescriptorsWithUtxoFilter(const QVector<QPair<Q
 
         QHash<QString, qint64> explorer_balances;
         QString explorer_detail;
-        setRecoveryCurrentMethod(QStringLiteral("Checking current balances with Nu Explore index."));
+        setRecoveryCurrentMethod(QStringLiteral("Checking current balances with the local address index."));
         setRecoveryState(true,
                          QStringLiteral("Checking %1 derived addresses for current spendable coins before import.")
                              .arg(checked_address_count),
@@ -15423,8 +14899,8 @@ void NuRpcService::importRecoveryDescriptorsWithUtxoFilter(const QVector<QPair<Q
                     total_found_amount += amount;
             }
             setRecoveryAddressScanProgress(
-                QStringLiteral("Nu Explore index lookup complete"), checked_address_count, checked_address_count);
-            import_funded_addresses(total_found_amount, recent_hit, QStringLiteral("Nu Explore index"));
+                QStringLiteral("Local address index lookup complete"), checked_address_count, checked_address_count);
+            import_funded_addresses(total_found_amount, recent_hit, QStringLiteral("local address index"));
             return;
         }
 
@@ -16724,10 +16200,6 @@ void NuRpcService::setThirdPartyTxUrlsEnabled(bool enabled)
     if (m_third_party_tx_urls_enabled == enabled)
         return;
     m_third_party_tx_urls_enabled = enabled;
-    if (!enabled && m_explorer_mode != QLatin1String("internal")) {
-        m_explorer_mode = QStringLiteral("internal");
-        QSettings().setValue(QStringLiteral("ExplorerMode"), m_explorer_mode);
-    }
     QSettings settings;
     settings.setValue(QStringLiteral("ThirdPartyTxUrlsEnabled"), enabled);
     QSettings(QStringLiteral("Defcoin"), QStringLiteral("Defcoin-Qt"))
@@ -16779,40 +16251,26 @@ void NuRpcService::setThirdPartyAddressUrl(const QString& url)
 void NuRpcService::setExplorerMode(const QString& mode)
 {
     QString clean = mode.trimmed().toLower();
-    if (!QStringList{QStringLiteral("internal"),
-                     QStringLiteral("dc903"),
-                     QStringLiteral("legacy"),
-                     QStringLiteral("fun"),
-                     QStringLiteral("custom")}
-             .contains(clean)) {
-        clean = QStringLiteral("internal");
+    if (!QStringList{QStringLiteral("dc903"), QStringLiteral("fun"), QStringLiteral("custom")}.contains(clean)) {
+        clean = QStringLiteral("dc903");
     }
     if (clean == QLatin1String("custom") && !hasValidExternalExplorerTemplates()) {
         Q_EMIT userMessage(QStringLiteral("Explorer URL required"),
                            QStringLiteral("Enter valid transaction and address explorer URL templates with one %s "
                                           "placeholder before switching to Custom."));
-        clean = QStringLiteral("internal");
+        clean = QStringLiteral("dc903");
     }
     if (m_explorer_mode == clean)
         return;
     m_explorer_mode = clean;
-    if (clean == QLatin1String("internal")) {
-        m_third_party_tx_urls_enabled = false;
-    } else {
-        m_third_party_tx_urls_enabled = true;
-        if (clean == QLatin1String("dc903"))
-            m_third_party_tx_url = explorerPresetUrl(1);
-        if (clean == QLatin1String("legacy"))
-            m_third_party_tx_url = explorerPresetUrl(2);
-        if (clean == QLatin1String("fun"))
-            m_third_party_tx_url = explorerPresetUrl(3);
-        if (clean != QLatin1String("custom")) {
-            const int preset_index = clean == QLatin1String("dc903")  ? 1 :
-                                     clean == QLatin1String("legacy") ? 2 :
-                                     clean == QLatin1String("fun")    ? 3 :
-                                                                        0;
-            m_third_party_address_url = explorerPresetAddressUrl(preset_index);
-        }
+    m_third_party_tx_urls_enabled = true;
+    if (clean == QLatin1String("dc903"))
+        m_third_party_tx_url = explorerPresetUrl(1);
+    if (clean == QLatin1String("fun"))
+        m_third_party_tx_url = explorerPresetUrl(3);
+    if (clean != QLatin1String("custom")) {
+        const int preset_index = clean == QLatin1String("fun") ? 3 : 1;
+        m_third_party_address_url = explorerPresetAddressUrl(preset_index);
     }
     QSettings settings;
     settings.setValue(QStringLiteral("ExplorerMode"), m_explorer_mode);
@@ -16826,7 +16284,7 @@ void NuRpcService::setExplorerMode(const QString& mode)
 
 bool NuRpcService::usingInternalExplorer() const
 {
-    return m_explorer_mode == QLatin1String("internal");
+    return false;
 }
 
 QString NuRpcService::normalizedExplorerUrl(const QString& url) const
@@ -16857,8 +16315,6 @@ QString NuRpcService::explorerPresetUrl(int index) const
 {
     if (index == 1)
         return QStringLiteral("https://defcoin.dc903.org/explorer/tx/%s");
-    if (index == 2)
-        return QStringLiteral("https://defcoin.dc903.org/legacyexplorer/tx/%s");
     if (index == 3)
         return QStringLiteral("https://explorer.defcoin.fun/tx/%s");
     return QString();
@@ -16868,8 +16324,6 @@ QString NuRpcService::explorerPresetAddressUrl(int index) const
 {
     if (index == 1)
         return QStringLiteral("https://defcoin.dc903.org/explorer/address/%s");
-    if (index == 2)
-        return QStringLiteral("https://defcoin.dc903.org/legacyexplorer/address/%s");
     if (index == 3)
         return QStringLiteral("https://explorer.defcoin.fun/address/%s");
     return QString();
@@ -16883,15 +16337,12 @@ QString NuRpcService::explorerAddressUrlTemplate(const QString& url) const
     return out;
 }
 
-QString NuRpcService::recoveryExploreLookupSuggestion() const
+QString NuRpcService::recoveryIndexLookupSuggestion() const
 {
-#if DEFCOIN_NU_EXPLORE_APP
-    return QString();
-#else
     const QFileInfo db_info(explorerDatabasePath());
     if (!db_info.exists()) {
-        return QStringLiteral("Nu can use Nu Explore's local index for faster zero-balance address checks. Open Nu "
-                              "Explore first and let it finish indexing before restore starts.");
+        return QStringLiteral("Nu can use a current local address index for faster zero-balance address checks when "
+                              "one is available.");
     }
 
     int indexed = -1;
@@ -16899,99 +16350,19 @@ QString NuRpcService::recoveryExploreLookupSuggestion() const
     QString detail;
     const bool ready = explorerIndexReadyForRecovery(&indexed, &tip, &detail);
     if (ready) {
-        return QStringLiteral("Nu will use the current Nu Explore index for faster zero-balance address checks.");
+        return QStringLiteral("Nu will use the current local address index for faster zero-balance address checks.");
     }
     if (indexed >= 0 && tip > 0) {
-        return QStringLiteral("Nu Explore can speed up zero-balance checks, but its index is at block %1 of %2. Open "
-                              "Nu Explore and let indexing finish before starting restore.")
+        return QStringLiteral("The local address index can speed up zero-balance checks, but it is at block %1 of %2.")
             .arg(QString::number(indexed), QString::number(tip));
     }
-    return QStringLiteral("Nu Explore can speed up zero-balance checks once its local index is built and current. Open "
-                          "Nu Explore before starting restore.");
-#endif
+    return QStringLiteral("A current local address index can speed up zero-balance checks once it is built.");
 }
 
 QString NuRpcService::explorerDatabasePath() const
 {
     const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
     return data_dir.filePath(QStringLiteral("nu-explorer/explorer.sqlite"));
-}
-
-QString NuRpcService::droidTrailsDatabasePath() const
-{
-    const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
-    return data_dir.filePath(QStringLiteral("nu-explorer/droidtails.sqlite"));
-}
-
-bool NuRpcService::ensureDroidTrailsDatabase(QString* error) const
-{
-    const QFileInfo db_info(droidTrailsDatabasePath());
-    if (!QDir().mkpath(db_info.absolutePath())) {
-        if (error)
-            *error = QStringLiteral("Could not create Droid Trails cache directory:\n%1").arg(db_info.absolutePath());
-        return false;
-    }
-
-    const QString connection_name =
-        QStringLiteral("nu_droidtails_init_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
-    bool ok = false;
-    QString local_error;
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
-        db.setDatabaseName(db_info.absoluteFilePath());
-        ok = db.open();
-        if (!ok) {
-            local_error = db.lastError().text();
-        } else {
-            QSqlQuery query(db);
-            query.exec(QStringLiteral("PRAGMA journal_mode=WAL"));
-            query.exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
-            ok = query.exec(QStringLiteral("CREATE TABLE IF NOT EXISTS droidtails_meta ("
-                                           "key TEXT PRIMARY KEY,"
-                                           "value TEXT NOT NULL)"));
-            if (!ok)
-                local_error = query.lastError().text();
-            if (ok) {
-                ok = query.exec(QStringLiteral("CREATE TABLE IF NOT EXISTS droidtails_cache ("
-                                               "cache_key TEXT PRIMARY KEY,"
-                                               "schema_version INTEGER NOT NULL,"
-                                               "source_height INTEGER NOT NULL,"
-                                               "source_outputs INTEGER NOT NULL,"
-                                               "payload_json TEXT NOT NULL,"
-                                               "cached_at INTEGER NOT NULL)"));
-                if (!ok)
-                    local_error = query.lastError().text();
-            }
-            QString saved_version;
-            if (ok) {
-                QSqlQuery version_query(db);
-                if (version_query.exec(
-                        QStringLiteral("SELECT value FROM droidtails_meta WHERE key='schema_version'")) &&
-                    version_query.next())
-                    saved_version = version_query.value(0).toString();
-                if (saved_version != QString::number(DROIDTRAILS_CACHE_SCHEMA_VERSION)) {
-                    if (!query.exec(QStringLiteral("DELETE FROM droidtails_cache"))) {
-                        ok = false;
-                        local_error = query.lastError().text();
-                    }
-                }
-            }
-            if (ok) {
-                QSqlQuery upsert(db);
-                upsert.prepare(
-                    QStringLiteral("INSERT OR REPLACE INTO droidtails_meta(key,value) VALUES('schema_version',?)"));
-                upsert.addBindValue(QString::number(DROIDTRAILS_CACHE_SCHEMA_VERSION));
-                ok = upsert.exec();
-                if (!ok)
-                    local_error = upsert.lastError().text();
-            }
-        }
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connection_name);
-    if (!ok && error)
-        *error = QStringLiteral("SQLite Droid Trails cache unavailable: %1").arg(local_error);
-    return ok;
 }
 
 bool NuRpcService::ensureExplorerDatabase(QString* error) const
@@ -17168,298 +16539,6 @@ bool NuRpcService::ensureExplorerDatabase(QString* error) const
     return ok;
 }
 
-void NuRpcService::refreshRecentAverageBlockTimeFromRpc(int tip_height)
-{
-    if (tip_height <= 1) {
-        refreshRecentAverageBlockTimeFromIndex();
-        return;
-    }
-
-    const int window_blocks = std::min(120, tip_height);
-    const int start_height = tip_height - window_blocks;
-    rpcCall(QStringLiteral("getblockhash"),
-            {tip_height},
-            false,
-            [this, tip_height, start_height, window_blocks](const QJsonValue& tip_result, const QString& tip_error) {
-                if (!tip_error.isEmpty() || !tip_result.isString()) {
-                    refreshRecentAverageBlockTimeFromIndex();
-                    return;
-                }
-                const QString tip_hash = tip_result.toString();
-                rpcCall(QStringLiteral("getblockheader"),
-                        {tip_hash},
-                        false,
-                        [this, start_height, window_blocks](const QJsonValue& tip_header_result,
-                                                            const QString& tip_header_error) {
-                            if (!tip_header_error.isEmpty() || !tip_header_result.isObject()) {
-                                refreshRecentAverageBlockTimeFromIndex();
-                                return;
-                            }
-                            const qint64 tip_time =
-                                tip_header_result.toObject().value(QStringLiteral("time")).toVariant().toLongLong();
-                            rpcCall(QStringLiteral("getblockhash"),
-                                    {start_height},
-                                    false,
-                                    [this, tip_time, window_blocks](const QJsonValue& start_result,
-                                                                    const QString& start_error) {
-                                        if (!start_error.isEmpty() || !start_result.isString()) {
-                                            refreshRecentAverageBlockTimeFromIndex();
-                                            return;
-                                        }
-                                        rpcCall(
-                                            QStringLiteral("getblockheader"),
-                                            {start_result.toString()},
-                                            false,
-                                            [this, tip_time, window_blocks](const QJsonValue& start_header_result,
-                                                                            const QString& start_header_error) {
-                                                if (!start_header_error.isEmpty() || !start_header_result.isObject()) {
-                                                    refreshRecentAverageBlockTimeFromIndex();
-                                                    return;
-                                                }
-                                                const qint64 start_time = start_header_result.toObject()
-                                                                              .value(QStringLiteral("time"))
-                                                                              .toVariant()
-                                                                              .toLongLong();
-                                                if (tip_time <= start_time || window_blocks <= 0) {
-                                                    refreshRecentAverageBlockTimeFromIndex();
-                                                    return;
-                                                }
-                                                m_metric_average_block_time = formatBlockSpacingMetric(
-                                                    double(tip_time - start_time) / double(window_blocks));
-                                                rebuildNodeMetrics();
-                                                Q_EMIT stateChanged();
-                                            });
-                                    });
-                        });
-            });
-}
-
-void NuRpcService::refreshRecentAverageBlockTimeFromIndex()
-{
-#if DEFCOIN_NU_EXPLORE_APP
-    QString error;
-    if (!ensureExplorerDatabase(&error)) {
-        m_metric_average_block_time = QStringLiteral("Unknown");
-        rebuildNodeMetrics();
-        Q_EMIT stateChanged();
-        return;
-    }
-
-    QString local_value = QStringLiteral("Index warming");
-    const QString connection_name =
-        QStringLiteral("nu_explorer_block_time_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
-        db.setDatabaseName(explorerDatabasePath());
-        if (db.open()) {
-            QSqlQuery query(db);
-            if (query.exec(QStringLiteral("SELECT height, time FROM explorer_blocks ORDER BY height DESC LIMIT 121"))) {
-                int newest_height = -1;
-                int oldest_height = -1;
-                qint64 newest_time = 0;
-                qint64 oldest_time = 0;
-                int row_count = 0;
-                while (query.next()) {
-                    const int height = query.value(0).toInt();
-                    const qint64 block_time = query.value(1).toLongLong();
-                    if (row_count == 0) {
-                        newest_height = height;
-                        newest_time = block_time;
-                    }
-                    oldest_height = height;
-                    oldest_time = block_time;
-                    ++row_count;
-                }
-                const int span_blocks = newest_height - oldest_height;
-                const qint64 span_seconds = newest_time - oldest_time;
-                if (row_count >= 2 && span_blocks > 0 && span_seconds > 0)
-                    local_value = formatBlockSpacingMetric(double(span_seconds) / double(span_blocks));
-            }
-            db.close();
-        }
-    }
-    QSqlDatabase::removeDatabase(connection_name);
-    m_metric_average_block_time = local_value;
-#else
-    m_metric_average_block_time = QStringLiteral("Explore only");
-#endif
-    rebuildNodeMetrics();
-    Q_EMIT stateChanged();
-}
-
-QVariantMap NuRpcService::networkPulseHistoryFromDb(int window_blocks, QString* error) const
-{
-    QVariantMap analysis;
-    QVariantList rows;
-    QVariantMap summary;
-#if !DEFCOIN_NU_EXPLORE_APP
-    if (error)
-        *error = QStringLiteral("Network Pulse history is only available in Defcoin Core Nu Explore.");
-    return analysis;
-#else
-    QString db_error;
-    if (!ensureExplorerDatabase(&db_error)) {
-        if (error)
-            *error = db_error;
-        return analysis;
-    }
-
-    const int clean_window = qBound(10, window_blocks, 20160);
-    const QString connection_name =
-        QStringLiteral("nu_network_pulse_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
-    QString local_error;
-    bool ok = false;
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
-        db.setDatabaseName(explorerDatabasePath());
-        ok = db.open();
-        if (!ok) {
-            local_error = db.lastError().text();
-        } else {
-            QSqlQuery query(db);
-            query.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
-            ok = query.exec(QStringLiteral("SELECT MIN(height), MAX(height), COUNT(*) FROM explorer_blocks"));
-            if (!ok || !query.next()) {
-                local_error = ok ? QStringLiteral("Explorer block table is not readable.") : query.lastError().text();
-                ok = false;
-            } else {
-                const int min_height = query.value(0).toInt();
-                const int max_height = query.value(1).toInt();
-                const int block_count = query.value(2).toInt();
-                if (block_count < 2 || max_height <= min_height) {
-                    local_error = QStringLiteral(
-                        "Explorer index needs at least two cached blocks before Network Pulse can chart history.");
-                    ok = false;
-                } else {
-                    const int target_samples = 360;
-                    const int chain_span = std::max(1, max_height - min_height);
-                    const int stride = std::max(clean_window, std::max(1, chain_span / target_samples));
-                    QSqlQuery sample(db);
-                    sample.prepare(QStringLiteral("SELECT height, hash, time, tx_count, raw_json "
-                                                  "FROM explorer_blocks "
-                                                  "WHERE height = ? OR height = ? OR ((height - ?) % ?) = 0 "
-                                                  "ORDER BY height ASC "
-                                                  "LIMIT 720"));
-                    sample.addBindValue(min_height);
-                    sample.addBindValue(max_height);
-                    sample.addBindValue(min_height);
-                    sample.addBindValue(stride);
-                    ok = sample.exec();
-                    if (!ok) {
-                        local_error = sample.lastError().text();
-                    } else {
-                        int previous_height = -1;
-                        qint64 previous_time = 0;
-                        int first_row_height = -1;
-                        int last_row_height = -1;
-                        qint64 first_row_time = 0;
-                        qint64 last_row_time = 0;
-                        double last_spacing = 0.0;
-                        double last_difficulty = 0.0;
-                        double last_hashrate = 0.0;
-                        while (sample.next()) {
-                            const int height = sample.value(0).toInt();
-                            const QString hash = sample.value(1).toString();
-                            const qint64 block_time = sample.value(2).toLongLong();
-                            const int tx_count = sample.value(3).toInt();
-                            const QString raw_json = sample.value(4).toString();
-                            double difficulty = 0.0;
-                            const QJsonDocument raw_doc = QJsonDocument::fromJson(raw_json.toUtf8());
-                            if (raw_doc.isObject())
-                                difficulty = raw_doc.object().value(QStringLiteral("difficulty")).toDouble();
-                            if (previous_height >= 0 && height > previous_height && block_time > previous_time) {
-                                const int span_blocks = height - previous_height;
-                                const qint64 span_seconds = block_time - previous_time;
-                                const double average_spacing = double(span_seconds) / double(span_blocks);
-                                const double estimated_hashrate = difficulty > 0.0 && average_spacing > 0.0 ?
-                                                                      difficulty * 4294967296.0 / average_spacing :
-                                                                      0.0;
-                                const QString date_text = QDateTime::fromSecsSinceEpoch(block_time)
-                                                              .toLocalTime()
-                                                              .toString(QStringLiteral("yyyy-MM-dd HH:mm"));
-                                QVariantMap meta{{QStringLiteral("type"), QStringLiteral("block")},
-                                                 {QStringLiteral("id"), hash},
-                                                 {QStringLiteral("height"), height},
-                                                 {QStringLiteral("time"), block_time},
-                                                 {QStringLiteral("avgSpacingSeconds"), average_spacing},
-                                                 {QStringLiteral("difficulty"), difficulty},
-                                                 {QStringLiteral("hashrate"), estimated_hashrate},
-                                                 {QStringLiteral("spanBlocks"), span_blocks},
-                                                 {QStringLiteral("spanSeconds"), span_seconds},
-                                                 {QStringLiteral("txCount"), tx_count}};
-                                rows.push_back(tableRow({QString::number(height),
-                                                         date_text,
-                                                         formatBlockSpacingMetric(average_spacing),
-                                                         formatCompactDifficulty(difficulty),
-                                                         formatHashrateMetric(estimated_hashrate),
-                                                         QStringLiteral("%1 blocks").arg(QString::number(span_blocks)),
-                                                         QString::number(tx_count)},
-                                                        meta));
-                                if (first_row_height < 0) {
-                                    first_row_height = height;
-                                    first_row_time = block_time;
-                                }
-                                last_row_height = height;
-                                last_row_time = block_time;
-                                last_spacing = average_spacing;
-                                last_difficulty = difficulty;
-                                last_hashrate = estimated_hashrate;
-                            }
-                            previous_height = height;
-                            previous_time = block_time;
-                        }
-                        if (rows.isEmpty()) {
-                            local_error = QStringLiteral(
-                                "Explorer index has block rows, but sampled timestamps were not usable.");
-                            ok = false;
-                        } else {
-                            summary.insert(QStringLiteral("windowBlocks"), clean_window);
-                            summary.insert(QStringLiteral("strideBlocks"), stride);
-                            summary.insert(QStringLiteral("sampleRows"), rows.size());
-                            summary.insert(QStringLiteral("indexedBlocks"), block_count);
-                            summary.insert(QStringLiteral("firstHeight"), first_row_height);
-                            summary.insert(QStringLiteral("lastHeight"), last_row_height);
-                            summary.insert(QStringLiteral("firstDate"),
-                                           first_row_time > 0 ? QDateTime::fromSecsSinceEpoch(first_row_time)
-                                                                    .toLocalTime()
-                                                                    .toString(QStringLiteral("yyyy-MM-dd")) :
-                                                                QStringLiteral("-"));
-                            summary.insert(QStringLiteral("lastDate"),
-                                           last_row_time > 0 ? QDateTime::fromSecsSinceEpoch(last_row_time)
-                                                                   .toLocalTime()
-                                                                   .toString(QStringLiteral("yyyy-MM-dd")) :
-                                                               QStringLiteral("-"));
-                            summary.insert(QStringLiteral("currentAvgBlockTime"),
-                                           formatBlockSpacingMetric(last_spacing));
-                            summary.insert(QStringLiteral("currentDifficulty"),
-                                           formatCompactDifficulty(last_difficulty));
-                            summary.insert(QStringLiteral("currentHashrate"), formatHashrateMetric(last_hashrate));
-                            summary.insert(QStringLiteral("currentAvgBlockSeconds"), last_spacing);
-                            summary.insert(QStringLiteral("currentHashrateRaw"), last_hashrate);
-                            summary.insert(QStringLiteral("currentDifficultyRaw"), last_difficulty);
-                            analysis.insert(QStringLiteral("rows"), rows);
-                            analysis.insert(QStringLiteral("summary"), summary);
-                            analysis.insert(
-                                QStringLiteral("status"),
-                                QStringLiteral("Network Pulse chart sampled %1 indexed block intervals from %2 cached "
-                                               "blocks. Window target: %3 blocks; sampled stride: %4 blocks.")
-                                    .arg(QString::number(rows.size()),
-                                         QString::number(block_count),
-                                         QString::number(clean_window),
-                                         QString::number(stride)));
-                        }
-                    }
-                }
-            }
-            db.close();
-        }
-    }
-    QSqlDatabase::removeDatabase(connection_name);
-    if (!ok && error)
-        *error = QStringLiteral("Network Pulse history unavailable: %1").arg(local_error);
-    return analysis;
-#endif
-}
 
 bool NuRpcService::acquireExplorerWriterLock(QString* error)
 {
@@ -17593,42 +16672,6 @@ bool NuRpcService::ensureExplorerBalanceDeltas(QString* error)
     return ok;
 }
 
-void NuRpcService::cacheExplorerLookup(
-    const QString& type, const QString& id, const QString& title, const QString& summary, const QJsonValue& raw_json)
-{
-    QString error;
-    if (!ensureExplorerDatabase(&error)) {
-        appendLaunchDiagnostic(error);
-        return;
-    }
-    const QString connection_name =
-        QStringLiteral("nu_explorer_write_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
-    bool ok = false;
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
-        db.setDatabaseName(explorerDatabasePath());
-        ok = db.open();
-        if (ok) {
-            QSqlQuery query(db);
-            query.prepare(QStringLiteral("INSERT INTO explorer_lookups(type, id, title, summary, raw_json, cached_at) "
-                                         "VALUES(?, ?, ?, ?, ?, ?) "
-                                         "ON CONFLICT(type, id) DO UPDATE SET "
-                                         "title=excluded.title, summary=excluded.summary, raw_json=excluded.raw_json, "
-                                         "cached_at=excluded.cached_at"));
-            query.addBindValue(type);
-            query.addBindValue(id);
-            query.addBindValue(title);
-            query.addBindValue(summary);
-            query.addBindValue(QString::fromUtf8(QJsonDocument(raw_json.toObject()).toJson(QJsonDocument::Compact)));
-            query.addBindValue(QDateTime::currentSecsSinceEpoch());
-            ok = query.exec();
-        }
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connection_name);
-    if (ok)
-        loadExplorerRecentLookups();
-}
 
 void NuRpcService::loadExplorerRecentLookups()
 {
@@ -17672,6 +16715,32 @@ void NuRpcService::loadExplorerRecentLookups()
     Q_EMIT explorerChanged();
 }
 
+qint64 NuRpcService::explorerMetaInteger(const QString& key, qint64 fallback) const
+{
+    if (key.isEmpty())
+        return fallback;
+    QString error;
+    if (!ensureExplorerDatabase(&error))
+        return fallback;
+    qint64 value = fallback;
+    const QString connection_name =
+        QStringLiteral("nu_explorer_meta_int_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral("SELECT value FROM explorer_meta WHERE key = ?"));
+            query.addBindValue(key);
+            if (query.exec() && query.next())
+                value = query.value(0).toLongLong();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    return value;
+}
+
 void NuRpcService::refreshExplorerRecentLookups()
 {
     loadExplorerRecentLookups();
@@ -17711,32 +16780,6 @@ int NuRpcService::explorerHighestIndexedBlock() const
     }
     QSqlDatabase::removeDatabase(connection_name);
     return highest;
-}
-
-qint64 NuRpcService::explorerMetaInteger(const QString& key, qint64 fallback) const
-{
-    if (key.isEmpty())
-        return fallback;
-    QString error;
-    if (!ensureExplorerDatabase(&error))
-        return fallback;
-    qint64 value = fallback;
-    const QString connection_name =
-        QStringLiteral("nu_explorer_meta_int_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
-        db.setDatabaseName(explorerDatabasePath());
-        if (db.open()) {
-            QSqlQuery query(db);
-            query.prepare(QStringLiteral("SELECT value FROM explorer_meta WHERE key = ?"));
-            query.addBindValue(key);
-            if (query.exec() && query.next())
-                value = query.value(0).toLongLong();
-        }
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connection_name);
-    return value;
 }
 
 int NuRpcService::explorerIndexedBlockCountFromDb() const
@@ -17791,6 +16834,202 @@ int NuRpcService::explorerIndexedOutputCountFromDb() const
     }
     QSqlDatabase::removeDatabase(connection_name);
     return count;
+}
+
+QVariantList NuRpcService::explorerContactsFromJsonArray(const QJsonArray& raw_contacts) const
+{
+    QVariantList contacts;
+    for (const QJsonValue& value : raw_contacts) {
+        const QJsonObject object = value.toObject();
+        const QString username = singleLineLimited(object.value(QStringLiteral("username")).toString(), 96).trimmed();
+        const QJsonArray raw_addresses = object.value(QStringLiteral("addresses")).toArray();
+        QVariantList addresses;
+        QStringList address_strings;
+        QSet<QString> seen;
+        for (const QJsonValue& address_value : raw_addresses) {
+            const QString address = singleLineLimited(address_value.toString(), 128).trimmed();
+            if (address.isEmpty() || seen.contains(address))
+                continue;
+            seen.insert(address);
+            addresses.push_back(address);
+            address_strings.push_back(address);
+        }
+        if (!username.isEmpty() && !addresses.isEmpty()) {
+            contacts.push_back(
+                QVariantMap{{QStringLiteral("username"), username},
+                            {QStringLiteral("addresses"), addresses},
+                            {QStringLiteral("addressText"), address_strings.join(QStringLiteral(", "))}});
+        }
+    }
+    return contacts;
+}
+
+QJsonArray NuRpcService::explorerContactsToJsonArray(const QVariantList& contacts) const
+{
+    QJsonArray out;
+    for (const QVariant& value : contacts) {
+        const QVariantMap contact = value.toMap();
+        const QString username = singleLineLimited(contact.value(QStringLiteral("username")).toString(), 96).trimmed();
+        QJsonArray addresses;
+        QSet<QString> seen;
+        for (const QVariant& address_value : contact.value(QStringLiteral("addresses")).toList()) {
+            const QString address = singleLineLimited(address_value.toString(), 128).trimmed();
+            if (address.isEmpty() || seen.contains(address))
+                continue;
+            seen.insert(address);
+            addresses.push_back(address);
+        }
+        if (username.isEmpty() || addresses.isEmpty())
+            continue;
+        QJsonObject object;
+        object.insert(QStringLiteral("username"), username);
+        object.insert(QStringLiteral("addresses"), addresses);
+        out.push_back(object);
+    }
+    return out;
+}
+
+void NuRpcService::emitExplorerError(const QString& title, const QString& detail)
+{
+    Q_EMIT explorerWindowRequested(
+        title, QStringLiteral("<h2>%1</h2><p>%2</p>").arg(title.toHtmlEscaped(), detail.toHtmlEscaped()));
+}
+
+QString NuRpcService::explorerUrlForTransaction(const QString& txid) const
+{
+    if (!m_third_party_tx_urls_enabled || txid.trimmed().isEmpty() ||
+        !m_third_party_tx_url.contains(QStringLiteral("%s"))) {
+        return QString();
+    }
+    QString out = m_third_party_tx_url;
+    out.replace(QStringLiteral("%s"), QString::fromLatin1(QUrl::toPercentEncoding(txid.trimmed())));
+    return out;
+}
+
+QString NuRpcService::explorerUrlForAddress(const QString& address) const
+{
+    if (!m_third_party_tx_urls_enabled || address.trimmed().isEmpty() ||
+        !m_third_party_address_url.contains(QStringLiteral("%s"))) {
+        return QString();
+    }
+    QString out = m_third_party_address_url;
+    out.replace(QStringLiteral("%s"), QString::fromLatin1(QUrl::toPercentEncoding(address.trimmed())));
+    return out;
+}
+
+void NuRpcService::refreshRecentAverageBlockTimeFromRpc(int tip_height)
+{
+    if (tip_height <= 1) {
+        refreshRecentAverageBlockTimeFromIndex();
+        return;
+    }
+
+    const int window_blocks = std::min(120, tip_height);
+    const int start_height = tip_height - window_blocks;
+    rpcCall(QStringLiteral("getblockhash"),
+            {tip_height},
+            false,
+            [this, tip_height, start_height, window_blocks](const QJsonValue& tip_result, const QString& tip_error) {
+                if (!tip_error.isEmpty() || !tip_result.isString()) {
+                    refreshRecentAverageBlockTimeFromIndex();
+                    return;
+                }
+                const QString tip_hash = tip_result.toString();
+                rpcCall(QStringLiteral("getblockheader"),
+                        {tip_hash},
+                        false,
+                        [this, start_height, window_blocks](const QJsonValue& tip_header_result,
+                                                            const QString& tip_header_error) {
+                            if (!tip_header_error.isEmpty() || !tip_header_result.isObject()) {
+                                refreshRecentAverageBlockTimeFromIndex();
+                                return;
+                            }
+                            const qint64 tip_time =
+                                tip_header_result.toObject().value(QStringLiteral("time")).toVariant().toLongLong();
+                            rpcCall(QStringLiteral("getblockhash"),
+                                    {start_height},
+                                    false,
+                                    [this, tip_time, window_blocks](const QJsonValue& start_result,
+                                                                    const QString& start_error) {
+                                        if (!start_error.isEmpty() || !start_result.isString()) {
+                                            refreshRecentAverageBlockTimeFromIndex();
+                                            return;
+                                        }
+                                        rpcCall(
+                                            QStringLiteral("getblockheader"),
+                                            {start_result.toString()},
+                                            false,
+                                            [this, tip_time, window_blocks](const QJsonValue& start_header_result,
+                                                                            const QString& start_header_error) {
+                                                if (!start_header_error.isEmpty() || !start_header_result.isObject()) {
+                                                    refreshRecentAverageBlockTimeFromIndex();
+                                                    return;
+                                                }
+                                                const qint64 start_time = start_header_result.toObject()
+                                                                              .value(QStringLiteral("time"))
+                                                                              .toVariant()
+                                                                              .toLongLong();
+                                                if (tip_time <= start_time || window_blocks <= 0) {
+                                                    refreshRecentAverageBlockTimeFromIndex();
+                                                    return;
+                                                }
+                                                m_metric_average_block_time = formatBlockSpacingMetric(
+                                                    double(tip_time - start_time) / double(window_blocks));
+                                                rebuildNodeMetrics();
+                                                Q_EMIT stateChanged();
+                                            });
+                                    });
+                        });
+            });
+}
+
+void NuRpcService::refreshRecentAverageBlockTimeFromIndex()
+{
+    QString error;
+    if (!ensureExplorerDatabase(&error)) {
+        m_metric_average_block_time = QStringLiteral("Unknown");
+        rebuildNodeMetrics();
+        Q_EMIT stateChanged();
+        return;
+    }
+
+    QString local_value = QStringLiteral("Index warming");
+    const QString connection_name =
+        QStringLiteral("nu_explorer_block_time_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        if (db.open()) {
+            QSqlQuery query(db);
+            if (query.exec(QStringLiteral("SELECT height, time FROM explorer_blocks ORDER BY height DESC LIMIT 121"))) {
+                int newest_height = -1;
+                int oldest_height = -1;
+                qint64 newest_time = 0;
+                qint64 oldest_time = 0;
+                int row_count = 0;
+                while (query.next()) {
+                    const int height = query.value(0).toInt();
+                    const qint64 block_time = query.value(1).toLongLong();
+                    if (row_count == 0) {
+                        newest_height = height;
+                        newest_time = block_time;
+                    }
+                    oldest_height = height;
+                    oldest_time = block_time;
+                    ++row_count;
+                }
+                const int span_blocks = newest_height - oldest_height;
+                const qint64 span_seconds = newest_time - oldest_time;
+                if (row_count >= 2 && span_blocks > 0 && span_seconds > 0)
+                    local_value = formatBlockSpacingMetric(double(span_seconds) / double(span_blocks));
+            }
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    m_metric_average_block_time = local_value;
+    rebuildNodeMetrics();
+    Q_EMIT stateChanged();
 }
 
 QVariantList NuRpcService::explorerRichListFromDb(QString* error) const
@@ -17886,1698 +17125,6 @@ QVariantList NuRpcService::explorerRichListFromDb(QString* error) const
     if (!local_error.isEmpty() && error)
         *error = local_error;
     return rows;
-}
-
-QVariantList NuRpcService::explorerMovementsFromDb(qint64 threshold_sats, QString* error) const
-{
-    QVariantList rows;
-    QString db_error;
-    if (!ensureExplorerDatabase(&db_error)) {
-        if (error)
-            *error = db_error;
-        return rows;
-    }
-
-    const qint64 bounded_threshold = std::max<qint64>(0, threshold_sats);
-    const QString connection_name =
-        QStringLiteral("nu_explorer_movements_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
-    QString local_error;
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
-        db.setDatabaseName(explorerDatabasePath());
-        if (!db.open()) {
-            local_error = db.lastError().text();
-        } else {
-            QSqlQuery query(db);
-            query.prepare(QStringLiteral(
-                "SELECT o.txid, o.vout, o.block_height, b.time, o.value_sats, o.address "
-                "FROM explorer_tx_outputs o INDEXED BY explorer_tx_outputs_block_value_address "
-                "JOIN explorer_blocks b ON b.height = o.block_height "
-                "JOIN explorer_block_transactions t ON t.txid = o.txid AND t.block_height = o.block_height "
-                "WHERE t.tx_index > 0 AND o.value_sats >= ? AND o.address != '' "
-                "ORDER BY o.block_height DESC "
-                "LIMIT 5000"));
-            query.addBindValue(QVariant::fromValue<qlonglong>(bounded_threshold));
-            if (!query.exec()) {
-                local_error = query.lastError().text();
-            } else {
-                QVector<QPair<qint64, int>> largest_candidates;
-                QVector<int> newest_candidates;
-                constexpr int graph_endpoint_cushion = 56;
-                while (query.next()) {
-                    const QString txid = query.value(0).toString();
-                    const int vout = query.value(1).toInt();
-                    const int height = query.value(2).toInt();
-                    const qint64 time = query.value(3).toLongLong();
-                    const qint64 amount_sats = query.value(4).toLongLong();
-                    const QString target_address = query.value(5).toString();
-                    QVariantList target_addresses;
-                    if (!target_address.isEmpty())
-                        target_addresses.push_back(target_address);
-                    const QString timestamp = QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(
-                        QStringLiteral("yyyy-MM-dd HH:mm:ss t"));
-                    const int row_index = rows.size();
-                    rows.push_back(QVariantMap{
-                        {QStringLiteral("cells"),
-                         QVariantList{txid, explorerAmountText(amount_sats), timestamp, height, 1, 1}},
-                        {QStringLiteral("meta"),
-                         QVariantMap{{QStringLiteral("type"), QStringLiteral("transaction")},
-                                     {QStringLiteral("id"), txid},
-                                     {QStringLiteral("txid"), txid},
-                                     {QStringLiteral("vout"), vout},
-                                     {QStringLiteral("height"), height},
-                                     {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
-                                     {QStringLiteral("amountSats"), QVariant::fromValue<qlonglong>(amount_sats)},
-                                     {QStringLiteral("sourceAddresses"), QVariantList{}},
-                                     {QStringLiteral("targetAddresses"), target_addresses}}}});
-                    if (newest_candidates.size() < graph_endpoint_cushion)
-                        newest_candidates.push_back(row_index);
-                    largest_candidates.push_back(qMakePair(amount_sats, row_index));
-                }
-                query.finish();
-
-                std::sort(largest_candidates.begin(),
-                          largest_candidates.end(),
-                          [](const QPair<qint64, int>& a, const QPair<qint64, int>& b) {
-                              if (a.first != b.first)
-                                  return a.first > b.first;
-                              return a.second < b.second;
-                          });
-                QVector<int> endpoint_rows;
-                auto add_endpoint_row = [&endpoint_rows](int row_index) {
-                    if (row_index < 0 || endpoint_rows.contains(row_index))
-                        return;
-                    endpoint_rows.push_back(row_index);
-                };
-                for (int i = 0; i < newest_candidates.size(); ++i)
-                    add_endpoint_row(newest_candidates.at(i));
-                const int largest_endpoint_count =
-                    std::min(graph_endpoint_cushion, static_cast<int>(largest_candidates.size()));
-                for (int i = 0; i < largest_endpoint_count; ++i)
-                    add_endpoint_row(largest_candidates.at(i).second);
-
-                QSqlQuery source_query(db);
-                const bool source_ok =
-                    source_query.prepare(QStringLiteral("SELECT address FROM explorer_tx_outputs "
-                                                        "WHERE spent_by_txid = ? AND address != '' "
-                                                        "GROUP BY address ORDER BY MAX(value_sats) DESC LIMIT 12"));
-                if (!source_ok) {
-                    local_error = source_query.lastError().text();
-                } else {
-                    for (int endpoint_index = 0; endpoint_index < endpoint_rows.size(); ++endpoint_index) {
-                        const int row_index = endpoint_rows.at(endpoint_index);
-                        if (row_index < 0 || row_index >= rows.size())
-                            continue;
-                        QVariantMap row = rows.at(row_index).toMap();
-                        QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
-                        const QString txid = meta.value(QStringLiteral("txid")).toString();
-                        if (txid.isEmpty())
-                            continue;
-
-                        QVariantList source_addresses;
-                        source_query.bindValue(0, txid);
-                        if (!source_query.exec()) {
-                            local_error = source_query.lastError().text();
-                            break;
-                        }
-                        while (source_query.next())
-                            source_addresses.push_back(source_query.value(0).toString());
-                        source_query.finish();
-
-                        meta.insert(QStringLiteral("sourceAddresses"), source_addresses);
-                        row.insert(QStringLiteral("meta"), meta);
-                        rows[row_index] = row;
-                    }
-                }
-            }
-        }
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connection_name);
-    if (!local_error.isEmpty() && error)
-        *error = local_error;
-    return rows;
-}
-
-QVariantMap NuRpcService::coindroidsAnalyticsFromCache(QString* error) const
-{
-    QVariantMap result;
-    QString db_error;
-    if (!ensureDroidTrailsDatabase(&db_error)) {
-        if (error)
-            *error = db_error;
-        return result;
-    }
-
-    const int source_height = explorerHighestIndexedBlock();
-    const int source_outputs = explorerIndexedOutputCountFromDb();
-    const QString connection_name =
-        QStringLiteral("nu_droidtails_read_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
-    QString local_error;
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
-        db.setDatabaseName(droidTrailsDatabasePath());
-        if (!db.open()) {
-            local_error = db.lastError().text();
-        } else {
-            QSqlQuery query(db);
-            query.prepare(QStringLiteral("SELECT schema_version,source_height,source_outputs,payload_json "
-                                         "FROM droidtails_cache WHERE cache_key='coindroids-analytics'"));
-            if (!query.exec()) {
-                local_error = query.lastError().text();
-            } else if (query.next()) {
-                const int schema_version = query.value(0).toInt();
-                const int cached_height = query.value(1).toInt();
-                const int cached_outputs = query.value(2).toInt();
-                const QString payload = query.value(3).toString();
-                if (schema_version == DROIDTRAILS_CACHE_SCHEMA_VERSION) {
-                    QJsonParseError parse_error;
-                    const QJsonDocument doc = QJsonDocument::fromJson(payload.toUtf8(), &parse_error);
-                    if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
-                        local_error =
-                            QStringLiteral("Droid Trails cache JSON parse error: %1").arg(parse_error.errorString());
-                    } else {
-                        result = doc.object().toVariantMap();
-                        QVariantMap summary = result.value(QStringLiteral("summary")).toMap();
-                        summary.insert(QStringLiteral("droidTrailsCacheStatus"), QStringLiteral("hit"));
-                        summary.insert(QStringLiteral("droidTrailsCacheVersion"), DROIDTRAILS_CACHE_SCHEMA_VERSION);
-                        summary.insert(QStringLiteral("droidTrailsCachePath"), droidTrailsDatabasePath());
-                        summary.insert(QStringLiteral("droidTrailsSourceHeight"), cached_height);
-                        summary.insert(QStringLiteral("droidTrailsSourceOutputs"), cached_outputs);
-                        summary.insert(QStringLiteral("droidTrailsCurrentSourceHeight"), source_height);
-                        summary.insert(QStringLiteral("droidTrailsCurrentSourceOutputs"), source_outputs);
-                        result.insert(QStringLiteral("summary"), summary);
-                    }
-                }
-            }
-        }
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connection_name);
-    if (!result.isEmpty())
-        return result;
-    if (!local_error.isEmpty() && error)
-        *error = local_error;
-    return {};
-}
-
-void NuRpcService::saveCoindroidsAnalyticsCache(const QVariantMap& analysis, QString* error) const
-{
-    if (analysis.isEmpty())
-        return;
-    QString db_error;
-    if (!ensureDroidTrailsDatabase(&db_error)) {
-        if (error)
-            *error = db_error;
-        return;
-    }
-
-    const int source_height = explorerHighestIndexedBlock();
-    const int source_outputs = explorerIndexedOutputCountFromDb();
-    const QJsonDocument doc(QJsonObject::fromVariantMap(analysis));
-    const QString connection_name =
-        QStringLiteral("nu_droidtails_write_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
-    QString local_error;
-    bool ok = false;
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
-        db.setDatabaseName(droidTrailsDatabasePath());
-        if (!db.open()) {
-            local_error = db.lastError().text();
-        } else {
-            QSqlQuery query(db);
-            query.prepare(QStringLiteral("INSERT OR REPLACE INTO droidtails_cache("
-                                         "cache_key,schema_version,source_height,source_outputs,payload_json,cached_at"
-                                         ") VALUES('coindroids-analytics',?,?,?,?,?)"));
-            query.addBindValue(DROIDTRAILS_CACHE_SCHEMA_VERSION);
-            query.addBindValue(source_height);
-            query.addBindValue(source_outputs);
-            query.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
-            query.addBindValue(QDateTime::currentSecsSinceEpoch());
-            ok = query.exec();
-            if (!ok)
-                local_error = query.lastError().text();
-        }
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connection_name);
-    if (!ok && error)
-        *error = QStringLiteral("Could not save Droid Trails cache: %1").arg(local_error);
-}
-
-QVariantMap NuRpcService::coindroidsAnalyticsFromDb(QString* error) const
-{
-    QVariantMap result;
-    QVariantMap summary;
-    QVariantList window_rows;
-    QVariantList endpoint_rows;
-    QVariantList winner_rows;
-    QVariantList phase_rows;
-    QVariantList published_rows;
-    QVariantList vanity_rows;
-    QVariantList op_return_rows;
-    QVariantList bot_rows;
-    QVariantList payout_rows;
-    QVariantList attack_address_rows;
-    QVariantList qr_seed_rows;
-    QVariantList source_ammo_rows;
-    QVariantList olo_rows;
-    QVariantList game_address_rows;
-    QVariantList evidence_rows;
-    QVariantMap dc25_chain_summary;
-    QString db_error;
-    if (!ensureExplorerDatabase(&db_error)) {
-        if (error)
-            *error = db_error;
-        return result;
-    }
-    const QVariantMap cached = coindroidsAnalyticsFromCache();
-    if (!cached.isEmpty())
-        return cached;
-
-    auto row_for = [](const QVariantList& cells, const QVariantMap& meta = QVariantMap()) {
-        QVariantMap row;
-        row.insert(QStringLiteral("cells"), cells);
-        row.insert(QStringLiteral("meta"), meta);
-        return row;
-    };
-    auto add_game_address_lead = [&game_address_rows, &row_for](const QString& role,
-                                                                const QString& name,
-                                                                const QString& address,
-                                                                const QString& amount,
-                                                                int score,
-                                                                const QString& confidence,
-                                                                const QString& evidence,
-                                                                const QVariantMap& extra_meta = QVariantMap()) {
-        if (address.trimmed().isEmpty())
-            return;
-        for (const QVariant& value : game_address_rows) {
-            const QVariantMap row = value.toMap();
-            const QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
-            if (meta.value(QStringLiteral("address")).toString() == address &&
-                meta.value(QStringLiteral("role")).toString() == role &&
-                meta.value(QStringLiteral("name")).toString() == name) {
-                return;
-            }
-        }
-        QVariantMap meta = extra_meta;
-        meta.insert(QStringLiteral("type"), QStringLiteral("address"));
-        meta.insert(QStringLiteral("id"), address);
-        meta.insert(QStringLiteral("address"), address);
-        meta.insert(QStringLiteral("role"), role);
-        meta.insert(QStringLiteral("name"), name);
-        meta.insert(QStringLiteral("score"), score);
-        meta.insert(QStringLiteral("confidence"), confidence);
-        meta.insert(
-            QStringLiteral("contactName"),
-            QStringLiteral("Coindroids %1 %2 [%3]").arg(role, name.isEmpty() ? address.left(10) : name, confidence));
-        game_address_rows.push_back(
-            row_for(QVariantList{role, name, address, amount, score, confidence, evidence}, meta));
-    };
-
-    auto decimal_dfc_text = [](const QVariant& value, int decimals = 4) {
-        const double amount = value.toDouble();
-        QString text = QString::number(amount, 'f', decimals);
-        while (text.contains(QLatin1Char('.')) && text.endsWith(QLatin1Char('0')))
-            text.chop(1);
-        if (text.endsWith(QLatin1Char('.')))
-            text.chop(1);
-        return text + QStringLiteral(" DFC");
-    };
-    auto decimal_text = [](const QVariant& value, int decimals = 3) {
-        QString text = QString::number(value.toDouble(), 'f', decimals);
-        while (text.contains(QLatin1Char('.')) && text.endsWith(QLatin1Char('0')))
-            text.chop(1);
-        if (text.endsWith(QLatin1Char('.')))
-            text.chop(1);
-        return text;
-    };
-
-    {
-        const QString relative_path = QStringLiteral("assets/data/coindroids_dc25_chain_forensics.json");
-        QStringList candidates;
-        candidates << QDir(nuResourceRoot()).filePath(relative_path)
-                   << QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("nu/%1").arg(relative_path))
-                   << QDir(QCoreApplication::applicationDirPath())
-                          .filePath(QStringLiteral("../Resources/nu/%1").arg(relative_path))
-                   << QStringLiteral(":/nu/assets/data/coindroids_dc25_chain_forensics.json");
-
-        QFile file;
-        for (const QString& candidate : candidates) {
-            file.setFileName(candidate);
-            if (file.open(QIODevice::ReadOnly | QIODevice::Text))
-                break;
-        }
-
-        if (file.isOpen()) {
-            QJsonParseError parse_error;
-            const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parse_error);
-            if (parse_error.error == QJsonParseError::NoError && doc.isObject()) {
-                const QJsonObject object = doc.object();
-                dc25_chain_summary = object.value(QStringLiteral("summary")).toObject().toVariantMap();
-                dc25_chain_summary.insert(QStringLiteral("dc25ChainForensicsStatus"), QStringLiteral("loaded"));
-
-                const QJsonArray qr_array = object.value(QStringLiteral("qrSeeds")).toArray();
-                for (const QJsonValue& value : qr_array) {
-                    const QVariantMap source = value.toObject().toVariantMap();
-                    const QString name = source.value(QStringLiteral("droid_name")).toString();
-                    const QString legacy = source.value(QStringLiteral("legacy_3_p2sh")).toString();
-                    const QString current = source.value(QStringLiteral("current_m_p2sh")).toString();
-                    const int dc25_outputs = source.value(QStringLiteral("dc25_outputs")).toInt();
-                    const int photo_outputs = source.value(QStringLiteral("photo_window_outputs")).toInt();
-                    const QString evidence =
-                        QStringLiteral(
-                            "QR card seed converted from legacy P2SH %1; %2 DC25 outputs and %3 photo-window outputs.")
-                            .arg(legacy, QString::number(dc25_outputs), QString::number(photo_outputs));
-                    qr_seed_rows.push_back(row_for(
-                        QVariantList{
-                            name,
-                            legacy,
-                            current,
-                            dc25_outputs,
-                            decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 8),
-                            photo_outputs,
-                            decimal_dfc_text(source.value(QStringLiteral("photo_window_dfc")), 8),
-                            QStringLiteral("%1-%2").arg(source.value(QStringLiteral("dc25_first_height")).toString(),
-                                                        source.value(QStringLiteral("dc25_last_height")).toString()),
-                            QStringLiteral("%1 - %2").arg(source.value(QStringLiteral("dc25_first_utc")).toString(),
-                                                          source.value(QStringLiteral("dc25_last_utc")).toString())},
-                        QVariantMap{{QStringLiteral("type"), QStringLiteral("address")},
-                                    {QStringLiteral("id"), current},
-                                    {QStringLiteral("address"), current},
-                                    {QStringLiteral("legacyP2sh"), legacy},
-                                    {QStringLiteral("name"), name},
-                                    {QStringLiteral("dc25Outputs"), dc25_outputs},
-                                    {QStringLiteral("photoWindowOutputs"), photo_outputs},
-                                    {QStringLiteral("dc25Dfc"), source.value(QStringLiteral("dc25_dfc"))},
-                                    {QStringLiteral("confidence"), QStringLiteral("Seed-confirmed")}}));
-                    add_game_address_lead(
-                        QStringLiteral("DC25 QR-confirmed attack address"),
-                        name,
-                        current,
-                        decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 4),
-                        92,
-                        QStringLiteral("Seed-confirmed"),
-                        evidence,
-                        QVariantMap{{QStringLiteral("source"), QStringLiteral("dc25-qr-seed-converted")},
-                                    {QStringLiteral("legacyP2sh"), legacy},
-                                    {QStringLiteral("dc25Outputs"), dc25_outputs},
-                                    {QStringLiteral("photoWindowOutputs"), photo_outputs}});
-                }
-
-                const QJsonArray attack_array = object.value(QStringLiteral("attackAddresses")).toArray();
-                for (const QJsonValue& value : attack_array) {
-                    const QVariantMap source = value.toObject().toVariantMap();
-                    const QString name = source.value(QStringLiteral("known_droid_name")).toString();
-                    const QString legacy = source.value(QStringLiteral("legacy_3_p2sh")).toString();
-                    const QString current = source.value(QStringLiteral("current_m_p2sh")).toString();
-                    const int dc25_outputs = source.value(QStringLiteral("dc25_outputs")).toInt();
-                    const int signature_outputs = source.value(QStringLiteral("signature_outputs")).toInt();
-                    const double signature_ratio = source.value(QStringLiteral("signature_ratio")).toDouble();
-                    const QString confidence = source.value(QStringLiteral("confidence")).toString();
-                    const QString role = confidence.contains(QStringLiteral("Broad")) ?
-                                             QStringLiteral("DC25 broad attack cohort") :
-                                             (confidence.contains(QStringLiteral("Seed")) ?
-                                                  QStringLiteral("DC25 QR-confirmed attack address") :
-                                                  QStringLiteral("DC25 attack candidate"));
-                    int score =
-                        45 + std::min(34, static_cast<int>(signature_ratio * 34.0)) + std::min(15, dc25_outputs / 70);
-                    if (confidence.contains(QStringLiteral("Seed")))
-                        score += 10;
-                    if (confidence.contains(QStringLiteral("Broad")))
-                        score -= 8;
-                    score = std::max(20, std::min(99, score));
-                    const QString display_name =
-                        name.isEmpty() ? QStringLiteral("candidate %1").arg(current.left(8)) : name;
-                    const QString evidence =
-                        QStringLiteral("%1 DC25 outputs, %2 signature outputs, ratio %3; legacy QR/P2SH form %4.")
-                            .arg(QString::number(dc25_outputs),
-                                 QString::number(signature_outputs),
-                                 decimal_text(source.value(QStringLiteral("signature_ratio")), 3),
-                                 legacy);
-                    attack_address_rows.push_back(row_for(
-                        QVariantList{
-                            display_name,
-                            legacy,
-                            current,
-                            dc25_outputs,
-                            decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 8),
-                            signature_outputs,
-                            decimal_text(source.value(QStringLiteral("signature_ratio")), 3),
-                            QStringLiteral("%1-%2").arg(source.value(QStringLiteral("first_height")).toString(),
-                                                        source.value(QStringLiteral("last_height")).toString()),
-                            confidence},
-                        QVariantMap{{QStringLiteral("type"), QStringLiteral("address")},
-                                    {QStringLiteral("id"), current},
-                                    {QStringLiteral("address"), current},
-                                    {QStringLiteral("legacyP2sh"), legacy},
-                                    {QStringLiteral("name"), display_name},
-                                    {QStringLiteral("knownName"), name},
-                                    {QStringLiteral("dc25Outputs"), dc25_outputs},
-                                    {QStringLiteral("dc25Dfc"), source.value(QStringLiteral("dc25_dfc"))},
-                                    {QStringLiteral("signatureOutputs"), signature_outputs},
-                                    {QStringLiteral("signatureDfc"), source.value(QStringLiteral("signature_dfc"))},
-                                    {QStringLiteral("signatureRatio"), signature_ratio},
-                                    {QStringLiteral("minDfc"), source.value(QStringLiteral("min_dfc"))},
-                                    {QStringLiteral("avgDfc"), source.value(QStringLiteral("avg_dfc"))},
-                                    {QStringLiteral("maxDfc"), source.value(QStringLiteral("max_dfc"))},
-                                    {QStringLiteral("firstHeight"), source.value(QStringLiteral("first_height"))},
-                                    {QStringLiteral("lastHeight"), source.value(QStringLiteral("last_height"))},
-                                    {QStringLiteral("confidence"), confidence},
-                                    {QStringLiteral("score"), score}}));
-                    add_game_address_lead(
-                        role,
-                        display_name,
-                        current,
-                        decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 4),
-                        score,
-                        confidence,
-                        evidence,
-                        QVariantMap{{QStringLiteral("source"), QStringLiteral("dc25-attack-address-csv")},
-                                    {QStringLiteral("legacyP2sh"), legacy},
-                                    {QStringLiteral("dc25Outputs"), dc25_outputs},
-                                    {QStringLiteral("signatureOutputs"), signature_outputs},
-                                    {QStringLiteral("signatureRatio"), signature_ratio}});
-                }
-
-                const QJsonArray source_array = object.value(QStringLiteral("sourceAmmo")).toArray();
-                for (const QJsonValue& value : source_array) {
-                    const QVariantMap source = value.toObject().toVariantMap();
-                    const QString address = source.value(QStringLiteral("source_address")).toString();
-                    const int attack_txs = source.value(QStringLiteral("attack_txs")).toInt();
-                    const int input_utxos = source.value(QStringLiteral("input_utxos")).toInt();
-                    const int targets = source.value(QStringLiteral("distinct_targets")).toInt();
-                    int score = 34 + std::min(35, attack_txs / 20) + std::min(25, targets);
-                    if (attack_txs >= 50)
-                        score += 8;
-                    score = std::max(20, std::min(99, score));
-                    const QString evidence =
-                        QStringLiteral(
-                            "%1 attack txs, %2 input UTXOs, %3 distinct attack targets; source blocks %4-%5.")
-                            .arg(QString::number(attack_txs),
-                                 QString::number(input_utxos),
-                                 QString::number(targets),
-                                 source.value(QStringLiteral("first_source_output_height")).toString(),
-                                 source.value(QStringLiteral("last_source_output_height")).toString());
-                    source_ammo_rows.push_back(row_for(
-                        QVariantList{address,
-                                     attack_txs,
-                                     input_utxos,
-                                     targets,
-                                     decimal_dfc_text(source.value(QStringLiteral("input_dfc")), 8),
-                                     QStringLiteral("%1-%2").arg(
-                                         source.value(QStringLiteral("first_source_output_height")).toString(),
-                                         source.value(QStringLiteral("last_source_output_height")).toString()),
-                                     score},
-                        QVariantMap{
-                            {QStringLiteral("type"), QStringLiteral("address")},
-                            {QStringLiteral("id"), address},
-                            {QStringLiteral("address"), address},
-                            {QStringLiteral("attackTxs"), attack_txs},
-                            {QStringLiteral("inputUtxos"), input_utxos},
-                            {QStringLiteral("distinctTargets"), targets},
-                            {QStringLiteral("inputDfc"), source.value(QStringLiteral("input_dfc"))},
-                            {QStringLiteral("firstHeight"), source.value(QStringLiteral("first_source_output_height"))},
-                            {QStringLiteral("lastHeight"), source.value(QStringLiteral("last_source_output_height"))},
-                            {QStringLiteral("score"), score},
-                            {QStringLiteral("confidence"),
-                             attack_txs >= 50 ? QStringLiteral("High source lead") : QStringLiteral("Source lead")}}));
-                    add_game_address_lead(
-                        QStringLiteral("DC25 source/ammo clip"),
-                        QStringLiteral("source %1").arg(address.left(8)),
-                        address,
-                        decimal_dfc_text(source.value(QStringLiteral("input_dfc")), 2),
-                        score,
-                        attack_txs >= 50 ? QStringLiteral("High source lead") : QStringLiteral("Source lead"),
-                        evidence,
-                        QVariantMap{{QStringLiteral("source"), QStringLiteral("dc25-source-ammo-csv")},
-                                    {QStringLiteral("attackTxs"), attack_txs},
-                                    {QStringLiteral("inputUtxos"), input_utxos},
-                                    {QStringLiteral("distinctTargets"), targets}});
-                }
-
-                const QJsonArray olo_array = object.value(QStringLiteral("oloCandidates")).toArray();
-                for (const QJsonValue& value : olo_array) {
-                    const QVariantMap source = value.toObject().toVariantMap();
-                    const QString legacy = source.value(QStringLiteral("legacy_3_p2sh")).toString();
-                    const QString current = source.value(QStringLiteral("current_m_p2sh")).toString();
-                    const QString evidence = source.value(QStringLiteral("evidence_type")).toString();
-                    olo_rows.push_back(row_for(
-                        QVariantList{QStringLiteral("Olo"),
-                                     legacy,
-                                     current,
-                                     source.value(QStringLiteral("dc25_outputs")).toInt(),
-                                     decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 8),
-                                     source.value(QStringLiteral("signature_outputs")).toInt(),
-                                     decimal_text(source.value(QStringLiteral("signature_ratio")), 3),
-                                     source.value(QStringLiteral("status")).toString().isEmpty() ?
-                                         QStringLiteral("Accepted DC25 lead") :
-                                         source.value(QStringLiteral("status")).toString(),
-                                     source.value(QStringLiteral("notes")).toString()},
-                        QVariantMap{
-                            {QStringLiteral("type"), QStringLiteral("address")},
-                            {QStringLiteral("id"), current},
-                            {QStringLiteral("address"), current},
-                            {QStringLiteral("legacyP2sh"), legacy},
-                            {QStringLiteral("name"), QStringLiteral("Olo")},
-                            {QStringLiteral("dc25Outputs"), source.value(QStringLiteral("dc25_outputs")).toInt()},
-                            {QStringLiteral("dc25Dfc"), source.value(QStringLiteral("dc25_dfc"))},
-                            {QStringLiteral("signatureOutputs"),
-                             source.value(QStringLiteral("signature_outputs")).toInt()},
-                            {QStringLiteral("signatureRatio"),
-                             source.value(QStringLiteral("signature_ratio")).toDouble()},
-                            {QStringLiteral("evidence"), evidence},
-                            {QStringLiteral("confidence"), QStringLiteral("Accepted DC25 lead")}}));
-                    add_game_address_lead(
-                        QStringLiteral("DC25 Olo lead"),
-                        QStringLiteral("Olo"),
-                        current,
-                        decimal_dfc_text(source.value(QStringLiteral("dc25_dfc")), 4),
-                        84,
-                        QStringLiteral("Accepted DC25 lead"),
-                        evidence,
-                        QVariantMap{{QStringLiteral("source"), QStringLiteral("dc25-olo-image-assisted")},
-                                    {QStringLiteral("legacyP2sh"), legacy}});
-                }
-            } else {
-                dc25_chain_summary.insert(QStringLiteral("dc25ChainForensicsStatus"),
-                                          QStringLiteral("parse error: %1").arg(parse_error.errorString()));
-            }
-        } else {
-            dc25_chain_summary.insert(QStringLiteral("dc25ChainForensicsStatus"),
-                                      QStringLiteral("bundled data unavailable"));
-        }
-    }
-
-    phase_rows.push_back(row_for(
-        QVariantList{
-            QStringLiteral("2014 on-chain response era"),
-            QStringLiteral("2014-08-12"),
-            QStringLiteral("DEF CON 22 launch"),
-            QStringLiteral(
-                "0.01 DFC registration returns and cosmetic battle-response outputs encoded visible game stats."),
-            QStringLiteral("High: vanity response detector")},
-        QVariantMap{{QStringLiteral("phase"), QStringLiteral("2014-response")},
-                    {QStringLiteral("date"), QStringLiteral("2014-08-12")},
-                    {QStringLiteral("sourceUrl"),
-                     QStringLiteral("https://blog.coindroids.com/introducing-coindroids-2014/")}}));
-    phase_rows.push_back(row_for(
-        QVariantList{QStringLiteral("Dust to OP_RETURN / mempool shift"),
-                     QStringLiteral("2017-07-25"),
-                     QStringLiteral("Mempool endpoint and later metadata model"),
-                     QStringLiteral("Early blocks need exact fractional output analysis; later blocks must preserve "
-                                    "OP_RETURN payloads because semantic action data can move out of the DFC amount."),
-                     QStringLiteral("Pivot: amount first, payload later")},
-        QVariantMap{{QStringLiteral("phase"), QStringLiteral("2017-mempool")},
-                    {QStringLiteral("date"), QStringLiteral("2017-07-25")},
-                    {QStringLiteral("sourceUrl"),
-                     QStringLiteral("https://blog.coindroids.com/defcoin-mempool-support-added/")}}));
-    phase_rows.push_back(
-        row_for(QVariantList{QStringLiteral("Purse renamed to Bounty"),
-                             QStringLiteral("2017-08-11"),
-                             QStringLiteral("Terminology / API transition"),
-                             QStringLiteral("Published status showed backend, API, frontend, documentation, and guides "
-                                            "moving at different speeds through the 2017-10-01 update."),
-                             QStringLiteral("Normalize terms, preserve raw labels")},
-                QVariantMap{{QStringLiteral("phase"), QStringLiteral("2017-bounty")},
-                            {QStringLiteral("date"), QStringLiteral("2017-08-11")},
-                            {QStringLiteral("sourceUrl"),
-                             QStringLiteral("https://blog.coindroids.com/upcoming-change-purse-to-bounty/")}}));
-    phase_rows.push_back(row_for(
-        QVariantList{QStringLiteral("docker-droid automation era"),
-                     QStringLiteral("2019-08-18"),
-                     QStringLiteral("DEF CON 27 recap"),
-                     QStringLiteral("Coindroids documented docker-droid, a bootstrapped Defcoin client with bot "
-                                    "tooling, making automation an explicit part of the culture."),
-                     QStringLiteral("Bot/reload candidates are neutral labels")},
-        QVariantMap{
-            {QStringLiteral("phase"), QStringLiteral("2019-automation")},
-            {QStringLiteral("date"), QStringLiteral("2019-08-18")},
-            {QStringLiteral("sourceUrl"), QStringLiteral("https://blog.coindroids.com/coindroids-defcon-27/")}}));
-
-    published_rows.push_back(row_for(
-        QVariantList{QStringLiteral("DEF CON 25 network share"),
-                     QStringLiteral("2017-08-08 recap"),
-                     QStringLiteral("71%"),
-                     QStringLiteral("Published share of all Defcoin network transactions during DEF CON 25.")}));
-    published_rows.push_back(
-        row_for(QVariantList{QStringLiteral("DEF CON 25 attacks"),
-                             QStringLiteral("2017-08-08 recap"),
-                             QStringLiteral("3,233 attacks / 126.664 DFC"),
-                             QStringLiteral("Published action count and attack volume for the Defcoin realm.")}));
-    published_rows.push_back(
-        row_for(QVariantList{QStringLiteral("DEF CON 25 item purchases"),
-                             QStringLiteral("2017-08-08 recap"),
-                             QStringLiteral("521 purchases / 0.803 DFC"),
-                             QStringLiteral("High count, low total value; health packs dominated purchase volume.")}));
-    published_rows.push_back(row_for(QVariantList{
-        QStringLiteral("DEF CON 25 payouts"),
-        QStringLiteral("2017-08-08 recap"),
-        QStringLiteral("227.046 DFC"),
-        QStringLiteral("Published total paid back out to players, including pre-existing bounty/purse value.")}));
-    published_rows.push_back(row_for(QVariantList{
-        QStringLiteral("Published largest payout winner"),
-        QStringLiteral("DEF CON 25"),
-        QStringLiteral("ModemBot1138 - 100.0605 DFC"),
-        QStringLiteral("Operator-published recap value; separate from the local launch-swarm recipient table.")}));
-    published_rows.push_back(row_for(
-        QVariantList{QStringLiteral("Top Droid prize winner"),
-                     QStringLiteral("DEF CON 25"),
-                     QStringLiteral("Bob"),
-                     QStringLiteral("Won by largest final purse/bounty at the cutoff, not by largest total payout.")}));
-    published_rows.push_back(row_for(
-        QVariantList{QStringLiteral("DEF CON 27 network share"),
-                     QStringLiteral("2019-08-18 recap"),
-                     QStringLiteral("74%"),
-                     QStringLiteral("Published share of the Defcoin network in the docker-droid automation era.")}));
-    published_rows.push_back(row_for(QVariantList{
-        QStringLiteral("DEF CON 27 winner"),
-        QStringLiteral("2019-08-18 recap"),
-        QStringLiteral("Ballhair"),
-        QStringLiteral("Published event winner; DETH-MASHENE was an honorable mention and bot-code catalyst.")}));
-
-    add_game_address_lead(
-        QStringLiteral("DC25 QR seed"),
-        QStringLiteral("an0n"),
-        QStringLiteral("MSL4CPocyHsDBwn1qoEzq5ESEusNXyjps5"),
-        QStringLiteral("Human card"),
-        35,
-        QStringLiteral("Seed"),
-        QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the "
-                       "indexed M... address."),
-        QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3L7utWPf2B1nPSW7jvFf1Rz2vDGvVcp2y1")}});
-    add_game_address_lead(
-        QStringLiteral("DC25 QR seed"),
-        QStringLiteral("jklol_b0t"),
-        QStringLiteral("MMvkAH6WRx2QCDyMCaqTUNcY2bbfB8oakY"),
-        QStringLiteral("Human card"),
-        35,
-        QStringLiteral("Seed"),
-        QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the "
-                       "indexed M... address."),
-        QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3FibrPgYUqAyPihT6hr7ejN8hu1DEvYDT1")}});
-    add_game_address_lead(
-        QStringLiteral("DC25 QR seed"),
-        QStringLiteral("Ax0n"),
-        QStringLiteral("MHscJrLV2LbobKNfRgFNZywKcFLfyaMtMH"),
-        QStringLiteral("Human card"),
-        35,
-        QStringLiteral("Seed"),
-        QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the "
-                       "indexed M... address."),
-        QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3BfTzxvX5DkNnp6mKoG2kLgvHYkE2Mec8T")}});
-    add_game_address_lead(
-        QStringLiteral("DC25 QR seed"),
-        QStringLiteral("xan"),
-        QStringLiteral("MCMWstrBmosLWiS9Em4hV5jYviBFaKvrrg"),
-        QStringLiteral("Human card"),
-        35,
-        QStringLiteral("Seed"),
-        QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the "
-                       "indexed M... address."),
-        QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("369Na1SDph1uiDAF8t5MfSV9c1aobbdt3Q")}});
-    add_game_address_lead(
-        QStringLiteral("DC25 QR seed"),
-        QStringLiteral("Def-crunch"),
-        QStringLiteral("MTeggkYKzmwts4tuGfMRZQx7Rk842gcKsL"),
-        QStringLiteral("Human card"),
-        35,
-        QStringLiteral("Seed"),
-        QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the "
-                       "indexed M... address."),
-        QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3MSYNs8N3f6U4Zd1AnN5jmhi73Xc52etzd")}});
-    add_game_address_lead(
-        QStringLiteral("DC25 QR seed"),
-        QStringLiteral("nekodroid"),
-        QStringLiteral("MLcZtx8smqFWJ83PKh5XJ19KBbjWHGZaoP"),
-        QStringLiteral("Human card"),
-        35,
-        QStringLiteral("Seed"),
-        QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the "
-                       "indexed M... address."),
-        QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3EQRb4iupiQ5VcmVDp6BUMturu94Me87us")}});
-    add_game_address_lead(
-        QStringLiteral("DC25 QR seed"),
-        QStringLiteral("Slick-Willy1"),
-        QStringLiteral("MJNT1e2PviEyxYytTE8zRciMResD4RHiUL"),
-        QStringLiteral("Human card"),
-        35,
-        QStringLiteral("Seed"),
-        QStringLiteral("Decoded from the public DC25 Human droid card image; legacy 3... P2SH form converted to the "
-                       "indexed M... address."),
-        QVariantMap{{QStringLiteral("legacyP2sh"), QStringLiteral("3CAJhkcRybPZA3hzMM9ebyTx6xGm3fG67Z")}});
-
-    auto classify_endpoint = [](qint64 value_sats, int outputs) {
-        if (value_sats == 1000000) {
-            return outputs >= 50 ? QStringLiteral("0.01 DFC action hub") : QStringLiteral("0.01 DFC action candidate");
-        }
-        if (value_sats == 13370000)
-            return QStringLiteral("0.1337 DFC payout/spillage recipient");
-        if (value_sats == 100000000)
-            return QStringLiteral("1.00 DFC battle/purse endpoint");
-        if (value_sats == 23000000 || value_sats == 46000000)
-            return QStringLiteral("repeated item/action amount");
-        return QStringLiteral("action-range endpoint");
-    };
-
-    const QString windows_cte = QString::fromLatin1(R"SQL(
-WITH windows(label,short_label,start_h,end_h,sort_order) AS (
-  VALUES
-    ('DEF CON 22 launch [Rio Hotel & Casino]','DC22',109943,111441,1),
-    ('DEF CON 23 [Paris Hotel and Bally''s Hotel]','DC23',299028,301643,2),
-    ('DEF CON 24 [Paris Hotel and Bally''s Hotel]','DC24',538696,541310,3),
-    ('DEF CON 25 return [Caesars Palace]','DC25',736611,739117,4),
-    ('DEF CON 26 return [Caesars Palace]','DC26',901949,904119,5),
-    ('DEF CON 27 return [Paris, Ballys, Flamingo & Planet Hollywood hotels]','DC27',1115166,1117682,6),
-    ('DEF CON 28 Safe Mode [Virtual Event]','DC28',1281336,1282012,7)
-)
-)SQL");
-
-    QString local_error;
-    qint64 total_action_outputs = 0;
-    qint64 total_action_txs = 0;
-    qint64 total_action_addresses = 0;
-    qint64 total_action_sats = 0;
-    qint64 launch_001_outputs = 0;
-    qint64 launch_1337_outputs = 0;
-    qint64 launch_1337_sats = 0;
-    qint64 launch_1337_recipients = 0;
-    QString largest_winner_address;
-    qint64 largest_winner_sats = 0;
-    int largest_winner_ties = 0;
-    QString strongest_window_label;
-    qint64 strongest_window_sats = 0;
-    qint64 strongest_window_outputs = 0;
-
-    const QString connection_name = QStringLiteral("nu_coindroids_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
-        db.setDatabaseName(explorerDatabasePath());
-        if (!db.open()) {
-            local_error = db.lastError().text();
-        } else {
-            QSqlQuery pragma(db);
-            pragma.exec(QStringLiteral("PRAGMA query_only=ON"));
-            pragma.exec(QStringLiteral("PRAGMA temp_store=MEMORY"));
-
-            QSqlQuery window_query(db);
-            if (!window_query.exec(windows_cte + QString::fromLatin1(R"SQL(
-, rows AS (
-  SELECT w.label,w.short_label,w.start_h,w.end_h,w.sort_order,o.txid,o.address,o.value_sats
-  FROM windows w
-  JOIN explorer_tx_outputs o ON o.block_height BETWEEN w.start_h AND w.end_h AND o.address != ''
-), action_range AS (
-  SELECT label,short_label,sort_order,start_h,end_h,COUNT(*) outputs,COUNT(DISTINCT txid) txs,
-         COUNT(DISTINCT address) addresses,COALESCE(SUM(value_sats),0) sats
-  FROM rows
-  WHERE value_sats BETWEEN 100000 AND 314159265
-  GROUP BY label,short_label,sort_order,start_h,end_h
-), exact001 AS (
-  SELECT label,COUNT(*) outputs,COUNT(DISTINCT address) addresses
-  FROM rows WHERE value_sats=1000000 GROUP BY label
-), exact1337 AS (
-  SELECT label,COUNT(*) outputs,COUNT(DISTINCT address) addresses,COALESCE(SUM(value_sats),0) sats
-  FROM rows WHERE value_sats=13370000 GROUP BY label
-)
-SELECT w.label,w.short_label,w.start_h,w.end_h,COALESCE(sb.time,0),COALESCE(eb.time,0),
-       COALESCE(a.outputs,0),COALESCE(a.txs,0),COALESCE(a.addresses,0),COALESCE(a.sats,0),
-       COALESCE(e.outputs,0),COALESCE(e.addresses,0),
-       COALESCE(s.outputs,0),COALESCE(s.addresses,0),COALESCE(s.sats,0)
-FROM windows w
-LEFT JOIN action_range a ON a.label=w.label
-LEFT JOIN exact001 e ON e.label=w.label
-LEFT JOIN exact1337 s ON s.label=w.label
-LEFT JOIN explorer_blocks sb ON sb.height=w.start_h
-LEFT JOIN explorer_blocks eb ON eb.height=w.end_h
-ORDER BY w.sort_order
-)SQL"))) {
-                local_error = window_query.lastError().text();
-            } else {
-                while (window_query.next()) {
-                    const QString label = window_query.value(0).toString();
-                    const QString short_label = window_query.value(1).toString();
-                    const int start_height = window_query.value(2).toInt();
-                    const int end_height = window_query.value(3).toInt();
-                    const qint64 start_time = window_query.value(4).toLongLong();
-                    const qint64 end_time = window_query.value(5).toLongLong();
-                    const qint64 action_outputs = window_query.value(6).toLongLong();
-                    const qint64 action_txs = window_query.value(7).toLongLong();
-                    const qint64 action_addresses = window_query.value(8).toLongLong();
-                    const qint64 action_sats = window_query.value(9).toLongLong();
-                    const qint64 exact001_outputs = window_query.value(10).toLongLong();
-                    const qint64 exact001_addresses = window_query.value(11).toLongLong();
-                    const qint64 exact1337_outputs = window_query.value(12).toLongLong();
-                    const qint64 exact1337_addresses = window_query.value(13).toLongLong();
-                    const qint64 exact1337_sats = window_query.value(14).toLongLong();
-                    const QString date_range = explorerDateRangeText(start_time, end_time);
-                    total_action_outputs += action_outputs;
-                    total_action_txs += action_txs;
-                    total_action_addresses += action_addresses;
-                    total_action_sats += action_sats;
-                    if (short_label == QLatin1String("DC22")) {
-                        launch_001_outputs = exact001_outputs;
-                        launch_1337_outputs = exact1337_outputs;
-                        launch_1337_sats = exact1337_sats;
-                        launch_1337_recipients = exact1337_addresses;
-                    }
-                    if (action_sats > strongest_window_sats) {
-                        strongest_window_sats = action_sats;
-                        strongest_window_outputs = action_outputs;
-                        strongest_window_label = label;
-                    }
-                    const QString signal = exact1337_outputs > 0 ?
-                                               QStringLiteral("strong payout swarm") :
-                                               (exact001_outputs >= 40 ? QStringLiteral("0.01 action cluster") :
-                                                                         QStringLiteral("background candidates"));
-                    window_rows.push_back(row_for(
-                        QVariantList{
-                            label,
-                            QStringLiteral("%1-%2").arg(QString::number(start_height), QString::number(end_height)),
-                            date_range,
-                            QVariant::fromValue<qlonglong>(action_outputs),
-                            QVariant::fromValue<qlonglong>(action_txs),
-                            QVariant::fromValue<qlonglong>(action_addresses),
-                            roundedExplorerAmountText(action_sats),
-                            QVariant::fromValue<qlonglong>(exact001_outputs),
-                            QVariant::fromValue<qlonglong>(exact1337_outputs),
-                            signal},
-                        QVariantMap{
-                            {QStringLiteral("label"), label},
-                            {QStringLiteral("shortLabel"), short_label},
-                            {QStringLiteral("startHeight"), start_height},
-                            {QStringLiteral("endHeight"), end_height},
-                            {QStringLiteral("startTime"), QVariant::fromValue<qlonglong>(start_time)},
-                            {QStringLiteral("endTime"), QVariant::fromValue<qlonglong>(end_time)},
-                            {QStringLiteral("dateRange"), date_range},
-                            {QStringLiteral("actionOutputs"), QVariant::fromValue<qlonglong>(action_outputs)},
-                            {QStringLiteral("actionTransactions"), QVariant::fromValue<qlonglong>(action_txs)},
-                            {QStringLiteral("actionAddresses"), QVariant::fromValue<qlonglong>(action_addresses)},
-                            {QStringLiteral("actionSats"), QVariant::fromValue<qlonglong>(action_sats)},
-                            {QStringLiteral("exact001Outputs"), QVariant::fromValue<qlonglong>(exact001_outputs)},
-                            {QStringLiteral("exact001Addresses"), QVariant::fromValue<qlonglong>(exact001_addresses)},
-                            {QStringLiteral("exact1337Outputs"), QVariant::fromValue<qlonglong>(exact1337_outputs)},
-                            {QStringLiteral("exact1337Addresses"), QVariant::fromValue<qlonglong>(exact1337_addresses)},
-                            {QStringLiteral("exact1337Sats"), QVariant::fromValue<qlonglong>(exact1337_sats)}}));
-                }
-            }
-
-            if (local_error.isEmpty()) {
-                QSqlQuery endpoint_query(db);
-                if (!endpoint_query.exec(windows_cte + QString::fromLatin1(R"SQL(
-, endpoint_hits AS (
-  SELECT w.label,w.sort_order,o.address,o.value_sats,COUNT(*) outputs,COUNT(DISTINCT o.txid) txs,
-         MIN(o.block_height) first_h,MAX(o.block_height) last_h,COALESCE(SUM(o.value_sats),0) sats
-  FROM windows w
-  JOIN explorer_tx_outputs o ON o.block_height BETWEEN w.start_h AND w.end_h AND o.address != ''
-  WHERE o.value_sats BETWEEN 100000 AND 314159265
-  GROUP BY w.label,w.sort_order,o.address,o.value_sats
-)
-SELECT label,address,value_sats,outputs,txs,sats,first_h,last_h
-FROM endpoint_hits
-WHERE outputs >= 25 OR (sort_order=1 AND value_sats IN (1000000,13370000,23000000,46000000,100000000) AND outputs >= 5)
-ORDER BY sort_order,outputs DESC,sats DESC,address ASC
-LIMIT 200
-)SQL"))) {
-                    local_error = endpoint_query.lastError().text();
-                } else {
-                    while (endpoint_query.next()) {
-                        const QString label = endpoint_query.value(0).toString();
-                        const QString address = endpoint_query.value(1).toString();
-                        const qint64 value_sats = endpoint_query.value(2).toLongLong();
-                        const int outputs = endpoint_query.value(3).toInt();
-                        const int txs = endpoint_query.value(4).toInt();
-                        const qint64 sats = endpoint_query.value(5).toLongLong();
-                        const int first_height = endpoint_query.value(6).toInt();
-                        const int last_height = endpoint_query.value(7).toInt();
-                        const QString kind = classify_endpoint(value_sats, outputs);
-                        endpoint_rows.push_back(row_for(
-                            QVariantList{kind,
-                                         label,
-                                         address,
-                                         roundedExplorerAmountText(value_sats),
-                                         outputs,
-                                         txs,
-                                         roundedExplorerAmountText(sats),
-                                         QStringLiteral("%1-%2").arg(QString::number(first_height),
-                                                                     QString::number(last_height))},
-                            QVariantMap{{QStringLiteral("type"), QStringLiteral("address")},
-                                        {QStringLiteral("id"), address},
-                                        {QStringLiteral("kind"), kind},
-                                        {QStringLiteral("label"), label},
-                                        {QStringLiteral("address"), address},
-                                        {QStringLiteral("valueSats"), QVariant::fromValue<qlonglong>(value_sats)},
-                                        {QStringLiteral("outputs"), outputs},
-                                        {QStringLiteral("transactions"), txs},
-                                        {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)},
-                                        {QStringLiteral("firstHeight"), first_height},
-                                        {QStringLiteral("lastHeight"), last_height}}));
-                        if ((outputs >= 100 || txs >= 50) && bot_rows.size() < 100) {
-                            bot_rows.push_back(row_for(
-                                QVariantList{QStringLiteral("Repeated endpoint / cadence candidate"),
-                                             address,
-                                             label,
-                                             roundedExplorerAmountText(value_sats),
-                                             outputs,
-                                             txs,
-                                             roundedExplorerAmountText(sats),
-                                             QStringLiteral("Same address and amount repeated across %1 blocks; could "
-                                                            "be attack target, item endpoint, or scripted play.")
-                                                 .arg(QString::number(std::max(1, last_height - first_height + 1)))},
-                                QVariantMap{{QStringLiteral("type"), QStringLiteral("address")},
-                                            {QStringLiteral("id"), address},
-                                            {QStringLiteral("address"), address},
-                                            {QStringLiteral("label"), label},
-                                            {QStringLiteral("signal"), QStringLiteral("repeated-endpoint")},
-                                            {QStringLiteral("valueSats"), QVariant::fromValue<qlonglong>(value_sats)},
-                                            {QStringLiteral("outputs"), outputs},
-                                            {QStringLiteral("transactions"), txs},
-                                            {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)},
-                                            {QStringLiteral("firstHeight"), first_height},
-                                            {QStringLiteral("lastHeight"), last_height}}));
-                        }
-                    }
-                }
-            }
-
-            if (local_error.isEmpty()) {
-                QSqlQuery vanity_query(db);
-                if (!vanity_query.exec(QString::fromLatin1(R"SQL(
-WITH vanity(address,role,sort_order) AS (
-  VALUES
-    ('DAtkLvJg7ZoECzqhnv6yRLETsH3PTfoW1E','Atk level',1),
-    ('DAtkHPuBm9TmAK3HGmz3LJaSgCSzjcemKY','Atk HP',2),
-    ('DDfndLvCygu9jyv9eKF1tUQcAok5uMwoC2','Def level',3),
-    ('DDfndHPWv9k3m2btAat9GQa74VUeQfaRui','Def HP',4),
-    ('DAMAGEYxp2xwJkginsmiRvhQ8Jesu6dpKU','Damage',5),
-    ('DCDAMGTzeNNLD8Gn5q9Ghdc3F1uyp21d8Z','Counter',6)
-), hits AS (
-  SELECT o.txid,o.block_height,b.time,v.role,v.sort_order,o.value_sats,o.value_text
-  FROM explorer_tx_outputs o
-  JOIN vanity v ON v.address=o.address
-  LEFT JOIN explorer_blocks b ON b.height=o.block_height
-)
-SELECT txid,block_height,COALESCE(time,0),COUNT(DISTINCT role) roles,
-       COUNT(*) outputs,COALESCE(SUM(value_sats),0) stat_sats,
-       GROUP_CONCAT(role || '=' || value_sats, ' | ') decoded
-FROM hits
-GROUP BY txid,block_height,time
-HAVING COUNT(DISTINCT role) >= 3
-ORDER BY block_height ASC, roles DESC, outputs DESC
-LIMIT 100
-)SQL"))) {
-                    local_error = vanity_query.lastError().text();
-                } else {
-                    while (vanity_query.next()) {
-                        const QString txid = vanity_query.value(0).toString();
-                        const int height = vanity_query.value(1).toInt();
-                        const qint64 time = vanity_query.value(2).toLongLong();
-                        const int roles = vanity_query.value(3).toInt();
-                        const int outputs = vanity_query.value(4).toInt();
-                        const qint64 stat_sats = vanity_query.value(5).toLongLong();
-                        const QString decoded = vanity_query.value(6).toString();
-                        const QString timestamp = time > 0 ? QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(
-                                                                 QStringLiteral("yyyy-MM-dd HH:mm:ss t")) :
-                                                             QStringLiteral("date unavailable");
-                        vanity_rows.push_back(row_for(
-                            QVariantList{
-                                txid, height, timestamp, roles, outputs, decoded, roundedExplorerAmountText(stat_sats)},
-                            QVariantMap{{QStringLiteral("type"), QStringLiteral("transaction")},
-                                        {QStringLiteral("id"), txid},
-                                        {QStringLiteral("txid"), txid},
-                                        {QStringLiteral("height"), height},
-                                        {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
-                                        {QStringLiteral("roles"), roles},
-                                        {QStringLiteral("outputs"), outputs},
-                                        {QStringLiteral("statSats"), QVariant::fromValue<qlonglong>(stat_sats)},
-                                        {QStringLiteral("decoded"), decoded}}));
-                    }
-                }
-            }
-
-            if (local_error.isEmpty()) {
-                QSqlQuery fanout_query(db);
-                if (!fanout_query.exec(windows_cte + QString::fromLatin1(R"SQL(
-, fanout_hits AS (
-  SELECT w.label,o.txid,o.block_height,COALESCE(b.time,0) time,o.value_sats,
-       COUNT(*) outputs,COUNT(DISTINCT o.address) addresses,COALESCE(SUM(o.value_sats),0) sats
-  FROM windows w
-  JOIN explorer_tx_outputs o ON o.block_height BETWEEN w.start_h AND w.end_h
-  LEFT JOIN explorer_blocks b ON b.height=o.block_height
-  WHERE o.address != '' AND o.value_sats BETWEEN 1 AND 314159265
-  GROUP BY w.label,o.txid,o.block_height,b.time,o.value_sats
-  HAVING outputs >= 25 AND addresses >= 10
-)
-SELECT label,txid,block_height,time,value_sats,outputs,addresses,sats
-FROM fanout_hits
-ORDER BY outputs DESC,sats DESC,block_height ASC
-LIMIT 120
-)SQL"))) {
-                    local_error = fanout_query.lastError().text();
-                } else {
-                    while (fanout_query.next() && bot_rows.size() < 180) {
-                        const QString label = fanout_query.value(0).toString();
-                        const QString txid = fanout_query.value(1).toString();
-                        const int height = fanout_query.value(2).toInt();
-                        const qint64 time = fanout_query.value(3).toLongLong();
-                        const qint64 value_sats = fanout_query.value(4).toLongLong();
-                        const int outputs = fanout_query.value(5).toInt();
-                        const int addresses = fanout_query.value(6).toInt();
-                        const qint64 sats = fanout_query.value(7).toLongLong();
-                        const QString timestamp = time > 0 ? QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(
-                                                                 QStringLiteral("yyyy-MM-dd HH:mm:ss t")) :
-                                                             QStringLiteral("date unavailable");
-                        bot_rows.push_back(row_for(
-                            QVariantList{QStringLiteral("Fan-out / reload candidate"),
-                                         txid,
-                                         QStringLiteral("%1 block %2").arg(label, QString::number(height)),
-                                         roundedExplorerAmountText(value_sats),
-                                         outputs,
-                                         addresses,
-                                         roundedExplorerAmountText(sats),
-                                         QStringLiteral("%1 identical outputs in one transaction on %2.")
-                                             .arg(QString::number(outputs), timestamp)},
-                            QVariantMap{{QStringLiteral("type"), QStringLiteral("transaction")},
-                                        {QStringLiteral("id"), txid},
-                                        {QStringLiteral("txid"), txid},
-                                        {QStringLiteral("height"), height},
-                                        {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
-                                        {QStringLiteral("signal"), QStringLiteral("fanout-reload")},
-                                        {QStringLiteral("valueSats"), QVariant::fromValue<qlonglong>(value_sats)},
-                                        {QStringLiteral("outputs"), outputs},
-                                        {QStringLiteral("addresses"), addresses},
-                                        {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)}}));
-                    }
-                }
-            }
-
-            if (local_error.isEmpty()) {
-                QSqlQuery op_return_query(db);
-                if (!op_return_query.exec(QString::fromLatin1(R"SQL(
-WITH windows(label,start_h,end_h,sort_order) AS (
-  VALUES
-    ('Post-pivot sample',736611,1117682,1),
-    ('DEF CON 25 return [Caesars Palace]',736611,739117,2),
-    ('DEF CON 26 return [Caesars Palace]',901949,904119,3),
-    ('DEF CON 27 return [Paris, Ballys, Flamingo & Planet Hollywood hotels]',1115166,1117682,4)
-)
-SELECT o.txid,o.vout,o.block_height,COALESCE(b.time,0),w.label,o.value_sats,
-       o.payload_hex,o.payload_text,LENGTH(o.payload_hex)/2 AS payload_bytes
-FROM explorer_op_returns o
-LEFT JOIN explorer_blocks b ON b.height=o.block_height
-LEFT JOIN windows w ON o.block_height BETWEEN w.start_h AND w.end_h
-WHERE o.block_height >= 736611
-ORDER BY o.block_height ASC,o.txid ASC,o.vout ASC
-LIMIT 160
-)SQL"))) {
-                    local_error = op_return_query.lastError().text();
-                } else {
-                    while (op_return_query.next()) {
-                        const QString txid = op_return_query.value(0).toString();
-                        const int vout = op_return_query.value(1).toInt();
-                        const int height = op_return_query.value(2).toInt();
-                        const qint64 time = op_return_query.value(3).toLongLong();
-                        const QString label = op_return_query.value(4).toString().trimmed().isEmpty() ?
-                                                  QStringLiteral("Post-pivot") :
-                                                  op_return_query.value(4).toString();
-                        const qint64 value_sats = op_return_query.value(5).toLongLong();
-                        const QString payload_hex = op_return_query.value(6).toString();
-                        const QString payload_text = op_return_query.value(7).toString();
-                        const int payload_bytes = op_return_query.value(8).toInt();
-                        const QString timestamp = time > 0 ? QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(
-                                                                 QStringLiteral("yyyy-MM-dd HH:mm:ss t")) :
-                                                             QStringLiteral("date unavailable");
-                        const QString preview =
-                            payload_text.isEmpty() ? QStringLiteral("hex ") + payload_hex.left(96) : payload_text;
-                        op_return_rows.push_back(row_for(
-                            QVariantList{txid,
-                                         vout,
-                                         height,
-                                         timestamp,
-                                         label,
-                                         payload_bytes,
-                                         roundedExplorerAmountText(value_sats),
-                                         preview},
-                            QVariantMap{{QStringLiteral("type"), QStringLiteral("transaction")},
-                                        {QStringLiteral("id"), txid},
-                                        {QStringLiteral("txid"), txid},
-                                        {QStringLiteral("vout"), vout},
-                                        {QStringLiteral("height"), height},
-                                        {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
-                                        {QStringLiteral("label"), label},
-                                        {QStringLiteral("payloadBytes"), payload_bytes},
-                                        {QStringLiteral("valueSats"), QVariant::fromValue<qlonglong>(value_sats)},
-                                        {QStringLiteral("payloadHex"), payload_hex},
-                                        {QStringLiteral("payloadText"), payload_text}}));
-                    }
-                }
-            }
-
-            if (local_error.isEmpty()) {
-                QSqlQuery payout_query(db);
-                if (!payout_query.exec(QString::fromLatin1(R"SQL(
-WITH targets(name,target_sats,published_dfc,sort_order) AS (
-  VALUES
-    ('ModemBot1138',10006050000,'100.0605 DFC',1),
-    ('LuckyBot',6011600000,'60.116 DFC',2),
-    ('xan',1166000000,'11.660 DFC',3),
-    ('DETH-MASHENE',781800000,'7.818 DFC',4),
-    ('BadIdea',499900000,'4.999 DFC',5),
-    ('Luca-B0T',452600000,'4.526 DFC',6),
-    ('Droidazon_Prime',354300000,'3.543 DFC',7),
-    ('Nesa',304100000,'3.041 DFC',8),
-    ('Mabuhay',270900000,'2.709 DFC',9),
-    ('Satya',231200000,'2.312 DFC',10),
-    ('BldyFrg',165500000,'1.655 DFC',11),
-    ('10u_b07',157700000,'1.577 DFC',12),
-    ('FUBrandon',117400000,'1.174 DFC',13),
-    ('bob',101400000,'1.014 DFC',14)
-), active AS (
-  SELECT address
-  FROM explorer_tx_outputs
-  WHERE block_height BETWEEN 736611 AND 739756 AND address != ''
-  UNION
-  SELECT address
-  FROM explorer_balance_deltas
-  WHERE height BETWEEN 736611 AND 739756 AND address != ''
-), ordered AS (
-  SELECT d.address,d.height,d.delta_sats
-  FROM explorer_balance_deltas d
-  JOIN active a ON a.address=d.address
-  WHERE d.height <= 739756
-), balances AS (
-  SELECT address,height,
-         SUM(delta_sats) OVER (
-           PARTITION BY address ORDER BY height
-           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-         ) AS balance_sats
-  FROM ordered
-), candidate_balances AS (
-  SELECT t.name,t.target_sats,t.published_dfc,t.sort_order,b.address,b.height,b.balance_sats,
-         ABS(b.balance_sats - t.target_sats) AS diff_sats
-  FROM balances b
-  JOIN targets t
-  WHERE b.height BETWEEN 736611 AND 739756
-    AND ABS(b.balance_sats - t.target_sats) <= 500000
-), per_address_best AS (
-  SELECT *,
-         ROW_NUMBER() OVER (
-           PARTITION BY name,address
-           ORDER BY diff_sats ASC,height DESC
-         ) AS address_rank
-  FROM candidate_balances
-), address_stats AS (
-  SELECT address,
-         COUNT(*) AS outputs,
-         COUNT(DISTINCT txid) AS txs,
-         COALESCE(SUM(value_sats),0) AS incoming_sats,
-         MIN(block_height) AS first_h,
-         MAX(block_height) AS last_h,
-         SUM(CASE WHEN value_sats BETWEEN 100000 AND 314159265 THEN 1 ELSE 0 END) AS action_outputs
-  FROM explorer_tx_outputs
-  WHERE block_height BETWEEN 736611 AND 739756 AND address != ''
-  GROUP BY address
-), direct_hits AS (
-  SELECT o.address,t.target_sats,COUNT(*) AS direct_outputs,MIN(o.block_height) AS direct_first_h,
-         GROUP_CONCAT(SUBSTR(o.txid,1,12), ' ') AS tx_preview
-  FROM explorer_tx_outputs o
-  JOIN targets t ON t.target_sats=o.value_sats
-  WHERE o.block_height BETWEEN 736611 AND 739756 AND o.address != ''
-  GROUP BY o.address,t.target_sats
-), exact_counts AS (
-  SELECT name,COUNT(DISTINCT address) AS exact_candidates
-  FROM per_address_best
-  WHERE address_rank=1 AND diff_sats=0
-  GROUP BY name
-), ranked AS (
-  SELECT b.name,b.target_sats,b.published_dfc,b.sort_order,b.address,b.height,b.balance_sats,b.diff_sats,
-         COALESCE(s.outputs,0) AS outputs,
-         COALESCE(s.txs,0) AS txs,
-         COALESCE(s.incoming_sats,0) AS incoming_sats,
-         COALESCE(s.first_h,0) AS first_h,
-         COALESCE(s.last_h,0) AS last_h,
-         COALESCE(s.action_outputs,0) AS action_outputs,
-         COALESCE(d.direct_outputs,0) AS direct_outputs,
-         COALESCE(d.direct_first_h,0) AS direct_first_h,
-         COALESCE(d.tx_preview,'') AS tx_preview,
-         COALESCE(e.exact_candidates,0) AS exact_candidates,
-         ROW_NUMBER() OVER (
-           PARTITION BY b.name
-           ORDER BY b.diff_sats ASC,COALESCE(s.action_outputs,0) DESC,COALESCE(s.outputs,0) DESC,b.height DESC,b.address ASC
-         ) AS target_rank
-  FROM per_address_best b
-  LEFT JOIN address_stats s ON s.address=b.address
-  LEFT JOIN direct_hits d ON d.address=b.address AND d.target_sats=b.target_sats
-  LEFT JOIN exact_counts e ON e.name=b.name
-  WHERE b.address_rank=1
-)
-SELECT r.name,r.published_dfc,r.target_sats,r.address,r.height,COALESCE(bl.time,0),
-       r.balance_sats,r.diff_sats,r.outputs,r.txs,r.incoming_sats,r.first_h,r.last_h,
-       r.action_outputs,r.direct_outputs,r.direct_first_h,r.tx_preview,r.exact_candidates,r.target_rank
-FROM ranked r
-LEFT JOIN explorer_blocks bl ON bl.height=r.height
-WHERE r.target_rank <= 8 OR r.diff_sats=0
-ORDER BY r.sort_order,r.target_rank,r.address
-)SQL"))) {
-                    local_error = payout_query.lastError().text();
-                } else {
-                    while (payout_query.next()) {
-                        const QString name = payout_query.value(0).toString();
-                        const QString published = payout_query.value(1).toString();
-                        const qint64 target_sats = payout_query.value(2).toLongLong();
-                        const QString address = payout_query.value(3).toString();
-                        const int height = payout_query.value(4).toInt();
-                        const qint64 time = payout_query.value(5).toLongLong();
-                        const qint64 balance_sats = payout_query.value(6).toLongLong();
-                        const qint64 diff_sats = payout_query.value(7).toLongLong();
-                        const int outputs = payout_query.value(8).toInt();
-                        const int txs = payout_query.value(9).toInt();
-                        const qint64 incoming_sats = payout_query.value(10).toLongLong();
-                        const int first_height = payout_query.value(11).toInt();
-                        const int last_height = payout_query.value(12).toInt();
-                        const int action_outputs = payout_query.value(13).toInt();
-                        const int direct_outputs = payout_query.value(14).toInt();
-                        const int direct_first_height = payout_query.value(15).toInt();
-                        const QString tx_preview = payout_query.value(16).toString();
-                        const int exact_candidates = payout_query.value(17).toInt();
-                        const int target_rank = payout_query.value(18).toInt();
-                        int score = diff_sats == 0 ? 70 : std::max(20, 62 - static_cast<int>(diff_sats / 10000));
-                        if (direct_outputs > 0)
-                            score += 12;
-                        if (action_outputs >= 25)
-                            score += 12;
-                        else if (action_outputs >= 5)
-                            score += 6;
-                        if (outputs >= 5)
-                            score += 4;
-                        score = std::min(score, 99);
-                        const QString confidence =
-                            diff_sats == 0 ?
-                                (exact_candidates > 1 ? QStringLiteral("Ambiguous") : QStringLiteral("High")) :
-                                (diff_sats <= 10000 ? QStringLiteral("Medium") : QStringLiteral("Low"));
-                        const QString match_type = diff_sats == 0 ? QStringLiteral("point_balance_exact") :
-                                                                    QStringLiteral("point_balance_near");
-                        const QString timestamp = time > 0 ? QDateTime::fromSecsSinceEpoch(time).toLocalTime().toString(
-                                                                 QStringLiteral("yyyy-MM-dd HH:mm:ss t")) :
-                                                             QStringLiteral("date unavailable");
-                        QStringList evidence;
-                        evidence.push_back(
-                            diff_sats == 0 ? QStringLiteral("historical balance exactly reached the published amount") :
-                                             QStringLiteral("historical balance came within %1 of the published amount")
-                                                 .arg(explorerAmountText(diff_sats)));
-                        if (direct_outputs > 0) {
-                            evidence.push_back(QStringLiteral("%1 exact payout-size output%2 in settlement window")
-                                                   .arg(QString::number(direct_outputs),
-                                                        direct_outputs == 1 ? QString() : QStringLiteral("s")));
-                        }
-                        if (action_outputs > 0) {
-                            evidence.push_back(QStringLiteral("%1 action-range output%2 in DC25 window")
-                                                   .arg(QString::number(action_outputs),
-                                                        action_outputs == 1 ? QString() : QStringLiteral("s")));
-                        }
-                        if (exact_candidates > 1 && diff_sats == 0) {
-                            evidence.push_back(
-                                QStringLiteral("%1 exact amount-matched addresses; identity remains unresolved")
-                                    .arg(QString::number(exact_candidates)));
-                        }
-                        payout_rows.push_back(row_for(
-                            QVariantList{name,
-                                         published,
-                                         address,
-                                         explorerAmountText(balance_sats),
-                                         QStringLiteral("%1 / %2").arg(QString::number(height), timestamp),
-                                         diff_sats == 0 ? QStringLiteral("exact") : explorerAmountText(diff_sats),
-                                         confidence,
-                                         evidence.join(QStringLiteral("; "))},
-                            QVariantMap{{QStringLiteral("type"), QStringLiteral("address")},
-                                        {QStringLiteral("id"), address},
-                                        {QStringLiteral("address"), address},
-                                        {QStringLiteral("droidName"), name},
-                                        {QStringLiteral("published"), published},
-                                        {QStringLiteral("targetSats"), QVariant::fromValue<qlonglong>(target_sats)},
-                                        {QStringLiteral("balanceSats"), QVariant::fromValue<qlonglong>(balance_sats)},
-                                        {QStringLiteral("differenceSats"), QVariant::fromValue<qlonglong>(diff_sats)},
-                                        {QStringLiteral("height"), height},
-                                        {QStringLiteral("time"), QVariant::fromValue<qlonglong>(time)},
-                                        {QStringLiteral("outputs"), outputs},
-                                        {QStringLiteral("transactions"), txs},
-                                        {QStringLiteral("incomingSats"), QVariant::fromValue<qlonglong>(incoming_sats)},
-                                        {QStringLiteral("firstHeight"), first_height},
-                                        {QStringLiteral("lastHeight"), last_height},
-                                        {QStringLiteral("actionOutputs"), action_outputs},
-                                        {QStringLiteral("directOutputs"), direct_outputs},
-                                        {QStringLiteral("directFirstHeight"), direct_first_height},
-                                        {QStringLiteral("txPreview"), tx_preview},
-                                        {QStringLiteral("exactCandidates"), exact_candidates},
-                                        {QStringLiteral("targetRank"), target_rank},
-                                        {QStringLiteral("score"), score},
-                                        {QStringLiteral("confidence"), confidence},
-                                        {QStringLiteral("matchType"), match_type}}));
-                        if (confidence != QLatin1String("Low") || action_outputs >= 25 || direct_outputs > 0) {
-                            add_game_address_lead(
-                                QStringLiteral("DC25 payout lead"),
-                                name,
-                                address,
-                                explorerAmountText(balance_sats),
-                                score,
-                                confidence,
-                                evidence.join(QStringLiteral("; ")),
-                                QVariantMap{
-                                    {QStringLiteral("source"), QStringLiteral("dc25-payout-hunt")},
-                                    {QStringLiteral("droidName"), name},
-                                    {QStringLiteral("height"), height},
-                                    {QStringLiteral("targetSats"), QVariant::fromValue<qlonglong>(target_sats)},
-                                    {QStringLiteral("balanceSats"), QVariant::fromValue<qlonglong>(balance_sats)},
-                                    {QStringLiteral("differenceSats"), QVariant::fromValue<qlonglong>(diff_sats)}});
-                        }
-                    }
-                }
-            }
-
-            if (local_error.isEmpty()) {
-                QSqlQuery game_lead_query(db);
-                if (!game_lead_query.exec(QString::fromLatin1(R"SQL(
-SELECT address,
-       COUNT(*) AS outputs,
-       COUNT(DISTINCT txid) AS txs,
-       COALESCE(SUM(value_sats),0) AS sats,
-       MIN(block_height) AS first_h,
-       MAX(block_height) AS last_h,
-       SUM(CASE WHEN value_sats BETWEEN 100000 AND 314159265 THEN 1 ELSE 0 END) AS action_outputs,
-       SUM(CASE WHEN value_sats=1000000 THEN 1 ELSE 0 END) AS exact001_outputs,
-       SUM(CASE WHEN value_sats IN (1620000,3210000,1190000,2524000,540000) THEN 1 ELSE 0 END) AS repeated_amount_outputs
-FROM explorer_tx_outputs
-WHERE block_height BETWEEN 736611 AND 739756 AND address != ''
-GROUP BY address
-HAVING action_outputs >= 40 OR exact001_outputs >= 10 OR repeated_amount_outputs >= 40
-ORDER BY action_outputs DESC,sats DESC,address ASC
-LIMIT 80
-)SQL"))) {
-                    local_error = game_lead_query.lastError().text();
-                } else {
-                    while (game_lead_query.next()) {
-                        const QString address = game_lead_query.value(0).toString();
-                        const int outputs = game_lead_query.value(1).toInt();
-                        const int txs = game_lead_query.value(2).toInt();
-                        const qint64 sats = game_lead_query.value(3).toLongLong();
-                        const int first_height = game_lead_query.value(4).toInt();
-                        const int last_height = game_lead_query.value(5).toInt();
-                        const int action_outputs = game_lead_query.value(6).toInt();
-                        const int exact001_outputs = game_lead_query.value(7).toInt();
-                        const int repeated_amount_outputs = game_lead_query.value(8).toInt();
-                        int score = 40 + std::min(35, action_outputs / 8);
-                        if (exact001_outputs >= 10)
-                            score += 8;
-                        if (repeated_amount_outputs >= 40)
-                            score += 8;
-                        score = std::min(score, 95);
-                        const QString role = action_outputs >= 100 ? QStringLiteral("DC25 high-cadence endpoint") :
-                                                                     QStringLiteral("DC25 action endpoint");
-                        const QString confidence =
-                            action_outputs >= 100 ? QStringLiteral("Medium") : QStringLiteral("Candidate");
-                        const QString evidence = QStringLiteral("%1 action-range outputs, %2 exact 0.01 sends, %3 "
-                                                                "repeated-cost outputs across blocks %4-%5.")
-                                                     .arg(QString::number(action_outputs),
-                                                          QString::number(exact001_outputs),
-                                                          QString::number(repeated_amount_outputs),
-                                                          QString::number(first_height),
-                                                          QString::number(last_height));
-                        add_game_address_lead(
-                            role,
-                            QStringLiteral("address %1").arg(address.left(8)),
-                            address,
-                            roundedExplorerAmountText(sats),
-                            score,
-                            confidence,
-                            evidence,
-                            QVariantMap{{QStringLiteral("source"), QStringLiteral("dc25-action-pattern")},
-                                        {QStringLiteral("outputs"), outputs},
-                                        {QStringLiteral("transactions"), txs},
-                                        {QStringLiteral("actionOutputs"), action_outputs},
-                                        {QStringLiteral("exact001Outputs"), exact001_outputs},
-                                        {QStringLiteral("repeatedAmountOutputs"), repeated_amount_outputs},
-                                        {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)},
-                                        {QStringLiteral("firstHeight"), first_height},
-                                        {QStringLiteral("lastHeight"), last_height}});
-                    }
-                }
-            }
-
-            if (local_error.isEmpty()) {
-                QSqlQuery winner_query(db);
-                if (!winner_query.exec(QString::fromLatin1(R"SQL(
-SELECT address,COUNT(*) outputs,COUNT(DISTINCT txid) txs,COALESCE(SUM(value_sats),0) sats,
-       MAX(value_sats) largest_sats,MIN(block_height) first_h,MAX(block_height) last_h,COUNT(DISTINCT block_height) blocks
-FROM explorer_tx_outputs
-WHERE block_height BETWEEN 109943 AND 111441 AND address != '' AND value_sats=13370000
-GROUP BY address
-ORDER BY sats DESC,outputs DESC,address ASC
-LIMIT 100
-)SQL"))) {
-                    local_error = winner_query.lastError().text();
-                } else {
-                    while (winner_query.next()) {
-                        const QString address = winner_query.value(0).toString();
-                        const int outputs = winner_query.value(1).toInt();
-                        const int txs = winner_query.value(2).toInt();
-                        const qint64 sats = winner_query.value(3).toLongLong();
-                        const qint64 largest_sats = winner_query.value(4).toLongLong();
-                        const int first_height = winner_query.value(5).toInt();
-                        const int last_height = winner_query.value(6).toInt();
-                        const int blocks = winner_query.value(7).toInt();
-                        if (largest_winner_sats == 0) {
-                            largest_winner_sats = sats;
-                            largest_winner_address = address;
-                        }
-                        if (sats == largest_winner_sats)
-                            ++largest_winner_ties;
-                        winner_rows.push_back(row_for(
-                            QVariantList{address,
-                                         roundedExplorerAmountText(sats),
-                                         outputs,
-                                         txs,
-                                         roundedExplorerAmountText(largest_sats),
-                                         blocks,
-                                         QStringLiteral("%1-%2").arg(QString::number(first_height),
-                                                                     QString::number(last_height))},
-                            QVariantMap{{QStringLiteral("type"), QStringLiteral("address")},
-                                        {QStringLiteral("id"), address},
-                                        {QStringLiteral("address"), address},
-                                        {QStringLiteral("sats"), QVariant::fromValue<qlonglong>(sats)},
-                                        {QStringLiteral("outputs"), outputs},
-                                        {QStringLiteral("transactions"), txs},
-                                        {QStringLiteral("largestSats"), QVariant::fromValue<qlonglong>(largest_sats)},
-                                        {QStringLiteral("blocks"), blocks},
-                                        {QStringLiteral("firstHeight"), first_height},
-                                        {QStringLiteral("lastHeight"), last_height}}));
-                    }
-                }
-            }
-        }
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connection_name);
-
-    evidence_rows.push_back(
-        row_for(QVariantList{QStringLiteral("Registration / sync"),
-                             QStringLiteral("Small player sends to a per-droid registration or sync address, then a "
-                                            "near-return or later recognized action."),
-                             QStringLiteral("candidate without live API")},
-                QVariantMap{{QStringLiteral("confidence"), QStringLiteral("medium")}}));
-    evidence_rows.push_back(row_for(QVariantList{QStringLiteral("Attack sends"),
-                                                 QStringLiteral("Registered-player source spends into a droid attack "
-                                                                "address; repeated fan-in marks likely droid targets."),
-                                                 QStringLiteral("candidate from fan-in")},
-                                    QVariantMap{{QStringLiteral("confidence"), QStringLiteral("medium")}}));
-    evidence_rows.push_back(
-        row_for(QVariantList{QStringLiteral("Shield / cover"),
-                             QStringLiteral("Repeated exact-cost sends to global defense endpoints; Defcoin launch "
-                                            "data shows many 0.01 DFC action-cost candidates."),
-                             QStringLiteral("candidate from cost hubs")},
-                QVariantMap{{QStringLiteral("confidence"), QStringLiteral("medium")}}));
-    evidence_rows.push_back(row_for(
-        QVariantList{
-            QStringLiteral("Payout / spillage swarm"),
-            QStringLiteral("Many equal 0.13370000 DFC outputs to the same 64 recipients in the launch window."),
-            QStringLiteral("high")},
-        QVariantMap{{QStringLiteral("confidence"), QStringLiteral("high")}}));
-    evidence_rows.push_back(row_for(
-        QVariantList{
-            QStringLiteral("DC25 point-balance payout hunt"),
-            QStringLiteral("Published leaderboard amounts are matched against historical balances reached during the "
-                           "DC25 game and settlement window; later spends do not disqualify a candidate."),
-            payout_rows.isEmpty() ? QStringLiteral("waiting for indexed matches") : QStringLiteral("candidate rows")},
-        QVariantMap{{QStringLiteral("confidence"),
-                     payout_rows.isEmpty() ? QStringLiteral("candidate") : QStringLiteral("medium")}}));
-    evidence_rows.push_back(
-        row_for(QVariantList{QStringLiteral("2014 vanity battle response"),
-                             QStringLiteral("A tx with three or more known cosmetic response addresses decodes output "
-                                            "satoshis into attacker/defender level, HP, damage, and counter-damage."),
-                             vanity_rows.isEmpty() ? QStringLiteral("available after matching outputs") :
-                                                     QStringLiteral("high")},
-                QVariantMap{{QStringLiteral("confidence"),
-                             vanity_rows.isEmpty() ? QStringLiteral("candidate") : QStringLiteral("high")}}));
-    evidence_rows.push_back(
-        row_for(QVariantList{QStringLiteral("25 Jul 2017 processing shift"),
-                             QStringLiteral("Defcoin mempool support exposed pending action estimates, but state "
-                                            "changes, inventory changes, and payouts still required confirmed blocks."),
-                             QStringLiteral("source-backed")},
-                QVariantMap{{QStringLiteral("confidence"), QStringLiteral("source-backed")}}));
-    evidence_rows.push_back(row_for(
-        QVariantList{
-            QStringLiteral("Dust to OP_RETURN pivot"),
-            QStringLiteral("Early blocks score exact fractional DFC outputs; later blocks scan indexed OP_RETURN "
-                           "payload hex/text because action semantics can move into transaction metadata."),
-            op_return_rows.isEmpty() ? QStringLiteral("indexed, waiting for matches") :
-                                       QStringLiteral("payloads indexed")},
-        QVariantMap{{QStringLiteral("confidence"),
-                     op_return_rows.isEmpty() ? QStringLiteral("candidate") : QStringLiteral("medium")}}));
-    evidence_rows.push_back(row_for(
-        QVariantList{QStringLiteral("Known API metadata"),
-                     QStringLiteral("The Coindroids API documented currencies, attack addresses, ammunition clips, "
-                                    "mempool actions, and payouts, but the live API did not answer during this build."),
-                     QStringLiteral("exact when available")},
-        QVariantMap{{QStringLiteral("confidence"), QStringLiteral("external")}}));
-    evidence_rows.push_back(row_for(
-        QVariantList{
-            QStringLiteral("DC25 attack-address chain forensics"),
-            dc25_chain_summary.value(QStringLiteral("cohortNote")).toString().isEmpty() ?
-                QStringLiteral(
-                    "The bundled DC25 chain-forensics data separates eight named DC25 leads including Olo, "
-                    "high-confidence attack-address candidates, broad cohort candidates, and source/ammo clips.") :
-                dc25_chain_summary.value(QStringLiteral("cohortNote")).toString(),
-            dc25_chain_summary.value(QStringLiteral("dc25ChainForensicsStatus")).toString().isEmpty() ?
-                QStringLiteral("loaded") :
-                dc25_chain_summary.value(QStringLiteral("dc25ChainForensicsStatus")).toString()},
-        QVariantMap{{QStringLiteral("confidence"), QStringLiteral("source-backed")}}));
-
-    summary.insert(QStringLiteral("actionOutputs"), QVariant::fromValue<qlonglong>(total_action_outputs));
-    summary.insert(QStringLiteral("actionTransactions"), QVariant::fromValue<qlonglong>(total_action_txs));
-    summary.insert(QStringLiteral("actionAddresses"), QVariant::fromValue<qlonglong>(total_action_addresses));
-    summary.insert(QStringLiteral("actionAmount"), explorerAmountText(total_action_sats));
-    summary.insert(QStringLiteral("actionAmountRounded"), roundedExplorerAmountText(total_action_sats));
-    summary.insert(QStringLiteral("windowCount"), window_rows.size());
-    summary.insert(QStringLiteral("strongestWindowLabel"), strongest_window_label);
-    summary.insert(QStringLiteral("strongestWindowAmount"), roundedExplorerAmountText(strongest_window_sats));
-    summary.insert(QStringLiteral("strongestWindowOutputs"), QVariant::fromValue<qlonglong>(strongest_window_outputs));
-    summary.insert(QStringLiteral("launch001Outputs"), QVariant::fromValue<qlonglong>(launch_001_outputs));
-    summary.insert(QStringLiteral("launch1337Outputs"), QVariant::fromValue<qlonglong>(launch_1337_outputs));
-    summary.insert(QStringLiteral("launch1337Amount"), explorerAmountText(launch_1337_sats));
-    summary.insert(QStringLiteral("launch1337AmountRounded"), roundedExplorerAmountText(launch_1337_sats));
-    summary.insert(QStringLiteral("launch1337Recipients"), QVariant::fromValue<qlonglong>(launch_1337_recipients));
-    summary.insert(QStringLiteral("largestWinnerAddress"), largest_winner_address);
-    summary.insert(QStringLiteral("largestWinnerAmount"), explorerAmountText(largest_winner_sats));
-    summary.insert(QStringLiteral("largestWinnerAmountRounded"), roundedExplorerAmountText(largest_winner_sats));
-    summary.insert(QStringLiteral("largestWinnerTies"), largest_winner_ties);
-    summary.insert(QStringLiteral("endpointCount"), endpoint_rows.size());
-    summary.insert(QStringLiteral("winnerCount"), winner_rows.size());
-    summary.insert(QStringLiteral("phaseCount"), phase_rows.size());
-    summary.insert(QStringLiteral("publishedAnchorCount"), published_rows.size());
-    summary.insert(QStringLiteral("vanityResponseCount"), vanity_rows.size());
-    summary.insert(QStringLiteral("opReturnCandidateCount"), op_return_rows.size());
-    summary.insert(QStringLiteral("botCandidateCount"), bot_rows.size());
-    summary.insert(QStringLiteral("payoutCandidateCount"), payout_rows.size());
-    summary.insert(QStringLiteral("gameAddressLeadCount"), game_address_rows.size());
-    for (auto it = dc25_chain_summary.constBegin(); it != dc25_chain_summary.constEnd(); ++it)
-        summary.insert(it.key(), it.value());
-    summary.insert(QStringLiteral("dc25AttackAddressRowCount"), attack_address_rows.size());
-    summary.insert(QStringLiteral("dc25QrSeedRowCount"), qr_seed_rows.size());
-    summary.insert(QStringLiteral("dc25NamedLeadCount"), qr_seed_rows.size() + olo_rows.size());
-    summary.insert(QStringLiteral("dc25SourceAmmoRowCount"), source_ammo_rows.size());
-    summary.insert(QStringLiteral("dc25OloCandidateRowCount"), olo_rows.size());
-    summary.insert(QStringLiteral("dc25PublishedTopPayoutTotal"), QStringLiteral("206.2045 DFC"));
-    summary.insert(QStringLiteral("dc25PublishedOverallPayoutTotal"), QStringLiteral("227.046 DFC"));
-    summary.insert(QStringLiteral("dc25PayoutHuntNote"),
-                   QStringLiteral("Published DC25 payout values are treated as point-in-time contest/payout "
-                                  "measurements. The scanner looks for historical balances reached during the DC25 "
-                                  "settlement window, not final or current wallet balances."));
-    summary.insert(QStringLiteral("transitionDate"), QStringLiteral("2017-07-25"));
-    summary.insert(QStringLiteral("transitionLabel"), QStringLiteral("Defcoin mempool support added"));
-    summary.insert(QStringLiteral("bountyTerminologyDate"), QStringLiteral("2017-08-11"));
-    summary.insert(QStringLiteral("publishedLargestWinner"), QStringLiteral("ModemBot1138"));
-    summary.insert(QStringLiteral("publishedLargestWinnerAmount"), QStringLiteral("100.0605 DFC"));
-    summary.insert(QStringLiteral("analysisNote"),
-                   QStringLiteral("Offline chain heuristics based on the documented transaction-driven Coindroids "
-                                  "protocol and local Defcoin explorer index."));
-    summary.insert(QStringLiteral("droidTrailsCacheStatus"), QStringLiteral("rebuilt"));
-    summary.insert(QStringLiteral("droidTrailsCacheVersion"), DROIDTRAILS_CACHE_SCHEMA_VERSION);
-    summary.insert(QStringLiteral("droidTrailsCachePath"), droidTrailsDatabasePath());
-    summary.insert(QStringLiteral("droidTrailsSourceHeight"), explorerHighestIndexedBlock());
-    summary.insert(QStringLiteral("droidTrailsSourceOutputs"), explorerIndexedOutputCountFromDb());
-
-    result.insert(QStringLiteral("summary"), summary);
-    result.insert(QStringLiteral("windows"), window_rows);
-    result.insert(QStringLiteral("endpoints"), endpoint_rows);
-    result.insert(QStringLiteral("winners"), winner_rows);
-    result.insert(QStringLiteral("phases"), phase_rows);
-    result.insert(QStringLiteral("published"), published_rows);
-    result.insert(QStringLiteral("vanity"), vanity_rows);
-    result.insert(QStringLiteral("opReturns"), op_return_rows);
-    result.insert(QStringLiteral("bots"), bot_rows);
-    result.insert(QStringLiteral("payouts"), payout_rows);
-    result.insert(QStringLiteral("attackAddresses"), attack_address_rows);
-    result.insert(QStringLiteral("qrSeeds"), qr_seed_rows);
-    result.insert(QStringLiteral("sourceAmmo"), source_ammo_rows);
-    result.insert(QStringLiteral("oloCandidates"), olo_rows);
-    result.insert(QStringLiteral("gameAddresses"), game_address_rows);
-    result.insert(QStringLiteral("evidence"), evidence_rows);
-    if (local_error.isEmpty())
-        saveCoindroidsAnalyticsCache(result);
-    if (!local_error.isEmpty() && error)
-        *error = local_error;
-    return result;
-}
-
-QVariantList NuRpcService::explorerContactsFromJsonArray(const QJsonArray& raw_contacts) const
-{
-    QVariantList contacts;
-    for (const QJsonValue& value : raw_contacts) {
-        const QJsonObject object = value.toObject();
-        const QString username = singleLineLimited(object.value(QStringLiteral("username")).toString(), 96).trimmed();
-        const QJsonArray raw_addresses = object.value(QStringLiteral("addresses")).toArray();
-        QVariantList addresses;
-        QStringList address_strings;
-        QSet<QString> seen;
-        for (const QJsonValue& address_value : raw_addresses) {
-            const QString address = singleLineLimited(address_value.toString(), 128).trimmed();
-            if (address.isEmpty() || seen.contains(address))
-                continue;
-            seen.insert(address);
-            addresses.push_back(address);
-            address_strings.push_back(address);
-        }
-        if (!username.isEmpty() && !addresses.isEmpty()) {
-            contacts.push_back(
-                QVariantMap{{QStringLiteral("username"), username},
-                            {QStringLiteral("addresses"), addresses},
-                            {QStringLiteral("addressText"), address_strings.join(QStringLiteral(", "))}});
-        }
-    }
-    return contacts;
-}
-
-QJsonArray NuRpcService::explorerContactsToJsonArray(const QVariantList& contacts) const
-{
-    QJsonArray out;
-    for (const QVariant& value : contacts) {
-        const QVariantMap contact = value.toMap();
-        const QString username = singleLineLimited(contact.value(QStringLiteral("username")).toString(), 96).trimmed();
-        QJsonArray addresses;
-        QSet<QString> seen;
-        for (const QVariant& address_value : contact.value(QStringLiteral("addresses")).toList()) {
-            const QString address = singleLineLimited(address_value.toString(), 128).trimmed();
-            if (address.isEmpty() || seen.contains(address))
-                continue;
-            seen.insert(address);
-            addresses.push_back(address);
-        }
-        if (username.isEmpty() || addresses.isEmpty())
-            continue;
-        QJsonObject object;
-        object.insert(QStringLiteral("username"), username);
-        object.insert(QStringLiteral("addresses"), addresses);
-        out.push_back(object);
-    }
-    return out;
 }
 
 QVariantMap NuRpcService::explorerContactSetRow(const QString& name,
@@ -20129,452 +17676,6 @@ void NuRpcService::loadExplorerContactRows(const QString& name, const QVariantLi
         QStringLiteral("Relationship contacts loaded"),
         QStringLiteral("Loaded %1 contact%2 from %3.")
             .arg(QString::number(contacts.size()), contacts.size() == 1 ? QString() : QStringLiteral("s"), clean_name));
-}
-
-QString NuRpcService::coindroidsContactSetName(const QString& key) const
-{
-    const QString normalized = key.trimmed().toLower();
-    if (normalized == QLatin1String("dc25-qr-seeds"))
-        return QStringLiteral("Coindroids DC25 Eight Leads");
-    if (normalized == QLatin1String("dc25-attack-cohort"))
-        return QStringLiteral("Coindroids DC25 Attack Cohort");
-    if (normalized == QLatin1String("dc25-source-ammo"))
-        return QStringLiteral("Coindroids DC25 Source Ammo");
-    if (normalized == QLatin1String("dc25-olo"))
-        return QStringLiteral("Coindroids DC25 Olo");
-    if (normalized == QLatin1String("dc25-investigation"))
-        return QStringLiteral("Coindroids DC25 Investigation");
-    return QString();
-}
-
-QVariantList NuRpcService::coindroidsContactsForSetKey(const QString& key) const
-{
-    const QString normalized = key.trimmed().toLower();
-    QVariantList contacts;
-    QSet<QString> seen_addresses;
-
-    auto add_contact = [&contacts, &seen_addresses, this](const QString& raw_name, const QString& raw_address) {
-        const QStringList clean_addresses = recognizedExplorerAddresses(QStringList{raw_address.trimmed()});
-        if (clean_addresses.isEmpty())
-            return;
-        const QString address = clean_addresses.first();
-        if (seen_addresses.contains(address))
-            return;
-        seen_addresses.insert(address);
-        const QString fallback_name = QStringLiteral("Coindroids %1").arg(address.left(10));
-        const QString name = singleLineLimited(raw_name.trimmed().isEmpty() ? fallback_name : raw_name, 96).trimmed();
-        if (name.isEmpty())
-            return;
-        contacts.push_back(QVariantMap{{QStringLiteral("username"), name},
-                                       {QStringLiteral("addresses"), QVariantList{address}},
-                                       {QStringLiteral("addressText"), address}});
-    };
-
-    auto add_rows = [&add_contact](const QVariantList& rows, const QString& prefix) {
-        for (const QVariant& value : rows) {
-            const QVariantMap row = value.toMap();
-            const QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
-            const QString address = meta.value(QStringLiteral("address")).toString();
-            const QString name = meta.value(QStringLiteral("name")).toString();
-            add_contact(prefix + (name.isEmpty() ? address.left(10) : name), address);
-        }
-    };
-
-    if (normalized == QLatin1String("dc25-qr-seeds")) {
-        add_rows(m_coindroids_qr_seed_rows, QStringLiteral("Coindroids QR "));
-        add_rows(m_coindroids_olo_rows, QStringLiteral("Coindroids "));
-    } else if (normalized == QLatin1String("dc25-attack-cohort")) {
-        add_rows(m_coindroids_attack_address_rows, QStringLiteral("Coindroids attack "));
-    } else if (normalized == QLatin1String("dc25-source-ammo")) {
-        add_rows(m_coindroids_source_ammo_rows, QStringLiteral("Coindroids source "));
-    } else if (normalized == QLatin1String("dc25-olo")) {
-        add_rows(m_coindroids_olo_rows, QStringLiteral("Coindroids "));
-    } else if (normalized == QLatin1String("dc25-investigation")) {
-        add_rows(m_coindroids_qr_seed_rows, QStringLiteral("Coindroids QR "));
-        add_rows(m_coindroids_attack_address_rows, QStringLiteral("Coindroids attack "));
-        add_rows(m_coindroids_source_ammo_rows, QStringLiteral("Coindroids source "));
-        add_rows(m_coindroids_olo_rows, QStringLiteral("Coindroids "));
-    }
-
-    return contacts;
-}
-
-void NuRpcService::ensureCoindroidsPrebuiltContactSets(bool emit_signal)
-{
-    const QStringList keys{QStringLiteral("dc25-qr-seeds"),
-                           QStringLiteral("dc25-attack-cohort"),
-                           QStringLiteral("dc25-source-ammo"),
-                           QStringLiteral("dc25-olo"),
-                           QStringLiteral("dc25-investigation")};
-    bool changed = false;
-    const qint64 now = QDateTime::currentSecsSinceEpoch();
-    for (const QString& key : keys) {
-        const QString name = coindroidsContactSetName(key);
-        const QVariantList contacts = coindroidsContactsForSetKey(key);
-        if (name.isEmpty() || contacts.isEmpty())
-            continue;
-        upsertExplorerContactSet(name, contacts, now);
-        changed = true;
-    }
-    if (!changed)
-        return;
-    persistExplorerContactSets();
-    if (emit_signal)
-        Q_EMIT explorerChanged();
-}
-
-void NuRpcService::loadCoindroidsContactSet(const QString& key)
-{
-    if (m_coindroids_attack_address_rows.isEmpty() && m_coindroids_qr_seed_rows.isEmpty() &&
-        m_coindroids_source_ammo_rows.isEmpty()) {
-        Q_EMIT userMessage(
-            QStringLiteral("Coindroids contact set not ready"),
-            QStringLiteral("Refresh Droid Trails first so Nu Explore can build the prebuilt Coindroids contact sets."));
-        return;
-    }
-    const QString name = coindroidsContactSetName(key);
-    const QVariantList contacts = coindroidsContactsForSetKey(key);
-    if (name.isEmpty() || contacts.isEmpty()) {
-        Q_EMIT userMessage(QStringLiteral("Coindroids contact set not ready"),
-                           QStringLiteral("That Coindroids relationship set has no addresses in the loaded analysis."));
-        return;
-    }
-
-    const qint64 now = QDateTime::currentSecsSinceEpoch();
-    upsertExplorerContactSet(name, contacts, now);
-    m_current_explorer_contact_set_name = name;
-    m_explorer_contacts = contacts;
-    persistExplorerContactSets();
-    refreshExplorerContactRelationships();
-    Q_EMIT userMessage(QStringLiteral("Coindroids contact set loaded"),
-                       QStringLiteral("Loaded %1 addresses into %2 for relationship graphing.")
-                           .arg(QString::number(contacts.size()), name));
-    Q_EMIT explorerChanged();
-}
-
-void NuRpcService::importCoindroidsGameContacts()
-{
-    if (m_coindroids_game_address_rows.isEmpty()) {
-        Q_EMIT userMessage(
-            QStringLiteral("No Coindroids contacts imported"),
-            QStringLiteral("Refresh Droid Trails first so the DC25 payout hunt and game-address leads are loaded."));
-        return;
-    }
-
-    QSet<QString> existing_addresses;
-    QHash<QString, int> index_by_name;
-    for (int i = 0; i < m_explorer_contacts.size(); ++i) {
-        const QVariantMap contact = m_explorer_contacts.at(i).toMap();
-        const QString username = contact.value(QStringLiteral("username")).toString().trimmed();
-        if (!username.isEmpty())
-            index_by_name.insert(username, i);
-        for (const QVariant& address_value : contact.value(QStringLiteral("addresses")).toList()) {
-            const QString address = address_value.toString().trimmed();
-            if (!address.isEmpty())
-                existing_addresses.insert(address);
-        }
-    }
-
-    int added = 0;
-    int updated = 0;
-    int skipped = 0;
-    for (const QVariant& row_value : m_coindroids_game_address_rows) {
-        const QVariantMap row = row_value.toMap();
-        const QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
-        const QString address = meta.value(QStringLiteral("address")).toString().trimmed();
-        const QStringList clean_addresses = recognizedExplorerAddresses(QStringList{address});
-        if (clean_addresses.isEmpty()) {
-            ++skipped;
-            continue;
-        }
-        const QString clean_address = clean_addresses.first();
-        if (existing_addresses.contains(clean_address)) {
-            ++skipped;
-            continue;
-        }
-        const QString contact_name =
-            singleLineLimited(meta.value(QStringLiteral("contactName")).toString().trimmed().isEmpty() ?
-                                  QStringLiteral("Coindroids lead %1").arg(clean_address.left(10)) :
-                                  meta.value(QStringLiteral("contactName")).toString(),
-                              96)
-                .trimmed();
-        if (contact_name.isEmpty()) {
-            ++skipped;
-            continue;
-        }
-
-        const int existing_index = index_by_name.value(contact_name, -1);
-        if (existing_index >= 0 && existing_index < m_explorer_contacts.size()) {
-            QVariantMap contact = m_explorer_contacts.at(existing_index).toMap();
-            QVariantList addresses = contact.value(QStringLiteral("addresses")).toList();
-            QStringList address_strings;
-            for (const QVariant& value : addresses)
-                address_strings.push_back(value.toString());
-            address_strings.push_back(clean_address);
-            address_strings.removeDuplicates();
-            addresses.clear();
-            for (const QString& value : address_strings)
-                addresses.push_back(value);
-            contact.insert(QStringLiteral("addresses"), addresses);
-            contact.insert(QStringLiteral("addressText"), address_strings.join(QStringLiteral(", ")));
-            m_explorer_contacts[existing_index] = contact;
-            ++updated;
-        } else {
-            QVariantList addresses;
-            addresses.push_back(clean_address);
-            m_explorer_contacts.push_back(QVariantMap{{QStringLiteral("username"), contact_name},
-                                                      {QStringLiteral("addresses"), addresses},
-                                                      {QStringLiteral("addressText"), clean_address}});
-            index_by_name.insert(contact_name, m_explorer_contacts.size() - 1);
-            ++added;
-        }
-        existing_addresses.insert(clean_address);
-    }
-
-    if (added == 0 && updated == 0) {
-        Q_EMIT userMessage(
-            QStringLiteral("No Coindroids contacts imported"),
-            QStringLiteral(
-                "All loaded Coindroids game-address leads were already present or were not valid Defcoin addresses."));
-        return;
-    }
-
-    persistExplorerContacts();
-    refreshExplorerContactRelationships();
-    Q_EMIT userMessage(QStringLiteral("Coindroids contacts imported"),
-                       QStringLiteral("Added %1 contact%2, updated %3, skipped %4 existing or invalid address%5.")
-                           .arg(QString::number(added),
-                                added == 1 ? QString() : QStringLiteral("s"),
-                                QString::number(updated),
-                                QString::number(skipped),
-                                skipped == 1 ? QString() : QStringLiteral("es")));
-}
-
-void NuRpcService::refreshCoindroidsAnalytics()
-{
-    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
-    if (m_coindroids_scanning) {
-        m_coindroids_status = QStringLiteral("Coindroids analysis is already reading the local explorer index.");
-        Q_EMIT explorerChanged();
-        return;
-    }
-    if (!m_coindroids_window_rows.isEmpty() && m_coindroids_last_refresh_ms > 0 &&
-        now_ms - m_coindroids_last_refresh_ms < 30000) {
-        return;
-    }
-
-    const int generation = ++m_coindroids_generation;
-    m_coindroids_scanning = true;
-    m_coindroids_status = QStringLiteral(
-        "Coindroids analysis loading: scanning launch windows, action-cost endpoints, and payout swarms.");
-    Q_EMIT explorerChanged();
-
-    QPointer<NuRpcService> guard(this);
-    QThread* thread = QThread::create([guard, generation] {
-        if (!guard)
-            return;
-        QString error;
-        QVariantMap analysis = guard->coindroidsAnalyticsFromDb(&error);
-        QMetaObject::invokeMethod(
-            guard,
-            [guard, generation, analysis = std::move(analysis), error]() mutable {
-                if (!guard || generation != guard->m_coindroids_generation)
-                    return;
-                guard->m_coindroids_scanning = false;
-                guard->m_coindroids_last_refresh_ms = QDateTime::currentMSecsSinceEpoch();
-                if (!error.isEmpty()) {
-                    guard->m_coindroids_status = QStringLiteral("Coindroids analysis could not load: %1").arg(error);
-                } else {
-                    guard->m_coindroids_summary = analysis.value(QStringLiteral("summary")).toMap();
-                    guard->m_coindroids_window_rows = analysis.value(QStringLiteral("windows")).toList();
-                    guard->m_coindroids_endpoint_rows = analysis.value(QStringLiteral("endpoints")).toList();
-                    guard->m_coindroids_winner_rows = analysis.value(QStringLiteral("winners")).toList();
-                    guard->m_coindroids_phase_rows = analysis.value(QStringLiteral("phases")).toList();
-                    guard->m_coindroids_published_rows = analysis.value(QStringLiteral("published")).toList();
-                    guard->m_coindroids_vanity_rows = analysis.value(QStringLiteral("vanity")).toList();
-                    guard->m_coindroids_op_return_rows = analysis.value(QStringLiteral("opReturns")).toList();
-                    guard->m_coindroids_bot_rows = analysis.value(QStringLiteral("bots")).toList();
-                    guard->m_coindroids_payout_rows = analysis.value(QStringLiteral("payouts")).toList();
-                    guard->m_coindroids_attack_address_rows =
-                        analysis.value(QStringLiteral("attackAddresses")).toList();
-                    guard->m_coindroids_qr_seed_rows = analysis.value(QStringLiteral("qrSeeds")).toList();
-                    guard->m_coindroids_source_ammo_rows = analysis.value(QStringLiteral("sourceAmmo")).toList();
-                    guard->m_coindroids_olo_rows = analysis.value(QStringLiteral("oloCandidates")).toList();
-                    guard->m_coindroids_game_address_rows = analysis.value(QStringLiteral("gameAddresses")).toList();
-                    guard->m_coindroids_evidence_rows = analysis.value(QStringLiteral("evidence")).toList();
-                    guard->ensureCoindroidsPrebuiltContactSets(false);
-                    const QString cache_status =
-                        guard->m_coindroids_summary.value(QStringLiteral("droidTrailsCacheStatus")).toString();
-                    const QString cache_label = cache_status == QLatin1String("hit") ?
-                                                    QStringLiteral("Loaded saved Droid Trails DB") :
-                                                    QStringLiteral("Rebuilt Droid Trails DB");
-                    guard->m_coindroids_status =
-                        QStringLiteral(
-                            "%1 v%2: %3 candidate endpoint clusters, %4 payout recipients, %5 DC25 point-balance "
-                            "payout leads, %6 game-address leads, %7 launch-window 0.1337 DFC swarm outputs, %8 "
-                            "vanity-response candidates, %9 OP_RETURN payload candidates, %10 bot/reload candidates, "
-                            "%11 DC25 attack-address rows, %12 source/ammo clips. Published DC25 payouts are treated "
-                            "as point-in-time measurements, not final balances. Major processing shift: 2017-07-25 "
-                            "dust/amount era toward mempool and payload-aware processing.")
-                            .arg(
-                                cache_label,
-                                guard->m_coindroids_summary.value(QStringLiteral("droidTrailsCacheVersion")).toString(),
-                                QString::number(guard->m_coindroids_endpoint_rows.size()),
-                                QString::number(guard->m_coindroids_winner_rows.size()),
-                                QString::number(guard->m_coindroids_payout_rows.size()),
-                                QString::number(guard->m_coindroids_game_address_rows.size()),
-                                guard->m_coindroids_summary.value(QStringLiteral("launch1337Outputs")).toString(),
-                                QString::number(guard->m_coindroids_vanity_rows.size()),
-                                QString::number(guard->m_coindroids_op_return_rows.size()),
-                                QString::number(guard->m_coindroids_bot_rows.size()),
-                                QString::number(guard->m_coindroids_attack_address_rows.size()),
-                                QString::number(guard->m_coindroids_source_ammo_rows.size()));
-                }
-                Q_EMIT guard->explorerChanged();
-            },
-            Qt::QueuedConnection);
-    });
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
-    thread->start(QThread::LowPriority);
-}
-
-void NuRpcService::refreshExplorerAnalytics(int movement_threshold_coins, const QString& scope)
-{
-    const int bounded_coins = std::max(0, movement_threshold_coins);
-    const qint64 threshold_sats = static_cast<qint64>(bounded_coins) * 100000000LL;
-    QString normalized_scope = scope.trimmed().toLower();
-    if (normalized_scope != QLatin1String("rich") && normalized_scope != QLatin1String("movements") &&
-        normalized_scope != QLatin1String("all")) {
-        normalized_scope = QStringLiteral("all");
-    }
-    const bool load_rich = normalized_scope == QLatin1String("rich") || normalized_scope == QLatin1String("all");
-    const bool load_movements =
-        normalized_scope == QLatin1String("movements") || normalized_scope == QLatin1String("all");
-
-    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
-    if (m_explorer_analytics_refreshing) {
-        m_explorer_analytics_status = QStringLiteral("Explorer analytics are loading in the background.");
-        Q_EMIT explorerChanged();
-        return;
-    }
-    if (m_explorer_analytics_last_threshold_coins == bounded_coins &&
-        m_explorer_analytics_last_scope == normalized_scope && m_explorer_analytics_last_refresh_ms > 0 &&
-        now_ms - m_explorer_analytics_last_refresh_ms < 30000 &&
-        ((load_rich && !m_explorer_rich_list.isEmpty()) || (load_movements && !m_explorer_movements.isEmpty()))) {
-        return;
-    }
-
-    const int generation = ++m_explorer_analytics_generation;
-    m_explorer_analytics_refreshing = true;
-    const int total_steps = (load_rich ? 1 : 0) + (load_movements ? 1 : 0);
-    m_explorer_analytics_status =
-        QStringLiteral("Explorer analytics loading: 0% complete. Starting %1%2.")
-            .arg(load_rich ? QStringLiteral("Holder Atlas") : QString())
-            .arg(load_rich && load_movements ? QStringLiteral(" and Movements") :
-                                               (load_movements ? QStringLiteral("Movements") : QString()));
-    Q_EMIT explorerChanged();
-
-    QPointer<NuRpcService> guard(this);
-    QThread* thread = QThread::create(
-        [guard, bounded_coins, threshold_sats, generation, normalized_scope, load_rich, load_movements, total_steps] {
-            if (!guard)
-                return;
-            QString rich_error;
-            QString movement_error;
-            QVariantList rich_list;
-            QVariantList movements;
-            int completed_steps = 0;
-            const qint64 started_ms = QDateTime::currentMSecsSinceEpoch();
-            auto publish_progress = [guard, generation, total_steps, started_ms](int completed, const QString& label) {
-                QMetaObject::invokeMethod(
-                    guard,
-                    [guard, generation, total_steps, started_ms, completed, label] {
-                        if (!guard || generation != guard->m_explorer_analytics_generation ||
-                            !guard->m_explorer_analytics_refreshing)
-                            return;
-                        const int percent = total_steps > 0 ? std::clamp((completed * 100) / total_steps, 0, 99) : 0;
-                        QString eta_text = QStringLiteral("ETA estimating");
-                        if (completed > 0 && completed < total_steps) {
-                            const qint64 elapsed_ms =
-                                std::max<qint64>(1, QDateTime::currentMSecsSinceEpoch() - started_ms);
-                            const qint64 eta_ms = (elapsed_ms * (total_steps - completed)) / completed;
-                            eta_text = QStringLiteral("ETA %1").arg(formatDurationFromSeconds(eta_ms / 1000));
-                        } else if (completed >= total_steps) {
-                            eta_text = QStringLiteral("ETA done");
-                        }
-                        guard->m_explorer_analytics_status =
-                            QStringLiteral("Explorer analytics loading: %1% complete. %2 %3.")
-                                .arg(QString::number(percent), label, eta_text);
-                        Q_EMIT guard->explorerChanged();
-                    },
-                    Qt::QueuedConnection);
-            };
-            if (load_rich) {
-                publish_progress(completed_steps,
-                                 QStringLiteral("Reading largest-holder balances from the local SQLite index."));
-                rich_list = guard->explorerRichListFromDb(&rich_error);
-                publish_progress(++completed_steps, QStringLiteral("Holder Atlas loaded; continuing analytics."));
-            }
-            if (load_movements) {
-                publish_progress(completed_steps, QStringLiteral("Reading movement rows from the local SQLite index."));
-                movements = guard->explorerMovementsFromDb(threshold_sats, &movement_error);
-                publish_progress(++completed_steps, QStringLiteral("Movement rows loaded; finalizing."));
-            }
-            QMetaObject::invokeMethod(
-                guard,
-                [guard,
-                 generation,
-                 bounded_coins,
-                 normalized_scope,
-                 load_rich,
-                 load_movements,
-                 rich_list = std::move(rich_list),
-                 movements = std::move(movements),
-                 rich_error,
-                 movement_error]() mutable {
-                    if (!guard || generation != guard->m_explorer_analytics_generation)
-                        return;
-                    guard->m_explorer_analytics_refreshing = false;
-                    guard->m_explorer_analytics_last_threshold_coins = bounded_coins;
-                    guard->m_explorer_analytics_last_scope = normalized_scope;
-                    guard->m_explorer_analytics_last_refresh_ms = QDateTime::currentMSecsSinceEpoch();
-                    if (load_rich)
-                        guard->m_explorer_rich_list = std::move(rich_list);
-                    if (load_movements)
-                        guard->m_explorer_movements = std::move(movements);
-                    guard->refreshExplorerTop100TimelineStats();
-                    if (!rich_error.isEmpty() || !movement_error.isEmpty()) {
-                        QStringList details;
-                        if (!rich_error.isEmpty())
-                            details.push_back(QStringLiteral("Holder Atlas: %1").arg(rich_error));
-                        if (!movement_error.isEmpty())
-                            details.push_back(QStringLiteral("Movements: %1").arg(movement_error));
-                        guard->m_explorer_analytics_status =
-                            QStringLiteral("Explorer analytics could not fully load. %1")
-                                .arg(details.join(QStringLiteral(" ")));
-                    } else if (load_rich && load_movements) {
-                        guard->m_explorer_analytics_status =
-                            QStringLiteral(
-                                "Loaded Holder Atlas and %1 movement rows at %2+ DFC from the local SQLite index.")
-                                .arg(QString::number(guard->m_explorer_movements.size()),
-                                     QString::number(bounded_coins));
-                    } else if (load_rich) {
-                        guard->m_explorer_analytics_status =
-                            QStringLiteral("Loaded Holder Atlas from the local SQLite index.");
-                    } else if (load_movements) {
-                        guard->m_explorer_analytics_status =
-                            QStringLiteral("Loaded %1 movement rows at %2+ DFC from the local SQLite index.")
-                                .arg(QString::number(guard->m_explorer_movements.size()),
-                                     QString::number(bounded_coins));
-                    } else {
-                        guard->m_explorer_analytics_status = QStringLiteral("Explorer analytics are current.");
-                    }
-                    Q_EMIT guard->explorerChanged();
-                },
-                Qt::QueuedConnection);
-        });
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
-    thread->start(QThread::LowPriority);
 }
 
 QString NuRpcService::explorerBlockHashAtHeight(int height) const
@@ -21666,9 +18767,7 @@ void NuRpcService::resetExplorerIndex()
     m_explorer_indexed_block_count = 0;
     m_explorer_indexed_output_count = 0;
     m_explorer_rich_list.clear();
-    m_explorer_movements.clear();
     refreshExplorerTop100TimelineStats();
-    m_explorer_analytics_status = QStringLiteral("Explorer analytics cleared with the local block index.");
     m_explorer_index_status = QStringLiteral("Index reset. Cached lookups were kept; block index tables were cleared.");
     Q_EMIT explorerChanged();
 }
@@ -22300,7 +19399,6 @@ void NuRpcService::explorerTop100Step()
                     .arg(QString::number(m_explorer_top100_scan_end_height),
                          QString::number(m_explorer_top100_events_written)) :
                 QStringLiteral("Holder timeline finished, but range status could not be saved: %1").arg(finish_error);
-        refreshExplorerAnalytics(5000, QStringLiteral("rich"));
         Q_EMIT explorerChanged();
         return;
     }
@@ -22659,451 +19757,6 @@ QVariantMap NuRpcService::explorerTop100Snapshot(int height) const
     return out;
 }
 
-void NuRpcService::refreshForensicsIrregularMessages()
-{
-    startForensicsIrregularMessages(0);
-}
-
-void NuRpcService::startForensicsIrregularMessages(int start_height)
-{
-    if (!m_rpc_connected) {
-        m_forensics_scanning = false;
-        m_forensics_request_in_flight = false;
-        m_forensics_scan_complete = false;
-        m_forensics_scan_status = QStringLiteral("Connect to the local backend before scanning irregular messages.");
-        rebuildForensicsScanSummary();
-        Q_EMIT forensicsChanged();
-        return;
-    }
-
-    m_forensics_irregular_messages.clear();
-    m_forensics_scanning = true;
-    m_forensics_request_in_flight = false;
-    m_forensics_scan_complete = false;
-    m_forensics_missing_witness_found = false;
-    m_forensics_first_missing_witness_height = -1;
-    m_forensics_missing_witness_count = 0;
-    resetForensicsPrefixCompression();
-    m_forensics_scan_start_height = std::max(0, start_height);
-    m_forensics_scan_height = m_forensics_scan_start_height;
-    m_forensics_scan_tip = std::max(m_forensics_scan_tip, m_block_height);
-    m_forensics_scan_status =
-        QStringLiteral("Starting Forensics scan from block %1.").arg(QString::number(m_forensics_scan_height));
-    rebuildForensicsScanSummary();
-    Q_EMIT forensicsChanged();
-    scheduleForensicsScanStep(0);
-}
-
-void NuRpcService::stopForensicsScan()
-{
-    m_forensics_scanning = false;
-    m_forensics_request_in_flight = false;
-    m_forensics_scan_status = QStringLiteral("Irregular message scan paused at block %1 with %2 flagged rows.")
-                                  .arg(QString::number(std::max(0, m_forensics_scan_height)),
-                                       QString::number(m_forensics_irregular_messages.size()));
-    rebuildForensicsScanSummary();
-    Q_EMIT forensicsChanged();
-}
-
-void NuRpcService::resumeForensicsScan()
-{
-    if (!m_rpc_connected) {
-        m_forensics_scan_status =
-            QStringLiteral("Connect to the local backend before resuming irregular message scan.");
-        rebuildForensicsScanSummary();
-        Q_EMIT forensicsChanged();
-        return;
-    }
-    if (m_forensics_scan_complete || m_forensics_scan_height <= 0) {
-        refreshForensicsIrregularMessages();
-        return;
-    }
-    m_forensics_scanning = true;
-    m_forensics_request_in_flight = false;
-    m_forensics_scan_status = QStringLiteral("Resuming Forensics scan at block %1.")
-                                  .arg(QString::number(std::max(0, m_forensics_scan_height)));
-    rebuildForensicsScanSummary();
-    Q_EMIT forensicsChanged();
-    scheduleForensicsScanStep(0);
-}
-
-void NuRpcService::resetForensicsPrefixCompression()
-{
-    m_forensics_compress_prefix.clear();
-    m_forensics_compress_start_height = -1;
-    m_forensics_compress_last_height = -1;
-    m_forensics_compress_start_row.clear();
-    m_forensics_compress_summary_row.clear();
-    m_forensics_compress_end_row.clear();
-    m_forensics_compress_start_index = -1;
-    m_forensics_compress_summary_index = -1;
-    m_forensics_compress_end_index = -1;
-    m_forensics_compress_count = 0;
-}
-
-void NuRpcService::finalizeForensicsPrefixCompression(QVariantList& rows)
-{
-    if (m_forensics_compress_count == 1 && m_forensics_compress_start_index >= 0 &&
-        m_forensics_compress_start_index < rows.size()) {
-        QVariantMap row = rows.at(m_forensics_compress_start_index).toMap();
-        QVariantList cells = row.value(QStringLiteral("cells")).toList();
-        if (!cells.isEmpty())
-            cells[0] = m_forensics_compress_start_height;
-        row.insert(QStringLiteral("cells"), cells);
-        rows[m_forensics_compress_start_index] = row;
-    }
-    resetForensicsPrefixCompression();
-}
-
-bool NuRpcService::appendForensicsDisplayRow(QVariantList& rows, const QVariantMap& display_row)
-{
-    const QVariantMap meta = display_row.value(QStringLiteral("meta")).toMap();
-    const QString prefix = meta.value(QStringLiteral("payloadPrefix4")).toString().toLower();
-    const bool compressible_bip141 = prefix == QLatin1String("aa21a9ed");
-    if (!compressible_bip141) {
-        finalizeForensicsPrefixCompression(rows);
-        rows.push_back(display_row);
-        return true;
-    }
-
-    const QVariant height_value = meta.value(QStringLiteral("height"));
-    const int height = height_value.isValid() ? height_value.toInt() : -1;
-    const bool same_run = m_forensics_compress_prefix == prefix && m_forensics_compress_last_height >= 0 &&
-                          height >= m_forensics_compress_last_height;
-    if (!same_run) {
-        finalizeForensicsPrefixCompression(rows);
-        QVariantMap start_row = display_row;
-        QVariantList cells = start_row.value(QStringLiteral("cells")).toList();
-        if (!cells.isEmpty())
-            cells[0] = QStringLiteral("%1 -").arg(height, 9, 10, QLatin1Char(' '));
-        start_row.insert(QStringLiteral("cells"), cells);
-        QVariantMap start_meta = start_row.value(QStringLiteral("meta")).toMap();
-        start_meta.insert(QStringLiteral("forensicsRangeRole"), QStringLiteral("start"));
-        start_row.insert(QStringLiteral("meta"), start_meta);
-
-        m_forensics_compress_prefix = prefix;
-        m_forensics_compress_start_height = height;
-        m_forensics_compress_last_height = height;
-        m_forensics_compress_start_row = start_row;
-        m_forensics_compress_start_index = rows.size();
-        m_forensics_compress_count = 1;
-        rows.push_back(start_row);
-        return true;
-    }
-
-    m_forensics_compress_last_height = height;
-    ++m_forensics_compress_count;
-
-    QVariantMap end_row = display_row;
-    QVariantList end_cells = end_row.value(QStringLiteral("cells")).toList();
-    if (!end_cells.isEmpty())
-        end_cells[0] = QStringLiteral("- %1").arg(height, 9, 10, QLatin1Char(' '));
-    end_row.insert(QStringLiteral("cells"), end_cells);
-    QVariantMap end_meta = end_row.value(QStringLiteral("meta")).toMap();
-    end_meta.insert(QStringLiteral("forensicsRangeRole"), QStringLiteral("end"));
-    end_row.insert(QStringLiteral("meta"), end_meta);
-
-    QVariantList summary_cells;
-    summary_cells
-        << QStringLiteral("...") << QStringLiteral("[various]")
-        << QStringLiteral("ALL TRANSACTIONS IN THIS RANGE CONTAIN aa21a9ed: BIP141 witness commitment header")
-        << QStringLiteral("—") << QStringLiteral("—")
-        << QStringLiteral(
-               "%1 consecutive rows compacted; uncheck regular BIP141 handling only when auditing raw commitment rows.")
-               .arg(QString::number(m_forensics_compress_count));
-    QVariantMap summary_meta;
-    summary_meta.insert(QStringLiteral("type"), QStringLiteral("range"));
-    summary_meta.insert(QStringLiteral("forensicsRangeRole"), QStringLiteral("summary"));
-    summary_meta.insert(QStringLiteral("payloadPrefix4"), prefix);
-    summary_meta.insert(
-        QStringLiteral("bip141Url"),
-        QStringLiteral("https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#commitment-structure"));
-    QVariantMap summary_row{{QStringLiteral("cells"), summary_cells}, {QStringLiteral("meta"), summary_meta}};
-
-    if (m_forensics_compress_count == 2) {
-        m_forensics_compress_summary_index = rows.size();
-        rows.push_back(summary_row);
-        m_forensics_compress_end_index = rows.size();
-        rows.push_back(end_row);
-    } else {
-        if (m_forensics_compress_summary_index >= 0 && m_forensics_compress_summary_index < rows.size())
-            rows[m_forensics_compress_summary_index] = summary_row;
-        if (m_forensics_compress_end_index >= 0 && m_forensics_compress_end_index < rows.size())
-            rows[m_forensics_compress_end_index] = end_row;
-    }
-    return m_forensics_compress_count <= 2;
-}
-
-void NuRpcService::rebuildForensicsScanSummary()
-{
-    const int total_rows = m_forensics_irregular_messages.size();
-    if (total_rows == 0) {
-        if (m_forensics_scan_complete) {
-            m_forensics_scan_summary = QStringLiteral("Scan complete. No irregular message rows were found.");
-        } else {
-            m_forensics_scan_summary.clear();
-        }
-        return;
-    }
-
-    QSet<int> irregular_blocks;
-    QHash<QString, int> prefix_counts;
-    int not_op_return_prefix = 0;
-
-    for (const QVariant& item : m_forensics_irregular_messages) {
-        const QVariantMap row = item.toMap();
-        const QVariantMap meta = row.value(QStringLiteral("meta")).toMap();
-        const QVariant height_value = meta.value(QStringLiteral("height"));
-        const int height = height_value.isValid() ? height_value.toInt() : -1;
-        if (height >= 0)
-            irregular_blocks.insert(height);
-
-        const QString script_prefix = meta.value(QStringLiteral("scriptPrefix4")).toString().toLower();
-        if (!script_prefix.startsWith(QStringLiteral("6a")))
-            ++not_op_return_prefix;
-
-        QString prefix = meta.value(QStringLiteral("payloadPrefix4")).toString().toLower();
-        if (prefix.size() < 8)
-            prefix = script_prefix.left(8);
-        if (prefix.size() >= 8)
-            ++prefix_counts[prefix.left(8)];
-    }
-
-    const int scan_end_height = m_forensics_scan_complete ?
-                                    m_forensics_scan_tip :
-                                    std::max(m_forensics_scan_start_height, m_forensics_scan_height);
-    const int scanned_blocks = std::max(1, scan_end_height - m_forensics_scan_start_height + 1);
-    const double irregular_block_pct =
-        100.0 * static_cast<double>(irregular_blocks.size()) / static_cast<double>(scanned_blocks);
-    const double not6a_pct = 100.0 * static_cast<double>(not_op_return_prefix) / static_cast<double>(total_rows);
-
-    QList<QPair<QString, int>> prefixes;
-    prefixes.reserve(prefix_counts.size());
-    for (auto it = prefix_counts.constBegin(); it != prefix_counts.constEnd(); ++it) {
-        prefixes.push_back(qMakePair(it.key(), it.value()));
-    }
-    std::sort(prefixes.begin(), prefixes.end(), [](const auto& a, const auto& b) {
-        if (a.second != b.second)
-            return a.second > b.second;
-        return a.first < b.first;
-    });
-
-    QStringList prefix_parts;
-    for (int i = 0; i < prefixes.size() && i < 8; ++i) {
-        const double pct = 100.0 * static_cast<double>(prefixes[i].second) / static_cast<double>(total_rows);
-        prefix_parts << QStringLiteral("%1: %2 (%3%)")
-                            .arg(prefixes[i].first.toUpper(),
-                                 QString::number(prefixes[i].second),
-                                 QString::number(pct, 'f', 1));
-    }
-    if (prefixes.size() > 8) {
-        prefix_parts << QStringLiteral("%1 more").arg(QString::number(prefixes.size() - 8));
-    }
-
-    m_forensics_scan_summary =
-        QStringLiteral("Summary: %1 blocks with irregular rows out of %2 scanned (%3%). Not 6a prefix: %4 rows (%5%). "
-                       "Unique 4-byte prefixes: %6%7")
-            .arg(QString::number(irregular_blocks.size()),
-                 QString::number(scanned_blocks),
-                 QString::number(irregular_block_pct, 'f', 4),
-                 QString::number(not_op_return_prefix),
-                 QString::number(not6a_pct, 'f', 1),
-                 QString::number(prefix_counts.size()),
-                 prefix_parts.isEmpty() ? QStringLiteral(".") :
-                                          QStringLiteral(" | %1.").arg(prefix_parts.join(QStringLiteral("; "))));
-}
-
-void NuRpcService::scheduleForensicsScanStep(int delay_ms)
-{
-    if (!m_forensics_scanning || m_forensics_request_in_flight)
-        return;
-    QTimer::singleShot(std::max(0, delay_ms), this, [this] { forensicsScanStep(); });
-}
-
-void NuRpcService::forensicsScanStep()
-{
-    if (!m_forensics_scanning || m_forensics_request_in_flight)
-        return;
-
-    constexpr int chunk_blocks = 25000;
-    constexpr int chunk_results = 500;
-    constexpr int display_cap = 5000;
-
-    if (m_forensics_irregular_messages.size() >= display_cap) {
-        m_forensics_scanning = false;
-        m_forensics_scan_complete = false;
-        m_forensics_scan_status =
-            QStringLiteral("Scan paused at the %1-row display cap. Enable regular BIP141 handling, export rows, or "
-                           "restart from a narrower height range before continuing.")
-                .arg(QString::number(display_cap));
-        rebuildForensicsScanSummary();
-        Q_EMIT forensicsChanged();
-        return;
-    }
-
-    const int start_height = std::max(0, m_forensics_scan_height);
-    const double pct = m_forensics_scan_tip > 0 ?
-                           (100.0 * static_cast<double>(start_height) / static_cast<double>(m_forensics_scan_tip)) :
-                           0.0;
-    m_forensics_request_in_flight = true;
-    m_forensics_scan_status = QStringLiteral("Scanning block %1 of %2 for irregular OP_RETURN messages (%3%).")
-                                  .arg(QString::number(start_height),
-                                       QString::number(std::max(0, m_forensics_scan_tip)),
-                                       QString::number(std::min(100.0, pct), 'f', 2));
-    Q_EMIT forensicsChanged();
-
-    rpcCall(
-        QStringLiteral("scanirregularmessages"),
-        {start_height, -1, chunk_results, chunk_blocks},
-        false,
-        [this, start_height](const QJsonValue& result, const QString& error) {
-            m_forensics_request_in_flight = false;
-            if (!m_forensics_scanning)
-                return;
-            if (!error.isEmpty()) {
-                m_forensics_scanning = false;
-                m_forensics_scan_complete = false;
-                m_forensics_scan_status =
-                    QStringLiteral("Scan stopped at block %1: %2").arg(QString::number(start_height), error);
-                rebuildForensicsScanSummary();
-                Q_EMIT forensicsChanged();
-                return;
-            }
-
-            const QJsonObject obj = result.toObject();
-            m_forensics_scan_tip = obj.value(QStringLiteral("tip")).toInt(m_forensics_scan_tip);
-            m_forensics_scan_height = obj.value(QStringLiteral("next_height")).toInt(start_height + chunk_blocks);
-            const int scanned_blocks = obj.value(QStringLiteral("scanned_blocks")).toInt();
-            const QJsonArray results = obj.value(QStringLiteral("results")).toArray();
-            const bool missing_witness_found = obj.value(QStringLiteral("missing_witness_found")).toBool(false);
-            const int first_missing_witness = obj.value(QStringLiteral("first_missing_witness_height")).toInt(-1);
-            const int missing_witness_count = obj.value(QStringLiteral("missing_witness_count")).toInt(0);
-            if (missing_witness_found) {
-                if (!m_forensics_missing_witness_found ||
-                    (first_missing_witness > 0 && first_missing_witness < m_forensics_first_missing_witness_height)) {
-                    m_forensics_first_missing_witness_height = first_missing_witness;
-                }
-                m_forensics_missing_witness_found = true;
-                m_forensics_missing_witness_count += missing_witness_count;
-            }
-
-            QVariantList rows = m_forensics_irregular_messages;
-            rows.reserve(rows.size() + results.size());
-            for (const QJsonValue& value : results) {
-                const QJsonObject row = value.toObject();
-                const int height = row.value(QStringLiteral("block_height")).toInt();
-                const QString txid = row.value(QStringLiteral("txid")).toString();
-                const int vout = row.value(QStringLiteral("vout")).toInt();
-                const QString burned = row.value(QStringLiteral("burned_text")).toString(QStringLiteral("0.00000000")) +
-                                       QStringLiteral(" DFC");
-                const QString decoded = row.value(QStringLiteral("decoded_text")).toString();
-                const QString reason = row.value(QStringLiteral("reason")).toString();
-                const QString script_hex = row.value(QStringLiteral("script_hex")).toString().toLower();
-                const QString script_prefix4 = row.value(QStringLiteral("script_prefix4")).toString().toLower();
-                const QString payload_hex = row.value(QStringLiteral("payload_hex")).toString().toLower();
-                const QString payload_prefix4 = row.value(QStringLiteral("payload_prefix4")).toString().toLower();
-                QString bip141_definition = QStringLiteral("—");
-                QString bip141_url;
-                if (payload_hex.startsWith(QStringLiteral("aa21a9ed")) ||
-                    script_hex.startsWith(QStringLiteral("6a24aa21a9ed"))) {
-                    bip141_definition = QStringLiteral("BIP141 witness commitment header (aa21a9ed)");
-                    bip141_url = QStringLiteral(
-                        "https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#commitment-structure");
-                }
-                if (m_forensics_accept_bip141_as_regular && !bip141_url.isEmpty()) {
-                    continue;
-                }
-                appendForensicsDisplayRow(
-                    rows,
-                    QVariantMap{{QStringLiteral("cells"),
-                                 QVariantList{height, txid, bip141_definition, burned, decoded, reason}},
-                                {QStringLiteral("meta"),
-                                 QVariantMap{{QStringLiteral("type"), QStringLiteral("transaction")},
-                                             {QStringLiteral("id"), txid},
-                                             {QStringLiteral("txid"), txid},
-                                             {QStringLiteral("height"), height},
-                                             {QStringLiteral("vout"), vout},
-                                             {QStringLiteral("reason"), reason},
-                                             {QStringLiteral("bip141Url"), bip141_url},
-                                             {QStringLiteral("scriptHex"), script_hex},
-                                             {QStringLiteral("scriptPrefix4"), script_prefix4},
-                                             {QStringLiteral("payloadHex"), payload_hex},
-                                             {QStringLiteral("payloadPrefix4"), payload_prefix4},
-                                             {QStringLiteral("scriptSize"),
-                                              row.value(QStringLiteral("script_size")).toInt()}}}});
-            }
-            m_forensics_irregular_messages = rows;
-            rebuildForensicsScanSummary();
-
-            const bool complete = obj.value(QStringLiteral("complete")).toBool(false);
-            const double pct =
-                m_forensics_scan_tip > 0 ?
-                    (100.0 * static_cast<double>(m_forensics_scan_height) / static_cast<double>(m_forensics_scan_tip)) :
-                    0.0;
-            if (complete) {
-                finalizeForensicsPrefixCompression(m_forensics_irregular_messages);
-                m_forensics_scanning = false;
-                m_forensics_scan_complete = true;
-                rebuildForensicsScanSummary();
-                m_forensics_scan_status =
-                    QStringLiteral("Scan complete through block %1. Found %2 irregular message rows.")
-                        .arg(QString::number(m_forensics_scan_tip),
-                             QString::number(m_forensics_irregular_messages.size()));
-                Q_EMIT forensicsChanged();
-                return;
-            }
-
-            m_forensics_scan_status =
-                QStringLiteral(
-                    "Scanned %1 blocks in this pass. Found %2 flagged rows so far; next block %3 of %4 (%5%).")
-                    .arg(QString::number(scanned_blocks),
-                         QString::number(m_forensics_irregular_messages.size()),
-                         QString::number(m_forensics_scan_height),
-                         QString::number(m_forensics_scan_tip),
-                         QString::number(std::min(100.0, pct), 'f', 2));
-            Q_EMIT forensicsChanged();
-            scheduleForensicsScanStep(15);
-        });
-}
-
-QString NuRpcService::explorerLookupHtml(const QString& title,
-                                         const QString& summary_html,
-                                         const QJsonValue& raw_json) const
-{
-    return QStringLiteral("<h2>%1</h2>%2<h3>Source JSON</h3><pre>%3</pre>")
-        .arg(title.toHtmlEscaped(),
-             summary_html,
-             QString::fromUtf8(QJsonDocument(raw_json.toObject()).toJson(QJsonDocument::Indented)).toHtmlEscaped());
-}
-
-void NuRpcService::emitExplorerError(const QString& title, const QString& detail)
-{
-    Q_EMIT explorerWindowRequested(
-        title, QStringLiteral("<h2>%1</h2><p>%2</p>").arg(title.toHtmlEscaped(), detail.toHtmlEscaped()));
-}
-
-QString NuRpcService::explorerUrlForTransaction(const QString& txid) const
-{
-    if (!m_third_party_tx_urls_enabled || txid.trimmed().isEmpty() ||
-        !m_third_party_tx_url.contains(QStringLiteral("%s"))) {
-        return QString();
-    }
-    QString out = m_third_party_tx_url;
-    out.replace(QStringLiteral("%s"), QString::fromLatin1(QUrl::toPercentEncoding(txid.trimmed())));
-    return out;
-}
-
-QString NuRpcService::explorerUrlForAddress(const QString& address) const
-{
-    if (!m_third_party_tx_urls_enabled || address.trimmed().isEmpty() ||
-        !m_third_party_address_url.contains(QStringLiteral("%s"))) {
-        return QString();
-    }
-    QString out = m_third_party_address_url;
-    out.replace(QStringLiteral("%s"), QString::fromLatin1(QUrl::toPercentEncoding(address.trimmed())));
-    return out;
-}
-
 void NuRpcService::openTransactionInExplorer(const QString& txid)
 {
     const QString clean_txid = txid.trimmed();
@@ -23117,10 +19770,6 @@ void NuRpcService::openTransactionInExplorer(const QString& txid)
                           QStringLiteral("Transaction IDs must be 64 hexadecimal characters."));
         return;
     }
-#if !DEFCOIN_NU_EXPLORE_APP
-    if (usingInternalExplorer() && launchExploreLookup(QStringLiteral("--open-transaction"), clean_txid))
-        return;
-#endif
     if (!usingInternalExplorer()) {
         const QString url = explorerUrlForTransaction(clean_txid);
         if (url.isEmpty()) {
@@ -23153,8 +19802,9 @@ void NuRpcService::openTransactionInExplorer(const QString& txid)
                 explorerLookupHtml(QStringLiteral("Transaction"), indexed_summary, indexed_raw));
             return;
         }
-        emitExplorerError(QStringLiteral("Internal explorer unavailable"),
-                          QStringLiteral("Connect to the local Defcoin backend before using the internal explorer."));
+        emitExplorerError(
+            QStringLiteral("Local lookup unavailable"),
+            QStringLiteral("Connect to the local Defcoin backend before using local transaction lookup."));
         return;
     }
 
@@ -23187,8 +19837,8 @@ void NuRpcService::openTransactionInExplorer(const QString& txid)
                     [this, clean_txid](const QJsonValue& wallet_result, const QString& wallet_error) {
                         if (!wallet_error.isEmpty()) {
                             emitExplorerError(QStringLiteral("Transaction not found"),
-                                              QStringLiteral("The internal explorer could not retrieve this "
-                                                             "transaction from the node or the active wallet:\n%1")
+                                              QStringLiteral("Nu could not retrieve this transaction from the node "
+                                                             "or the active wallet:\n%1")
                                                   .arg(wallet_error));
                             return;
                         }
@@ -23273,11 +19923,6 @@ void NuRpcService::openAddressInExplorer(const QString& address)
         return;
     }
 
-#if !DEFCOIN_NU_EXPLORE_APP
-    if (usingInternalExplorer() && launchExploreLookup(QStringLiteral("--open-address"), clean_address))
-        return;
-#endif
-
     if (usingInternalExplorer()) {
         bool indexed_found = false;
         const QString indexed_summary = explorerIndexedAddressHtml(clean_address, &indexed_found);
@@ -23296,8 +19941,8 @@ void NuRpcService::openAddressInExplorer(const QString& address)
         if (!m_rpc_connected) {
             emitExplorerError(
                 QStringLiteral("Internal explorer unavailable"),
-                QStringLiteral("This address is not in the local explorer index yet. Connect to the local Defcoin "
-                               "backend, build the Explorer index, or switch Settings to an external explorer."));
+                QStringLiteral("This address is not in the local address index yet. Connect to the local Defcoin "
+                               "backend, update the local index, or switch Settings to an external block explorer."));
             return;
         }
         rpcCall(
@@ -23308,9 +19953,7 @@ void NuRpcService::openAddressInExplorer(const QString& address)
                 if (!error.isEmpty()) {
                     emitExplorerError(
                         QStringLiteral("Address not found"),
-                        QStringLiteral(
-                            "The internal explorer could not retrieve this address from the active wallet:\n%1")
-                            .arg(error));
+                        QStringLiteral("Nu could not retrieve this address from the active wallet:\n%1").arg(error));
                     return;
                 }
                 const QJsonObject info = result.toObject();
@@ -23378,14 +20021,9 @@ void NuRpcService::openBlockInExplorer(const QString& block_id)
             QStringLiteral("Block lookups must use a non-negative height or a 64-character hexadecimal block hash."));
         return;
     }
-#if !DEFCOIN_NU_EXPLORE_APP
-    if (usingInternalExplorer() && launchExploreLookup(QStringLiteral("--open-block"), clean))
-        return;
-#endif
     if (!usingInternalExplorer()) {
         Q_EMIT userMessage(QStringLiteral("External block links unavailable"),
-                           QStringLiteral("This explorer setting only defines transaction and address URL templates. "
-                                          "Switch to the internal explorer for block lookups."));
+                           QStringLiteral("This explorer setting only defines transaction and address URL templates."));
         return;
     }
     if (!m_rpc_connected) {
@@ -23398,8 +20036,8 @@ void NuRpcService::openBlockInExplorer(const QString& block_id)
                 explorerLookupHtml(QStringLiteral("Block"), cached_summary, cached_raw));
             return;
         }
-        emitExplorerError(QStringLiteral("Internal explorer unavailable"),
-                          QStringLiteral("Connect to the local Defcoin backend before using the internal explorer."));
+        emitExplorerError(QStringLiteral("Local lookup unavailable"),
+                          QStringLiteral("Connect to the local Defcoin backend before using local block lookup."));
         return;
     }
 
@@ -23503,10 +20141,6 @@ void NuRpcService::searchExplorer(const QString& query)
             QStringLiteral("Search input is too long. Enter a block height, 64-character hash, or Defcoin address."));
         return;
     }
-#if !DEFCOIN_NU_EXPLORE_APP
-    if (usingInternalExplorer() && launchExploreLookup(QStringLiteral("--search"), clean))
-        return;
-#endif
     bool is_height = false;
     clean.toInt(&is_height);
     if (is_height && !isNonNegativeBlockHeight(clean)) {
@@ -23584,28 +20218,8 @@ void NuRpcService::openExplorerLink(const QString& link)
         openBlockInExplorer(value);
     } else {
         Q_EMIT userMessage(QStringLiteral("Explorer link blocked"),
-                           QStringLiteral("Nu did not recognize this internal explorer link type."));
+                           QStringLiteral("Nu did not recognize this local explorer link type."));
     }
-}
-
-void NuRpcService::openNuExplore()
-{
-#if DEFCOIN_NU_EXPLORE_APP
-    Q_EMIT userMessage(QStringLiteral("Nu Explore is open"),
-                       QStringLiteral("This window is already the Defcoin Core Nu Explore app."));
-#else
-    if (launchExploreApp()) {
-        Q_EMIT userMessage(
-            QStringLiteral("Nu Explore opened"),
-            QStringLiteral("Let Nu Explore finish indexing before starting recovery for the fastest zero-balance "
-                           "address checks."));
-        return;
-    }
-    Q_EMIT userMessage(
-        QStringLiteral("Nu Explore not found"),
-        QStringLiteral("Nu could not launch the Defcoin Core Nu Explore app. Open it manually if it is installed; "
-                       "otherwise recovery will fall back to the slower Core UTXO scan."));
-#endif
 }
 
 void NuRpcService::copyText(const QString& text)
@@ -23643,28 +20257,6 @@ void NuRpcService::openExternalUrl(const QString& url)
     if (!QDesktopServices::openUrl(clean_url)) {
         Q_EMIT userMessage(QStringLiteral("Link failed"), QStringLiteral("Nu could not open that link."));
     }
-}
-
-void NuRpcService::openCoindroidsReportPdf()
-{
-    const QString relative_path = QStringLiteral("assets/docs/coindroids_defcoin_forensics_story_report_v6.pdf");
-    const QStringList candidates{
-        QDir(nuResourceRoot()).filePath(relative_path),
-        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("nu/%1").arg(relative_path)),
-        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../Resources/nu/%1").arg(relative_path)),
-        QStringLiteral("/Volumes/TB5_4TB/d/Downloads/coindroids_defcoin_forensics_story_report_v6.pdf")};
-    for (const QString& candidate : candidates) {
-        const QFileInfo info(candidate);
-        if (!info.exists() || !info.isFile())
-            continue;
-        if (!QDesktopServices::openUrl(QUrl::fromLocalFile(info.absoluteFilePath()))) {
-            Q_EMIT userMessage(QStringLiteral("PDF failed"),
-                               QStringLiteral("Nu could not open the Coindroids PDF report."));
-        }
-        return;
-    }
-    Q_EMIT userMessage(QStringLiteral("PDF not found"),
-                       QStringLiteral("The bundled Coindroids story report placeholder is missing from this build."));
 }
 
 void NuRpcService::backupWallet()
@@ -25057,129 +21649,129 @@ void NuRpcService::requestTransactionDetails(const QString& txid)
     }
 
     const QString wallet_name = m_wallet_name;
-    rpcCall(QStringLiteral("gettransaction"),
-            {clean_txid, true},
-            true,
-            [this, wallet_name, clean_txid](const QJsonValue& result, const QString& error) {
-                if (wallet_name != m_wallet_name)
-                    return;
-                if (!error.isEmpty()) {
-                    Q_EMIT userMessage(QStringLiteral("Transaction details unavailable"), error);
-                    return;
-                }
-                const QJsonObject tx = result.toObject();
-                const QJsonArray details = tx.value(QStringLiteral("details")).toArray();
-                QStringList addresses;
-                QString label;
-                QString category;
-                for (const QJsonValue& value : details) {
-                    const QJsonObject detail = value.toObject();
-                    if (label.isEmpty())
-                        label = detail.value(QStringLiteral("label")).toString();
-                    if (category.isEmpty())
-                        category = detail.value(QStringLiteral("category")).toString();
-                    const QString candidate = detail.value(QStringLiteral("address")).toString().trimmed();
-                    if (isLikelyBase58AddressText(candidate) && !addresses.contains(candidate))
+    rpcCall(
+        QStringLiteral("gettransaction"),
+        {clean_txid, true},
+        true,
+        [this, wallet_name, clean_txid](const QJsonValue& result, const QString& error) {
+            if (wallet_name != m_wallet_name)
+                return;
+            if (!error.isEmpty()) {
+                Q_EMIT userMessage(QStringLiteral("Transaction details unavailable"), error);
+                return;
+            }
+            const QJsonObject tx = result.toObject();
+            const QJsonArray details = tx.value(QStringLiteral("details")).toArray();
+            QStringList addresses;
+            QString label;
+            QString category;
+            for (const QJsonValue& value : details) {
+                const QJsonObject detail = value.toObject();
+                if (label.isEmpty())
+                    label = detail.value(QStringLiteral("label")).toString();
+                if (category.isEmpty())
+                    category = detail.value(QStringLiteral("category")).toString();
+                const QString candidate = detail.value(QStringLiteral("address")).toString().trimmed();
+                if (isLikelyBase58AddressText(candidate) && !addresses.contains(candidate))
+                    addresses.push_back(candidate);
+            }
+            const QJsonObject decoded = tx.value(QStringLiteral("decoded")).toObject();
+            const QJsonArray decoded_vout = decoded.value(QStringLiteral("vout")).toArray();
+            for (const QJsonValue& value : decoded_vout) {
+                const QJsonObject out = value.toObject();
+                const QStringList output_addresses = recognizedExplorerAddresses(
+                    explorerOutputAddresses(out.value(QStringLiteral("scriptPubKey")).toObject()));
+                for (const QString& candidate : output_addresses) {
+                    if (!addresses.contains(candidate))
                         addresses.push_back(candidate);
                 }
-                const QJsonObject decoded = tx.value(QStringLiteral("decoded")).toObject();
-                const QJsonArray decoded_vout = decoded.value(QStringLiteral("vout")).toArray();
-                for (const QJsonValue& value : decoded_vout) {
-                    const QJsonObject out = value.toObject();
-                    const QStringList output_addresses = recognizedExplorerAddresses(
-                        explorerOutputAddresses(out.value(QStringLiteral("scriptPubKey")).toObject()));
-                    for (const QString& candidate : output_addresses) {
-                        if (!addresses.contains(candidate))
-                            addresses.push_back(candidate);
-                    }
-                }
+            }
 
-                auto localTime = [](const QJsonValue& value) {
-                    const qint64 seconds = value.toVariant().toLongLong();
-                    return seconds > 0 ? QDateTime::fromSecsSinceEpoch(seconds).toLocalTime().toString(
-                                             QStringLiteral("yyyy-MM-dd HH:mm:ss t")) :
-                                         QStringLiteral("N/A");
-                };
-                auto rowHtml = [](const QString& key, const QString& value) {
-                    return QStringLiteral("<tr><th>%1</th><td>%2</td></tr>")
-                        .arg(key.toHtmlEscaped(), value.toHtmlEscaped());
-                };
-                auto rowHtmlRaw = [](const QString& key, const QString& value_html) {
-                    return QStringLiteral("<tr><th>%1</th><td>%2</td></tr>").arg(key.toHtmlEscaped(), value_html);
-                };
+            auto localTime = [](const QJsonValue& value) {
+                const qint64 seconds = value.toVariant().toLongLong();
+                return seconds > 0 ? QDateTime::fromSecsSinceEpoch(seconds).toLocalTime().toString(
+                                         QStringLiteral("yyyy-MM-dd HH:mm:ss t")) :
+                                     QStringLiteral("N/A");
+            };
+            auto rowHtml = [](const QString& key, const QString& value) {
+                return QStringLiteral("<tr><th>%1</th><td>%2</td></tr>")
+                    .arg(key.toHtmlEscaped(), value.toHtmlEscaped());
+            };
+            auto rowHtmlRaw = [](const QString& key, const QString& value_html) {
+                return QStringLiteral("<tr><th>%1</th><td>%2</td></tr>").arg(key.toHtmlEscaped(), value_html);
+            };
 
-                QString html = QStringLiteral("<h2>Transaction details</h2><table>");
-                html += rowHtml(QStringLiteral("Status"),
-                                tx.value(QStringLiteral("confirmations")).toInt() > 0 ? QStringLiteral("Confirmed") :
-                                                                                        QStringLiteral("Unconfirmed"));
-                html += rowHtml(QStringLiteral("Confirmations"),
-                                QString::number(tx.value(QStringLiteral("confirmations")).toInt()));
-                html += rowHtml(QStringLiteral("Date"), localTime(tx.value(QStringLiteral("time"))));
-                html +=
-                    rowHtml(QStringLiteral("Received by node"), localTime(tx.value(QStringLiteral("timereceived"))));
-                if (!category.isEmpty())
-                    html += rowHtml(QStringLiteral("Type"), category.left(1).toUpper() + category.mid(1));
-                if (!label.isEmpty())
-                    html += rowHtml(QStringLiteral("Label"), label);
-                if (!addresses.isEmpty())
-                    html += rowHtmlRaw(addresses.size() == 1 ? QStringLiteral("Address") : QStringLiteral("Addresses"),
-                                       explorerAddressLinksHtml(addresses));
+            QString html = QStringLiteral("<h2>Transaction details</h2><table>");
+            html += rowHtml(QStringLiteral("Status"),
+                            tx.value(QStringLiteral("confirmations")).toInt() > 0 ? QStringLiteral("Confirmed") :
+                                                                                    QStringLiteral("Unconfirmed"));
+            html += rowHtml(QStringLiteral("Confirmations"),
+                            QString::number(tx.value(QStringLiteral("confirmations")).toInt()));
+            html += rowHtml(QStringLiteral("Date"), localTime(tx.value(QStringLiteral("time"))));
+            html += rowHtml(QStringLiteral("Received by node"), localTime(tx.value(QStringLiteral("timereceived"))));
+            if (!category.isEmpty())
+                html += rowHtml(QStringLiteral("Type"), category.left(1).toUpper() + category.mid(1));
+            if (!label.isEmpty())
+                html += rowHtml(QStringLiteral("Label"), label);
+            if (!addresses.isEmpty())
+                html += rowHtmlRaw(addresses.size() == 1 ? QStringLiteral("Address") : QStringLiteral("Addresses"),
+                                   explorerAddressLinksHtml(addresses));
+            html += rowHtml(
+                QStringLiteral("Amount"),
+                QString::number(tx.value(QStringLiteral("amount")).toDouble(), 'f', 8) + QStringLiteral(" DFC"));
+            if (tx.contains(QStringLiteral("fee"))) {
                 html += rowHtml(
-                    QStringLiteral("Amount"),
-                    QString::number(tx.value(QStringLiteral("amount")).toDouble(), 'f', 8) + QStringLiteral(" DFC"));
-                if (tx.contains(QStringLiteral("fee"))) {
-                    html += rowHtml(
-                        QStringLiteral("Fee"),
-                        QString::number(tx.value(QStringLiteral("fee")).toDouble(), 'f', 8) + QStringLiteral(" DFC"));
-                }
-                html += rowHtml(QStringLiteral("Transaction ID"), clean_txid);
-                if (tx.contains(QStringLiteral("blockhash")))
-                    html += rowHtml(QStringLiteral("Block hash"), tx.value(QStringLiteral("blockhash")).toString());
-                html += QStringLiteral("</table>");
+                    QStringLiteral("Fee"),
+                    QString::number(tx.value(QStringLiteral("fee")).toDouble(), 'f', 8) + QStringLiteral(" DFC"));
+            }
+            html += rowHtml(QStringLiteral("Transaction ID"), clean_txid);
+            if (tx.contains(QStringLiteral("blockhash")))
+                html += rowHtml(QStringLiteral("Block hash"), tx.value(QStringLiteral("blockhash")).toString());
+            html += QStringLiteral("</table>");
 
-                if (usingInternalExplorer()) {
-                    html += QStringLiteral(
-                        "<h3>Internal explorer</h3><p>Open cached SQLite-backed explorer views for:</p><ul>");
-                    html += QStringLiteral("<li>Transaction ID: <a href=\"nu://transaction/%1\" title=\"Open internal "
-                                           "explorer window\">%2</a></li>")
-                                .arg(QString::fromLatin1(QUrl::toPercentEncoding(clean_txid)).toHtmlEscaped(),
-                                     clean_txid.toHtmlEscaped());
-                    for (const QString& address : addresses) {
-                        html += QStringLiteral("<li>Wallet address: <a href=\"nu://address/%1\" title=\"Open internal "
-                                               "explorer window\">%2</a></li>")
-                                    .arg(QString::fromLatin1(QUrl::toPercentEncoding(address)).toHtmlEscaped(),
-                                         address.toHtmlEscaped());
-                    }
-                    html += QStringLiteral("</ul>");
-                }
-
-                const QString tx_url = explorerUrlForTransaction(clean_txid);
-                QList<QPair<QString, QString>> address_links;
+            if (usingInternalExplorer()) {
+                html +=
+                    QStringLiteral("<h3>Local index</h3><p>Open cached SQLite-backed local index details for:</p><ul>");
+                html += QStringLiteral("<li>Transaction ID: <a href=\"nu://transaction/%1\" title=\"Open internal "
+                                       "local index window\">%2</a></li>")
+                            .arg(QString::fromLatin1(QUrl::toPercentEncoding(clean_txid)).toHtmlEscaped(),
+                                 clean_txid.toHtmlEscaped());
                 for (const QString& address : addresses) {
-                    const QString address_url = explorerUrlForAddress(address);
-                    if (!address_url.isEmpty())
-                        address_links.push_back(qMakePair(address_url, address));
+                    html += QStringLiteral("<li>Wallet address: <a href=\"nu://address/%1\" title=\"Open internal "
+                                           "local index window\">%2</a></li>")
+                                .arg(QString::fromLatin1(QUrl::toPercentEncoding(address)).toHtmlEscaped(),
+                                     address.toHtmlEscaped());
                 }
-                if (!tx_url.isEmpty() || !address_links.isEmpty()) {
-                    const QString host =
-                        QUrl(!tx_url.isEmpty() ? tx_url : address_links.first().first, QUrl::StrictMode).host();
-                    html += QStringLiteral("<h3>Explorer links</h3><p>Use %1 block explorer to open:</p><ul>")
-                                .arg(host.toHtmlEscaped());
-                    if (!tx_url.isEmpty()) {
-                        html += QStringLiteral("<li>Transaction ID: <a href=\"%1\" title=\"Open %1\">%2</a></li>")
-                                    .arg(tx_url.toHtmlEscaped(), clean_txid.toHtmlEscaped());
-                    }
-                    for (const QPair<QString, QString>& link : address_links) {
-                        html += QStringLiteral("<li>Wallet address: <a href=\"%1\" title=\"Open %1\">%2</a></li>")
-                                    .arg(link.first.toHtmlEscaped(), link.second.toHtmlEscaped());
-                    }
-                    html += QStringLiteral("</ul>");
-                }
+                html += QStringLiteral("</ul>");
+            }
 
-                html += QStringLiteral("<h3>Backend JSON</h3><pre>%1</pre>")
-                            .arg(QString::fromUtf8(QJsonDocument(tx).toJson(QJsonDocument::Indented)).toHtmlEscaped());
-                Q_EMIT transactionDetailsReady(QStringLiteral("Transaction details"), html);
-            });
+            const QString tx_url = explorerUrlForTransaction(clean_txid);
+            QList<QPair<QString, QString>> address_links;
+            for (const QString& address : addresses) {
+                const QString address_url = explorerUrlForAddress(address);
+                if (!address_url.isEmpty())
+                    address_links.push_back(qMakePair(address_url, address));
+            }
+            if (!tx_url.isEmpty() || !address_links.isEmpty()) {
+                const QString host =
+                    QUrl(!tx_url.isEmpty() ? tx_url : address_links.first().first, QUrl::StrictMode).host();
+                html += QStringLiteral("<h3>Block explorer links</h3><p>Use %1 block explorer to open:</p><ul>")
+                            .arg(host.toHtmlEscaped());
+                if (!tx_url.isEmpty()) {
+                    html += QStringLiteral("<li>Transaction ID: <a href=\"%1\" title=\"Open %1\">%2</a></li>")
+                                .arg(tx_url.toHtmlEscaped(), clean_txid.toHtmlEscaped());
+                }
+                for (const QPair<QString, QString>& link : address_links) {
+                    html += QStringLiteral("<li>Wallet address: <a href=\"%1\" title=\"Open %1\">%2</a></li>")
+                                .arg(link.first.toHtmlEscaped(), link.second.toHtmlEscaped());
+                }
+                html += QStringLiteral("</ul>");
+            }
+
+            html += QStringLiteral("<h3>Backend JSON</h3><pre>%1</pre>")
+                        .arg(QString::fromUtf8(QJsonDocument(tx).toJson(QJsonDocument::Indented)).toHtmlEscaped());
+            Q_EMIT transactionDetailsReady(QStringLiteral("Transaction details"), html);
+        });
 }
 
 QString NuRpcService::debugLogPath() const
@@ -25403,42 +21995,6 @@ void NuRpcService::exportTrafficCsv()
     }
     Q_EMIT userMessage(QStringLiteral("Export complete"),
                        QStringLiteral("The network traffic CSV was written successfully."));
-}
-
-void NuRpcService::exportForensicsIrregularMessagesCsv()
-{
-    const QString path =
-        QFileDialog::getSaveFileName(nullptr,
-                                     QStringLiteral("Export Irregular Messages"),
-                                     QDir(realHomePath()).filePath(QStringLiteral("defcoin-irregular-messages.csv")),
-                                     QStringLiteral("CSV files (*.csv)"));
-    if (path.isEmpty())
-        return;
-
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        Q_EMIT userMessage(QStringLiteral("Export failed"), file.errorString());
-        return;
-    }
-
-    QTextStream out(&file);
-    out << "Block Height,Transaction ID,BIP141 Definition,Burned Defcoin Amount,Decoded Text Message,Flag,Script "
-           "Prefix 4,Payload Prefix 4,Script Hex,Payload Hex\n";
-    for (const QVariant& row_value : m_forensics_irregular_messages) {
-        const QVariantList cells = tableRowCells(row_value);
-        const QVariantMap meta = row_value.toMap().value(QStringLiteral("meta")).toMap();
-        QStringList escaped;
-        for (int i = 0; i < 6; ++i) {
-            escaped << csvCell(i < cells.size() ? cells.at(i).toString() : QString());
-        }
-        escaped << csvCell(meta.value(QStringLiteral("scriptPrefix4")).toString())
-                << csvCell(meta.value(QStringLiteral("payloadPrefix4")).toString())
-                << csvCell(meta.value(QStringLiteral("scriptHex")).toString())
-                << csvCell(meta.value(QStringLiteral("payloadHex")).toString());
-        out << escaped.join(QLatin1Char(',')) << '\n';
-    }
-    Q_EMIT userMessage(QStringLiteral("Export complete"),
-                       QStringLiteral("The irregular messages CSV was written successfully."));
 }
 
 void NuRpcService::loadPsbtPayload(const QByteArray& payload, const QString& source)

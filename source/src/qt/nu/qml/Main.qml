@@ -309,7 +309,7 @@ ApplicationWindow {
              + "</ul>"
              + "<h2>What went into Nu</h2>"
              + "<ul>"
-             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, RPC Console, Metrics, and Settings. Explorer and Forensics analysis now live in the separate Defcoin Core Nu Explore app so Nu can stay wallet-first.</li>"
+             + "<li>Qt Quick interface organized around Home, Send, Receive, Transactions, Wallet, Mining, RPC Console, Metrics, and Settings.</li>"
              + "<li>Visual system, copy, and interaction patterns are guided by Nothing-style restraint and Bitcoin Design Community wallet usability patterns.</li>"
              + "<li>Bundled backend autostart, RPC connection handling, launch diagnostics, and current-launch log viewing.</li>"
              + "<li><b>Enable LAN node discovery</b> is off by default. When enabled, macOS may ask for Local Network access so Nu can find Defcoin nodes on the same LAN, which can help another local wallet copy blockchain data faster. The permission does not grant access to wallet keys, passphrases, or private wallet data.</li>"
@@ -321,10 +321,9 @@ ApplicationWindow {
              + "<li>The address filter is endpoint-specific, not IP-wide. If the same host runs Litecoin Core on one port and Defcoin Core on another, Nu keeps the Defcoin endpoint eligible and can replace older same-IP non-Defcoin ports in addrman. Defcoin nodes on non-standard ports can still communicate and be retained after completing an actual Defcoin handshake.</li>"
              + "<li>Peer inspection with simple and detailed views, including actual per-peer magic bytes where reported by the backend.</li>"
              + "<li>Network metrics now include difficulty, 120-block network hashrate, chain-tip counts, sync progress, and top P2P message types where the backend reports them. [Thanks to packetloss404 / Ian S. Walmsley's v1.0.2 build.]</li>"
-             + "<li>Defcoin Core Nu Explore carries the Explorer and Forensics surfaces from Nu, including irregular OP_RETURN scans, Holder Atlas analytics, movements, contacts, relationship graphs, and index controls. Nu can hand address and transaction inspections to Explore when the internal explorer mode is selected.</li>"
              + "<li>BIP39 recovery phrase creation and restore workflows for Nu/Core HD wallets, plus an advanced preview-gated external derivation scan with Defcoin WIF compatibility options.</li>"
              + "<li>Local mining setup can select an external cpuminer-compatible executable, build scrypt stratum arguments, and monitor miner output without bundling miner binaries into the wallet app.</li>"
-             + "<li>Wallet basics including receive requests, transaction inspection, PSBT tools, message signing, wallet backup, encryption, and optional third-party explorer links.</li>"
+             + "<li>Wallet basics including receive requests, transaction inspection, PSBT tools, message signing, wallet backup, encryption, and optional third-party block explorer links.</li>"
              + "</ul>"
              + "<h2>How Nu differs from Defcoin 1.0.0 and 1.0.1</h2>"
              + "<ul>"
@@ -363,12 +362,12 @@ ApplicationWindow {
              + "</ul>"
              + "<h3>3. Wider Defcoin ecosystem inspirations and history</h3>"
              + "<ul>"
-             + "<li>Coindroids and Defcoin culture - Joshua \"Josh\" McDougall / @Abstrct - <a href=\"https://github.com/Abstrct/docker-droid\">Abstrct/docker-droid</a> and Coindroids writings | DEF CON origin context - Dark Tangent / Jeff Moss and the DEF CON community.</li>"
+             + "<li>Defcoin culture and DEF CON origin context - Dark Tangent / Jeff Moss and the DEF CON community.</li>"
              + "<li>Defcoin project and community sites - <a href=\"http://defcoin.org/\">defcoin.org</a> | <a href=\"https://defcoin-ng.org/\">defcoin-ng.org</a> | Defcoin Node Docker - Mike T. Weaver / @miketweaver - <a href=\"https://github.com/defcoin-ng/defcoin-node-docker\">defcoin-ng/defcoin-node-docker</a> | <a href=\"https://defcoin.io/\">defcoin.io</a> | <a href=\"https://wiki.defcoin.io/\">wiki.defcoin.io</a> | <a href=\"https://defcoin.dc903.org/\">defcoin.dc903.org</a> | <a href=\"https://www.defcoinstats.com/\">defcoinstats.com</a>.</li>"
              + "<li>Mobile wallets - Android Defcoin Wallet v1.07 - Justin Culbertson / @jjculber - <a href=\"https://github.com/jjculber/defcoin-wallet\">jjculber/defcoin-wallet</a> | BeerWallet for iOS - Michael Perklin / @mperklin - <a href=\"https://github.com/mperklin/beerwallet\">mperklin/beerwallet</a>.</li>"
              + "<li>Historical pool credits - defcoin.dc903.org P2Pool - <a href=\"https://defcoin.dc903.org/pool\">defcoin.dc903.org/pool</a> | defcoin.io P2Pool - <a href=\"https://defcoin.io/\">defcoin.io</a> | defcoin.host - <a href=\"https://defcoin.host/\">defcoin.host</a> | RedBaron Defcoin Pool - <a href=\"https://www.redbaron.us\">redbaron.us</a> | Subba Defcoin Pool - <a href=\"https://defcoin-pool.subba.net\">defcoin-pool.subba.net</a> | Chunky Pools - <a href=\"https://chunkypools.com/def\">chunkypools.com/def</a></li>"
              + "<li>More historical pool credits - Defcoin.us Pool / earlier Defcoin.io - <a href=\"https://defcoin.us/\">defcoin.us</a> | IPTron Pool - <a href=\"http://coin.iptron.net:13370\">coin.iptron.net:13370</a> | Beardpool Defcoin Pool / Acor - <a href=\"https://pool.acor.to\">pool.acor.to</a> | DefcoinPool - <a href=\"http://www.defcoinpool.com/\">defcoinpool.com</a> | Poltergeek's Pool - <a href=\"http://defcoin.cloudapp.net\">defcoin.cloudapp.net</a> | Cryptoheater - <a href=\"http://cryptoheater.com/\">cryptoheater.com</a> | SecDSM Defcoin Pool | Unknown Mining Pool | LAIW.</li>"
-             + "<li>Historical utilities and archives - def.coindroids.com | defcointalk.org | defcoin.assmeow.org | defcoin.jculb.com | defcoinfaucet.com | beerwallet.org | wallet.ribbit.me | miningpoolstats.stream/defcoin | InfoConDB entry for The Making of Defcoin.</li>"
+             + "<li>Historical utilities and archives - defcointalk.org | defcoin.assmeow.org | defcoin.jculb.com | defcoinfaucet.com | beerwallet.org | wallet.ribbit.me | miningpoolstats.stream/defcoin | InfoConDB entry for The Making of Defcoin.</li>"
              + "</ul>"
              + "<h3>4. Everyone we forgot</h3>"
              + "<p>Apologies if we've left anyone out of this list and I am sure there are many. Also thanks to everyone who participated: the project is nothing without the community.</p>"
@@ -2724,21 +2723,16 @@ ApplicationWindow {
         RowLayout {
             visible: restoreRecoveryMode.currentIndex !== 2
                      && restoreRecoverySkipZeroBalance.checked
-                     && NuService.recoveryExploreLookupSuggestion.length > 0
+                     && NuService.recoveryIndexLookupSuggestion.length > 0
             Layout.fillWidth: true
             spacing: NuTokens.spaceSm
 
             Label {
                 Layout.fillWidth: true
-                text: NuService.recoveryExploreLookupSuggestion
+                text: NuService.recoveryIndexLookupSuggestion
                 color: NuTokens.accentSky
                 font.pixelSize: NuTokens.fontSmall
                 wrapMode: Text.WordWrap
-            }
-
-            NuActionButton {
-                text: qsTr("Open Explore")
-                onClicked: NuService.openNuExplore()
             }
         }
 

@@ -55,23 +55,18 @@
 
 namespace {
 constexpr bool kNuHelpEnabled = DEFCOIN_NU_HELP_ENABLED != 0;
-#ifndef DEFCOIN_NU_EXPLORE_APP
-#define DEFCOIN_NU_EXPLORE_APP 0
-#endif
-constexpr bool kExploreApp = DEFCOIN_NU_EXPLORE_APP != 0;
 
 QFile* gLaunchLogFile = nullptr;
 QtMessageHandler gPreviousMessageHandler = nullptr;
 
 QString productName()
 {
-    return kExploreApp ? QStringLiteral("Defcoin Core Nu Explore") : QStringLiteral("Defcoin Core Nu");
+    return QStringLiteral("Defcoin Core Nu");
 }
 
 QString productBundleIdentifier()
 {
-    return kExploreApp ? QStringLiteral("org.defcoincore.DefcoinCoreNuExplore") :
-                         QStringLiteral("org.defcoincore.DefcoinCoreNu");
+    return QStringLiteral("org.defcoincore.DefcoinCoreNu");
 }
 
 void writeLaunchLogLine(const QString& message)
@@ -262,9 +257,7 @@ void drawNuBrandSplash(QPixmap& pixmap, const QString& resourceRoot)
         painter.drawLine(x, panel.top(), x, panel.bottom());
     }
 
-    const QPixmap lockup(resourceRoot + (kExploreApp ?
-                                             QStringLiteral("/assets/brand/defcoin-core-nu-explore-lockup.png") :
-                                             QStringLiteral("/assets/brand/defcoin-core-nu-lockup.png")));
+    const QPixmap lockup(resourceRoot + QStringLiteral("/assets/brand/defcoin-core-nu-lockup.png"));
     if (!lockup.isNull()) {
         constexpr double kBaseWordmarkSize = 256.0;
         constexpr double kSplashWordmarkSize = 58.0;
@@ -576,39 +569,30 @@ int runQtQuickUiSelfTest(QApplication& app, QObject* rootObject, QQuickWindow* r
         return 0;
     }
 
-    QStringList routes =
-        kExploreApp ?
-            (QStringList() << QStringLiteral("explorer") << QStringLiteral("pulse") << QStringLiteral("holders")
-                           << QStringLiteral("movements") << QStringLiteral("coindroids") << QStringLiteral("reddit")
-                           << QStringLiteral("messages") << QStringLiteral("contacts") << QStringLiteral("indexing")
-                           << QStringLiteral("paper") << QStringLiteral("witness")) :
-            (QStringList() << QStringLiteral("home") << QStringLiteral("send") << QStringLiteral("receive")
-                           << QStringLiteral("activity") << QStringLiteral("wallet") << QStringLiteral("mining")
-                           << QStringLiteral("rpc") << QStringLiteral("node") << QStringLiteral("settings"));
+    QStringList routes = QStringList() << QStringLiteral("home") << QStringLiteral("send") << QStringLiteral("receive")
+                                       << QStringLiteral("activity") << QStringLiteral("wallet")
+                                       << QStringLiteral("mining") << QStringLiteral("rpc") << QStringLiteral("node")
+                                       << QStringLiteral("settings");
     const QString route_filter = qEnvironmentVariable("DEFCOIN_NU_UI_SELF_TEST_ROUTE").trimmed();
     if (!route_filter.isEmpty())
         routes = {route_filter};
 
     writeLaunchLogLine(QStringLiteral("UI self-test begin."));
     for (const QString& route : routes) {
-        if (!kExploreApp && (route == QLatin1String("mining") || route == QLatin1String("rpc") ||
-                             route == QLatin1String("node") || route == QLatin1String("settings"))) {
+        if (route == QLatin1String("mining") || route == QLatin1String("rpc") || route == QLatin1String("node") ||
+            route == QLatin1String("settings")) {
             service.setProperty("advancedToolsVisible", true);
         }
         rootObject->setProperty("currentRoute", route);
         uiSelfTestSettle(app, route == QLatin1String("paper") ? 900 : 650);
-        if (kExploreApp && route == QLatin1String("paper")) {
-            service.installPaperWalletSelfTestData();
-            uiSelfTestSettle(app, 350);
-        } else if (!kExploreApp && route == QLatin1String("wallet") &&
-                   !qEnvironmentVariableIsEmpty("DEFCOIN_NU_UI_SELF_TEST_PAPER_WALLET")) {
+        if (route == QLatin1String("wallet") && !qEnvironmentVariableIsEmpty("DEFCOIN_NU_UI_SELF_TEST_PAPER_WALLET")) {
             const bool opened = QMetaObject::invokeMethod(rootObject, "uiSelfTestOpenPaperWalletTab");
             if (!opened) {
                 ok = false;
                 writeLaunchLogLine(QStringLiteral("UI self-test failed: Paper Wallet tab hook missing."));
             }
             uiSelfTestSettle(app, 900);
-        } else if (!kExploreApp && route == QLatin1String("settings") &&
+        } else if (route == QLatin1String("settings") &&
                    !qEnvironmentVariableIsEmpty("DEFCOIN_NU_UI_SELF_TEST_SETTINGS_TAB")) {
             const QString settingsTab = qEnvironmentVariable("DEFCOIN_NU_UI_SELF_TEST_SETTINGS_TAB").trimmed();
             const bool opened = QMetaObject::invokeMethod(
@@ -623,21 +607,6 @@ int runQtQuickUiSelfTest(QApplication& app, QObject* rootObject, QQuickWindow* r
         ok = uiSelfTestSaveScreenshot(rootWindow, screenshotDir, QStringLiteral("route-%1").arg(route)) && ok;
     }
 
-    if (kExploreApp) {
-        rootObject->setProperty("currentRoute", QStringLiteral("paper"));
-        service.installPaperWalletSelfTestData();
-        uiSelfTestSettle(app, 450);
-        if (QMetaObject::invokeMethod(rootObject, "uiSelfTestOpenPaperWalletPopout")) {
-            uiSelfTestSettle(app, 700);
-            ok = uiSelfTestSaveScreenshot(rootWindow, screenshotDir, QStringLiteral("paper-wallet-popout")) && ok;
-            QMetaObject::invokeMethod(rootObject, "uiSelfTestClosePaperWalletPopout");
-            uiSelfTestSettle(app, 250);
-        } else {
-            ok = false;
-            writeLaunchLogLine(QStringLiteral("UI self-test failed: Paper Wallet pop-out hook missing."));
-        }
-    }
-
     if (!qEnvironmentVariableIsEmpty("DEFCOIN_NU_PAPER_WALLET_PDF")) {
         service.installPaperWalletSelfTestData();
         const bool hide_art = qEnvironmentVariableIntValue("DEFCOIN_NU_PAPER_WALLET_HIDE_ART") > 0;
@@ -646,14 +615,11 @@ int runQtQuickUiSelfTest(QApplication& app, QObject* rootObject, QQuickWindow* r
         writeLaunchLogLine(QStringLiteral("UI self-test paper wallet PDF render requested."));
     }
 
-    const QStringList dialogs =
-        kExploreApp ?
-            (QStringList() << QStringLiteral("brand-button") << QStringLiteral("about") << QStringLiteral("help")
-                           << QStringLiteral("about-details")) :
-            (QStringList() << QStringLiteral("about") << QStringLiteral("build-notes") << QStringLiteral("help")
-                           << QStringLiteral("create-wallet") << QStringLiteral("create-recovery-wallet")
-                           << QStringLiteral("restore-recovery-wallet") << QStringLiteral("open-uri")
-                           << QStringLiteral("sign-message") << QStringLiteral("verify-message"));
+    const QStringList dialogs = QStringList()
+                                << QStringLiteral("about") << QStringLiteral("build-notes") << QStringLiteral("help")
+                                << QStringLiteral("create-wallet") << QStringLiteral("create-recovery-wallet")
+                                << QStringLiteral("restore-recovery-wallet") << QStringLiteral("open-uri")
+                                << QStringLiteral("sign-message") << QStringLiteral("verify-message");
 
     for (const QString& dialogName : dialogs) {
         uiSelfTestClosePopups(app, rootObject);
@@ -759,9 +725,8 @@ int main(int argc, char* argv[])
         startup.step(QStringLiteral("Checking single-instance data-directory lock."));
         const QString dataDir = nuDefaultDataDir();
         QDir().mkpath(dataDir);
-        singleInstanceLock = std::make_unique<QLockFile>(
-            QDir(dataDir).filePath(kExploreApp ? QStringLiteral("defcoin-core-nu-explore-gui.lock") :
-                                                 QStringLiteral("defcoin-core-nu-gui.lock")));
+        singleInstanceLock =
+            std::make_unique<QLockFile>(QDir(dataDir).filePath(QStringLiteral("defcoin-core-nu-gui.lock")));
         singleInstanceLock->setStaleLockTime(30000);
         bool hasSingleInstanceLock = tryAcquireSingleInstanceLock(*singleInstanceLock);
         while (!hasSingleInstanceLock) {
@@ -874,8 +839,7 @@ int main(int argc, char* argv[])
     engine.addImportPath(resourceRoot + "/qml");
     engine.addImportPath(resourceRoot);
 
-    const QUrl mainUrl = QUrl::fromLocalFile(
-        resourceRoot + (kExploreApp ? QStringLiteral("/qml/ExploreMain.qml") : QStringLiteral("/qml/Main.qml")));
+    const QUrl mainUrl = QUrl::fromLocalFile(resourceRoot + QStringLiteral("/qml/Main.qml"));
 #if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
     QObject::connect(
         &engine,
@@ -923,22 +887,18 @@ int main(int argc, char* argv[])
         const int openBlockIndex = arguments.indexOf("--open-block");
         const int searchIndex = arguments.indexOf("--search");
         if (openAddressIndex >= 0 && openAddressIndex + 1 < arguments.size()) {
-            rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
             QTimer::singleShot(450, &service, [&service, value = arguments.at(openAddressIndex + 1)] {
                 service.openAddressInExplorer(value);
             });
         } else if (openTxIndex >= 0 && openTxIndex + 1 < arguments.size()) {
-            rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
             QTimer::singleShot(450, &service, [&service, value = arguments.at(openTxIndex + 1)] {
                 service.openTransactionInExplorer(value);
             });
         } else if (openBlockIndex >= 0 && openBlockIndex + 1 < arguments.size()) {
-            rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
             QTimer::singleShot(450, &service, [&service, value = arguments.at(openBlockIndex + 1)] {
                 service.openBlockInExplorer(value);
             });
         } else if (searchIndex >= 0 && searchIndex + 1 < arguments.size()) {
-            rootObject->setProperty("currentRoute", QStringLiteral("explorer"));
             QTimer::singleShot(
                 450, &service, [&service, value = arguments.at(searchIndex + 1)] { service.searchExplorer(value); });
         }
@@ -1009,7 +969,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    if (!kExploreApp && quickCloneNow) {
+    if (quickCloneNow) {
         QTimer::singleShot(2500, &service, [&service] { service.syncUsingQuickCloneNow(); });
     }
 

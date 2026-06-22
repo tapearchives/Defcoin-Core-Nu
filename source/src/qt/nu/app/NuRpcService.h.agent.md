@@ -7,7 +7,7 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
 ## Nu Divergence
 
 - Exposes traffic totals split into TCP, UDP, total, and Quick Clone subset counters.
-- Exposes Metrics rows, peer data, Quick Clone settings/status, Explore paper-wallet/watch-only actions, and Fast Sync diagnostic state to QML.
+- Exposes Metrics rows, peer data, Quick Clone settings/status, paper-wallet/watch-only actions, and Fast Sync diagnostic state to QML.
 - Exposes shutdown status, the August 2026 Defcoin-only magic setting, separate
   transaction/address explorer templates, and backend log metadata used by the
   restored Debug Log panel.
@@ -26,7 +26,7 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
   and must remain a one-way local import request, not frontend state.
 - Exposes `restoreWalletFromRecoveryPhrase()` with optional fixed-scan
   zero-balance skip and SQL descriptor-wallet flags plus recovery progress
-  fields for address scan status, elapsed time, ETA, and Nu Explore lookup
+  fields for address scan status, elapsed time, ETA, and local address-index
   guidance. QML must pass the skip flag only for fixed legacy auto/external
   scans, never for Nu/Core HD seed creation, SQL descriptor recovery, or
   auto-until-empty recovery.
@@ -63,7 +63,7 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
 - Keep recovery-scan flags explicit in the invokable signature; do not overload
   negative range values with additional meanings beyond auto-until-empty. SQL
   descriptor recovery must remain an explicit boolean.
-- Keep Nu Explore recovery lookup guidance separate from the restore flag. The
+- Keep local address-index recovery lookup guidance separate from the restore flag. The
   service decides whether the local index is current enough and must fall back
   to Core scanning when it is not.
 - Keep `prepareForApplicationQuit()` available to QML so the shutdown overlay

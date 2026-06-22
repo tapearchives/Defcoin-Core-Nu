@@ -479,7 +479,7 @@ Item {
                                             root.refreshPreviewPages()
                                         }
                                         ToolTip.visible: hovered
-                                        ToolTip.text: "Choose 1 to 100 paper wallets for this run. Large batches belong in Explore later."
+                                        ToolTip.text: "Choose 1 to 100 paper wallets for this run. Large batches should use a dedicated reviewed workflow."
                                     }
                                 }
 

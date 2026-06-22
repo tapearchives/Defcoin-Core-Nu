@@ -1,169 +1,106 @@
 # Defcoin Core Nu Goals
 
-This note defines the product and community goals for Defcoin Core Nu and the
-Explore explorer/forensics surface. It treats the local Defcoin Core Nu source
-tree as authoritative for protocol parameters when public copy conflicts with
-the code. In particular, the defcoin.io 60-second block-time copy is not used as
-the protocol baseline here.
+This note defines the product and community goals for Defcoin Core Nu. It
+treats the local source tree as authoritative for protocol parameters when
+public copy conflicts with the code. In particular, the defcoin.io 60-second
+block-time copy is not used as the protocol baseline here.
 
 ## Position
 
 Defcoin Core Nu should make Defcoin feel inspectable, repairable, and worth
-experimenting with. It is not a market-hype wallet. It is a hacker-friendly full
-node, wallet, explorer, and forensic workbench for a small proof-of-work chain
-with DEF CON-adjacent history.
+experimenting with. It is not a market-hype wallet. It is a hacker-friendly
+full-node wallet for a small proof-of-work chain with DEF CON-adjacent history.
 
 The coin's durable niche is not that it can outspend larger networks. Its niche
 is that it is small enough to understand, old enough to have real chain history,
-and open enough that one motivated user can run a node, mine, inspect flows,
-write tools, and see their work affect the network.
+and open enough that one motivated user can run a node, mine, inspect local
+wallet activity, write tools, and see their work affect the network.
 
 ## What Keeps Niche Coins Alive
 
 Strong niche coin communities usually have several traits:
 
 - A clear identity that is easy to explain and easy to repeat.
-- A low-friction first action: download, sync, get an address, mine, search,
-  inspect, or contribute a small fix.
-- Public artifacts that reward curiosity: explorers, rich lists, network
-  monitors, mining stats, docs, and visible GitHub work.
+- A low-friction first action: download, sync, get an address, mine, test, or
+  contribute a small fix.
+- Public artifacts that reward curiosity: release notes, mining stats, docs,
+  node status, GitHub work, and reproducible builds.
 - A contribution ladder for non-coders and coders: write docs, run a node,
   maintain a seed, mine, test builds, triage issues, build tools, then touch
   core code.
 - A reason to stay after the novelty fades: social rituals, project ownership,
   recurring challenges, transparent operations, and useful data.
 
-Dogecoin shows the power of a welcoming identity and social participation.
-Monero shows how explicit workgroups turn a wide community into focused
-contribution paths. Litecoin shows that a proof-of-work coin can remain relevant
-for years when it stays open-source, simple to run, and connected to real node
-operation. eIquidus shows what altcoin users expect from a useful explorer:
-searchable blocks, transactions, addresses, movement views, network stats,
-rich-list style holder views, APIs, and index maintenance.
-
-## What Motivates DEF CON-Aligned Users
-
-The DEF CON community is not motivated by passive ownership alone. The durable
-motivators are curiosity, proof, skill growth, experimentation, and credible
-participation. The official DEF CON Groups language emphasizes learning,
-sharing, hacking, connecting, local projects, and year-round activity. The older
-DEF CON Groups FAQ also frames groups as places where newcomers can learn,
-people can mentor, and different technical backgrounds can meet around modern
-technology.
-
-For Defcoin, that means the app should invite users to do things:
-
-- Search a real address, txid, block hash, or block height.
-- Ask why an address accumulated DFC.
-- Watch how holder concentration changes.
-- Inspect odd OP_RETURN and witness-storage cases.
-- Mine against P2Pool and see the chain respond.
-- Export or query data to build a tool of their own.
-- Run infrastructure that other users can verify.
-
 ## Product Goals
 
-1. Explorer first.
+1. Make custody clear.
 
-   Explore must behave like a normal block explorer before it behaves like a
-   specialty forensic tool. The main mast search should accept wallet addresses,
-   txids, block hashes, and heights, then route directly to Explorer results.
+   Wallet actions must be explicit, recoverable, and understandable. Sending,
+   receiving, backup, encryption, recovery phrases, paper wallets, watch-only
+   addresses, message signing, and compatibility tools belong in the Wallet
+   section, not hidden behind diagnostics.
 
-2. Make public-chain data visually sticky.
+2. Keep Core validation authoritative.
 
-   Holder concentration, supply bands, movement thresholds, and forensic oddities
-   should make the user ask another question. The charts should not just report
-   numbers; they should imply paths for investigation.
+   Fast Sync, Quick Clone/DCOL, LAN discovery, and mining helpers must not
+   create alternate consensus paths. Transport can be optimized, but accepted
+   blocks still go through Core validation.
 
-3. Show the indexing engine honestly.
+3. Make node health readable.
 
-   The mast should show Explorer, Holder Atlas, movement, and forensics indexing
-   states because those background jobs are the engine of the app. Users should
-   know when data is fresh, stale, scanning, paused, or missing.
+   The status strip, Metrics, peer tables, Debug Log, and RPC Console should
+   make it obvious whether the backend is connected, synced, mining, fast-sync
+   capable, or waiting on a user-visible action.
 
-4. Separate observation from custody.
-
-   Explore can inspect public chain data and local SQLite indexes. It must not
-   duplicate consensus rules, wallet signing, private-key handling, or validation
-   logic in QML. The backend remains authoritative.
-
-5. Turn mining into a security action.
+4. Turn mining into a security action.
 
    Mining copy and status should frame mining as securing and reviving the
    Defcoin chain, not only as earning DFC. P2Pool matters because it lets users
    participate without trusting a central pool balance sheet.
 
-6. Make builders feel invited.
+5. Keep builders invited.
 
-   Nu and Explore should expose enough local data, RPC examples, and schema
-   documentation that a curious user can build a dashboard, bot, indexer, miner
-   monitor, or research notebook without reverse-engineering the app first.
+   Nu should expose enough RPC examples, local status, protocol notes, and
+   reproducible build instructions that a curious user can build a dashboard,
+   miner monitor, seed node, or research notebook without reverse-engineering
+   the app first.
 
-7. Preserve history without freezing the project.
+6. Preserve history without freezing the project.
 
    Defcoin's old chain, legacy ports, address forms, and DEF CON-adjacent story
-   are part of the charm. Nu should preserve compatibility while making the next
-   decade about maintainable tooling, active nodes, visible mining, and usable
-   public data.
+   are part of the charm. Nu should preserve compatibility while making the
+   next decade about maintainable tooling, active nodes, visible mining, and
+   usable wallet operations.
 
-8. Keep Fast Sync and Quick Clone/DCOL distinct.
+7. Keep Quick Clone/DCOL distinct from Fast Sync.
 
    Fast Sync is a transport optimization for normal Core-selected block
    download and validation. Quick Clone is the human-friendly name for Direct
-   Copy Over LAN (DCOL): a trusted snapshot-style mode for a user who
-   intentionally chooses to seed local chain state from machines they control
-   and bypass historical validation. DCOL must never copy wallets, keys,
-   settings, peers, address books, RPC cookies, or ban files. It must move only
-   chain/index state, use explicit manifests and hashes before replacing local
-   chain data, require backend shutdown or a coherent source snapshot, and leave
-   normal Core validation and repair paths available after import. While the
-   snapshot exporter is being built, any validated LAN block-copy scaffolding
-   must continue feeding blocks through Core acceptance instead of pretending it
-   is a validation-bypass clone.
-
-## Explore Experience Goals
-
-- The first screen should feel like an explorer command center, not a marketing
-  page.
-- The top-left lockup should state the product clearly: DEFCOIN / CORE NU /
-  EXPLORE.
-- The first left-pane section should be the Holder Atlas: Largest Holders,
-  Supply Bands, and Whale Lens grouped as one study of holder accumulation and
-  concentration.
-- The Indexer Console should be framed as the monitor and settings page for
-  long-running data engines.
-- Search results should remain inside the Explorer workflow so users understand
-  that Explore is the app's investigative home.
+   Copy Over LAN: a trusted snapshot-style mode for a user who intentionally
+   chooses to seed local chain state from machines they control and bypass
+   historical validation. DCOL must never copy wallets, keys, settings, peers,
+   address books, RPC cookies, or ban files.
 
 ## Voice
 
 Use precise, non-promotional language:
 
-- Prefer "inspect", "verify", "mine", "build", "run", "index", "trace", and
-  "experiment".
-- Avoid price-first framing and investment promises.
-- Avoid implying that one address is one person unless the app has evidence.
-- Explain uncertainty plainly, especially around address clustering and holder
-  interpretation.
+- Prefer "full-node wallet", "local backend", "public chain data", "trusted
+  LAN", "Core validation", and "external block explorer".
+- Avoid hype about price, scarcity, investment, or guaranteed speed.
+- When a feature is experimental, say so directly and show fallback behavior.
+- When a feature touches wallet safety, explain what is and is not copied,
+  persisted, or transmitted.
 
-## References
+## Practical Product Standard
 
-- Local protocol baseline: `source/src/chainparams.cpp` and `source/src/amount.h`.
-- Local architecture boundary: `docs/backend-frontend-boundary.md` and
-  `docs/functionality-map.md`.
-- Defcoin public site for current mining/explorer/community links:
-  https://defcoin.io/
-- Historical Defcoin source tree:
-  https://github.com/mspicer/Defcoin
-- DEF CON Groups:
-  https://defcon-groups.org/
-- DEF CON Groups FAQ:
-  https://forum.defcon.org/node/231249
-- Dogecoin community onboarding:
-  https://dogecoin.com/dogepedia/articles/join-the-dogecoin-community/
-- Monero workgroups:
-  https://www.getmonero.org/community/workgroups/
-- Litecoin project framing:
-  https://litecoin.com/what-is-litecoin
-- eIquidus explorer feature baseline:
-  https://github.com/VECO-Project/eiquidus-explorer
+Every Nu surface should answer one of these questions quickly:
+
+- Can I receive or send DFC safely?
+- Is my wallet backed up, encrypted, and recoverable?
+- Is my node synced and connected to real Defcoin peers?
+- Can I inspect what the backend is doing without leaving the app?
+- Can I mine, test, or help the network without damaging wallet data?
+
+If a feature does not support one of those questions, it should stay outside
+the Nu wallet release until it has its own product boundary.

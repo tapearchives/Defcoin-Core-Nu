@@ -9,7 +9,7 @@ Stages macOS Nu distribution bundles, deploys backend/Qt runtime dependencies, s
 - Owns the final user-facing macOS app package and DMG presentation.
 - DMG layout has repeatedly regressed around icon text backing, coin artwork placement, arrow alignment, and title/logo text.
 - Copies source QML into staged bundles, then prunes source-only `.agent.md`
-  companions. The wallet app also prunes Explore-only QML routes.
+  companions.
 
 ## Do Not Break
 
@@ -21,7 +21,7 @@ Stages macOS Nu distribution bundles, deploys backend/Qt runtime dependencies, s
   plugins loads two Qt runtimes and aborts at launch.
 - DMG background artwork should be visually verified; generated gradients must fully fade out before image edges.
 - DMG wordmark art must follow `docs/brand-logo-text.md` by using the generated
-  Nu/Explore lockup assets shared with QML and splash. Do not redraw the
+  Nu lockup asset shared with QML and splash. Do not redraw the
   wordmark with separate font math, and do not add decorative corner coin
   stacks behind the centered installer layout.
 - Do not treat successful packaging as proof of runtime launch; smoke-test launch separately.

@@ -15,5 +15,5 @@ build over `26.6.1`. The inherited Core client build number is unchanged.
 ## Notes
 
 - `-dbcache` remains a Core backend cache for block validation and chainstate
-  work. It can improve initial sync and validation-heavy work, but Explorer and
-  Explore SQLite indexing use their own SQLite caches and batching.
+  work. It can improve initial sync and validation-heavy work, while local
+  SQLite indexing uses its own caches and batching.

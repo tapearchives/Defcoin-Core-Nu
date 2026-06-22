@@ -78,54 +78,6 @@ src/qt/nu/app/stage_macos_distribution.sh \
   "macOS-AppleSilicon"
 ```
 
-## Explore App Boundary
-
-Defcoin Core Explore is a separate application with its own distribution cycle
-and its own build thread. It currently inherits Nu's visible build number, but a
-Nu-only fix must not automatically copy Explore into a Nu distribution folder.
-
-The CMake project still defines the Explore targets for the Explore build
-thread, but they are excluded from the default Nu build. Build Explore only when
-the Explore thread explicitly requests it:
-
-```sh
-cmake --build build/nu-qml-arm64 --target DefcoinCoreExploreResources -- -j1
-
-src/qt/nu/app/stage_macos_distribution.sh \
-  "$SRC/build/nu-qml-arm64/DefcoinCoreExplore.app" \
-  "$OUT/Defcoin Core Explore/Explore-26.6.2i-20260602/apple-silicon" \
-  "26.6.2i" \
-  "macOS-AppleSilicon"
-```
-
-Mounted DMG smoke check:
-
-```sh
-MOUNT_DIR="$(mktemp -d /tmp/defcoin-explore-install-qa.XXXXXX)"
-hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_DIR" \
-  "$OUT/Defcoin Core Explore/Explore-26.6.2i-20260602/apple-silicon/Defcoin-Core-Nu-Explore-v26.6.2i-macOS-AppleSilicon.dmg"
-
-"$MOUNT_DIR/Defcoin Core Nu Explore.app/Contents/MacOS/DefcoinCoreExplore" \
-  --smoke-test \
-  --route holders \
-  --grab-screenshot /tmp/defcoin-explore-dmg-holders-smoke.png \
-  --grab-delay-ms 3600
-
-for tool in defcoind defcoin-cli defcoin-tx defcoin-wallet; do
-  tool_path="$MOUNT_DIR/Defcoin Core Nu Explore.app/Contents/Resources/nu/bin/$tool"
-  otool -L "$tool_path" | awk '/@executable_path\/..\/Frameworks/ {bad=1; print} END {exit bad ? 1 : 0}'
-  "$tool_path" -version >/dev/null
-done
-
-hdiutil detach "$MOUNT_DIR"
-```
-
-Use a delayed grab for mounted images because Explore route bodies are loaded
-asynchronously and read-only DMG startup can be slower than a local build tree.
-The backend tool loop verifies that packaged tools under
-`Contents/Resources/nu/bin` do not use the GUI-only
-`@executable_path/../Frameworks` install-name form.
-
 ## Windows Cross-Compile
 
 Build the backend from a clean source copy and use one build thread on

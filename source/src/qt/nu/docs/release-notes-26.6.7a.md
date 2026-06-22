@@ -7,7 +7,7 @@ mining, and Fast Sync selector update after 26.6.5h.
 
 - Wallet tab content is now mapped to the visible tab labels. The Recovery tab
   opens BIP39 recovery tools again, Watch-only tools remain under Wallet >
-  Tools, and Paper Wallet generation lives in the separate Explore app.
+  Tools, and Paper Wallet generation stays out of this early wallet candidate.
 - App quit now routes through a shutdown status overlay before the backend stops,
   warning users not to force-quit while wallets, indexes, and database files are
   closing cleanly.
@@ -15,9 +15,9 @@ mining, and Fast Sync selector update after 26.6.5h.
   purple rollover outline.
 - Wallet > Tools is scrollable, so Watch-only controls remain reachable on
   shorter windows.
-- Explore adds a Paper Wallet route with mouse/keyboard entropy capture,
-  in-memory address/private-key QR previews, a pop-out preview, native printing,
-  and a Clear action that removes generated key material from the session.
+- The Paper Wallet route work adds mouse/keyboard entropy capture, in-memory
+  address/private-key QR previews, a pop-out preview, native printing, and a
+  Clear action that removes generated key material from the session.
 - Wallet > Files action buttons get a stable wrapping height so default-width
   windows do not crop the rightmost actions.
 - The mast/header is cleaner while mining: Network and Wallet remain aligned,
@@ -40,7 +40,7 @@ mining, and Fast Sync selector update after 26.6.5h.
 
 - Lion and Windows should port the Wallet tab mapping, mast/header layout,
   shutdown overlay, panel hover outline, Wallet Tools scrolling, mining monitor
-  Follow tail control, Explore Paper Wallet placement, mining pool presets, and
+  Follow tail control, Paper Wallet placement, mining pool presets, and
   UDP selector cooldown changes.
 - Server Fast Sync should match the 26.6.7a user-agent/version identity and the
   same responder/probe behavior, but does not need Quick Clone.
@@ -65,15 +65,13 @@ mining, and Fast Sync selector update after 26.6.5h.
   and DMG checksum verification.
 - Passed: Tahoe paper-wallet check build on 2026-06-11:
   `cmake -S src/qt/nu/app -B build/nu-qml-arm64-paper-wallet-check ...`,
-  `cmake --build build/nu-qml-arm64-paper-wallet-check --target DefcoinCoreNuResources -- -j1`,
-  and `cmake --build build/nu-qml-arm64-paper-wallet-check --target DefcoinCoreExploreResources -- -j1`.
-- Passed: Tahoe Qt 6.11.1 Apple Silicon Nu and Explore resource rebuild from
-  `source/build/nu-qml-arm64-26.6.7a` after the Explore parity/self-test pass.
-- Passed: Tahoe Nu and Explore `--ui-self-test --allow-multiple` route, menu,
+  and `cmake --build build/nu-qml-arm64-paper-wallet-check --target DefcoinCoreNuResources -- -j1`.
+- Passed: Tahoe Qt 6.11.1 Apple Silicon Nu resource rebuild from
+  `source/build/nu-qml-arm64-26.6.7a` after the parity/self-test pass.
+- Passed: Tahoe Nu `--ui-self-test --allow-multiple` route, menu,
   dialog, and Paper Wallet pop-out walks with screenshots under
-  `/tmp/defcoin-nu-ui-selftest-tahoe` and
-  `/tmp/defcoin-explore-ui-selftest-tahoe`.
-- Staged: Tahoe Nu and Explore Apple Silicon apps/DMGs under the timestamped
+  `/tmp/defcoin-nu-ui-selftest-tahoe`.
+- Staged: Tahoe Nu Apple Silicon app/DMG under the timestamped
   `apple-silicon-20260611_125538` distribution folders.
 - Passed: launch-gate first-launch test. The gate cleared any blocking dialogs,
   clicked the Local Network prompt when it appeared, and recorded a clean

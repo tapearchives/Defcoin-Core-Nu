@@ -10,7 +10,7 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 - Calls `reservefastsyncblock` so UDP block transfer follows Core peer/block reservation and normal Core validation.
 - Tracks TCP totals from Core `getnettotals`, UDP totals from Nu Fast Sync/Quick Clone sockets, and Quick Clone as a subset of UDP for diagnostics/CSV.
 - Implements Quick Clone user prompt/status scaffolding as trusted LAN public-chain copy only; wallet/private/config data must never be copied.
-- Provides the standalone Nu RPC Console parser, peer table enrichment, workstation discovery display, Explore paper wallet generation/printing, watch-only import, and selectable diagnostic output.
+- Provides the standalone Nu RPC Console parser, peer table enrichment, workstation discovery display, paper wallet generation/printing, watch-only import, and selectable diagnostic output.
 - Restores the Debug Log surface as a reusable QML panel under RPC Console while
   keeping the existing backend log buffer, line-number data, font sizing, find,
   copy, save, and open-log service APIs in this file.
@@ -99,8 +99,8 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   wallet-scoped `keypoolrefill`, prime a change address with
   `getrawchangeaddress`, and then re-run the original wallet RPC.
 - Restore Wallet fixed-range BIP39 recovery can skip current zero-balance
-  addresses by deriving candidate addresses, checking the current Nu Explore
-  SQLite index when it is caught up to the backend tip, falling back to one
+  addresses by deriving candidate addresses, checking the current local address
+  index when it is caught up to the backend tip, falling back to one
   local `scantxoutset` UTXO pre-scan when the index is absent/stale, and
   importing only funded descriptor index ranges. This is not historical
   pruning; addresses with only fully spent past activity are skipped. Recovery
@@ -179,8 +179,8 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   supported automatic recovery is wallet-scoped Core keypool refill, change
   address priming, and one original-RPC retry.
 - Do not implement zero-balance recovery as in-place wallet key/descriptor
-  deletion. Keep it as a new-wallet fixed-scan pre-import filter. The Nu Explore
-  shortcut may read only a current local SQLite index; otherwise fall back to
+  deletion. Keep it as a new-wallet fixed-scan pre-import filter. The local
+  address-index shortcut may read only a current local SQLite index; otherwise fall back to
   local-only `scantxoutset` because scan objects expose derived wallet
   addresses.
 - Do not route SQL descriptor-wallet phrase recovery through `sethdseed` or

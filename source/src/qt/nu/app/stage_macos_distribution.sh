@@ -13,23 +13,17 @@ RELEASE_VERSION="$3"
 DMG_SUFFIX="${4:-macOS-AppleSilicon}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILT_APP_BASENAME="$(basename "$BUILT_APP")"
-if [[ "$BUILT_APP_BASENAME" == *Explore* || "$BUILT_APP" == *DefcoinCoreExplore* ]]; then
-  PRODUCT_NAME="Defcoin Core Nu Explore"
-  PRODUCT_SLUG="Defcoin-Core-Nu-Explore"
-  APP_EXECUTABLE_NAME="DefcoinCoreExplore"
-  DEST_DMG_BACKGROUND_BASENAME="defcoin-core-nu-explore-dmg-background.png"
-  DMG_STAGE_TEMPLATE="/tmp/defcoin-explore-dmg-stage.XXXXXX"
-  WORDMARK_THIRD_LINE="EXPLORE"
-  LOCKUP_ASSET_BASENAME="defcoin-core-nu-explore-lockup.png"
-else
-  PRODUCT_NAME="Defcoin Core Nu"
-  PRODUCT_SLUG="Defcoin-Core-Nu"
-  APP_EXECUTABLE_NAME="DefcoinCoreNu"
-  DEST_DMG_BACKGROUND_BASENAME="defcoin-core-nu-dmg-background.png"
-  DMG_STAGE_TEMPLATE="/tmp/defcoin-nu-dmg-stage.XXXXXX"
-  WORDMARK_THIRD_LINE=""
-  LOCKUP_ASSET_BASENAME="defcoin-core-nu-lockup.png"
+if [[ "$BUILT_APP_BASENAME" != "DefcoinCoreNu.app" && "$BUILT_APP_BASENAME" != "Defcoin Core Nu.app" ]]; then
+  echo "only Defcoin Core Nu app bundles can be staged by this script" >&2
+  exit 2
 fi
+PRODUCT_NAME="Defcoin Core Nu"
+PRODUCT_SLUG="Defcoin-Core-Nu"
+APP_EXECUTABLE_NAME="DefcoinCoreNu"
+DEST_DMG_BACKGROUND_BASENAME="defcoin-core-nu-dmg-background.png"
+DMG_STAGE_TEMPLATE="/tmp/defcoin-nu-dmg-stage.XXXXXX"
+WORDMARK_THIRD_LINE=""
+LOCKUP_ASSET_BASENAME="defcoin-core-nu-lockup.png"
 DEST_APP="$DEST_PLATFORM_DIR/${PRODUCT_NAME}.app"
 DEST_DMG="$DEST_PLATFORM_DIR/${PRODUCT_SLUG}-v${RELEASE_VERSION}-${DMG_SUFFIX}.dmg"
 LEGACY_DMG_BACKGROUND="$DEST_PLATFORM_DIR/${DEST_DMG_BACKGROUND_BASENAME}"
@@ -51,13 +45,6 @@ rm -rf "$NU_RESOURCE_DIR/qml" "$NU_RESOURCE_DIR/assets"
 ditto "$SCRIPT_DIR/../qml" "$NU_RESOURCE_DIR/qml"
 ditto "$SCRIPT_DIR/../assets" "$NU_RESOURCE_DIR/assets"
 find "$NU_RESOURCE_DIR/qml" -type f -name '*.agent.md' -delete 2>/dev/null || true
-if [ "$PRODUCT_NAME" = "Defcoin Core Nu" ]; then
-  rm -f "$NU_RESOURCE_DIR/qml/ExploreMain.qml"
-  rm -f "$NU_RESOURCE_DIR/qml/Shell/ExploreFrame.qml"
-  rm -f "$NU_RESOURCE_DIR/qml/Shell/ExploreNavigationRail.qml"
-  rm -f "$NU_RESOURCE_DIR/qml/Views/ExplorerView.qml"
-  rm -f "$NU_RESOURCE_DIR/qml/Views/ForensicsView.qml"
-fi
 APP_PLIST="$DEST_APP/Contents/Info.plist"
 if [ -f "$APP_PLIST" ]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleName $PRODUCT_NAME" "$APP_PLIST" 2>/dev/null \

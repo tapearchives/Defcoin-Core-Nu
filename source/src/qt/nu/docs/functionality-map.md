@@ -16,8 +16,6 @@ review history, manage wallets, measure the node, and configure the app.
 | Activity | Transaction history, date/type/search filters, CSV export | History is a retrieval task, not part of payment composition. |
 | Wallet | Wallet files, backup, BIP39 recovery, compatibility encoding tools, passphrase protection, message signing, and address book | Key and wallet maintenance are now first-class wallet tasks instead of being buried under Settings. |
 | Mining | External miner executable setup, pool presets, CPU thread/nice settings, and miner output | Mining helpers stay separate from wallet spending and node metrics. |
-| Explorer | Explorer Search, Network Pulse, Holder Atlas, Movement Map, Droid Trails, and Index Engines | Chain-wide public data stays separate from wallet-owned funds and keys; Explore groups lookup, macro network state, holder analysis, Coindroids-era token-flow discovery, and indexing by user task. |
-| Forensics | Message Scan, Witness Repair, and Contacts | Blockchain oddities, maintenance checks, and local address clusters are readable without exposing raw RPC or requiring manual block scans. |
 | RPC Console | Litecoin-style single-line RPC console with wallet selector | Advanced command execution is available without crowding Metrics. |
 | Metrics | Traffic graph, status rows, and peers | Node transparency is preserved while keeping it out of the main wallet path. |
 | Settings | Network controls, Quick Clone, display behavior, update checks, and background-close behavior | App preferences stay together; wallet operations live in Wallet. Node metrics stay in Metrics. Quick Clone is the trusted-LAN/DCOL workflow for public chain data only. Wallet material is never copied; final snapshot replacement remains manifest-gated. |
@@ -68,8 +66,6 @@ review history, manage wallets, measure the node, and configure the app.
 | Debug log tail | RPC Console / debug-log actions | `debug.log` tail | Advanced support UI | Read-only launch/debug output is kept out of Metrics. |
 | Open full debug log | RPC Console / debug-log actions | system open `debug.log` | Advanced support UI | Maintenance action stays away from metrics tables. |
 | RPC console | RPC Console | local JSON-RPC | Direct UI for advanced users | Preserves full Litecoin/Defcoin command surface while keeping ordinary users on safer flows. |
-| Irregular OP_RETURN messages | Forensics > Message Scan | `scanirregularmessages` | Direct UI | Flags accepted-chain message outputs that bypass standard relay expectations or burn DFC. |
-| Witness block storage repair | Forensics > Witness Repair | `repairwitnessblockdata` | Direct UI | Inspects and optionally rewinds/redownloads post-activation blocks whose local stored bodies are missing witness data, without loading the irregular-message table. |
 | About | About menu, Settings > About | local text/assets | Direct UI | Standard desktop behavior retained. |
 | Options/preferences | Settings | QML settings + RPC | Direct UI | Duplicate controls removed; Defcoin user-agent filter appears in Network only. |
 
@@ -81,7 +77,6 @@ review history, manage wallets, measure the node, and configure the app.
 | Network connect/isolate control | Settings > Network and status strip | Implemented |
 | Dual magic migration control | Settings > Network | Implemented as startup option for accepting both legacy `fbc0b6db` and new `defc014e` peer message bytes. In dual mode, outbound handshakes prefer the new `defc014e` bytes while bounded legacy probes keep old-only Defcoin peers reachable; with dual mode off, the backend uses new Defcoin magic only. |
 | UDP fast sync | Settings > Network, Metrics > Status | Experimental helper using checksum-protected UDP block transfer from connected Defcoin peers and normal backend validation. LAN discovery adds local broadcast; normal TCP sync stays active as fallback. See `fast-sync-protocol.md`. |
-| Network Pulse | Explore > Network Pulse and status strip | Recent hashrate, difficulty, and average block time are visible in the mast; indexed history charts show estimated hashrate, difficulty, and sampled block spacing. |
 | LAN firehose tester | `source/src/qt/nu/tools/lan_firehose` | Standalone developer diagnostic for measuring TCP/UDP LAN throughput and payload-size behavior before changing wallet fast-sync defaults. Includes both CLI and native Qt wrapper. |
 | Network traffic graph | Metrics > Traffic | Implemented in neutral form |
 | Debug log tab/readout | RPC Console / debug-log actions | Implemented |

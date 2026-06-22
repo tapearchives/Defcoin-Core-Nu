@@ -261,67 +261,6 @@ target_compile_definitions(DefcoinCoreNu PRIVATE
     DEFCOIN_NU_VERSION="${DEFCOIN_NU_RELEASE_NAME}"
     DEFCOIN_NU_HELP_ENABLED=${DEFCOIN_NU_HELP_ENABLED_VALUE}
     DEFCOIN_NU_VELOPACK_UPDATE_URL="${DEFCOIN_NU_VELOPACK_UPDATE_URL}"
-    DEFCOIN_NU_EXPLORE_APP=0
-    DEFCOIN_NU_HAS_OPENSSL_CRYPTO=1
-)
-
-qt_add_executable(DefcoinCoreExplore
-    MACOSX_BUNDLE
-    main.cpp
-    NuPlatformIntegration.cpp
-    NuPlatformIntegration.h
-    NuRpcService.cpp
-    NuRpcService.h
-    NuVelopackUpdater.cpp
-    NuVelopackUpdater.h
-    "${DEFCOIN_NU_CORE_SRC_DIR}/crypto/ripemd160.cpp"
-)
-
-target_sources(DefcoinCoreExplore PRIVATE ${DEFCOIN_NU_ICON_MACOS})
-
-if(WIN32)
-    target_sources(DefcoinCoreExplore PRIVATE DefcoinCoreNu.rc)
-    target_link_options(DefcoinCoreExplore PRIVATE -mwindows)
-endif()
-
-if(APPLE)
-    target_sources(DefcoinCoreExplore PRIVATE MacHelp.h MacHelp.mm)
-    target_link_libraries(DefcoinCoreExplore PRIVATE ${COCOA_LIBRARY} ${CARBON_LIBRARY})
-endif()
-
-target_link_libraries(DefcoinCoreExplore
-    PRIVATE
-        ${DEFCOIN_NU_QT_LIBRARIES}
-        ${QRENCODE_LIBRARY}
-        OpenSSL::Crypto
-)
-if(DEFCOIN_NU_HAS_LOCAL_SECP256K1)
-    target_link_libraries(DefcoinCoreExplore PRIVATE ${DEFCOIN_NU_SECP256K1_LIBRARY})
-    target_compile_definitions(DefcoinCoreExplore PRIVATE DEFCOIN_NU_HAS_LOCAL_SECP256K1=1)
-endif()
-
-target_include_directories(DefcoinCoreExplore PRIVATE
-    ${QRENCODE_INCLUDE_DIR}
-    "${DEFCOIN_NU_CORE_SRC_DIR}"
-    "${DEFCOIN_NU_SECP256K1_INCLUDE_DIR}"
-)
-
-set_target_properties(DefcoinCoreExplore PROPERTIES
-    EXCLUDE_FROM_ALL TRUE
-    MACOSX_BUNDLE_GUI_IDENTIFIER org.defcoincore.DefcoinCoreNuExplore
-    MACOSX_BUNDLE_BUNDLE_NAME "Defcoin Core Nu Explore"
-    MACOSX_BUNDLE_DISPLAY_NAME "Defcoin Core Nu Explore"
-    MACOSX_BUNDLE_ICON_FILE "AppIcon"
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/MacOSXBundleInfo.plist.in"
-    MACOSX_BUNDLE_SHORT_VERSION_STRING "${DEFCOIN_NU_RELEASE_NAME}"
-    MACOSX_BUNDLE_BUNDLE_VERSION "${DEFCOIN_NU_RELEASE_NAME}"
-)
-
-target_compile_definitions(DefcoinCoreExplore PRIVATE
-    DEFCOIN_NU_VERSION="${DEFCOIN_NU_RELEASE_NAME}"
-    DEFCOIN_NU_HELP_ENABLED=${DEFCOIN_NU_HELP_ENABLED_VALUE}
-    DEFCOIN_NU_VELOPACK_UPDATE_URL="${DEFCOIN_NU_VELOPACK_UPDATE_URL}"
-    DEFCOIN_NU_EXPLORE_APP=1
     DEFCOIN_NU_HAS_OPENSSL_CRYPTO=1
 )
 
@@ -337,7 +276,6 @@ if(APPLE)
     endfunction()
 
     defcoin_nu_install_compiled_app_icon(DefcoinCoreNu)
-    defcoin_nu_install_compiled_app_icon(DefcoinCoreExplore)
 endif()
 
 file(GLOB_RECURSE DEFCOIN_NU_QML_FILES CONFIGURE_DEPENDS
@@ -349,25 +287,13 @@ file(GLOB_RECURSE DEFCOIN_NU_QML_AGENT_NOTE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/../qml/*.agent.md"
 )
 
-set(DEFCOIN_NU_EXPLORE_ONLY_QML_PATHS
-    "ExploreMain.qml"
-    "Shell/ExploreFrame.qml"
-    "Shell/ExploreNavigationRail.qml"
-    "Views/ExplorerView.qml"
-    "Views/ForensicsView.qml"
-)
-
 set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/DefcoinCoreNu.ico"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/bip39/english.txt"
-    "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-core-nu-explore-lockup.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-core-nu-lockup.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-coin-stack-hires.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-nu-icon-1024.png"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/brand/defcoin-v26-coin.png"
-    "${CMAKE_CURRENT_LIST_DIR}/../assets/data/coindroids_dc25_chain_forensics.json"
-    "${CMAKE_CURRENT_LIST_DIR}/../assets/data/defcoin_reddit_timeline.json"
-    "${CMAKE_CURRENT_LIST_DIR}/../assets/docs/coindroids_defcoin_forensics_story_report_v6.pdf"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/AtkinsonHyperlegibleMono-Bold.ttf"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/AtkinsonHyperlegibleMono-BoldItalic.ttf"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/AtkinsonHyperlegibleMono-Italic.ttf"
@@ -378,8 +304,6 @@ set(DEFCOIN_NU_RUNTIME_ASSET_FILES
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/external-link.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/eye-off.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/eye.svg"
-    "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/explorer.svg"
-    "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/forensics.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/home.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/isolated.svg"
     "${CMAKE_CURRENT_LIST_DIR}/../assets/icons/lock.svg"
@@ -471,13 +395,6 @@ foreach(nu_agent_note IN LISTS DEFCOIN_NU_QML_AGENT_NOTE_FILES)
     )
 endforeach()
 
-set(DEFCOIN_NU_EXPLORE_ONLY_QML_REMOVE_COMMANDS)
-foreach(nu_explore_qml IN LISTS DEFCOIN_NU_EXPLORE_ONLY_QML_PATHS)
-    list(APPEND DEFCOIN_NU_EXPLORE_ONLY_QML_REMOVE_COMMANDS
-        COMMAND ${CMAKE_COMMAND} -E rm -f "${DEFCOIN_NU_RESOURCE_DIR}/qml/${nu_explore_qml}"
-    )
-endforeach()
-
 set(DEFCOIN_NU_ASSET_COPY_COMMANDS)
 foreach(nu_asset IN LISTS DEFCOIN_NU_RUNTIME_ASSET_FILES)
     file(RELATIVE_PATH nu_asset_rel "${CMAKE_CURRENT_LIST_DIR}/../assets" "${nu_asset}")
@@ -494,7 +411,6 @@ add_custom_target(DefcoinCoreNuResources ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_RESOURCE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_LIST_DIR}/../qml" "${DEFCOIN_NU_RESOURCE_DIR}/qml"
     ${DEFCOIN_NU_QML_AGENT_NOTE_REMOVE_COMMANDS}
-    ${DEFCOIN_NU_EXPLORE_ONLY_QML_REMOVE_COMMANDS}
     ${DEFCOIN_NU_ASSET_COPY_COMMANDS}
 )
 
@@ -547,65 +463,16 @@ else()
     )
 endif()
 
-if(APPLE)
-    set(DEFCOIN_NU_EXPLORE_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/nu")
-    set(DEFCOIN_NU_EXPLORE_HELP_DIR "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/DefcoinCoreNu.help")
-else()
-    set(DEFCOIN_NU_EXPLORE_RESOURCE_DIR "$<TARGET_FILE_DIR:DefcoinCoreExplore>/nu")
-    set(DEFCOIN_NU_EXPLORE_HELP_DIR "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/help/DefcoinCoreNu.help")
-endif()
-
-set(DEFCOIN_NU_EXPLORE_ASSET_COPY_COMMANDS)
-foreach(nu_asset IN LISTS DEFCOIN_NU_RUNTIME_ASSET_FILES)
-    file(RELATIVE_PATH nu_asset_rel "${CMAKE_CURRENT_LIST_DIR}/../assets" "${nu_asset}")
-    get_filename_component(nu_asset_rel_dir "${nu_asset_rel}" DIRECTORY)
-    list(APPEND DEFCOIN_NU_EXPLORE_ASSET_COPY_COMMANDS
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/assets/${nu_asset_rel_dir}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${nu_asset}" "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/assets/${nu_asset_rel}"
-    )
-endforeach()
-
-set(DEFCOIN_NU_EXPLORE_QML_AGENT_NOTE_REMOVE_COMMANDS)
-foreach(nu_agent_note IN LISTS DEFCOIN_NU_QML_AGENT_NOTE_FILES)
-    file(RELATIVE_PATH nu_agent_note_rel "${CMAKE_CURRENT_LIST_DIR}/../qml" "${nu_agent_note}")
-    list(APPEND DEFCOIN_NU_EXPLORE_QML_AGENT_NOTE_REMOVE_COMMANDS
-        COMMAND ${CMAKE_COMMAND} -E rm -f "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/qml/${nu_agent_note_rel}"
-    )
-endforeach()
-
-add_custom_target(DefcoinCoreExploreResources
-    DEPENDS ${DEFCOIN_NU_QML_FILES} ${DEFCOIN_NU_RUNTIME_ASSET_FILES}
-    COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_LIST_DIR}/../qml" "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/qml"
-    ${DEFCOIN_NU_EXPLORE_QML_AGENT_NOTE_REMOVE_COMMANDS}
-    ${DEFCOIN_NU_EXPLORE_ASSET_COPY_COMMANDS}
-)
-
-add_dependencies(DefcoinCoreExploreResources DefcoinCoreExplore)
-if(APPLE)
-    add_dependencies(DefcoinCoreExploreResources DefcoinCoreNuAppIconAssets)
-    add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_APP_ICON_ASSETS_CAR}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/Assets.car"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_APP_ICON_ICNS}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/AppIcon.icns"
-        COMMENT "Installing Defcoin Core Nu Explore compiled app icon"
-    )
-endif()
-
 if(DEFCOIN_NU_TRIPPY_BINARY)
     if(WIN32)
         set(DEFCOIN_NU_TRIPPY_OUTPUT "${DEFCOIN_NU_RESOURCE_DIR}/bin/trip.exe")
-        set(DEFCOIN_NU_EXPLORE_TRIPPY_OUTPUT "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin/trip.exe")
     else()
         set(DEFCOIN_NU_TRIPPY_OUTPUT "${DEFCOIN_NU_RESOURCE_DIR}/bin/trip")
-        set(DEFCOIN_NU_EXPLORE_TRIPPY_OUTPUT "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin/trip")
     endif()
     if(UNIX)
         set(DEFCOIN_NU_TRIPPY_CHMOD_COMMAND COMMAND /bin/chmod 755 "${DEFCOIN_NU_TRIPPY_OUTPUT}")
-        set(DEFCOIN_NU_EXPLORE_TRIPPY_CHMOD_COMMAND COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPLORE_TRIPPY_OUTPUT}")
     else()
         set(DEFCOIN_NU_TRIPPY_CHMOD_COMMAND)
-        set(DEFCOIN_NU_EXPLORE_TRIPPY_CHMOD_COMMAND)
     endif()
     add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_RESOURCE_DIR}/bin"
@@ -613,44 +480,7 @@ if(DEFCOIN_NU_TRIPPY_BINARY)
         ${DEFCOIN_NU_TRIPPY_CHMOD_COMMAND}
         COMMENT "Bundling Trippy route tracer for Nu"
     )
-    add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_TRIPPY_BINARY}" "${DEFCOIN_NU_EXPLORE_TRIPPY_OUTPUT}"
-        ${DEFCOIN_NU_EXPLORE_TRIPPY_CHMOD_COMMAND}
-        COMMENT "Bundling Trippy route tracer for Explore"
-    )
 endif()
-
-if(APPLE)
-    add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-        COMMAND /bin/chmod u+w "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
-        COMMAND ${CMAKE_COMMAND}
-            "-DDEFCOIN_NU_RESOURCE_DIR=${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}"
-            "-DDEFCOIN_NU_RELEASE_NAME=${DEFCOIN_NU_RELEASE_NAME}"
-            "-DDEFCOIN_NU_SOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}"
-            "-DDEFCOIN_NU_PLIST_PATH=$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
-            -P "${CMAKE_CURRENT_LIST_DIR}/write_nu_build_metadata.cmake"
-        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/set_macos_launch_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
-        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/remove_macos_help_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
-        COMMAND /usr/bin/touch -ch "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
-        COMMENT "Writing Defcoin Core Nu Explore resources and build metadata"
-    )
-else()
-    add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-        COMMAND ${CMAKE_COMMAND}
-            "-DDEFCOIN_NU_RESOURCE_DIR=${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}"
-            "-DDEFCOIN_NU_RELEASE_NAME=${DEFCOIN_NU_RELEASE_NAME}"
-            "-DDEFCOIN_NU_SOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}"
-            -P "${CMAKE_CURRENT_LIST_DIR}/write_nu_build_metadata.cmake"
-        COMMENT "Writing Defcoin Core Nu Explore build metadata"
-    )
-endif()
-
-add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPLORE_HELP_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E rm -rf "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/help"
-    COMMENT "Omitting optional Defcoin Core Nu Explore help resources"
-)
 
 if(APPLE)
     add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
@@ -721,22 +551,6 @@ if(APPLE)
                 COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
                 COMMENT "Deploying focused Qt frameworks, plugins, and QML imports"
             )
-            add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Frameworks"
-                COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/PlugIns"
-                COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/qml"
-                COMMAND "${DEFCOIN_NU_MACDEPLOYQT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
-                    -no-plugins
-                    "-libpath=${DEFCOIN_NU_QT_ROOT}/lib"
-                    -always-overwrite
-                    -appstore-compliant
-                    ${DEFCOIN_NU_MACDEPLOYQT_CODESIGN_FLAGS}
-                COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/deploy_macos_qt_runtime.sh" "${DEFCOIN_NU_QT_ROOT}" "${DEFCOIN_NU_QT_PLUGIN_ROOT}" "${DEFCOIN_NU_QT_QML_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
-                COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/fix_macos_qt_rpath.sh" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/MacOS/DefcoinCoreExplore"
-                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/repair_macos_qt_bundle.py" "${DEFCOIN_NU_QT_ROOT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
-                COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
-                COMMENT "Deploying focused Qt frameworks, plugins, and QML imports for Explore"
-            )
         else()
             message(WARNING "macdeployqt not found at ${DEFCOIN_NU_MACDEPLOYQT}; macOS app bundle will not be self-contained")
         endif()
@@ -748,11 +562,6 @@ if(APPLE)
             COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Frameworks"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${qrencode_runtime_library}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Frameworks/${qrencode_runtime_name}"
             COMMENT "Bundling qrencode runtime for Defcoin Core Nu"
-        )
-        add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Frameworks"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${qrencode_runtime_library}" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Frameworks/${qrencode_runtime_name}"
-            COMMENT "Bundling qrencode runtime for Defcoin Core Nu Explore"
         )
     endforeach()
 
@@ -1014,59 +823,9 @@ if(DEFCOIN_NU_BACKEND_BINARY)
         )
     endif()
     if(APPLE)
-        set(DEFCOIN_NU_EXPLORE_BACKEND_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/nu/bin/defcoind")
-        set(DEFCOIN_NU_EXPLORE_CLI_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/nu/bin/defcoin-cli")
-        set(DEFCOIN_NU_EXPLORE_TX_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/nu/bin/defcoin-tx")
-        set(DEFCOIN_NU_EXPLORE_WALLET_OUTPUT "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Resources/nu/bin/defcoin-wallet")
-    elseif(WIN32)
-        set(DEFCOIN_NU_EXPLORE_BACKEND_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExplore>/nu/bin/defcoind.exe")
-        set(DEFCOIN_NU_EXPLORE_CLI_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExplore>/nu/bin/defcoin-cli.exe")
-        set(DEFCOIN_NU_EXPLORE_TX_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExplore>/nu/bin/defcoin-tx.exe")
-        set(DEFCOIN_NU_EXPLORE_WALLET_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExplore>/nu/bin/defcoin-wallet.exe")
-    else()
-        set(DEFCOIN_NU_EXPLORE_BACKEND_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExplore>/nu/bin/defcoind")
-        set(DEFCOIN_NU_EXPLORE_CLI_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExplore>/nu/bin/defcoin-cli")
-        set(DEFCOIN_NU_EXPLORE_TX_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExplore>/nu/bin/defcoin-tx")
-        set(DEFCOIN_NU_EXPLORE_WALLET_OUTPUT "$<TARGET_FILE_DIR:DefcoinCoreExplore>/nu/bin/defcoin-wallet")
-    endif()
-    add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_BACKEND_BINARY}" "${DEFCOIN_NU_EXPLORE_BACKEND_OUTPUT}"
-        COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPLORE_BACKEND_OUTPUT}"
-        COMMENT "Bundling Defcoin backend for Explore"
-    )
-    if(DEFCOIN_NU_CLI_BINARY)
-        add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_CLI_BINARY}" "${DEFCOIN_NU_EXPLORE_CLI_OUTPUT}"
-            COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPLORE_CLI_OUTPUT}"
-            COMMENT "Bundling Defcoin CLI for Explore"
-        )
-    endif()
-    if(DEFCOIN_NU_TX_BINARY)
-        add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_TX_BINARY}" "${DEFCOIN_NU_EXPLORE_TX_OUTPUT}"
-            COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPLORE_TX_OUTPUT}"
-            COMMENT "Bundling Defcoin transaction utility for Explore"
-        )
-    endif()
-    if(DEFCOIN_NU_WALLET_BINARY)
-        add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${DEFCOIN_NU_EXPLORE_RESOURCE_DIR}/bin"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DEFCOIN_NU_WALLET_BINARY}" "${DEFCOIN_NU_EXPLORE_WALLET_OUTPUT}"
-            COMMAND /bin/chmod 755 "${DEFCOIN_NU_EXPLORE_WALLET_OUTPUT}"
-            COMMENT "Bundling Defcoin wallet utility for Explore"
-        )
-    endif()
-    if(APPLE)
         add_custom_command(TARGET DefcoinCoreNuResources POST_BUILD
             COMMAND /bin/bash "${CMAKE_CURRENT_LIST_DIR}/bundle_macos_backend_deps.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>"
             COMMENT "Bundling Defcoin backend runtime dependencies for Nu"
-        )
-        add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-            COMMAND /bin/bash "${CMAKE_CURRENT_LIST_DIR}/bundle_macos_backend_deps.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
-            COMMENT "Bundling Defcoin backend runtime dependencies for Explore"
         )
     endif()
     if(WIN32)
@@ -1128,12 +887,5 @@ if(APPLE)
         COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/${DEFCOIN_NU_FINAL_HELP_PLIST_SCRIPT}" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>/Contents/Info.plist"
         COMMAND /bin/bash "${CMAKE_CURRENT_LIST_DIR}/sign_macos_bundle.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreNu>"
         COMMENT "Ad-hoc signing Defcoin Core Nu app bundle"
-    )
-    add_custom_command(TARGET DefcoinCoreExploreResources POST_BUILD
-        COMMAND /bin/chmod u+w "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
-        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/set_macos_launch_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
-        COMMAND /bin/sh "${CMAKE_CURRENT_LIST_DIR}/remove_macos_help_plist.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>/Contents/Info.plist"
-        COMMAND /bin/bash "${CMAKE_CURRENT_LIST_DIR}/sign_macos_bundle.sh" "$<TARGET_BUNDLE_DIR:DefcoinCoreExplore>"
-        COMMENT "Ad-hoc signing Defcoin Core Nu Explore app bundle"
     )
 endif()

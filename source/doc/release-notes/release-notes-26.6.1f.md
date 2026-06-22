@@ -13,7 +13,7 @@ Defcoin Core Nu `26.6.1f` is a small documentation and wording cleanup over
   recurring first-launch crashes. It documents confirmed recent causes, including
   mixed Homebrew/bundled Qt frameworks, missing Qt platform/runtime plugins,
   bundle identity drift, saved-window restoration confusion, stale backend
-  instances, and dirty Nu/Explore split worktrees.
+  instances, and dirty Nu split worktrees.
 - Linked the launch-crash prevention note from the Nu developer docs index.
 
 The inherited Core client compatibility version is unchanged.

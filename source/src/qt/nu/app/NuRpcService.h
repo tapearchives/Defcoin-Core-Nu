@@ -159,7 +159,7 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QString recoveryAddressScanStatus READ recoveryAddressScanStatus NOTIFY recoveryChanged)
     Q_PROPERTY(QString recoveryElapsed READ recoveryElapsed NOTIFY recoveryChanged)
     Q_PROPERTY(QString recoveryEta READ recoveryEta NOTIFY recoveryChanged)
-    Q_PROPERTY(QString recoveryExploreLookupSuggestion READ recoveryExploreLookupSuggestion NOTIFY explorerChanged)
+    Q_PROPERTY(QString recoveryIndexLookupSuggestion READ recoveryIndexLookupSuggestion NOTIFY explorerChanged)
     Q_PROPERTY(bool recoveryCancelable READ recoveryCancelable NOTIFY recoveryChanged)
     Q_PROPERTY(QStringList bip39EnglishWords READ bip39EnglishWords CONSTANT)
     Q_PROPERTY(QString minerExecutable READ minerExecutable NOTIFY minerChanged)
@@ -194,37 +194,10 @@ class NuRpcService final : public QObject
     Q_PROPERTY(int explorerIndexedBlockCount READ explorerIndexedBlockCount NOTIFY explorerChanged)
     Q_PROPERTY(int explorerIndexedOutputCount READ explorerIndexedOutputCount NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerRichList READ explorerRichList NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList explorerMovements READ explorerMovements NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantMap coindroidsSummary READ coindroidsSummary NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsWindowRows READ coindroidsWindowRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsEndpointRows READ coindroidsEndpointRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsWinnerRows READ coindroidsWinnerRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsPhaseRows READ coindroidsPhaseRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsPublishedRows READ coindroidsPublishedRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsVanityRows READ coindroidsVanityRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsOpReturnRows READ coindroidsOpReturnRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsBotRows READ coindroidsBotRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsPayoutRows READ coindroidsPayoutRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsAttackAddressRows READ coindroidsAttackAddressRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsQrSeedRows READ coindroidsQrSeedRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsSourceAmmoRows READ coindroidsSourceAmmoRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsOloRows READ coindroidsOloRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsGameAddressRows READ coindroidsGameAddressRows NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList coindroidsEvidenceRows READ coindroidsEvidenceRows NOTIFY explorerChanged)
-    Q_PROPERTY(QString coindroidsStatus READ coindroidsStatus NOTIFY explorerChanged)
-    Q_PROPERTY(bool coindroidsScanning READ coindroidsScanning NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantMap defcoinTimelineSummary READ defcoinTimelineSummary NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList defcoinTimelineRows READ defcoinTimelineRows NOTIFY explorerChanged)
-    Q_PROPERTY(QString defcoinTimelineCriteria READ defcoinTimelineCriteria NOTIFY explorerChanged)
-    Q_PROPERTY(QString defcoinTimelineStatus READ defcoinTimelineStatus NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantMap networkPulseSummary READ networkPulseSummary NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList networkPulseHistoryRows READ networkPulseHistoryRows NOTIFY explorerChanged)
-    Q_PROPERTY(QString networkPulseStatus READ networkPulseStatus NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerContactSets READ explorerContactSets NOTIFY explorerChanged)
     Q_PROPERTY(QString currentExplorerContactSetName READ currentExplorerContactSetName NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerContacts READ explorerContacts NOTIFY explorerChanged)
     Q_PROPERTY(QVariantList explorerContactRelationships READ explorerContactRelationships NOTIFY explorerChanged)
-    Q_PROPERTY(QString explorerAnalyticsStatus READ explorerAnalyticsStatus NOTIFY explorerChanged)
     Q_PROPERTY(bool explorerTop100Scanning READ explorerTop100Scanning NOTIFY explorerChanged)
     Q_PROPERTY(bool explorerTop100FocusedIndexing READ explorerTop100FocusedIndexing WRITE
                    setExplorerTop100FocusedIndexing NOTIFY settingsChanged)
@@ -234,29 +207,6 @@ class NuRpcService final : public QObject
     Q_PROPERTY(int explorerTop100TimelineStartHeight READ explorerTop100TimelineStartHeight NOTIFY explorerChanged)
     Q_PROPERTY(int explorerTop100TimelineEndHeight READ explorerTop100TimelineEndHeight NOTIFY explorerChanged)
     Q_PROPERTY(int explorerTop100TimelineEventCount READ explorerTop100TimelineEventCount NOTIFY explorerChanged)
-    Q_PROPERTY(QVariantList forensicsIrregularMessages READ forensicsIrregularMessages NOTIFY forensicsChanged)
-    Q_PROPERTY(bool forensicsScanning READ forensicsScanning NOTIFY forensicsChanged)
-    Q_PROPERTY(QString forensicsScanStatus READ forensicsScanStatus NOTIFY forensicsChanged)
-    Q_PROPERTY(QString forensicsScanSummary READ forensicsScanSummary NOTIFY forensicsChanged)
-    Q_PROPERTY(int forensicsScanHeight READ forensicsScanHeight NOTIFY forensicsChanged)
-    Q_PROPERTY(int forensicsScanTip READ forensicsScanTip NOTIFY forensicsChanged)
-    Q_PROPERTY(int forensicsIrregularMessageCount READ forensicsIrregularMessageCount NOTIFY forensicsChanged)
-    Q_PROPERTY(bool forensicsScanComplete READ forensicsScanComplete NOTIFY forensicsChanged)
-    Q_PROPERTY(bool forensicsAcceptBip141AsRegular READ forensicsAcceptBip141AsRegular WRITE
-                   setForensicsAcceptBip141AsRegular NOTIFY settingsChanged)
-    Q_PROPERTY(bool forensicsMissingWitnessFound READ forensicsMissingWitnessFound NOTIFY forensicsChanged)
-    Q_PROPERTY(int forensicsFirstMissingWitnessHeight READ forensicsFirstMissingWitnessHeight NOTIFY forensicsChanged)
-    Q_PROPERTY(int forensicsMissingWitnessCount READ forensicsMissingWitnessCount NOTIFY forensicsChanged)
-    Q_PROPERTY(bool forensicsWitnessRepairRunning READ forensicsWitnessRepairRunning NOTIFY forensicsChanged)
-    Q_PROPERTY(
-        bool forensicsWitnessInspectionAvailable READ forensicsWitnessInspectionAvailable NOTIFY forensicsChanged)
-    Q_PROPERTY(QString forensicsWitnessRepairStatus READ forensicsWitnessRepairStatus NOTIFY forensicsChanged)
-    Q_PROPERTY(int forensicsWitnessRepairStartHeight READ forensicsWitnessRepairStartHeight NOTIFY forensicsChanged)
-    Q_PROPERTY(
-        int forensicsWitnessRepairInspectedBlocks READ forensicsWitnessRepairInspectedBlocks NOTIFY forensicsChanged)
-    Q_PROPERTY(int forensicsWitnessRepairFirstMissingHeight READ forensicsWitnessRepairFirstMissingHeight NOTIFY
-                   forensicsChanged)
-
 public:
     explicit NuRpcService(QObject* parent = nullptr);
     ~NuRpcService() override;
@@ -767,7 +717,7 @@ public:
     {
         return m_shutdown_status;
     }
-    QString recoveryExploreLookupSuggestion() const;
+    QString recoveryIndexLookupSuggestion() const;
     QString explorerDatabasePath() const;
     QVariantList explorerRecentLookups() const
     {
@@ -801,110 +751,6 @@ public:
     {
         return m_explorer_rich_list;
     }
-    QVariantList explorerMovements() const
-    {
-        return m_explorer_movements;
-    }
-    QVariantMap coindroidsSummary() const
-    {
-        return m_coindroids_summary;
-    }
-    QVariantList coindroidsWindowRows() const
-    {
-        return m_coindroids_window_rows;
-    }
-    QVariantList coindroidsEndpointRows() const
-    {
-        return m_coindroids_endpoint_rows;
-    }
-    QVariantList coindroidsWinnerRows() const
-    {
-        return m_coindroids_winner_rows;
-    }
-    QVariantList coindroidsPhaseRows() const
-    {
-        return m_coindroids_phase_rows;
-    }
-    QVariantList coindroidsPublishedRows() const
-    {
-        return m_coindroids_published_rows;
-    }
-    QVariantList coindroidsVanityRows() const
-    {
-        return m_coindroids_vanity_rows;
-    }
-    QVariantList coindroidsOpReturnRows() const
-    {
-        return m_coindroids_op_return_rows;
-    }
-    QVariantList coindroidsBotRows() const
-    {
-        return m_coindroids_bot_rows;
-    }
-    QVariantList coindroidsPayoutRows() const
-    {
-        return m_coindroids_payout_rows;
-    }
-    QVariantList coindroidsAttackAddressRows() const
-    {
-        return m_coindroids_attack_address_rows;
-    }
-    QVariantList coindroidsQrSeedRows() const
-    {
-        return m_coindroids_qr_seed_rows;
-    }
-    QVariantList coindroidsSourceAmmoRows() const
-    {
-        return m_coindroids_source_ammo_rows;
-    }
-    QVariantList coindroidsOloRows() const
-    {
-        return m_coindroids_olo_rows;
-    }
-    QVariantList coindroidsGameAddressRows() const
-    {
-        return m_coindroids_game_address_rows;
-    }
-    QVariantList coindroidsEvidenceRows() const
-    {
-        return m_coindroids_evidence_rows;
-    }
-    QString coindroidsStatus() const
-    {
-        return m_coindroids_status;
-    }
-    bool coindroidsScanning() const
-    {
-        return m_coindroids_scanning;
-    }
-    QVariantMap defcoinTimelineSummary() const
-    {
-        return m_defcoin_timeline_summary;
-    }
-    QVariantList defcoinTimelineRows() const
-    {
-        return m_defcoin_timeline_rows;
-    }
-    QString defcoinTimelineCriteria() const
-    {
-        return m_defcoin_timeline_criteria;
-    }
-    QString defcoinTimelineStatus() const
-    {
-        return m_defcoin_timeline_status;
-    }
-    QVariantMap networkPulseSummary() const
-    {
-        return m_network_pulse_summary;
-    }
-    QVariantList networkPulseHistoryRows() const
-    {
-        return m_network_pulse_history_rows;
-    }
-    QString networkPulseStatus() const
-    {
-        return m_network_pulse_status;
-    }
     QVariantList explorerContactSets() const
     {
         return m_explorer_contact_sets;
@@ -920,10 +766,6 @@ public:
     QVariantList explorerContactRelationships() const
     {
         return m_explorer_contact_relationships;
-    }
-    QString explorerAnalyticsStatus() const
-    {
-        return m_explorer_analytics_status;
     }
     bool explorerTop100Scanning() const
     {
@@ -957,78 +799,6 @@ public:
     {
         return m_explorer_top100_timeline_event_count;
     }
-    QVariantList forensicsIrregularMessages() const
-    {
-        return m_forensics_irregular_messages;
-    }
-    bool forensicsScanning() const
-    {
-        return m_forensics_scanning;
-    }
-    QString forensicsScanStatus() const
-    {
-        return m_forensics_scan_status;
-    }
-    QString forensicsScanSummary() const
-    {
-        return m_forensics_scan_summary;
-    }
-    int forensicsScanHeight() const
-    {
-        return m_forensics_scan_height;
-    }
-    int forensicsScanTip() const
-    {
-        return m_forensics_scan_tip;
-    }
-    int forensicsIrregularMessageCount() const
-    {
-        return m_forensics_irregular_messages.size();
-    }
-    bool forensicsScanComplete() const
-    {
-        return m_forensics_scan_complete;
-    }
-    bool forensicsAcceptBip141AsRegular() const
-    {
-        return m_forensics_accept_bip141_as_regular;
-    }
-    bool forensicsMissingWitnessFound() const
-    {
-        return m_forensics_missing_witness_found;
-    }
-    int forensicsFirstMissingWitnessHeight() const
-    {
-        return m_forensics_first_missing_witness_height;
-    }
-    int forensicsMissingWitnessCount() const
-    {
-        return m_forensics_missing_witness_count;
-    }
-    bool forensicsWitnessRepairRunning() const
-    {
-        return m_forensics_witness_repair_running;
-    }
-    bool forensicsWitnessInspectionAvailable() const
-    {
-        return m_forensics_witness_inspection_available;
-    }
-    QString forensicsWitnessRepairStatus() const
-    {
-        return m_forensics_witness_repair_status;
-    }
-    int forensicsWitnessRepairStartHeight() const
-    {
-        return m_forensics_witness_repair_start_height;
-    }
-    int forensicsWitnessRepairInspectedBlocks() const
-    {
-        return m_forensics_witness_repair_inspected_blocks;
-    }
-    int forensicsWitnessRepairFirstMissingHeight() const
-    {
-        return m_forensics_witness_repair_first_missing_height;
-    }
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void requestNewAddress(const QString& label = QString(),
@@ -1059,7 +829,6 @@ public:
     Q_INVOKABLE void setAddressLabel(const QString& address, const QString& label);
     Q_INVOKABLE void setNetworkActive(bool active);
     Q_INVOKABLE void scheduleWitnessBlockRepair(int start_height);
-    Q_INVOKABLE void repairWitnessBlockDataNow(int start_height, bool fix_missing_witness = true);
     Q_INVOKABLE void syncUsingQuickCloneNow();
     Q_INVOKABLE void acceptQuickClonePrompt();
     Q_INVOKABLE void declineQuickClonePrompt();
@@ -1164,13 +933,7 @@ public:
     Q_INVOKABLE void openBlockInExplorer(const QString& block_id);
     Q_INVOKABLE void searchExplorer(const QString& query);
     Q_INVOKABLE void openExplorerLink(const QString& link);
-    Q_INVOKABLE void openNuExplore();
     Q_INVOKABLE void refreshExplorerRecentLookups();
-    Q_INVOKABLE void refreshExplorerAnalytics(int movement_threshold_coins = 5000,
-                                              const QString& scope = QStringLiteral("all"));
-    Q_INVOKABLE void refreshCoindroidsAnalytics();
-    Q_INVOKABLE void refreshDefcoinTimeline();
-    Q_INVOKABLE void refreshNetworkPulseHistory(int window_blocks = 120);
     Q_INVOKABLE void startExplorerIndexing();
     Q_INVOKABLE void stopExplorerIndexing();
     Q_INVOKABLE void resetExplorerIndex();
@@ -1189,14 +952,6 @@ public:
     Q_INVOKABLE void deleteExplorerContact(int index);
     Q_INVOKABLE void refreshExplorerContactRelationships();
     Q_INVOKABLE void loadExplorerContactRows(const QString& name, const QVariantList& rows);
-    Q_INVOKABLE void importCoindroidsGameContacts();
-    Q_INVOKABLE void loadCoindroidsContactSet(const QString& key);
-    Q_INVOKABLE void openCoindroidsReportPdf();
-    Q_INVOKABLE void refreshForensicsIrregularMessages();
-    Q_INVOKABLE void startForensicsIrregularMessages(int start_height);
-    Q_INVOKABLE void stopForensicsScan();
-    Q_INVOKABLE void resumeForensicsScan();
-    Q_INVOKABLE void exportForensicsIrregularMessagesCsv();
     Q_INVOKABLE void checkForUpdates(bool manual);
     Q_INVOKABLE void downloadPendingUpdate();
     Q_INVOKABLE void installDownloadedUpdate();
@@ -1248,7 +1003,6 @@ public Q_SLOTS:
     void setLogVerbosity(int verbosity);
     void setLogSearchPattern(const QString& pattern);
     void setLogRemovePattern(const QString& pattern);
-    void setForensicsAcceptBip141AsRegular(bool enabled);
     void setBackgroundCloseEnabled(bool enabled);
     void setShowStartupSplashStatusIndicator(bool enabled);
     void setMaskBalances(bool enabled);
@@ -1275,7 +1029,6 @@ Q_SIGNALS:
     void transactionDetailsReady(const QString& title, const QString& html);
     void explorerWindowRequested(const QString& title, const QString& html);
     void explorerChanged();
-    void forensicsChanged();
     void peerTraceStarted(const QString& trace_id, const QString& title, const QString& host, const QString& command);
     void peerTraceOutput(const QString& trace_id, const QString& text);
     void peerTraceFinished(const QString& trace_id, int exit_code, const QString& status);
@@ -1445,7 +1198,6 @@ private:
     void recordCoreSyncPathProgress(int blocks, double seconds);
     bool shouldAttemptUdpFastSync();
     void resetFastSyncProtocolWindow();
-    void probeBackendCapabilities();
     void refreshDebugLog();
     void updateReceiveQr();
     QString receiveRequestSettingsKey() const;
@@ -1484,22 +1236,11 @@ private:
     int explorerIndexedBlockCountFromDb() const;
     int explorerIndexedOutputCountFromDb() const;
     QVariantList explorerRichListFromDb(QString* error = nullptr) const;
-    QVariantList explorerMovementsFromDb(qint64 threshold_sats, QString* error = nullptr) const;
-    QString droidTrailsDatabasePath() const;
-    bool ensureDroidTrailsDatabase(QString* error = nullptr) const;
-    QVariantMap coindroidsAnalyticsFromCache(QString* error = nullptr) const;
-    void saveCoindroidsAnalyticsCache(const QVariantMap& analysis, QString* error = nullptr) const;
-    QVariantMap coindroidsAnalyticsFromDb(QString* error = nullptr) const;
-    void loadDefcoinTimeline();
-    QVariantMap networkPulseHistoryFromDb(int window_blocks, QString* error = nullptr) const;
     void refreshRecentAverageBlockTimeFromRpc(int tip_height);
     void refreshRecentAverageBlockTimeFromIndex();
     void loadExplorerContacts();
     void persistExplorerContacts();
     void persistExplorerContactSets();
-    QString coindroidsContactSetName(const QString& key) const;
-    QVariantList coindroidsContactsForSetKey(const QString& key) const;
-    void ensureCoindroidsPrebuiltContactSets(bool emit_signal);
     QVariantList explorerContactsFromJsonArray(const QJsonArray& raw_contacts) const;
     QJsonArray explorerContactsToJsonArray(const QVariantList& contacts) const;
     QVariantMap explorerContactSetRow(const QString& name, const QVariantList& contacts, qint64 updated_at) const;
@@ -1543,12 +1284,6 @@ private:
     bool writeExplorerTop100EventBatch(const QVector<ExplorerTop100EventWrite>& events, QString* error = nullptr);
     bool writeExplorerTop100Events(int height, qint64 block_time, bool force_anchor, QString* error = nullptr);
     bool finishExplorerTop100Scan(bool completed, QString* error = nullptr);
-    void scheduleForensicsScanStep(int delay_ms = 0);
-    void forensicsScanStep();
-    void rebuildForensicsScanSummary();
-    void resetForensicsPrefixCompression();
-    void finalizeForensicsPrefixCompression(QVariantList& rows);
-    bool appendForensicsDisplayRow(QVariantList& rows, const QVariantMap& display_row);
     QString explorerLookupHtml(const QString& title, const QString& summary_html, const QJsonValue& raw_json) const;
     void emitExplorerError(const QString& title, const QString& detail);
     void rebuildNodeMetrics();
@@ -2011,51 +1746,15 @@ private:
     bool m_third_party_tx_urls_enabled = false;
     QString m_third_party_tx_url;
     QString m_third_party_address_url;
-    QString m_explorer_mode = QStringLiteral("internal");
+    QString m_explorer_mode = QStringLiteral("dc903");
     QString m_shutdown_status = QStringLiteral("Ready to shut down.");
     bool m_application_shutdown_prepared = false;
     QVariantList m_explorer_recent_lookups;
     QVariantList m_explorer_rich_list;
-    QVariantList m_explorer_movements;
-    QVariantMap m_coindroids_summary;
-    QVariantList m_coindroids_window_rows;
-    QVariantList m_coindroids_endpoint_rows;
-    QVariantList m_coindroids_winner_rows;
-    QVariantList m_coindroids_phase_rows;
-    QVariantList m_coindroids_published_rows;
-    QVariantList m_coindroids_vanity_rows;
-    QVariantList m_coindroids_op_return_rows;
-    QVariantList m_coindroids_bot_rows;
-    QVariantList m_coindroids_payout_rows;
-    QVariantList m_coindroids_attack_address_rows;
-    QVariantList m_coindroids_qr_seed_rows;
-    QVariantList m_coindroids_source_ammo_rows;
-    QVariantList m_coindroids_olo_rows;
-    QVariantList m_coindroids_game_address_rows;
-    QVariantList m_coindroids_evidence_rows;
-    QString m_coindroids_status = QStringLiteral("Coindroids analysis not loaded yet.");
-    int m_coindroids_generation = 0;
-    bool m_coindroids_scanning = false;
-    qint64 m_coindroids_last_refresh_ms = 0;
-    QVariantMap m_defcoin_timeline_summary;
-    QVariantList m_defcoin_timeline_rows;
-    QString m_defcoin_timeline_criteria = QStringLiteral("Timeline not loaded yet.");
-    QString m_defcoin_timeline_status = QStringLiteral("/r/Defcoin timeline not loaded yet.");
-    bool m_defcoin_timeline_loaded = false;
-    QVariantMap m_network_pulse_summary;
-    QVariantList m_network_pulse_history_rows;
-    QString m_network_pulse_status =
-        QStringLiteral("Network Pulse waits for the Explorer index to cache block timestamps.");
     QVariantList m_explorer_contacts;
     QVariantList m_explorer_contact_relationships;
     QVariantList m_explorer_contact_sets;
     QString m_current_explorer_contact_set_name = QStringLiteral("Default");
-    QString m_explorer_analytics_status = QStringLiteral("Explorer analytics not loaded yet.");
-    int m_explorer_analytics_generation = 0;
-    bool m_explorer_analytics_refreshing = false;
-    int m_explorer_analytics_last_threshold_coins = -1;
-    QString m_explorer_analytics_last_scope;
-    qint64 m_explorer_analytics_last_refresh_ms = 0;
     bool m_explorer_indexing = false;
     bool m_explorer_index_request_in_flight = false;
     bool m_explorer_auto_index_requested = false;
@@ -2101,37 +1800,6 @@ private:
     QHash<QString, qint64> m_explorer_top100_balances;
     std::set<ExplorerTop100Entry, ExplorerTop100EntryLess> m_explorer_top100_order;
     QVector<QPair<QString, int>> m_explorer_top100_previous_rows;
-    QVariantList m_forensics_irregular_messages;
-    bool m_forensics_scanning = false;
-    bool m_forensics_request_in_flight = false;
-    bool m_forensics_scan_complete = false;
-    bool m_forensics_accept_bip141_as_regular = true;
-    bool m_forensics_missing_witness_found = false;
-    int m_forensics_first_missing_witness_height = -1;
-    int m_forensics_missing_witness_count = 0;
-    QString m_forensics_scan_status = QStringLiteral("Irregular message scan not started.");
-    QString m_forensics_scan_summary;
-    bool m_forensics_witness_repair_running = false;
-    bool m_forensics_witness_inspection_available = false;
-    bool m_forensics_witness_capability_known = false;
-    bool m_forensics_witness_capability_probe_in_flight = false;
-    QString m_forensics_witness_repair_status = QStringLiteral("Witness data inspection not started.");
-    int m_forensics_witness_repair_start_height = 903168;
-    int m_forensics_witness_repair_inspected_blocks = 0;
-    int m_forensics_witness_repair_first_missing_height = -1;
-    int m_forensics_scan_start_height = 0;
-    int m_forensics_scan_height = 0;
-    int m_forensics_scan_tip = 0;
-    QString m_forensics_compress_prefix;
-    int m_forensics_compress_start_height = -1;
-    int m_forensics_compress_last_height = -1;
-    QVariantMap m_forensics_compress_start_row;
-    QVariantMap m_forensics_compress_summary_row;
-    QVariantMap m_forensics_compress_end_row;
-    int m_forensics_compress_start_index = -1;
-    int m_forensics_compress_summary_index = -1;
-    int m_forensics_compress_end_index = -1;
-    int m_forensics_compress_count = 0;
     mutable QStringList m_bip39_words;
     mutable QHash<QString, int> m_bip39_word_index;
 };

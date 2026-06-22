@@ -8,21 +8,21 @@ Initializes the Nu QML app, command-line switches, backend/service objects, sing
 
 - Adds single-instance lock handling with "check again" and "close other instance" flows.
 - Translates Nu debug launch switches into environment/backend behavior for Core TCP sync, Core block-body sync, Fast Sync, and Quick Clone isolation tests.
-- Supports Quick Clone launch initiation and Explorer/ExpFor split behavior.
+- Supports Quick Clone launch initiation and Nu-only wallet startup behavior.
 - Loads bundled Nu fonts from `Resources/nu/assets/fonts` before QML starts so
   Atkinson Hyperlegible Mono is available to QML and C++ paper-wallet rendering
   without depending on system font installs.
 - Shows launch progress on the splash screen with one centered top status line so loading text does not collide with the logo/title artwork.
 - Supports `--grab-splash <path>` as a focused diagnostic that writes the exact
   generated startup splash pixmap and exits before backend startup.
-- The splash coin + wordmark lockup is drawn from the generated brand assets
-  `defcoin-core-nu-lockup.png` and `defcoin-core-nu-explore-lockup.png`, the
-  same assets used by `NuBrandLockup.qml`. Do not recreate splash logo spacing
-  with independent font math. Update `docs/brand-logo-text.md`, the generated
-  lockup assets, and `NuBrandLockup.qml` together when ratios change.
+- The splash coin + wordmark lockup is drawn from the generated brand asset
+  `defcoin-core-nu-lockup.png`, the same asset used by `NuBrandLockup.qml`. Do
+  not recreate splash logo spacing with independent font math. Update
+  `docs/brand-logo-text.md`, the generated lockup asset, and
+  `NuBrandLockup.qml` together when ratios change.
 - Provides an internal `--ui-self-test` route/dialog/menu walk. It disables
-  backend autostart, skips the single-instance guard, opens Nu and Explore
-  route surfaces, exercises menu-backed dialogs, and can capture screenshots via
+  backend autostart, skips the single-instance guard, opens Nu route surfaces,
+  exercises menu-backed dialogs, and can capture screenshots via
   `DEFCOIN_NU_UI_SELF_TEST_SCREENSHOTS`.
 - When `DEFCOIN_NU_PAPER_WALLET_PDF` is set during `--ui-self-test`, renders
   the paper-wallet print sheet with fake placeholder key data to the requested
@@ -61,7 +61,7 @@ Initializes the Nu QML app, command-line switches, backend/service objects, sing
 
 - `git diff --check`
 - Launch with and without an existing Nu instance and confirm duplicate handling loops until the first instance is actually closed or the user quits.
-- Run `--ui-self-test --allow-multiple` for both Nu and Explore after route,
-  menu, dialog, or paper-wallet surface changes.
+- Run `--ui-self-test --allow-multiple` after route, menu, dialog, or
+  paper-wallet surface changes.
 - Use `--grab-splash <path>` when checking splash-only artwork changes without
   relying on macOS screen-recording permission.

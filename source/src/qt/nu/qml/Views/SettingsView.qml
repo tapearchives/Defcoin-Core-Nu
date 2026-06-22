@@ -24,13 +24,13 @@ ColumnLayout {
         return index >= 0 && index < values.length ? values[index] : "tsv"
     }
     function explorerModeIndex(mode) {
-        const values = ["internal", "dc903", "legacy", "fun", "custom"]
+        const values = ["dc903", "fun", "custom"]
         const index = values.indexOf(String(mode).toLowerCase())
         return index >= 0 ? index : 0
     }
     function explorerModeAt(index) {
-        const values = ["internal", "dc903", "legacy", "fun", "custom"]
-        return index >= 0 && index < values.length ? values[index] : "internal"
+        const values = ["dc903", "fun", "custom"]
+        return index >= 0 && index < values.length ? values[index] : "dc903"
     }
     function customExplorerTemplatesValid() {
         return String(NuService.thirdPartyTxUrl || "").indexOf("%s") >= 0
@@ -339,7 +339,7 @@ ColumnLayout {
                         spacing: NuTokens.spaceSm
 
                         Label {
-                            text: "Explorer links"
+                            text: "Block explorer links"
                             color: NuTokens.textPrimary
                             font.pixelSize: NuTokens.fontBody
                             font.weight: Font.DemiBold
@@ -352,16 +352,16 @@ ColumnLayout {
                             columnSpacing: NuTokens.spaceLg
 
                             Label {
-                                text: "Open explorer links with"
+                                text: "Open block explorer links with"
                                 color: NuTokens.textSecondary
                                 font.pixelSize: NuTokens.fontBody
                             }
                             NuComboBox {
                                 id: explorerMode
                                 Layout.fillWidth: true
-                                model: ["Nu Explore app", "External: DC903 Explorer", "External: Legacy Explorer", "External: explorer.defcoin.fun", "External: Custom URLs"]
+                                model: ["External: DC903 Explorer", "External: explorer.defcoin.fun", "External: Custom URLs"]
                                 currentIndex: root.explorerModeIndex(NuService.explorerMode)
-                                helpText: "Nu Explore is the default local lookup target. It opens the adjunct Defcoin Core Nu Explore app for address, transaction, and block details. External choices open a browser."
+                                helpText: "Choose which external block explorer Nu opens for address and transaction links."
                                 onActivated: function(index) {
                                     NuService.setExplorerMode(root.explorerModeAt(index))
                                 }
@@ -417,12 +417,10 @@ ColumnLayout {
 
                         Label {
                             Layout.fillWidth: true
-                            text: NuService.explorerMode === "internal"
-                                  ? "Nu Explore lookups stay local, open in the separate Explore app, and use the local SQLite cache at: " + NuService.explorerDatabasePath
-                                  : (!root.customExplorerTemplatesValid()
-                                     ? "External explorer links need transaction and address URL templates containing %s."
-                                     : "External explorer links open in the system browser.")
-                            color: NuService.explorerMode !== "internal" && !root.customExplorerTemplatesValid() ? NuTokens.stateWarning : NuTokens.textSecondary
+                            text: !root.customExplorerTemplatesValid()
+                                  ? "External block explorer links need transaction and address URL templates containing %s."
+                                  : "External block explorer links open in the system browser."
+                            color: !root.customExplorerTemplatesValid() ? NuTokens.stateWarning : NuTokens.textSecondary
                             font.pixelSize: NuTokens.fontSmall
                             wrapMode: Text.WordWrap
                         }

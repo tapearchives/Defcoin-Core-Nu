@@ -214,10 +214,7 @@ Nu organizes the wallet around these main views:
 - Receive: address generation, receive-request history, request details, QR
   display, and request removal.
 - Transactions: transaction history, details, copy/export actions, and
-  explorer links where configured by the user.
-- Explorer: local SQLite-backed block, transaction, address, rich-list, and
-  movement lookups.
-- Forensics: irregular OP_RETURN message discovery from active-chain block data.
+  external block-explorer links where configured by the user.
 - Diagnostics: backend status, logs, console, traffic, and simple or detailed
   peer tables.
 - Mining: external miner selection, preset pool configuration, command/config
@@ -287,14 +284,6 @@ payload sizes, and writes JSONL/CSV results. A native Qt wrapper provides common
 controls, live stats, a results table, stdout log, and a small TCP/UDP chart.
 The tester is deliberately separate from wallet sync: it does not read keys, use
 RPC, or submit blocks.
-
-The Forensics view starts with `Irregular Messages`, a user-readable OP_RETURN
-oddity table. Its backend `scanirregularmessages` RPC scans active-chain
-`CBlock` data in bounded chunks and flags outputs that would normally be outside
-standard relay policy: nonzero value burned into OP_RETURN, scripts larger than
-the 83-byte standard OP_RETURN relay limit, active opcodes after OP_RETURN, and
-multiple OP_RETURN outputs in the same transaction. The RPC only reads accepted
-block data and does not change chain state.
 
 ## BIP39 Recovery Phrase Support
 
@@ -468,9 +457,8 @@ boundaries documented in `doc/license-and-attribution-notices.md`.
 Defcoin Core Nu builds on prior Defcoin wallet, pool, and mobile work: the
 first public Defcoin-Qt v0.8.6.2 builds, Defcoin Core v1.0.0, v1.0.1,
 packetloss404 / Ian S. Walmsley's v1.0.2 work, earlier Defcoin P2Pool porting
-credited to charlesrocket and later Defcoin pool operators, Justin
-Culbertson's Android Defcoin Wallet, Michael Perklin's BeerWallet for iOS, and
-Joshua "Josh" McDougall / Abstrct's Coindroids work.
+credited to charlesrocket and later Defcoin pool operators, Justin Culbertson's
+Android Defcoin Wallet, and Michael Perklin's BeerWallet for iOS.
 
 Security-sensitive work should be reviewed with extra care, especially changes
 to wallet encryption, signing, transaction construction, mnemonic recovery,

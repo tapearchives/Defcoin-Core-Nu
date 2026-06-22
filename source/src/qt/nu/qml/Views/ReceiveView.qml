@@ -378,14 +378,12 @@ ColumnLayout {
                     NuActionButton {
                         text: "Inspect address"
                         Layout.preferredWidth: 168
-                        helpText: "Open this address with the selected explorer behavior. Internal mode opens a Nu explorer window; external mode opens the configured browser explorer."
+                        helpText: "Open this address with the configured external block explorer."
                         onClicked: NuService.openAddressInExplorer(root.currentRequest.address || "")
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: NuService.explorerMode === "internal"
-                              ? "Opens in the internal SQLite-backed explorer."
-                              : NuService.explorerUrlForAddress(root.currentRequest.address || "")
+                        text: NuService.explorerUrlForAddress(root.currentRequest.address || "")
                         color: NuTokens.textSecondary
                         font.pixelSize: NuTokens.fontSmall
                         wrapMode: Text.WrapAnywhere

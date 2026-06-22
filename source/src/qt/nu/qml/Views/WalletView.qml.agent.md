@@ -6,7 +6,7 @@ Owns wallet management, wallet lists, backups, single paper-wallet generation, a
 
 ## Nu Divergence
 
-- Hosts the single paper-wallet generator as a Wallet tab immediately after Wallets. The route is for one offline wallet at a time; bulk paper-wallet workflows belong in Explore.
+- Hosts the single paper-wallet generator as a Wallet tab immediately after Wallets. The route is for one offline wallet at a time; bulk paper-wallet workflows need a dedicated reviewed workflow.
 - Guards tab changes away from Paper Wallet while generated private keys remain
   in memory. Accepting the warning clears the generated keys before switching;
   canceling leaves the user on Paper Wallet.
@@ -26,7 +26,7 @@ Owns wallet management, wallet lists, backups, single paper-wallet generation, a
 
 ## Do Not Break
 
-- Keep Paper Wallet as a single-wallet flow. Do not add bulk generation or coin-splitting workflows here; those belong in Explore.
+- Keep Paper Wallet as a single-wallet flow. Do not add bulk generation or coin-splitting workflows here; those need a dedicated reviewed workflow.
 - Do not bypass the generated-key leave warning when changing Wallet tabs.
 - Watch-only addresses cannot spend; keep that warning visible.
 - Wallet delete must move to `Deleted Wallets`, not secure-wipe or silently remove active wallet files.

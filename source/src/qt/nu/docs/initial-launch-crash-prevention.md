@@ -2,9 +2,9 @@
 
 Last updated: 2026-06-02
 
-This note tracks the recurring “build opens, splash appears, then the app exits”
-failure mode. The goal is to make every new Nu or Explore package pass the same
-launch gates before it is handed off.
+This note tracks the recurring "build opens, splash appears, then the app exits"
+failure mode. The goal is to make every new Nu package pass the same launch
+gates before it is handed off.
 
 ## Confirmed Recent Causes
 
@@ -73,9 +73,9 @@ Symptom:
 
 Cause:
 
-- Recent Nu/Explore split work changed visible names, bundle identifiers,
-  executable names, and DMG names. A partially renamed bundle can still build
-  but fail at launch or relaunch the wrong binary.
+- Recent packaging work changed visible names, bundle identifiers, executable
+  names, and DMG names. A partially renamed bundle can still build but fail at
+  launch or relaunch the wrong binary.
 
 Fix:
 
@@ -88,7 +88,6 @@ test -x "$APP/Contents/MacOS/DefcoinCoreNu"
 ```
 
 - Nu should use the Nu executable and bundle identifier.
-- Explore should use the Explore executable and bundle identifier.
 - Do not reuse a staged app folder across product renames; stage into a clean
   destination.
 
@@ -108,7 +107,7 @@ Cause:
 Fix:
 
 - Keep `set_macos_launch_plist.sh` in the build path.
-- Ensure the app disables saved no-window restoration for Nu and Explore.
+- Ensure the app disables saved no-window restoration.
 - Launch the app fresh after a crash test rather than trusting the restored
   state.
 
@@ -118,14 +117,12 @@ Symptom:
 
 - A build that worked minutes earlier starts crashing after a small unrelated
   change.
-- Nu contains Explore-only QML or C++ paths, or Explore lacks copied Nu
-  components.
+- Nu contains non-wallet QML or stale product-split C++ paths.
 
 Cause:
 
-- Nu and Explore currently share `NuRpcService`, QML components, and packaging
-  scripts. During the split, a dirty tree can include unrelated staged or
-  unstaged changes that affect the app being packaged.
+- During packaging work, a dirty tree can include unrelated staged or unstaged
+  changes that affect the app being packaged.
 
 Fix:
 
@@ -158,7 +155,7 @@ Fix:
 - Stop any previous test instance before launch smoke tests:
 
 ```sh
-pgrep -fl "DefcoinCoreNu|DefcoinCoreExplore|defcoind"
+pgrep -fl "DefcoinCoreNu|defcoind"
 defcoin-cli -rpcconnect=127.0.0.1 -rpcport=9332 stop
 ```
 
@@ -225,8 +222,8 @@ They prove packaging integrity, not runtime viability.
 - Stage with `stage_macos_distribution.sh`; do not hand-copy `.app` bundles.
 - Do not skip the Qt repair/verification pass.
 - Do not hand off a build that has not been opened once from the staged app path.
-- Keep Nu and Explore build outputs separate; do not stage one product into the
-  other product's folder.
+- Keep the Nu output folder Nu-only; do not stage unrelated products or preview
+  material into it.
 - Preserve the inherited Core client version unless the user explicitly asks to
   change it; use Nu suffixes for UI/package rebuilds.
 - When an automated launch sees a fresh `SIGABRT` DiagnosticReports file, treat

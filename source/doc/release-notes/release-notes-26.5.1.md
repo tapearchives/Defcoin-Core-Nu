@@ -31,8 +31,7 @@ policy, and `/Defcoin` User-Agent filtering.
   values: difficulty, estimated network hash rate over 120 blocks, active
   chain and chain-tip counts, sync progress, and top P2P message types.
 - Added Build Notes acknowledgements for prior Defcoin Core releases, earlier
-  Defcoin P2Pool work, Android Defcoin Wallet, BeerWallet for iOS, and
-  Coindroids.
+  Defcoin P2Pool work, Android Defcoin Wallet, and BeerWallet for iOS.
 - Added modern SQL descriptor wallet creation using Bitcoin Core's descriptor
   wallet model. Bitcoin Core introduced SQLite descriptor wallets in v0.21 and
   current Bitcoin Core creates descriptor wallets in SQLite by default; Defcoin

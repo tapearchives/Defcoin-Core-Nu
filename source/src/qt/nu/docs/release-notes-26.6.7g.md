@@ -40,8 +40,8 @@ staged, and safer to use before the Lion and Windows parity ports.
 - The printed amount is cosmetic. It does not fund the paper wallet or check
   balance.
 - Bulk funded paper-wallet workflows, custom artwork templates, and automatic
-  split/distribution beyond the reviewed Nu funding table belong in Explore and
-  remain roadmap work.
+  split/distribution beyond the reviewed Nu funding table need a dedicated
+  reviewed workflow and remain roadmap work.
 
 ## Verification
 
