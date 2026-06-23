@@ -84,21 +84,41 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
   group-guide lines and rotating theme-color dots every six characters to make
   manual transcription easier without altering the key text.
 - Refuses non-loopback RPC targets by default for Nu UI operations; remote RPC is an explicit operator override via `DEFCOIN_NU_ALLOW_REMOTE_RPC=1`.
+- Managed backend launch must pass `-onlydefcoinua=` from Nu settings. Daemon
+  backend starts do not inherit Qt settings, and without the explicit argument
+  public Litecoin-style peers can pollute logs with invalid-header traffic.
 - Limits automatic update download/apply to Velopack-managed installs. GitHub release fallback opens the release page for manual download instead of trusting package and checksum from the same release channel.
 - Throttles in-app miner log UI updates so high-volume miner output does not force continuous QML text re-rendering.
-- Keeps the in-app miner log capped to the newest 4K lines and exposes a
-  recent-window accepted-share rate text for the mast/Monitor. The parser must
-  recognize both Nu summary lines and common cpuminer
+- Keeps the in-app miner log capped to the newest 4K lines, keeps a
+  launch-local monotonically increasing line-number list for those buffered
+  rows, and exposes a recent-window accepted-share rate text for the
+  mast/Monitor. The parser must recognize both Nu summary lines and common cpuminer
   accepted/rejected/hashrate output.
 - Owns the Mining > Benchmark Pools runner. It reuses the saved miner
-  executable, payout, password, thread, and nice settings; iterates validated
-  preset/custom stratum endpoints; pings each host before mining; records
-  hashrate, raw accepted shares, accepted share-difficulty work/s, ping,
-  restart timing, and status; shows current-pool elapsed/left timing while a run
-  is active; and autosaves both latest and timestamped JSON/PNG chart artifacts
-  under the Defcoin data directory. Pool comparison must use accepted work/s
-  rather than raw accepted share count because pools may assign different share
-  difficulty.
+  executable, default payout, default password, thread, and nice settings;
+  iterates validated preset/custom stratum endpoints from the persisted Mining
+  > Pools preset table; applies optional per-pool payout/password overrides
+  only for that pool's benchmark pass; probes each Stratum endpoint with an
+  internal ten-try TCP-connect latency check before mining; records pool number,
+  pool software, hashrate, raw accepted shares, accepted share-difficulty totals,
+  accepted share-difficulty work/s data, endpoint latency, restart timing for
+  ETA, local completion time, and status; shows current-pool elapsed/left timing
+  while a run is active; and autosaves both latest and timestamped JSON/PNG
+  chart artifacts under the Defcoin data directory. The countdown must not add a
+  fixed endpoint-latency tax; it starts from configured pool time and adds only
+  observed restart overhead once samples exist. Pool comparison must use the
+  fairer accepted work/s score scaled by 1,000,000 for display rather than raw
+  accepted share count because pools may assign different share difficulty; sum
+  accepted `Submitted Diff` values when present and only fall back to the current
+  target-equivalent minimum difficulty when an accepted share has no matched
+  difficulty row, making missing log detail conservative rather than exact. The
+  benchmark minimum per-pool run is 10 seconds. The PNG chart renderer must stay
+  1920x1080, use bar charts for accepted work/s x1e6, hashrate, and endpoint
+  latency, show per-bar labels and per-pool-average labels clear of the bars to
+  the right of the averaged group, keep the legend on one line, and switch a
+  panel to log scale when a large value spread would hide the useful
+  differences.
+  Export save dialogs share the last successful export directory.
 - On Windows, assigns Nu-owned backend, miner, traceroute, and helper child processes to a kill-on-close job object so crash paths do not leave mining/backend processes running unattended.
 - Seed/source attribution may include protocol-verified fixed address aliases for public Defcoin operators. These aliases affect peer display only and must not silently become Core bootstrap seeds.
 - Seed/source attribution for configured DNS seeds must survive IPv6 DNS
@@ -192,8 +212,13 @@ Main C++ bridge between the Nu QML frontend and the Defcoin backend. Owns RPC or
 - Keep miner log updates throttled and capped to bounded memory; do not emit
   `minerChanged` for every raw miner output chunk.
 - Keep pool benchmarking on the same Nu-owned miner process path as ordinary
-  local mining so validation, wrapper handling, redaction, Windows job
-  containment, and bounded log parsing do not fork into a second behavior.
+  local mining so validation, wrapper handling, Windows job containment, and
+  bounded log parsing do not fork into a second behavior. Miner launch logs may
+  show the Stratum `-p` value because Defcoin pools usually use this as a dummy
+  worker parameter rather than a wallet secret.
+- Built-in Mining > Pools defaults should not include obsolete/retired presets,
+  but saved or custom rows that users already have must stay visible and
+  editable rather than being silently hidden or deleted during normalization.
 - Keep Windows child-process job containment on every Nu-owned `QProcess` start path.
 - During Tahoe UDP testing, macOS Local Network "Allow" is a hard external gate; failed probes before Allow are not code evidence.
 - Do not make backup UI imply a different wallet than the active one. If wallet naming/storage detection changes, update `walletBackupDefaultFileName()` and smoke-test both BDB and SQL wallet names.

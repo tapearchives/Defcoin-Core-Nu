@@ -16,7 +16,6 @@ ColumnLayout {
     property var logFilterPresetModel: []
     property bool logAutoFollow: true
     property bool logRecentFirst: false
-    property bool logAutoFollowBeforeRecentFirst: true
     property bool adjustingLogScroll: false
 
     function logVerbosityName(level) {
@@ -97,7 +96,8 @@ ColumnLayout {
         const debugWidth = String(maxLineNumber).length
         for (let i = 0; i < lines.length; ++i) {
             const debugLineNumber = lines[i].lineNumber > 0 ? root.leftPadNumber(lines[i].lineNumber, debugWidth) : root.leftPadNumber("-", debugWidth)
-            out.push(root.leftPadNumber(i + 1, viewWidth) + " \u2502 " + debugLineNumber + " \u2502 " + String(lines[i].line || ""))
+            const viewLineNumber = root.logRecentFirst ? lines.length - i : i + 1
+            out.push(root.leftPadNumber(viewLineNumber, viewWidth) + " \u2502 " + debugLineNumber + " \u2502 " + String(lines[i].line || ""))
         }
         return out.join("\n")
     }
@@ -184,10 +184,12 @@ ColumnLayout {
         debugLogText.cursorPosition = Math.min(oldCursor, debugLogText.length)
         if (hadSelection)
             debugLogText.select(Math.min(oldSelectionStart, debugLogText.length), Math.min(oldSelectionEnd, debugLogText.length))
-        else if (root.logRecentFirst)
-            root.followLogHead()
-        else if (root.logAutoFollow)
-            root.followLogTail()
+        else if (root.logAutoFollow) {
+            if (root.logRecentFirst)
+                root.followLogHead()
+            else
+                root.followLogTail()
+        }
     }
 
     function followLogTail() {
@@ -251,31 +253,25 @@ ColumnLayout {
         Label { text: root.logVerbosityName(NuService.logVerbosity); color: NuTokens.textPrimary; font.pixelSize: NuTokens.fontSmall }
         Label { text: "Lines: " + root.shownLogLineCount; color: NuTokens.textSecondary; font.pixelSize: NuTokens.fontSmall }
         NuCheckBox {
-            text: "Follow tail"
-            checked: !root.logRecentFirst && root.logAutoFollow
-            enabled: !root.logRecentFirst
-            helpText: "Keep the newest debug log output visible at the bottom."
+            text: "Output focus"
+            checked: root.logAutoFollow
+            helpText: "Keep newest debug log output in view. With latest output on top, this focuses the first line; otherwise it follows the bottom tail."
             onToggled: {
                 root.logAutoFollow = checked
-                if (checked)
-                    root.followLogTail()
+                if (checked) {
+                    if (root.logRecentFirst)
+                        root.followLogHead()
+                    else
+                        root.followLogTail()
+                }
             }
         }
         NuCheckBox {
-            text: "Recent Logs to Top"
+            text: "Latest output on top"
             checked: root.logRecentFirst
-            helpText: "Show new debug log output at the top instead of following the bottom tail."
+            helpText: "Show newest debug log output at the top."
             onToggled: {
-                if (checked) {
-                    root.logAutoFollowBeforeRecentFirst = root.logAutoFollow
-                    root.logRecentFirst = true
-                    root.followLogHead()
-                } else {
-                    root.logRecentFirst = false
-                    root.logAutoFollow = root.logAutoFollowBeforeRecentFirst
-                    if (root.logAutoFollow)
-                        root.followLogTail()
-                }
+                root.logRecentFirst = checked
                 root.updateLogText()
             }
         }

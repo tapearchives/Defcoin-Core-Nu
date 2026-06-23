@@ -65,15 +65,71 @@ whether the strict public `26.6.8` line is ready.
   boundary build and rebuilds the matching Windows 11 x86_64 package. The Nu
   repo, docs, changelog, source tree, and staged packages exclude sibling
   product targets, screenshots, data files, QML, and release notes.
+- `26.6.8f-alpha` polishes the Tahoe Mining > Monitor and Benchmark Pools
+  surfaces. Miner output keeps its viewing position unless Output focus is
+  enabled, line numbers remain monotonic across the rolling 4K-line buffer,
+  latest-output-on-top no longer disables focus controls, benchmark tables are
+  selectable and sortable, benchmark charts are 1920x1080 bar charts with
+  apples-to-apples accepted work/s emphasis, and chart export/copy/open-window
+  actions are available. Pool presets now group the Defcoin Host CPU/USB/ASIC
+  P2Pool endpoints together with Defcoin.io solo mining, and managed backend
+  startup explicitly passes the Defcoin user-agent filter preference so
+  Litecoin-family peers cannot pollute the node when filtering is enabled.
+- `26.6.8g-alpha` tightens the Tahoe Mining > Benchmark Pools layout and
+  comparison output. The table now fits next to the preview chart, omits the
+  Status display column, uses accepted work/ms for more readable fair-comparison
+  values, pings the bare stratum host without its port, removes the restart-time
+  PNG panel, and keeps pool numbers off the chart labels and legend.
+- `26.6.8h-alpha` adds a proper Tahoe Mining > Pools preset table with
+  separate Pool name, Stratum address, and Pool software fields plus add,
+  update, remove, use-selected, and reset-default actions. The Defcoin Host
+  CPU/USB/ASIC P2Pool presets now use IP-based stratum endpoints while keeping
+  readable host:port names, and Mining Benchmark latency checks use a built-in
+  ten-try HTTPing-style Qt TCP probe instead of launching command-line ping.
+- `26.6.8i-alpha` polishes Tahoe Mining > Pools and Benchmark Pools. Presets
+  can be reordered by dragging the No. column, optional per-pool payout/password
+  fields inherit the general mining settings when blank, the benchmark table
+  uses readable accepted work/s x1e6 values with units in headers, the restart
+  display column is removed, the preview chart is larger, the Monitor launch
+  command no longer redacts the Stratum `-p` value, and the latency check no
+  longer sends HTTP bytes to Stratum ports.
+- `26.6.8j-alpha` restores Mining > Pools to Nu's reusable table component so
+  pool presets are selectable, copyable, sortable, and still reorderable from
+  the No. column. It tightens table auto-fit sizing, removes the retired
+  `cpu.defcoin.host:13370` preset, lowers the benchmark minimum to 10 seconds,
+  fixes the estimated runtime math, and redraws the benchmark PNG with a
+  full-height accepted work/s panel, one-line legend, sharper text, and per-bar
+  plus average value labels.
+- `26.6.8k-alpha` corrects the Benchmark Pools countdown labels so idle
+  `Time left` mirrors the current per-pool/cycle/pool-count estimate and the
+  live backend ETA no longer adds a fixed ten-second-per-pool latency pad. It
+  also moves the live cycle/status line into the control row after `Time left`,
+  removes the thick progress divider, and keeps the compact controls/actions on
+  one row. Benchmark results now include a compact accepted share-difficulty
+  `Diff` column, Work/s hover/chart notes explain that the fairer speed score
+  sums accepted `Submitted Diff` values per second, uses a conservative
+  target-equivalent fallback only when an accepted share lacks a matched
+  difficulty row, and chart average labels sit to the right of their averaged
+  bar group instead of colliding with candles.
+- `26.6.8l-alpha` polishes Mining > Pools and Benchmark Pools again. The
+  `.fun` preset/software label is corrected to `UNOMP`, Shift-click cell-range
+  selection works immediately across reusable tables, the pool reorder handle
+  now shows open/closed hand feedback with a highlighted drop target, and
+  benchmark decimal columns use fixed precision for decimal alignment. The
+  saved PNG is now branded as `Defcoin Core Nu's Pool Benchmark` with a
+  centered title, one-line auto-fitted legend, footer summary, `Conducted on`
+  timestamp, clearer fairness wording, restored dashed average overlays, and a
+  separate diagnostics sidecar for hashrate/HTTPing when long multi-pass runs
+  need the accepted-work chart to use the full width.
 
 ## Packaging
 
-- Visible release label for this candidate: `26.6.8e-alpha`.
+- Visible release label for this candidate: `26.6.8l-alpha`.
 - Nu Tahoe build output:
-  `source/build/nu-qml-arm64-26.6.8e-alpha/DefcoinCoreNu.app`.
+  `source/build/nu-qml-arm64-26.6.8l-alpha/DefcoinCoreNu.app`.
 - Staged Nu Apple Silicon artifact:
-  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.8e-alpha-20260622/apple-silicon/`.
-- Staged Nu Windows 11 x86_64 artifacts:
+  `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.8l-alpha-20260623/apple-silicon/`.
+- Staged Nu Windows 11 x86_64 artifacts from the previous cross-platform pass:
   `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.8e-alpha-20260622/windows11-x86_64/Defcoin-Core-Nu-v26.6.8e-alpha-Windows-11-x86_64-Setup.exe`
   and
   `/Volumes/TB5_4TB/d/litecoincore/Distribution_Versions/Defcoin Core Nu/Nu-26.6.8e-alpha-20260622/windows11-x86_64/Defcoin-Core-Nu-v26.6.8e-alpha-Windows-11-x86_64-Portable.zip`.
@@ -82,9 +138,9 @@ whether the strict public `26.6.8` line is ready.
 
 ## Verification
 
-- Tahoe backend tools report `v26.6.8e-alpha`.
+- Tahoe backend tools report `v26.6.8l-alpha`.
 - Nu Apple Silicon app bundle reports `CFBundleShortVersionString` and
-  `CFBundleVersion` as `26.6.8e-alpha`, passes
+  `CFBundleVersion` as `26.6.8l-alpha`, passes
   `codesign --verify --deep --strict`, and contains arm64 Mach-O binaries.
 - Nu Apple Silicon DMG passes `hdiutil verify`.
 - Windows backend tools and app launcher are PE32+ x86_64 binaries.

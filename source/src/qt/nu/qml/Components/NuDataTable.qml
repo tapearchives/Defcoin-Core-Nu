@@ -36,6 +36,10 @@ Rectangle {
     property bool alwaysShowVerticalScrollBar: false
     property bool fitColumnsToViewport: false
     property bool wrapBodyText: false
+    property bool centerHeaderText: false
+    property bool shrinkToContent: false
+    property bool rowReorderEnabled: false
+    property int rowReorderColumn: 0
     property int maxWrappedBodyLines: 4
     property int rowRenderLimit: 0
     property int widthMeasurementRowLimit: 1500
@@ -67,11 +71,16 @@ Rectangle {
     property string rowKeyMetaField: "address"
     property var selectedRowKeys: []
     property int rowSelectionAnchor: -1
+    property bool reorderDragging: false
+    property bool reorderDragged: false
+    property int reorderStartRow: -1
+    property int reorderTargetRow: -1
     property bool shuttingDown: false
 
     signal rowActivated(var row)
     signal rowDeleteRequested(var row)
     signal rowSelectionChanged(var keys)
+    signal rowReorderRequested(var row, var targetRow)
     signal resetRequested()
     signal sortChanged(int column, bool ascending, string key)
 
@@ -249,6 +258,7 @@ Rectangle {
     }
 
     function headerHorizontalAlignment(index) {
+        if (centerHeaderText) return Text.AlignHCenter
         const type = columnType(index)
         if (type === "knownDns" || type === "seedLanSource") return Text.AlignHCenter
         if (centerAlignColumn(index)) return Text.AlignHCenter
@@ -436,6 +446,8 @@ Rectangle {
         if (!rowSelectionEnabled) return false
         root.forceActiveFocus()
         if ((modifiers & Qt.ShiftModifier) !== 0) {
+            if (!plainClickSelectsRows && cellSelectionAnchorRow >= -1 && cellSelectionAnchorColumn >= 0)
+                return false
             clearCellSelection()
             if (rowSelectionAnchor < 0) rowSelectionAnchor = rowIndex
             selectRowRange(rowSelectionAnchor, rowIndex)
@@ -520,7 +532,7 @@ Rectangle {
     }
 
     function textPadding() {
-        return compact ? 8 : 14
+        return compact ? 4 : 10
     }
 
     function lanIconPadding() {
@@ -699,7 +711,14 @@ Rectangle {
 
     function totalWidth() {
         const margins = compact ? NuTokens.spaceSm * 2 : NuTokens.spaceLg * 2
+        if (shrinkToContent)
+            return Math.max(columnsWidth(), 320)
         return Math.max(columnsWidth(), Math.max(320, root.width - margins))
+    }
+
+    function naturalOuterWidth() {
+        const margins = compact ? NuTokens.spaceSm * 2 : NuTokens.spaceLg * 2
+        return Math.max(320, columnsWidth() + margins)
     }
 
     function valueAt(row, index) {
@@ -890,6 +909,47 @@ Rectangle {
 
     function finishRangeSelection() {
         selectingRange = false
+    }
+
+    function canReorderColumn(index) {
+        return rowReorderEnabled && index === rowReorderColumn
+    }
+
+    function beginRowReorder(rowIndex) {
+        if (!rowReorderEnabled) return
+        root.forceActiveFocus()
+        reorderDragging = true
+        reorderDragged = false
+        reorderStartRow = rowIndex
+        reorderTargetRow = rowIndex
+    }
+
+    function updateRowReorder(rowIndex) {
+        if (!reorderDragging) return
+        const rows = sortedRows()
+        if (rows.length === 0) return
+        const target = Math.max(0, Math.min(rows.length - 1, rowIndex))
+        reorderTargetRow = target
+        if (target !== reorderStartRow) reorderDragged = true
+    }
+
+    function finishRowReorder(localPoint) {
+        if (!reorderDragging) return false
+        const rows = sortedRows()
+        const sourceIndex = reorderStartRow
+        const pointedIndex = Math.max(0, Math.min(rows.length - 1, rowAtY(localPoint.y)))
+        const targetIndex = reorderTargetRow >= 0 ? reorderTargetRow : pointedIndex
+        const didDrag = reorderDragged
+        reorderDragging = false
+        reorderDragged = false
+        reorderStartRow = -1
+        reorderTargetRow = -1
+        if (sourceIndex < 0 || sourceIndex >= rows.length) return false
+        if (targetIndex !== sourceIndex) {
+            rowReorderRequested(rows[sourceIndex], rows[targetIndex])
+            return true
+        }
+        return didDrag
     }
 
     function clearCellSelection() {
@@ -1349,6 +1409,23 @@ Rectangle {
                                     opacity: 0.16
                                 }
 
+                                Rectangle {
+                                    anchors.fill: parent
+                                    visible: root.reorderDragging && bodyRow.index === root.reorderTargetRow
+                                    color: NuTokens.accentSky
+                                    opacity: 0.09
+                                }
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 2
+                                    visible: root.reorderDragging && bodyRow.index === root.reorderTargetRow
+                                    color: NuTokens.accentSky
+                                    opacity: 0.70
+                                }
+
                                 Item {
                                     id: actionCell
                                     anchors.fill: parent
@@ -1435,9 +1512,11 @@ Rectangle {
                                 TextEdit {
                                     anchors.fill: parent
                                     anchors.margins: root.compact ? NuTokens.spaceXs : NuTokens.spaceSm
-                                    anchors.leftMargin: root.cellHasLanIcon(bodyRow.modelData, bodyCell.index)
-                                                        ? root.lanIconPadding()
-                                                        : (root.compact ? NuTokens.spaceXs : NuTokens.spaceSm)
+                                    anchors.leftMargin: root.canReorderColumn(bodyCell.index)
+                                                        ? (root.compact ? 22 : 24)
+                                                        : (root.cellHasLanIcon(bodyRow.modelData, bodyCell.index)
+                                                           ? root.lanIconPadding()
+                                                           : (root.compact ? NuTokens.spaceXs : NuTokens.spaceSm))
                                     visible: !root.isActionColumn(bodyCell.index)
                                              && root.columnType(bodyCell.index) !== "swatch"
                                              && root.columnType(bodyCell.index) !== "lan"
@@ -1455,6 +1534,46 @@ Rectangle {
                                     horizontalAlignment: root.cellHorizontalAlignment(bodyRow.modelData, bodyCell.index)
                                     wrapMode: root.wrapBodyText ? TextEdit.WordWrap : TextEdit.NoWrap
                                     clip: true
+                                }
+
+                                Canvas {
+                                    id: reorderGrip
+                                    visible: root.canReorderColumn(bodyCell.index)
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: root.compact ? 5 : 7
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: root.compact ? 14 : 16
+                                    height: root.compact ? 18 : 20
+                                    opacity: root.reorderDragging && bodyRow.index === root.reorderStartRow ? 1.0 : 0.72
+                                    onPaint: {
+                                        const ctx = getContext("2d")
+                                        ctx.reset()
+                                        ctx.lineWidth = 1.6
+                                        ctx.strokeStyle = root.reorderDragging && bodyRow.index === root.reorderStartRow
+                                                          ? NuTokens.accentSky
+                                                          : NuTokens.textSecondary
+                                        ctx.fillStyle = ctx.strokeStyle
+                                        const cx = width / 2
+                                        ctx.beginPath()
+                                        ctx.moveTo(cx, 2)
+                                        ctx.lineTo(cx - 4, 6)
+                                        ctx.moveTo(cx, 2)
+                                        ctx.lineTo(cx + 4, 6)
+                                        ctx.moveTo(cx, height - 2)
+                                        ctx.lineTo(cx - 4, height - 6)
+                                        ctx.moveTo(cx, height - 2)
+                                        ctx.lineTo(cx + 4, height - 6)
+                                        ctx.moveTo(3, height * 0.38)
+                                        ctx.lineTo(width - 3, height * 0.38)
+                                        ctx.moveTo(3, height * 0.62)
+                                        ctx.lineTo(width - 3, height * 0.62)
+                                        ctx.stroke()
+                                    }
+                                    Connections {
+                                        target: root
+                                        function onReorderDraggingChanged() { reorderGrip.requestPaint() }
+                                        function onReorderStartRowChanged() { reorderGrip.requestPaint() }
+                                    }
                                 }
 
                                 Rectangle {
@@ -1551,7 +1670,10 @@ Rectangle {
                                     visible: !root.isActionColumn(bodyCell.index)
                                     hoverEnabled: true
                                     acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                    cursorShape: root.explorerLinkUrl(bodyRow.modelData, bodyCell.index).length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+                                    preventStealing: root.canReorderColumn(bodyCell.index)
+                                    cursorShape: root.canReorderColumn(bodyCell.index)
+                                                 ? (root.reorderDragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
+                                                 : (root.explorerLinkUrl(bodyRow.modelData, bodyCell.index).length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor)
                                     property point startPoint: Qt.point(0, 0)
                                     ToolTip.visible: bodyMouse.containsMouse && root.cellDisplayToolTip(bodyRow.modelData, bodyCell.index, bodyCell.width).length > 0
                                     ToolTip.text: root.cellDisplayToolTip(bodyRow.modelData, bodyCell.index, bodyCell.width)
@@ -1560,6 +1682,19 @@ Rectangle {
                                     onPressed: (mouse) => {
                                         if (mouse.button === Qt.RightButton) {
                                             root.openCopyMenu(bodyCell, mouse.x, mouse.y, bodyRow.index, bodyCell.index)
+                                            mouse.accepted = true
+                                            return
+                                        }
+                                        if (root.canReorderColumn(bodyCell.index)
+                                                && (mouse.modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.MetaModifier)) === 0) {
+                                            const key = root.rowKey(bodyRow.modelData)
+                                            if (root.rowSelectionEnabled && key.length > 0) {
+                                                root.clearCellSelection()
+                                                root.rowSelectionAnchor = bodyRow.index
+                                                root.setSelectedKeys([key])
+                                            }
+                                            startPoint = bodyCell.mapToItem(tableViewport, mouse.x, mouse.y)
+                                            root.beginRowReorder(bodyRow.index)
                                             mouse.accepted = true
                                             return
                                         }
@@ -1576,11 +1711,22 @@ Rectangle {
                                     }
                                     onPositionChanged: (mouse) => {
                                         const point = bodyCell.mapToItem(tableViewport, mouse.x, mouse.y)
+                                        if (root.reorderDragging) {
+                                            root.updateRowReorder(root.rowAtY(point.y))
+                                            mouse.accepted = true
+                                            return
+                                        }
                                         if (Math.abs(point.x - startPoint.x) > 3 || Math.abs(point.y - startPoint.y) > 3) root.selectionDragged = true
                                         root.updateRangeSelection(point)
                                     }
                                     onReleased: (mouse) => {
                                         if (mouse.button !== Qt.RightButton) {
+                                            if (root.reorderDragging) {
+                                                const point = bodyCell.mapToItem(tableViewport, mouse.x, mouse.y)
+                                                root.finishRowReorder(point)
+                                                mouse.accepted = true
+                                                return
+                                            }
                                             const link = root.explorerLinkUrl(bodyRow.modelData, bodyCell.index)
                                             const modified = (mouse.modifiers & Qt.ShiftModifier) !== 0
                                                     || (mouse.modifiers & Qt.ControlModifier) !== 0

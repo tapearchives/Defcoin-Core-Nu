@@ -39,13 +39,29 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
 - Exposes an internal paper-wallet placeholder installer for `--ui-self-test`;
   it is not a user-facing wallet API.
 - Owns the miner-log throttle timer state used to batch high-volume miner
-  output before notifying QML and exposes the accepted-share rate text used by
-  the mast and Mining Monitor.
+  output before notifying QML, exposes launch-local miner log line numbers for
+  the 4K rolling monitor buffer, and exposes the accepted-share rate text used
+  by the mast and Mining Monitor.
 - Exposes Mining > Benchmark Pools state and actions: running/status/progress,
   ETA, last chart/stat paths, chart image source, completed run rows, and
-  start/stop/load/export/open-folder invokables. Benchmark run rows include raw
-  accepted shares for diagnostics and accepted share-difficulty work/s for fair
-  pool comparison.
+  start/stop/load/export/copy-chart/open-folder invokables. Benchmark run rows
+  include pool number, pool software, raw accepted shares for diagnostics,
+  accepted share-difficulty totals, and accepted share-difficulty work/s data
+  for a fairer pool comparison. The UI scales work/s by 1,000,000 for readable
+  display and must explain that the score sums accepted Submitted Diff values
+  per second, with conservative target-minimum fallback only when the miner log
+  lacks a matched difficulty row. Saved chart PNGs use a centered
+  `Defcoin Core Nu's Pool Benchmark` title, footer-based summary/fairness text,
+  dashed average overlays, and a separate diagnostics sidecar for
+  hashrate/HTTPing when long multi-pass runs need the accepted-work chart to
+  use the full width. Export save dialogs share the last successful export
+  directory.
+- Exposes `miningPoolPresets` and `saveMiningPoolPresets()` so Mining > Pools
+  can manage a persisted editable preset table with separate pool number/order,
+  pool name, stratum address, pool software, and optional per-pool payout and
+  password override fields. Built-in defaults should not include obsolete
+  presets, but normalization must keep existing saved/custom rows visible and
+  editable instead of silently hiding or deleting them.
 
 ## Do Not Break
 
@@ -68,7 +84,8 @@ Declares the Nu frontend service API exposed to QML, including properties, invok
 - Preserve the miner-log throttle/rate members when changing miner properties;
   QML must not be signaled once per miner output chunk.
 - Keep benchmark properties read-only from QML; the service owns sequencing,
-  pinging, miner process switching, autosave paths, and chart generation.
+  internal HTTPing probes, miner process switching, autosave paths, and chart
+  generation.
 - Keep transaction and address explorer template properties distinct.
 - Keep recovery-scan flags explicit in the invokable signature; do not overload
   negative range values with additional meanings beyond auto-until-empty. SQL

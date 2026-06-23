@@ -53,6 +53,7 @@
 #include <QSqlQuery>
 #include <QStandardPaths>
 #include <QSysInfo>
+#include <QTcpSocket>
 #include <QTextDocument>
 #include <QTextStream>
 #include <QThread>
@@ -2634,6 +2635,8 @@ QString formatBenchmarkDuration(qint64 seconds)
             .arg(minutes, 2, 10, QLatin1Char('0'))
             .arg(secs, 2, 10, QLatin1Char('0'));
     }
+    if (minutes <= 0)
+        return QStringLiteral("%1s").arg(secs);
     return QStringLiteral("%1m %2s").arg(minutes).arg(secs, 2, 10, QLatin1Char('0'));
 }
 
@@ -2655,6 +2658,16 @@ QString formatBenchmarkClock(qint64 seconds)
 QString stratumHostForBenchmark(QString pool_url)
 {
     pool_url = pool_url.trimmed();
+    const QRegularExpressionMatch url_match =
+        QRegularExpression(QStringLiteral(R"(^stratum\+(?:tcp|ssl)://(\[[^\]]+\]|[^/:]+)(?::\d+)?(?:/.*)?$)"),
+                           QRegularExpression::CaseInsensitiveOption)
+            .match(pool_url);
+    if (url_match.hasMatch()) {
+        QString host = url_match.captured(1).trimmed();
+        if (host.startsWith(QLatin1Char('[')) && host.endsWith(QLatin1Char(']')))
+            host = host.mid(1, host.size() - 2);
+        return host;
+    }
     pool_url.remove(
         QRegularExpression(QStringLiteral(R"(^stratum\+(?:tcp|ssl)://)"), QRegularExpression::CaseInsensitiveOption));
     if (pool_url.startsWith(QLatin1Char('['))) {
@@ -2672,6 +2685,37 @@ QString stratumHostForBenchmark(QString pool_url)
     return pool_url.left(end).trimmed();
 }
 
+struct BenchmarkEndpoint {
+    QString host;
+    quint16 port = 0;
+    bool valid = false;
+};
+
+BenchmarkEndpoint stratumEndpointForBenchmark(QString pool_url)
+{
+    pool_url = pool_url.trimmed();
+    const QRegularExpression endpoint_re(
+        QStringLiteral(R"(^stratum\+(?:tcp|ssl)://(\[[^\]]+\]|[^/:]+)(?::(\d{1,5}))?(?:/.*)?$)"),
+        QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch match = endpoint_re.match(pool_url);
+    if (!match.hasMatch())
+        return {};
+
+    QString host = match.captured(1).trimmed();
+    if (host.startsWith(QLatin1Char('[')) && host.endsWith(QLatin1Char(']')))
+        host = host.mid(1, host.size() - 2);
+    if (host.isEmpty())
+        return {};
+
+    bool ok = false;
+    const int port = match.captured(2).isEmpty() ? 3333 : match.captured(2).toInt(&ok);
+    if (!match.captured(2).isEmpty() && !ok)
+        return {};
+    if (port <= 0 || port > 65535)
+        return {};
+    return {host, static_cast<quint16>(port), true};
+}
+
 QString benchmarkPoolColor(int index)
 {
     static const QStringList colors{
@@ -2685,6 +2729,29 @@ QString benchmarkPoolColor(int index)
         QStringLiteral("#6fcf97"),
     };
     return colors.at(index % colors.size());
+}
+
+QString benchmarkPoolSoftware(QString name, QString url)
+{
+    name = name.trimmed().toLower();
+    url = url.trimmed().toLower();
+    if (url.contains(QStringLiteral("defcoin.host")) || url.contains(QStringLiteral("defcoin.dc903.org")) ||
+        url.contains(QStringLiteral("135.148.43.187")) || url.contains(QStringLiteral("135.148.43.188")) ||
+        url.contains(QStringLiteral("135.148.43.189")) || name.contains(QStringLiteral("dc903"))) {
+        return QStringLiteral("P2Pool");
+    }
+    if (url.contains(QStringLiteral("pool.defcoin.fun")) || name.contains(QStringLiteral("pool.defcoin.fun"))) {
+        return QStringLiteral("UNOMP");
+    }
+    return QStringLiteral("Unk. stratum");
+}
+
+QString shortenedPoolSoftware(QString value)
+{
+    value = value.trimmed();
+    return value.compare(QStringLiteral("Unknown stratum"), Qt::CaseInsensitive) == 0 || value.isEmpty() ?
+               QStringLiteral("Unk. stratum") :
+               value;
 }
 
 QString benchmarkFileStamp(const QDateTime& utc)
@@ -3331,7 +3398,7 @@ QString csvCell(QString text)
     return QStringLiteral("\"%1\"").arg(text);
 }
 
-QString processCommandForDisplayRedacted(const QString& program, const QStringList& args)
+[[maybe_unused]] QString processCommandForDisplayRedacted(const QString& program, const QStringList& args)
 {
     QStringList redacted;
     redacted.reserve(args.size());
@@ -3371,6 +3438,106 @@ bool isValidStratumUrl(const QString& pool_url)
     bool ok = false;
     const int port = port_text.toInt(&ok);
     return ok && port > 0 && port <= 65535;
+}
+
+QVariantMap miningPoolPreset(const QString& name,
+                             const QString& url,
+                             const QString& pool_software,
+                             const QString& color,
+                             const QString& payout_address = QString(),
+                             const QString& password = QString())
+{
+    QVariantMap pool;
+    pool.insert(QStringLiteral("name"), name);
+    pool.insert(QStringLiteral("url"), url);
+    pool.insert(QStringLiteral("poolSoftware"), pool_software);
+    pool.insert(QStringLiteral("color"), color);
+    pool.insert(QStringLiteral("payoutAddress"), payout_address);
+    pool.insert(QStringLiteral("password"), password);
+    return pool;
+}
+
+QVariantList defaultMiningPoolPresets()
+{
+    return {
+        miningPoolPreset(QStringLiteral("DC903"),
+                         QStringLiteral("stratum+tcp://defcoin.dc903.org:13372"),
+                         QStringLiteral("P2Pool"),
+                         QStringLiteral("#51a7f9")),
+        miningPoolPreset(QStringLiteral("pool.defcoin.fun"),
+                         QStringLiteral("stratum+tcp://pool.defcoin.fun:3333"),
+                         QStringLiteral("UNOMP"),
+                         QStringLiteral("#e85d75")),
+        miningPoolPreset(QStringLiteral("usb.defcoin.host:13371"),
+                         QStringLiteral("stratum+tcp://135.148.43.188:13371"),
+                         QStringLiteral("P2Pool"),
+                         QStringLiteral("#f7b84b")),
+        miningPoolPreset(QStringLiteral("asic.defcoin.host:13372"),
+                         QStringLiteral("stratum+tcp://135.148.43.189:13372"),
+                         QStringLiteral("P2Pool"),
+                         QStringLiteral("#a77cf2")),
+        miningPoolPreset(QStringLiteral("Defcoin.io Solo Mining"),
+                         QStringLiteral("stratum+tcp://pool.defcoin.io:4044"),
+                         QStringLiteral("Unk. stratum"),
+                         QStringLiteral("#19b8c7")),
+    };
+}
+
+QString migratedMiningPoolUrl(QString name, QString url)
+{
+    name = name.trimmed().toLower();
+    url = url.trimmed();
+    const QString lower_url = url.toLower();
+    if (name.contains(QStringLiteral("cpu.defcoin.host")) ||
+        lower_url == QLatin1String("stratum+tcp://cpu.defcoin.host:13370")) {
+        return QStringLiteral("stratum+tcp://135.148.43.187:13370");
+    }
+    if (name.contains(QStringLiteral("usb.defcoin.host")) ||
+        lower_url == QLatin1String("stratum+tcp://usb.defcoin.host:13371")) {
+        return QStringLiteral("stratum+tcp://135.148.43.188:13371");
+    }
+    if (name.contains(QStringLiteral("asic.defcoin.host")) ||
+        lower_url == QLatin1String("stratum+tcp://asic.defcoin.host:13372")) {
+        return QStringLiteral("stratum+tcp://135.148.43.189:13372");
+    }
+    return url;
+}
+
+QVariantList normalizedMiningPoolPresets(const QVariantList& pools)
+{
+    QVariantList cleaned;
+    QSet<QString> seen_urls;
+    int color_index = 0;
+    for (const QVariant& pool_value : pools) {
+        QVariantMap pool = pool_value.toMap();
+        QString name = singleLineLimited(pool.value(QStringLiteral("name")).toString(), 96).trimmed();
+        QString url =
+            migratedMiningPoolUrl(name, singleLineLimited(pool.value(QStringLiteral("url")).toString(), 512).trimmed());
+        if (url.isEmpty() || !isValidStratumUrl(url))
+            continue;
+        const QString key = url.toLower();
+        if (seen_urls.contains(key))
+            continue;
+        seen_urls.insert(key);
+
+        if (name.isEmpty())
+            name = stratumHostForBenchmark(url);
+        QString pool_software = singleLineLimited(pool.value(QStringLiteral("poolSoftware")).toString(), 80).trimmed();
+        if (pool_software.isEmpty() || name.contains(QStringLiteral("pool.defcoin.fun"), Qt::CaseInsensitive) ||
+            url.contains(QStringLiteral("pool.defcoin.fun"), Qt::CaseInsensitive)) {
+            pool_software = benchmarkPoolSoftware(name, url);
+        }
+        pool_software = shortenedPoolSoftware(pool_software);
+        QString color = singleLineLimited(pool.value(QStringLiteral("color")).toString(), 24).trimmed();
+        if (color.isEmpty())
+            color = benchmarkPoolColor(color_index);
+        const QString payout_address =
+            singleLineLimited(pool.value(QStringLiteral("payoutAddress")).toString(), 128).trimmed();
+        const QString password = singleLineLimited(pool.value(QStringLiteral("password")).toString(), 128).trimmed();
+        cleaned.push_back(miningPoolPreset(name, url, pool_software, color, payout_address, password));
+        ++color_index;
+    }
+    return cleaned.isEmpty() ? defaultMiningPoolPresets() : cleaned;
 }
 
 bool isHex256(const QString& value)
@@ -3515,6 +3682,11 @@ NuRpcService::NuRpcService(QObject* parent)
 {
     m_app_launch_utc = QDateTime::currentDateTimeUtc();
     loadLocalSettings();
+    m_mining_benchmark_httping_timer = new QTimer(this);
+    m_mining_benchmark_httping_timer->setSingleShot(true);
+    connect(m_mining_benchmark_httping_timer, &QTimer::timeout, this, [this]() {
+        finishMiningBenchmarkHttpingAttempt(false);
+    });
     m_debug_disable_core_tcp_sync = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_DEBUG_DISABLE_CORE_TCP_SYNC");
     m_debug_disable_core_sync = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_DEBUG_DISABLE_CORE_SYNC");
     m_debug_disable_fast_sync = !qEnvironmentVariableIsEmpty("DEFCOIN_NU_DEBUG_DISABLE_FAST_SYNC");
@@ -3708,6 +3880,8 @@ void NuRpcService::loadLocalSettings()
         singleLineLimited(nu_settings.value(QStringLiteral("MinerExecutable"), QString()).toString(), 1024);
     m_miner_pool_url =
         singleLineLimited(nu_settings.value(QStringLiteral("MinerPoolUrl"), m_miner_pool_url).toString(), 512);
+    m_miner_pool_url = migratedMiningPoolUrl(QString(), m_miner_pool_url);
+    loadMiningPoolPresets();
     m_miner_payout_address =
         singleLineLimited(nu_settings.value(QStringLiteral("MinerPayoutAddress"), QString()).toString(), 128);
     m_miner_password =
@@ -4074,6 +4248,7 @@ bool NuRpcService::ensureBackendStarted()
          << QStringLiteral("-networkactive=%1").arg(effective_network_active ? 1 : 0)
          << QStringLiteral("-defcoindisablecoretcpblocks=%1")
                 .arg((m_debug_disable_core_tcp_sync || m_debug_disable_core_sync) ? 1 : 0)
+         << QStringLiteral("-onlydefcoinua=%1").arg(m_only_defcoin_user_agents ? 1 : 0)
          << QStringLiteral("-acceptlegacymagic=%1").arg(m_only_defcoin_magic_bytes ? 0 : 1)
          << QStringLiteral("-allowlannodediscovery=%1").arg(effective_lan_node_discovery_enabled ? 1 : 0)
          << QStringLiteral("-defcoinfastsync=%1").arg(effective_lan_fast_sync_enabled ? 1 : 0)
@@ -14360,7 +14535,9 @@ void NuRpcService::resetMinerRuntimeStats()
     m_miner_accepted_shares = 0;
     m_miner_rejected_shares = 0;
     m_miner_accepted_share_difficulty = 0.0;
+    m_miner_current_share_target_difficulty = 0.0;
     m_miner_submitted_share_difficulty_by_id.clear();
+    m_miner_pending_accepted_share_target_difficulty_by_id.clear();
     m_miner_pending_accepted_share_ids.clear();
     m_miner_started_ms = 0;
     m_miner_accepted_share_times_ms.clear();
@@ -14386,6 +14563,18 @@ void NuRpcService::updateMinerAcceptedShares(int accepted)
     m_miner_accepted_shares = accepted;
 }
 
+double NuRpcService::effectiveMinerAcceptedShareDifficulty() const
+{
+    double difficulty = m_miner_accepted_share_difficulty;
+    for (auto it = m_miner_pending_accepted_share_target_difficulty_by_id.constBegin();
+         it != m_miner_pending_accepted_share_target_difficulty_by_id.constEnd();
+         ++it) {
+        if (std::isfinite(it.value()) && it.value() > 0.0)
+            difficulty += it.value();
+    }
+    return difficulty;
+}
+
 void NuRpcService::parseMinerLogChunk(const QString& text)
 {
     const QString clean = stripAnsiControlSequences(text);
@@ -14406,6 +14595,8 @@ void NuRpcService::parseMinerLogChunk(const QString& text)
     static const QRegularExpression submitted_diff_re(
         QStringLiteral(R"((?:^|\]\s*)(\d+)\s+Submitted\s+Diff\s+([0-9]+(?:\.[0-9]+)?(?:e[+-]?\d+)?))"),
         QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression target_diff_re(QStringLiteral(R"(\bTarget\s+([0-9]+(?:\.[0-9]+)?(?:e[+-]?\d+)?))"),
+                                                   QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression rejected_re(QStringLiteral(R"(\bA(\d+)\s+S\d+\s+Rejected\s+(\d+)\s+B\d+\b)"),
                                                 QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression periodic_accepted_re(QStringLiteral(R"(^Accepted\s+\d+\s+(\d+)\b)"),
@@ -14439,6 +14630,23 @@ void NuRpcService::parseMinerLogChunk(const QString& text)
         const bool is_pool_estimate = line.contains(QStringLiteral("Net hash rate"), Qt::CaseInsensitive) ||
                                       line.contains(QStringLiteral("Lost hash rate"), Qt::CaseInsensitive);
 
+        const QRegularExpressionMatch target_diff_match = target_diff_re.match(line);
+        if (target_diff_match.hasMatch()) {
+            const double target_difficulty = target_diff_match.captured(1).toDouble();
+            if (std::isfinite(target_difficulty) && target_difficulty > 0.0)
+                m_miner_current_share_target_difficulty = target_difficulty;
+        }
+
+        auto updateAcceptedSharesWithTargetFallback = [this](int accepted) {
+            const int before = m_miner_accepted_shares;
+            updateMinerAcceptedShares(accepted);
+            const int delta = std::max(0, m_miner_accepted_shares - before);
+            if (delta > 0 && std::isfinite(m_miner_current_share_target_difficulty) &&
+                m_miner_current_share_target_difficulty > 0.0) {
+                m_miner_accepted_share_difficulty += double(delta) * m_miner_current_share_target_difficulty;
+            }
+        };
+
         const QRegularExpressionMatch local_hashrate_match = local_hashrate_re.match(line);
         if (local_hashrate_match.hasMatch()) {
             m_miner_hashrate_text =
@@ -14468,14 +14676,18 @@ void NuRpcService::parseMinerLogChunk(const QString& text)
             const int share_id = submitted_diff_match.captured(1).toInt();
             const double share_difficulty = submitted_diff_match.captured(2).toDouble();
             if (share_id > 0 && std::isfinite(share_difficulty) && share_difficulty > 0.0) {
-                if (m_miner_pending_accepted_share_ids.remove(share_id) > 0)
+                if (m_miner_pending_accepted_share_ids.remove(share_id) > 0) {
                     m_miner_accepted_share_difficulty += share_difficulty;
-                else
+                    m_miner_pending_accepted_share_target_difficulty_by_id.remove(share_id);
+                } else {
                     m_miner_submitted_share_difficulty_by_id.insert(share_id, share_difficulty);
+                }
                 if (m_miner_submitted_share_difficulty_by_id.size() > 8192)
                     m_miner_submitted_share_difficulty_by_id.clear();
-                if (m_miner_pending_accepted_share_ids.size() > 8192)
+                if (m_miner_pending_accepted_share_ids.size() > 8192) {
                     m_miner_pending_accepted_share_ids.clear();
+                    m_miner_pending_accepted_share_target_difficulty_by_id.clear();
+                }
             }
             continue;
         }
@@ -14488,28 +14700,34 @@ void NuRpcService::parseMinerLogChunk(const QString& text)
             const double share_difficulty = m_miner_submitted_share_difficulty_by_id.take(share_id);
             if (std::isfinite(share_difficulty) && share_difficulty > 0.0)
                 m_miner_accepted_share_difficulty += share_difficulty;
-            else if (share_id > 0)
+            else if (share_id > 0) {
                 m_miner_pending_accepted_share_ids.insert(share_id);
+                if (std::isfinite(m_miner_current_share_target_difficulty) &&
+                    m_miner_current_share_target_difficulty > 0.0) {
+                    m_miner_pending_accepted_share_target_difficulty_by_id.insert(
+                        share_id, m_miner_current_share_target_difficulty);
+                }
+            }
             continue;
         }
 
         const QRegularExpressionMatch accepted_match = accepted_re.match(line);
         if (accepted_match.hasMatch()) {
-            updateMinerAcceptedShares(accepted_match.captured(1).toInt());
+            updateAcceptedSharesWithTargetFallback(accepted_match.captured(1).toInt());
             m_miner_rejected_shares = std::max(m_miner_rejected_shares, accepted_match.captured(2).toInt());
             continue;
         }
 
         const QRegularExpressionMatch rejected_match = rejected_re.match(line);
         if (rejected_match.hasMatch()) {
-            updateMinerAcceptedShares(rejected_match.captured(1).toInt());
+            updateAcceptedSharesWithTargetFallback(rejected_match.captured(1).toInt());
             m_miner_rejected_shares = std::max(m_miner_rejected_shares, rejected_match.captured(2).toInt());
             continue;
         }
 
         const QRegularExpressionMatch periodic_accepted_match = periodic_accepted_re.match(line);
         if (periodic_accepted_match.hasMatch()) {
-            updateMinerAcceptedShares(periodic_accepted_match.captured(1).toInt());
+            updateAcceptedSharesWithTargetFallback(periodic_accepted_match.captured(1).toInt());
             continue;
         }
 
@@ -14523,7 +14741,7 @@ void NuRpcService::parseMinerLogChunk(const QString& text)
         if (cpuminer_accepted_match.hasMatch()) {
             const int accepted = cpuminer_accepted_match.captured(1).toInt();
             const int total = cpuminer_accepted_match.captured(2).toInt();
-            updateMinerAcceptedShares(accepted);
+            updateAcceptedSharesWithTargetFallback(accepted);
             if (total >= accepted)
                 m_miner_rejected_shares = std::max(m_miner_rejected_shares, total - accepted);
             continue;
@@ -14542,23 +14760,39 @@ void NuRpcService::appendMinerLog(const QString& line)
         return;
     const QString clean = stripAnsiControlSequences(line);
     parseMinerLogChunk(clean);
-    m_miner_log += clean;
-    if (!m_miner_log.endsWith(QLatin1Char('\n')))
-        m_miner_log += QLatin1Char('\n');
-    constexpr int max_chars = 256 * 1024;
-    if (m_miner_log.size() > max_chars)
-        m_miner_log = m_miner_log.right(max_chars);
-    constexpr int max_lines = 4000;
-    int line_count = 0;
-    int cut_pos = -1;
-    for (int i = m_miner_log.size() - 1; i >= 0; --i) {
-        if (m_miner_log.at(i) == QLatin1Char('\n') && ++line_count > max_lines) {
-            cut_pos = i + 1;
-            break;
-        }
+
+    QString normalized = clean.left(16000);
+    normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    normalized.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    QStringList lines = normalized.split(QLatin1Char('\n'));
+    while (!lines.isEmpty() && lines.last().isEmpty())
+        lines.removeLast();
+    if (lines.isEmpty())
+        return;
+
+    for (const QString& entry : lines) {
+        m_miner_log_lines.push_back(entry);
+        m_miner_log_line_numbers.push_back(m_miner_log_next_line_number++);
     }
-    if (cut_pos > 0)
-        m_miner_log.remove(0, cut_pos);
+
+    constexpr int max_lines = 4000;
+    while (m_miner_log_lines.size() > max_lines) {
+        m_miner_log_lines.removeFirst();
+        if (!m_miner_log_line_numbers.isEmpty())
+            m_miner_log_line_numbers.removeFirst();
+    }
+
+    constexpr int max_chars = 256 * 1024;
+    int total_chars = 0;
+    for (const QString& entry : std::as_const(m_miner_log_lines)) {
+        total_chars += entry.size() + 1;
+    }
+    while (total_chars > max_chars && !m_miner_log_lines.isEmpty()) {
+        total_chars -= m_miner_log_lines.first().size() + 1;
+        m_miner_log_lines.removeFirst();
+        if (!m_miner_log_line_numbers.isEmpty())
+            m_miner_log_line_numbers.removeFirst();
+    }
     scheduleMinerChanged();
 }
 
@@ -16112,6 +16346,36 @@ void NuRpcService::saveMinerConfiguration(
     Q_EMIT minerChanged();
 }
 
+void NuRpcService::loadMiningPoolPresets()
+{
+    QSettings settings;
+    QVariantList pools;
+    const QByteArray json = settings.value(QStringLiteral("MiningPoolPresetsJson")).toString().toUtf8();
+    if (!json.isEmpty()) {
+        QJsonParseError parse_error;
+        const QJsonDocument doc = QJsonDocument::fromJson(json, &parse_error);
+        if (parse_error.error == QJsonParseError::NoError && doc.isArray())
+            pools = doc.array().toVariantList();
+    }
+    m_mining_pool_presets = normalizedMiningPoolPresets(pools);
+    settings.setValue(
+        QStringLiteral("MiningPoolPresetsJson"),
+        QString::fromUtf8(
+            QJsonDocument(QJsonArray::fromVariantList(m_mining_pool_presets)).toJson(QJsonDocument::Compact)));
+}
+
+void NuRpcService::saveMiningPoolPresets(const QVariantList& pools)
+{
+    m_mining_pool_presets = normalizedMiningPoolPresets(pools);
+    QSettings settings;
+    settings.setValue(
+        QStringLiteral("MiningPoolPresetsJson"),
+        QString::fromUtf8(
+            QJsonDocument(QJsonArray::fromVariantList(m_mining_pool_presets)).toJson(QJsonDocument::Compact)));
+    m_miner_status = QStringLiteral("Mining pool presets saved.");
+    Q_EMIT minerChanged();
+}
+
 void NuRpcService::startConfiguredMiner()
 {
     launchConfiguredMiner(true, true);
@@ -16221,12 +16485,13 @@ bool NuRpcService::launchConfiguredMiner(bool clear_log, bool show_user_messages
             });
     resetMinerRuntimeStats();
     m_miner_started_ms = QDateTime::currentMSecsSinceEpoch();
-    if (clear_log)
-        m_miner_log.clear();
+    if (clear_log) {
+        m_miner_log_lines.clear();
+        m_miner_log_line_numbers.clear();
+    }
     if (!wrapper_note.isEmpty())
         appendMinerLog(wrapper_note);
-    appendMinerLog(
-        QStringLiteral("Nu launch command: %1").arg(processCommandForDisplayRedacted(program, process_args)));
+    appendMinerLog(QStringLiteral("Nu launch command: %1").arg(processCommandForDisplay(program, process_args)));
     m_miner_status = QStringLiteral("Starting miner...");
     Q_EMIT minerChanged();
     m_miner_process->start();
@@ -16258,7 +16523,8 @@ void NuRpcService::stopMiner()
 
 void NuRpcService::clearMinerLog()
 {
-    m_miner_log.clear();
+    m_miner_log_lines.clear();
+    m_miner_log_line_numbers.clear();
     Q_EMIT minerChanged();
 }
 
@@ -16274,6 +16540,27 @@ QString NuRpcService::miningBenchmarkDirectory() const
 {
     const QDir data_dir(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir);
     return data_dir.filePath(QStringLiteral("nu-mining-benchmarks"));
+}
+
+QString NuRpcService::exportDialogInitialPath(const QString& default_file_name) const
+{
+    QSettings settings;
+    QString dir_path = settings.value(QStringLiteral("LastExportDirectory")).toString().trimmed();
+    if (dir_path.isEmpty() || !QFileInfo(dir_path).isDir()) {
+        dir_path = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        if (dir_path.isEmpty() || !QFileInfo(dir_path).isDir())
+            dir_path = realHomePath();
+    }
+    return QDir(dir_path).filePath(QFileInfo(default_file_name).fileName());
+}
+
+void NuRpcService::rememberExportDialogPath(const QString& path)
+{
+    if (path.trimmed().isEmpty())
+        return;
+    const QString dir_path = QFileInfo(path).absolutePath();
+    if (!dir_path.isEmpty())
+        QSettings().setValue(QStringLiteral("LastExportDirectory"), dir_path);
 }
 
 void NuRpcService::loadLatestMiningBenchmarkArtifacts()
@@ -16304,6 +16591,7 @@ void NuRpcService::startMiningBenchmark(const QVariantList& pools, int seconds_p
     QVariantList clean_pools;
     QSet<QString> seen_urls;
     int color_index = 0;
+    int pool_number = 1;
     for (const QVariant& pool_value : pools) {
         QVariantMap pool = pool_value.toMap();
         QString name = singleLineLimited(pool.value(QStringLiteral("name")).toString(), 80).trimmed();
@@ -16316,14 +16604,25 @@ void NuRpcService::startMiningBenchmark(const QVariantList& pools, int seconds_p
         seen_urls.insert(key);
         if (name.isEmpty())
             name = stratumHostForBenchmark(url);
+        QString pool_software = singleLineLimited(pool.value(QStringLiteral("poolSoftware")).toString(), 80).trimmed();
+        if (pool_software.isEmpty())
+            pool_software = benchmarkPoolSoftware(name, url);
+        const QString payout_address =
+            singleLineLimited(pool.value(QStringLiteral("payoutAddress")).toString(), 128).trimmed();
+        const QString password = singleLineLimited(pool.value(QStringLiteral("password")).toString(), 128).trimmed();
+        pool.insert(QStringLiteral("poolNo"), pool_number);
         pool.insert(QStringLiteral("name"), name);
         pool.insert(QStringLiteral("url"), url);
+        pool.insert(QStringLiteral("poolSoftware"), pool_software);
+        pool.insert(QStringLiteral("payoutAddress"), payout_address);
+        pool.insert(QStringLiteral("password"), password);
         pool.insert(QStringLiteral("color"),
                     pool.value(QStringLiteral("color")).toString().isEmpty() ?
                         benchmarkPoolColor(color_index) :
                         pool.value(QStringLiteral("color")).toString());
         clean_pools.push_back(pool);
         ++color_index;
+        ++pool_number;
     }
 
     if (clean_pools.isEmpty()) {
@@ -16338,7 +16637,7 @@ void NuRpcService::startMiningBenchmark(const QVariantList& pools, int seconds_p
     m_mining_benchmark_running = true;
     m_mining_benchmark_pools = clean_pools;
     m_mining_benchmark_runs.clear();
-    m_mining_benchmark_seconds_per_pool = std::clamp(seconds_per_pool, 15, 24 * 60 * 60);
+    m_mining_benchmark_seconds_per_pool = std::clamp(seconds_per_pool, 10, 24 * 60 * 60);
     m_mining_benchmark_cycles = std::clamp(cycles, 1, 100);
     m_mining_benchmark_current_cycle = 0;
     m_mining_benchmark_current_pool_index = 0;
@@ -16347,11 +16646,13 @@ void NuRpcService::startMiningBenchmark(const QVariantList& pools, int seconds_p
     m_mining_benchmark_restart_total_ms = 0;
     m_mining_benchmark_restart_samples = 0;
     m_mining_benchmark_original_pool_url = m_miner_pool_url;
+    m_mining_benchmark_original_payout_address = m_miner_payout_address;
+    m_mining_benchmark_original_password = m_miner_password;
     m_mining_benchmark_started_at_utc = QDateTime::currentDateTimeUtc();
     m_mining_benchmark_started_ms = QDateTime::currentMSecsSinceEpoch();
     m_mining_benchmark_run_id = benchmarkFileStamp(m_mining_benchmark_started_at_utc);
     m_mining_benchmark_last_run_label =
-        QStringLiteral("Last run's chart - %1")
+        QStringLiteral("Conducted on: %1")
             .arg(m_mining_benchmark_started_at_utc.toLocalTime().toString(QStringLiteral("yyyy-MM-dd h:mm AP")));
     m_mining_benchmark_start_accepted_shares = 0;
     m_mining_benchmark_start_rejected_shares = 0;
@@ -16398,75 +16699,99 @@ void NuRpcService::startNextMiningBenchmarkPool()
         m_mining_benchmark_restart_total_ms += restart_ms;
         ++m_mining_benchmark_restart_samples;
     }
-    startMiningBenchmarkPing(pool, restart_ms);
+    startMiningBenchmarkHttping(pool, restart_ms);
 }
 
-void NuRpcService::startMiningBenchmarkPing(const QVariantMap& pool, int restart_ms)
+void NuRpcService::startMiningBenchmarkHttping(const QVariantMap& pool, int restart_ms)
 {
     m_mining_benchmark_pending_pool = pool;
     m_mining_benchmark_current_restart_ms = restart_ms;
-    const QString host = stratumHostForBenchmark(pool.value(QStringLiteral("url")).toString());
-    if (host.isEmpty()) {
+    m_mining_benchmark_httping_pool = pool;
+    m_mining_benchmark_httping_restart_ms = restart_ms;
+    m_mining_benchmark_httping_attempt = 0;
+    m_mining_benchmark_httping_successes = 0;
+    m_mining_benchmark_httping_total_ms = 0.0;
+    const BenchmarkEndpoint endpoint = stratumEndpointForBenchmark(pool.value(QStringLiteral("url")).toString());
+    if (!endpoint.valid) {
         beginMiningBenchmarkPool(pool, -1.0, restart_ms);
         return;
     }
 
-    if (m_mining_benchmark_ping_process) {
-        m_mining_benchmark_ping_process->kill();
-        m_mining_benchmark_ping_process->deleteLater();
-        m_mining_benchmark_ping_process = nullptr;
+    if (m_mining_benchmark_httping_socket) {
+        m_mining_benchmark_httping_socket->abort();
+        m_mining_benchmark_httping_socket->deleteLater();
+        m_mining_benchmark_httping_socket = nullptr;
     }
 
     m_mining_benchmark_status =
-        QStringLiteral("Pinging %1 before mining on %2.").arg(host, pool.value(QStringLiteral("name")).toString());
+        QStringLiteral("Checking endpoint latency for %1:%2 before mining.").arg(endpoint.host).arg(endpoint.port);
     scheduleMinerChanged();
-
-    m_mining_benchmark_ping_process = new QProcess(this);
-    m_mining_benchmark_ping_process->setProcessChannelMode(QProcess::MergedChannels);
-#if defined(Q_OS_WIN)
-    m_mining_benchmark_ping_process->setProgram(QStringLiteral("ping"));
-    m_mining_benchmark_ping_process->setArguments({QStringLiteral("-n"), QStringLiteral("10"), host});
-#else
-    m_mining_benchmark_ping_process->setProgram(QStringLiteral("/sbin/ping"));
-    m_mining_benchmark_ping_process->setArguments(
-        {QStringLiteral("-c"), QStringLiteral("10"), QStringLiteral("-n"), host});
-#endif
-    connect(m_mining_benchmark_ping_process,
-            qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-            this,
-            &NuRpcService::finishMiningBenchmarkPing);
-    m_mining_benchmark_ping_process->start();
-    if (!m_mining_benchmark_ping_process->waitForStarted(1000)) {
-        m_mining_benchmark_ping_process->deleteLater();
-        m_mining_benchmark_ping_process = nullptr;
-        beginMiningBenchmarkPool(pool, -1.0, restart_ms);
-    }
+    startNextMiningBenchmarkHttpingAttempt();
 }
 
-void NuRpcService::finishMiningBenchmarkPing(int, QProcess::ExitStatus)
+void NuRpcService::startNextMiningBenchmarkHttpingAttempt()
 {
-    if (!m_mining_benchmark_ping_process)
+    if (!m_mining_benchmark_running)
         return;
-
-    const QString output = QString::fromLocal8Bit(m_mining_benchmark_ping_process->readAll());
-    double ping_avg_ms = -1.0;
-    QRegularExpression unix_avg_re(QStringLiteral(R"(=\s*[0-9.]+/([0-9.]+)/[0-9.]+)"));
-    QRegularExpressionMatch match = unix_avg_re.match(output);
-    if (match.hasMatch()) {
-        ping_avg_ms = match.captured(1).toDouble();
-    } else {
-        QRegularExpression win_avg_re(QStringLiteral(R"(Average\s*=\s*([0-9]+)ms)"),
-                                      QRegularExpression::CaseInsensitiveOption);
-        match = win_avg_re.match(output);
-        if (match.hasMatch())
-            ping_avg_ms = match.captured(1).toDouble();
+    if (m_mining_benchmark_httping_attempt >= 10) {
+        const double avg_ms = m_mining_benchmark_httping_successes > 0 ?
+                                  m_mining_benchmark_httping_total_ms / m_mining_benchmark_httping_successes :
+                                  -1.0;
+        beginMiningBenchmarkPool(m_mining_benchmark_httping_pool, avg_ms, m_mining_benchmark_httping_restart_ms);
+        return;
     }
 
-    const QVariantMap pool = m_mining_benchmark_pending_pool;
-    const int restart_ms = m_mining_benchmark_current_restart_ms;
-    m_mining_benchmark_ping_process->deleteLater();
-    m_mining_benchmark_ping_process = nullptr;
-    beginMiningBenchmarkPool(pool, ping_avg_ms, restart_ms);
+    const BenchmarkEndpoint endpoint =
+        stratumEndpointForBenchmark(m_mining_benchmark_httping_pool.value(QStringLiteral("url")).toString());
+    if (!endpoint.valid) {
+        finishMiningBenchmarkHttpingAttempt(false);
+        return;
+    }
+
+    if (m_mining_benchmark_httping_socket) {
+        m_mining_benchmark_httping_socket->abort();
+        m_mining_benchmark_httping_socket->deleteLater();
+        m_mining_benchmark_httping_socket = nullptr;
+    }
+    m_mining_benchmark_httping_socket = new QTcpSocket(this);
+    m_mining_benchmark_httping_elapsed.restart();
+    connect(m_mining_benchmark_httping_socket, &QTcpSocket::connected, this, [this]() {
+        if (!m_mining_benchmark_httping_socket)
+            return;
+        finishMiningBenchmarkHttpingAttempt(true);
+    });
+    connect(m_mining_benchmark_httping_socket, &QTcpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
+        finishMiningBenchmarkHttpingAttempt(false);
+    });
+    m_mining_benchmark_httping_timer->start(2500);
+    m_mining_benchmark_httping_socket->connectToHost(endpoint.host, endpoint.port);
+}
+
+void NuRpcService::finishMiningBenchmarkHttpingAttempt(bool success)
+{
+    if (!m_mining_benchmark_running)
+        return;
+    if (m_mining_benchmark_httping_timer)
+        m_mining_benchmark_httping_timer->stop();
+    if (m_mining_benchmark_httping_socket) {
+        m_mining_benchmark_httping_socket->disconnect();
+        m_mining_benchmark_httping_socket->abort();
+        m_mining_benchmark_httping_socket->deleteLater();
+        m_mining_benchmark_httping_socket = nullptr;
+    }
+    if (success) {
+        m_mining_benchmark_httping_total_ms += static_cast<double>(m_mining_benchmark_httping_elapsed.elapsed());
+        ++m_mining_benchmark_httping_successes;
+    }
+    ++m_mining_benchmark_httping_attempt;
+    if (m_mining_benchmark_httping_attempt >= 10) {
+        const double avg_ms = m_mining_benchmark_httping_successes > 0 ?
+                                  m_mining_benchmark_httping_total_ms / m_mining_benchmark_httping_successes :
+                                  -1.0;
+        beginMiningBenchmarkPool(m_mining_benchmark_httping_pool, avg_ms, m_mining_benchmark_httping_restart_ms);
+        return;
+    }
+    QTimer::singleShot(120, this, &NuRpcService::startNextMiningBenchmarkHttpingAttempt);
 }
 
 void NuRpcService::beginMiningBenchmarkPool(const QVariantMap& pool, double ping_avg_ms, int restart_ms)
@@ -16475,6 +16800,13 @@ void NuRpcService::beginMiningBenchmarkPool(const QVariantMap& pool, double ping
         return;
 
     m_miner_pool_url = pool.value(QStringLiteral("url")).toString();
+    const QString pool_payout =
+        singleLineLimited(pool.value(QStringLiteral("payoutAddress")).toString(), 128).trimmed();
+    const QString pool_password = singleLineLimited(pool.value(QStringLiteral("password")).toString(), 128).trimmed();
+    m_miner_payout_address = pool_payout.isEmpty() ? m_mining_benchmark_original_payout_address : pool_payout;
+    m_miner_password = pool_password.isEmpty() ? m_mining_benchmark_original_password : pool_password;
+    if (m_miner_password.isEmpty())
+        m_miner_password = QStringLiteral("x");
     const qint64 launch_start = QDateTime::currentMSecsSinceEpoch();
     const bool started = launchConfiguredMiner(true, true);
     const int launch_ms = int(std::max<qint64>(0, QDateTime::currentMSecsSinceEpoch() - launch_start));
@@ -16485,23 +16817,35 @@ void NuRpcService::beginMiningBenchmarkPool(const QVariantMap& pool, double ping
     }
     if (!started) {
         QVariantMap row;
+        const QDateTime failed_at_utc = QDateTime::currentDateTimeUtc();
+        const QDateTime failed_at_local = failed_at_utc.toLocalTime();
         row.insert(QStringLiteral("cycle"), m_mining_benchmark_current_cycle + 1);
         row.insert(QStringLiteral("poolIndex"), m_mining_benchmark_current_pool_index);
+        row.insert(QStringLiteral("poolNo"),
+                   pool.value(QStringLiteral("poolNo"), m_mining_benchmark_current_pool_index + 1).toInt());
         row.insert(QStringLiteral("poolName"), pool.value(QStringLiteral("name")).toString());
         row.insert(QStringLiteral("poolUrl"), pool.value(QStringLiteral("url")).toString());
+        row.insert(QStringLiteral("poolSoftware"), pool.value(QStringLiteral("poolSoftware")).toString());
         row.insert(QStringLiteral("color"), pool.value(QStringLiteral("color")).toString());
-        row.insert(QStringLiteral("startedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+        row.insert(QStringLiteral("startedAt"), failed_at_utc.toString(Qt::ISODate));
+        row.insert(QStringLiteral("finishedAt"), failed_at_utc.toString(Qt::ISODate));
+        row.insert(QStringLiteral("finishedAtLocal"), failed_at_local.toString(QStringLiteral("yyyy-MM-dd h:mm AP")));
+        row.insert(QStringLiteral("finishedAtMs"), failed_at_utc.toMSecsSinceEpoch());
         row.insert(QStringLiteral("durationSeconds"), 0);
         row.insert(QStringLiteral("accepted"), 0);
         row.insert(QStringLiteral("rejected"), 0);
         row.insert(QStringLiteral("acceptedPerSecond"), 0.0);
         row.insert(QStringLiteral("acceptedDifficulty"), 0.0);
         row.insert(QStringLiteral("acceptedDifficultyPerSecond"), 0.0);
+        row.insert(QStringLiteral("acceptedDifficultyPerMillisecond"), 0.0);
         row.insert(QStringLiteral("hashrateKh"), 0.0);
         row.insert(QStringLiteral("hashrateText"), QStringLiteral("-"));
         row.insert(QStringLiteral("pingAvgMs"), ping_avg_ms);
         row.insert(QStringLiteral("restartMs"), total_restart_ms);
         row.insert(QStringLiteral("status"), QStringLiteral("failed to start"));
+        row.insert(
+            QStringLiteral("statusDisplay"),
+            QStringLiteral("Failed to start %1").arg(failed_at_local.toString(QStringLiteral("yyyy-MM-dd h:mm AP"))));
         m_mining_benchmark_runs.push_back(row);
         ++m_mining_benchmark_completed_runs;
         ++m_mining_benchmark_current_pool_index;
@@ -16513,7 +16857,7 @@ void NuRpcService::beginMiningBenchmarkPool(const QVariantMap& pool, double ping
     m_mining_benchmark_pool_started_ms = QDateTime::currentMSecsSinceEpoch();
     m_mining_benchmark_start_accepted_shares = m_miner_accepted_shares;
     m_mining_benchmark_start_rejected_shares = m_miner_rejected_shares;
-    m_mining_benchmark_start_accepted_share_difficulty = m_miner_accepted_share_difficulty;
+    m_mining_benchmark_start_accepted_share_difficulty = effectiveMinerAcceptedShareDifficulty();
     m_mining_benchmark_current_restart_ms = total_restart_ms;
     m_mining_benchmark_pending_pool = pool;
     m_mining_benchmark_pending_pool.insert(QStringLiteral("pingAvgMs"), ping_avg_ms);
@@ -16547,29 +16891,40 @@ void NuRpcService::finishCurrentMiningBenchmarkPool()
     const int accepted_shares = std::max(0, m_miner_accepted_shares - m_mining_benchmark_start_accepted_shares);
     const int rejected_shares = std::max(0, m_miner_rejected_shares - m_mining_benchmark_start_rejected_shares);
     const double accepted_difficulty =
-        std::max(0.0, m_miner_accepted_share_difficulty - m_mining_benchmark_start_accepted_share_difficulty);
+        std::max(0.0, effectiveMinerAcceptedShareDifficulty() - m_mining_benchmark_start_accepted_share_difficulty);
 
     QVariantMap row;
+    const QDateTime finished_at_utc = QDateTime::currentDateTimeUtc();
+    const QDateTime finished_at_local = finished_at_utc.toLocalTime();
     row.insert(QStringLiteral("cycle"), m_mining_benchmark_current_cycle + 1);
     row.insert(QStringLiteral("poolIndex"), m_mining_benchmark_current_pool_index);
+    row.insert(QStringLiteral("poolNo"),
+               pool.value(QStringLiteral("poolNo"), m_mining_benchmark_current_pool_index + 1).toInt());
     row.insert(QStringLiteral("poolName"), pool.value(QStringLiteral("name")).toString());
     row.insert(QStringLiteral("poolUrl"), pool.value(QStringLiteral("url")).toString());
+    row.insert(QStringLiteral("poolSoftware"), pool.value(QStringLiteral("poolSoftware")).toString());
     row.insert(QStringLiteral("color"), pool.value(QStringLiteral("color")).toString());
     row.insert(QStringLiteral("startedAt"),
                QDateTime::fromMSecsSinceEpoch(m_mining_benchmark_pool_started_ms).toUTC().toString(Qt::ISODate));
-    row.insert(QStringLiteral("finishedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    row.insert(QStringLiteral("finishedAt"), finished_at_utc.toString(Qt::ISODate));
+    row.insert(QStringLiteral("finishedAtLocal"), finished_at_local.toString(QStringLiteral("yyyy-MM-dd h:mm AP")));
+    row.insert(QStringLiteral("finishedAtMs"), finished_at_utc.toMSecsSinceEpoch());
     row.insert(QStringLiteral("durationSeconds"), duration_seconds);
     row.insert(QStringLiteral("accepted"), accepted_shares);
     row.insert(QStringLiteral("rejected"), rejected_shares);
     row.insert(QStringLiteral("acceptedPerSecond"), double(accepted_shares) / double(duration_seconds));
     row.insert(QStringLiteral("acceptedDifficulty"), accepted_difficulty);
-    row.insert(QStringLiteral("acceptedDifficultyPerSecond"), accepted_difficulty / double(duration_seconds));
+    const double accepted_difficulty_per_second = accepted_difficulty / double(duration_seconds);
+    row.insert(QStringLiteral("acceptedDifficultyPerSecond"), accepted_difficulty_per_second);
+    row.insert(QStringLiteral("acceptedDifficultyPerMillisecond"), accepted_difficulty_per_second / 1000.0);
     row.insert(QStringLiteral("hashrateKh"), minerHashrateTextToKh(m_miner_hashrate_text));
     row.insert(QStringLiteral("hashrateText"), m_miner_hashrate_text);
     row.insert(QStringLiteral("pingAvgMs"),
                pool.contains(QStringLiteral("pingAvgMs")) ? pool.value(QStringLiteral("pingAvgMs")).toDouble() : -1.0);
     row.insert(QStringLiteral("restartMs"), m_mining_benchmark_current_restart_ms);
     row.insert(QStringLiteral("status"), QStringLiteral("complete"));
+    row.insert(QStringLiteral("statusDisplay"),
+               QStringLiteral("Complete %1").arg(finished_at_local.toString(QStringLiteral("yyyy-MM-dd h:mm AP"))));
     m_mining_benchmark_runs.push_back(row);
 
     ++m_mining_benchmark_completed_runs;
@@ -16587,21 +16942,29 @@ void NuRpcService::finishMiningBenchmark(bool canceled)
 {
     if (m_mining_benchmark_timer)
         m_mining_benchmark_timer->stop();
-    if (m_mining_benchmark_ping_process) {
-        m_mining_benchmark_ping_process->kill();
-        m_mining_benchmark_ping_process->deleteLater();
-        m_mining_benchmark_ping_process = nullptr;
+    if (m_mining_benchmark_httping_timer)
+        m_mining_benchmark_httping_timer->stop();
+    if (m_mining_benchmark_httping_socket) {
+        m_mining_benchmark_httping_socket->abort();
+        m_mining_benchmark_httping_socket->deleteLater();
+        m_mining_benchmark_httping_socket = nullptr;
     }
     if (minerRunning())
         stopMiner();
     m_miner_pool_url =
         m_mining_benchmark_original_pool_url.isEmpty() ? m_miner_pool_url : m_mining_benchmark_original_pool_url;
+    m_miner_payout_address = m_mining_benchmark_original_payout_address.isEmpty() ?
+                                 m_miner_payout_address :
+                                 m_mining_benchmark_original_payout_address;
+    m_miner_password =
+        m_mining_benchmark_original_password.isEmpty() ? QStringLiteral("x") : m_mining_benchmark_original_password;
     m_mining_benchmark_running = false;
     m_mining_benchmark_pool_started_ms = 0;
     m_mining_benchmark_progress = canceled ? m_mining_benchmark_progress : 100;
     m_mining_benchmark_eta = QStringLiteral("00:00");
-    m_mining_benchmark_status =
-        canceled ? QStringLiteral("Pool benchmark stopped by user.") : QStringLiteral("Pool benchmark complete.");
+    const QString local_time = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd h:mm AP"));
+    m_mining_benchmark_status = canceled ? QStringLiteral("Pool benchmark stopped by user at %1.").arg(local_time) :
+                                           QStringLiteral("Pool benchmark complete %1.").arg(local_time);
     saveMiningBenchmarkArtifacts();
     Q_EMIT minerChanged();
 }
@@ -16648,10 +17011,9 @@ void NuRpcService::updateMiningBenchmarkProgress()
     const double average_restart_seconds =
         m_mining_benchmark_restart_samples > 0 ?
             double(m_mining_benchmark_restart_total_ms) / double(m_mining_benchmark_restart_samples) / 1000.0 :
-            2.5;
+            0.0;
     const double remaining_starts = std::max(0, m_mining_benchmark_total_runs - m_mining_benchmark_completed_runs);
-    const qint64 eta_seconds =
-        qint64(std::ceil(remaining_pool_seconds + remaining_starts * (average_restart_seconds + 10.0)));
+    const qint64 eta_seconds = qint64(std::ceil(remaining_pool_seconds + remaining_starts * average_restart_seconds));
     m_mining_benchmark_eta = formatBenchmarkClock(eta_seconds);
 }
 
@@ -16659,6 +17021,7 @@ QVariantMap NuRpcService::miningBenchmarkSummaryObject() const
 {
     double accepted_per_second_total = 0.0;
     double accepted_difficulty_per_second_total = 0.0;
+    double accepted_difficulty_per_millisecond_total = 0.0;
     double accepted_difficulty_total = 0.0;
     double hashrate_total = 0.0;
     double ping_total = 0.0;
@@ -16668,7 +17031,13 @@ QVariantMap NuRpcService::miningBenchmarkSummaryObject() const
     for (const QVariant& value : m_mining_benchmark_runs) {
         const QVariantMap row = value.toMap();
         accepted_per_second_total += row.value(QStringLiteral("acceptedPerSecond")).toDouble();
-        accepted_difficulty_per_second_total += row.value(QStringLiteral("acceptedDifficultyPerSecond")).toDouble();
+        const double accepted_difficulty_per_second =
+            row.value(QStringLiteral("acceptedDifficultyPerSecond")).toDouble();
+        accepted_difficulty_per_second_total += accepted_difficulty_per_second;
+        accepted_difficulty_per_millisecond_total +=
+            row.contains(QStringLiteral("acceptedDifficultyPerMillisecond")) ?
+                row.value(QStringLiteral("acceptedDifficultyPerMillisecond")).toDouble() :
+                accepted_difficulty_per_second / 1000.0;
         accepted_difficulty_total += row.value(QStringLiteral("acceptedDifficulty")).toDouble();
         total_accepted += row.value(QStringLiteral("accepted")).toInt();
         const double hashrate = row.value(QStringLiteral("hashrateKh")).toDouble();
@@ -16701,6 +17070,14 @@ QVariantMap NuRpcService::miningBenchmarkSummaryObject() const
                    m_mining_benchmark_runs.isEmpty() ?
                        0.0 :
                        accepted_difficulty_per_second_total / m_mining_benchmark_runs.size());
+    summary.insert(QStringLiteral("averageAcceptedWorkScore"),
+                   m_mining_benchmark_runs.isEmpty() ?
+                       0.0 :
+                       (accepted_difficulty_per_second_total / m_mining_benchmark_runs.size()) * 1000000.0);
+    summary.insert(QStringLiteral("averageAcceptedDifficultyPerMillisecond"),
+                   m_mining_benchmark_runs.isEmpty() ?
+                       0.0 :
+                       accepted_difficulty_per_millisecond_total / m_mining_benchmark_runs.size());
     summary.insert(QStringLiteral("averageHashrateKh"), hashrate_count > 0 ? hashrate_total / hashrate_count : 0.0);
     summary.insert(QStringLiteral("averagePingMs"), ping_count > 0 ? ping_total / ping_count : -1.0);
     summary.insert(QStringLiteral("averageRestartMs"),
@@ -16721,8 +17098,10 @@ void NuRpcService::saveMiningBenchmarkArtifacts()
                                                                m_mining_benchmark_run_id;
     const QString stats_path = dir.filePath(stem + QStringLiteral(".json"));
     const QString chart_path = dir.filePath(stem + QStringLiteral(".png"));
+    const QString diagnostics_chart_path = dir.filePath(stem + QStringLiteral("-diagnostics.png"));
     const QString latest_stats_path = dir.filePath(QStringLiteral("latest.json"));
     const QString latest_chart_path = dir.filePath(QStringLiteral("latest.png"));
+    const QString latest_diagnostics_chart_path = dir.filePath(QStringLiteral("latest-diagnostics.png"));
 
     QJsonObject object;
     object.insert(QStringLiteral("schema"), QStringLiteral("defcoin-nu-mining-pool-benchmark-v1"));
@@ -16742,8 +17121,30 @@ void NuRpcService::saveMiningBenchmarkArtifacts()
         }
     }
 
-    renderMiningBenchmarkChart(chart_path);
-    renderMiningBenchmarkChart(latest_chart_path);
+    int max_runs_per_pool = 0;
+    QHash<QString, int> runs_by_pool;
+    for (const QVariant& run_value : m_mining_benchmark_runs) {
+        const QVariantMap row = run_value.toMap();
+        QString key = row.value(QStringLiteral("poolUrl")).toString().trimmed().toLower();
+        if (key.isEmpty())
+            key = row.value(QStringLiteral("poolName")).toString().trimmed().toLower();
+        if (key.isEmpty())
+            key = QString::number(row.value(QStringLiteral("poolIndex")).toInt());
+        const int count = runs_by_pool.value(key) + 1;
+        runs_by_pool.insert(key, count);
+        max_runs_per_pool = std::max(max_runs_per_pool, count);
+    }
+    const bool write_diagnostics_chart = max_runs_per_pool > 3;
+
+    renderMiningBenchmarkChart(chart_path, false);
+    renderMiningBenchmarkChart(latest_chart_path, false);
+    if (write_diagnostics_chart) {
+        renderMiningBenchmarkChart(diagnostics_chart_path, true);
+        renderMiningBenchmarkChart(latest_diagnostics_chart_path, true);
+    } else {
+        QFile::remove(diagnostics_chart_path);
+        QFile::remove(latest_diagnostics_chart_path);
+    }
     m_mining_benchmark_last_stats_path = latest_stats_path;
     m_mining_benchmark_last_chart_path = latest_chart_path;
     ++m_mining_benchmark_chart_serial;
@@ -16806,13 +17207,14 @@ void NuRpcService::exportMiningBenchmarkStats()
         Q_EMIT userMessage(QStringLiteral("Nothing to export"), QStringLiteral("Run or load a pool benchmark first."));
         return;
     }
-    const QString path =
-        QFileDialog::getSaveFileName(nullptr,
-                                     QStringLiteral("Export mining pool benchmark stats"),
-                                     QStringLiteral("defcoin-pool-benchmark-%1.json").arg(m_mining_benchmark_run_id),
-                                     QStringLiteral("Benchmark JSON (*.json)"));
+    const QString path = QFileDialog::getSaveFileName(
+        nullptr,
+        QStringLiteral("Export mining pool benchmark stats"),
+        exportDialogInitialPath(QStringLiteral("defcoin-pool-benchmark-%1.json").arg(m_mining_benchmark_run_id)),
+        QStringLiteral("Benchmark JSON (*.json)"));
     if (path.isEmpty())
         return;
+    rememberExportDialogPath(path);
     QFile::remove(path);
     if (!QFile::copy(m_mining_benchmark_last_stats_path, path)) {
         Q_EMIT userMessage(QStringLiteral("Export failed"),
@@ -16826,18 +17228,36 @@ void NuRpcService::exportMiningBenchmarkChart()
         Q_EMIT userMessage(QStringLiteral("Nothing to export"), QStringLiteral("Run or load a pool benchmark first."));
         return;
     }
-    const QString path =
-        QFileDialog::getSaveFileName(nullptr,
-                                     QStringLiteral("Export mining pool benchmark chart"),
-                                     QStringLiteral("defcoin-pool-benchmark-%1.png").arg(m_mining_benchmark_run_id),
-                                     QStringLiteral("PNG image (*.png)"));
+    const QString path = QFileDialog::getSaveFileName(
+        nullptr,
+        QStringLiteral("Export mining pool benchmark chart"),
+        exportDialogInitialPath(QStringLiteral("defcoin-pool-benchmark-%1.png").arg(m_mining_benchmark_run_id)),
+        QStringLiteral("PNG image (*.png)"));
     if (path.isEmpty())
         return;
+    rememberExportDialogPath(path);
     QFile::remove(path);
     if (!QFile::copy(m_mining_benchmark_last_chart_path, path)) {
         Q_EMIT userMessage(QStringLiteral("Export failed"),
                            QStringLiteral("Nu could not write the benchmark chart image."));
     }
+}
+
+void NuRpcService::copyMiningBenchmarkChartImage()
+{
+    if (m_mining_benchmark_last_chart_path.isEmpty() || !QFileInfo::exists(m_mining_benchmark_last_chart_path)) {
+        Q_EMIT userMessage(QStringLiteral("No benchmark chart"),
+                           QStringLiteral("Run or load a pool benchmark before copying its chart image."));
+        return;
+    }
+    const QImage image(m_mining_benchmark_last_chart_path);
+    if (image.isNull()) {
+        Q_EMIT userMessage(QStringLiteral("Chart copy failed"),
+                           QStringLiteral("Nu could not read the current benchmark chart image."));
+        return;
+    }
+    QApplication::clipboard()->setImage(image);
+    Q_EMIT userMessage(QStringLiteral("Chart copied"), QStringLiteral("The benchmark chart image was copied."));
 }
 
 void NuRpcService::openMiningBenchmarkFolder()
@@ -16846,38 +17266,33 @@ void NuRpcService::openMiningBenchmarkFolder()
     QDesktopServices::openUrl(QUrl::fromLocalFile(miningBenchmarkDirectory()));
 }
 
-bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
+bool NuRpcService::renderMiningBenchmarkChart(const QString& path, bool diagnostics_only) const
 {
-    QImage image(QSize(1280, 720), QImage::Format_ARGB32_Premultiplied);
+    QImage image(QSize(1920, 1080), QImage::Format_ARGB32_Premultiplied);
     image.fill(QColor(QStringLiteral("#080b12")));
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     painter.setPen(QColor(QStringLiteral("#f5f7fb")));
     QFont title_font = painter.font();
-    title_font.setPointSize(22);
+    title_font.setPixelSize(42);
     title_font.setBold(true);
     painter.setFont(title_font);
-    painter.drawText(
-        QRect(36, 28, 900, 34), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Defcoin Pool Benchmark"));
+    painter.drawText(QRect(48, 28, 1824, 54),
+                     Qt::AlignHCenter | Qt::AlignVCenter,
+                     diagnostics_only ? QStringLiteral("Defcoin Core Nu's Pool Benchmark Diagnostics") :
+                                        QStringLiteral("Defcoin Core Nu's Pool Benchmark"));
 
     QFont body_font = painter.font();
-    body_font.setPointSize(10);
+    body_font.setPixelSize(19);
     body_font.setBold(false);
-    painter.setFont(body_font);
-    painter.setPen(QColor(QStringLiteral("#aeb7c8")));
-    painter.drawText(QRect(36, 62, 1180, 24),
-                     Qt::AlignLeft | Qt::AlignVCenter,
-                     m_mining_benchmark_last_run_label.isEmpty() ? QStringLiteral("No completed runs yet.") :
-                                                                   m_mining_benchmark_last_run_label);
-    painter.drawText(
-        QRect(36, 80, 1180, 22),
-        Qt::AlignLeft | Qt::AlignVCenter,
-        QStringLiteral(
-            "Accepted work/s is accepted share difficulty per second; higher is better when comparing pools."));
 
     struct PoolSlot {
+        int pool_no = 0;
         QString name;
         QString url;
+        QString software;
         QString color;
         QVector<QVariantMap> runs;
     };
@@ -16893,8 +17308,10 @@ bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
         if (!key.isEmpty() && slot_by_key.contains(key))
             return slot_by_key.value(key);
         PoolSlot slot;
+        slot.pool_no = pool_slots.size() + 1;
         slot.name = name.trimmed();
         slot.url = url.trimmed();
+        slot.software = benchmarkPoolSoftware(slot.name, slot.url);
         slot.color = color.trimmed().isEmpty() ? benchmarkPoolColor(pool_slots.size()) : color.trimmed();
         pool_slots.push_back(slot);
         const int index = pool_slots.size() - 1;
@@ -16908,6 +17325,13 @@ bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
         ensure_slot(pool.value(QStringLiteral("name")).toString(),
                     pool.value(QStringLiteral("url")).toString(),
                     pool.value(QStringLiteral("color")).toString());
+        const int index = pool_slots.size() - 1;
+        if (index >= 0) {
+            pool_slots[index].pool_no = pool.value(QStringLiteral("poolNo"), index + 1).toInt();
+            const QString software = pool.value(QStringLiteral("poolSoftware")).toString().trimmed();
+            if (!software.isEmpty())
+                pool_slots[index].software = software;
+        }
     }
     for (const QVariant& value : m_mining_benchmark_runs) {
         const QVariantMap row = value.toMap();
@@ -16922,6 +17346,14 @@ bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
             continue;
         if (pool_slots[pool_index].name.isEmpty())
             pool_slots[pool_index].name = row.value(QStringLiteral("poolName")).toString();
+        if (pool_slots[pool_index].pool_no <= 0)
+            pool_slots[pool_index].pool_no = row.value(QStringLiteral("poolNo"), pool_index + 1).toInt();
+        if (pool_slots[pool_index].software.isEmpty()) {
+            const QString software = row.value(QStringLiteral("poolSoftware")).toString().trimmed();
+            pool_slots[pool_index].software =
+                software.isEmpty() ? benchmarkPoolSoftware(pool_slots[pool_index].name, pool_slots[pool_index].url) :
+                                     software;
+        }
         if (pool_slots[pool_index].color.isEmpty())
             pool_slots[pool_index].color = row.value(QStringLiteral("color")).toString();
         pool_slots[pool_index].runs.push_back(row);
@@ -16929,6 +17361,10 @@ bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
     for (int i = 0; i < pool_slots.size(); ++i) {
         if (pool_slots[i].name.isEmpty())
             pool_slots[i].name = QStringLiteral("Pool %1").arg(i + 1);
+        if (pool_slots[i].pool_no <= 0)
+            pool_slots[i].pool_no = i + 1;
+        if (pool_slots[i].software.isEmpty())
+            pool_slots[i].software = benchmarkPoolSoftware(pool_slots[i].name, pool_slots[i].url);
         if (pool_slots[i].color.isEmpty())
             pool_slots[i].color = benchmarkPoolColor(i);
         std::sort(pool_slots[i].runs.begin(), pool_slots[i].runs.end(), [](const QVariantMap& a, const QVariantMap& b) {
@@ -16940,63 +17376,124 @@ bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
         });
     }
 
-    int legend_x = 36;
-    int legend_y = 106;
+    int max_runs_per_pool = 0;
     for (const PoolSlot& slot : pool_slots) {
+        max_runs_per_pool = std::max(max_runs_per_pool, int(slot.runs.size()));
+    }
+    const bool accepted_only_main_chart = !diagnostics_only && max_runs_per_pool > 3;
+
+    const int legend_left = 48;
+    const int legend_top = 92;
+    const int legend_width = 1824;
+    QFont legend_font = body_font;
+    QVector<QString> legend_texts;
+    legend_texts.reserve(pool_slots.size());
+    for (const PoolSlot& slot : pool_slots) {
+        legend_texts.push_back(QStringLiteral("%1 (%2)").arg(slot.name, slot.software));
+    }
+    auto legend_width_for_font = [&](const QFont& font) {
+        QFontMetricsF metrics(font);
+        double total = 0.0;
+        for (const QString& text : legend_texts) {
+            total += 20.0 + metrics.horizontalAdvance(text) + 32.0;
+        }
+        return total;
+    };
+    legend_font.setPixelSize(16);
+    while (legend_font.pixelSize() > 9 && legend_width_for_font(legend_font) > legend_width) {
+        legend_font.setPixelSize(legend_font.pixelSize() - 1);
+    }
+    painter.setFont(legend_font);
+    QFontMetricsF legend_metrics(legend_font);
+    const double legend_total_width = std::min(double(legend_width), legend_width_for_font(legend_font));
+    double legend_x = legend_left + (double(legend_width) - legend_total_width) / 2.0;
+    for (int legend_index = 0; legend_index < pool_slots.size(); ++legend_index) {
+        const PoolSlot& slot = pool_slots.at(legend_index);
         const QColor color(slot.color);
         painter.setBrush(color);
         painter.setPen(Qt::NoPen);
-        painter.drawEllipse(QPointF(legend_x + 7, legend_y + 7), 6, 6);
+        painter.drawEllipse(QPointF(legend_x + 8.0, legend_top + 9.0), 7, 7);
         painter.setPen(QColor(QStringLiteral("#dfe6f4")));
-        painter.drawText(QRect(legend_x + 18, legend_y - 2, 220, 20), Qt::AlignLeft | Qt::AlignVCenter, slot.name);
-        legend_x += 235;
-        if (legend_x > 1060) {
-            legend_x = 36;
-            legend_y += 24;
-        }
+        const QString legend_text = legend_texts.at(legend_index);
+        const double text_width = legend_metrics.horizontalAdvance(legend_text);
+        const double item_width = 20.0 + text_width + 32.0;
+        painter.drawText(QRectF(legend_x + 22.0, legend_top - 2.0, text_width + 4.0, 26.0),
+                         Qt::AlignLeft | Qt::AlignVCenter,
+                         legend_text);
+        legend_x += item_width;
     }
 
     struct SeriesConfig {
         QString key;
         QString title;
         QRect rect;
-        bool bars;
+        QString units;
     };
-    const QVector<SeriesConfig> charts{
-        {QStringLiteral("acceptedDifficultyPerSecond"),
-         QStringLiteral("Accepted work/s"),
-         QRect(36, 150, 580, 210),
-         true},
-        {QStringLiteral("hashrateKh"), QStringLiteral("Hashrate (KH/s)"), QRect(664, 150, 580, 210), false},
-        {QStringLiteral("accepted"), QStringLiteral("Accepted shares"), QRect(36, 420, 580, 210), true},
-        {QStringLiteral("pingAvgMs"), QStringLiteral("Ping avg (ms)"), QRect(664, 420, 580, 210), false},
-    };
+    QVector<SeriesConfig> charts;
+    if (diagnostics_only) {
+        charts.push_back({QStringLiteral("hashrateKh"),
+                          QStringLiteral("Hashrate"),
+                          QRect(48, 150, 1824, 350),
+                          QStringLiteral("KH/s")});
+        charts.push_back({QStringLiteral("pingAvgMs"),
+                          QStringLiteral("HTTPing average"),
+                          QRect(48, 548, 1824, 334),
+                          QStringLiteral("ms")});
+    } else if (accepted_only_main_chart) {
+        charts.push_back({QStringLiteral("acceptedDifficultyPerSecond"),
+                          QStringLiteral("Accepted work/s x1e6"),
+                          QRect(48, 150, 1824, 732),
+                          QStringLiteral("work/s x1e6")});
+    } else {
+        charts.push_back({QStringLiteral("acceptedDifficultyPerSecond"),
+                          QStringLiteral("Accepted work/s x1e6"),
+                          QRect(48, 150, 884, 732),
+                          QStringLiteral("work/s x1e6")});
+        charts.push_back({QStringLiteral("hashrateKh"),
+                          QStringLiteral("Hashrate"),
+                          QRect(988, 150, 884, 334),
+                          QStringLiteral("KH/s")});
+        charts.push_back({QStringLiteral("pingAvgMs"),
+                          QStringLiteral("HTTPing average"),
+                          QRect(988, 548, 884, 334),
+                          QStringLiteral("ms")});
+    }
 
     struct ChartValue {
         double value = 0.0;
         bool valid = false;
     };
     auto value_for = [](const QVariantMap& row, const QString& key) {
-        if (key == QLatin1String("acceptedDifficultyPerSecond") && !row.contains(key))
-            return ChartValue{0.0, false};
-        const double value = row.value(key).toDouble();
+        double value = row.value(key).toDouble();
+        if (key == QLatin1String("acceptedDifficultyPerSecond")) {
+            if (row.contains(QStringLiteral("acceptedDifficultyPerSecond")))
+                value = row.value(QStringLiteral("acceptedDifficultyPerSecond")).toDouble();
+            else if (row.contains(QStringLiteral("acceptedDifficultyPerMillisecond")))
+                value = row.value(QStringLiteral("acceptedDifficultyPerMillisecond")).toDouble() * 1000.0;
+            else
+                return ChartValue{0.0, false};
+            value *= 1000000.0;
+        }
         if (!std::isfinite(value))
             return ChartValue{0.0, false};
         if (key == QLatin1String("pingAvgMs") && value < 0.0)
             return ChartValue{0.0, false};
         return value >= 0.0 ? ChartValue{value, true} : ChartValue{0.0, false};
     };
-    auto axis_label = [](double value) {
-        return QString::number(value, 'f', value >= 100.0 ? 0 : (value >= 10.0 ? 1 : 2));
+    auto trimmed_number = [](double value, int decimals) {
+        QString text = QString::number(value, 'f', decimals);
+        text.remove(QRegularExpression(QStringLiteral("0+$")));
+        text.remove(QRegularExpression(QStringLiteral("\\.$")));
+        return text.isEmpty() ? QStringLiteral("0") : text;
     };
-    auto bar_value_label = [](const QString& key, double value) {
-        if (key == QLatin1String("accepted"))
-            return QString::number(int(std::round(value)));
+    auto value_label = [&](const QString& key, double value) {
         if (key == QLatin1String("acceptedDifficultyPerSecond"))
-            return QString::number(value, 'g', 3);
-        if (key == QLatin1String("acceptedPerSecond"))
-            return QString::number(value, 'f', value >= 10.0 ? 1 : (value >= 1.0 ? 2 : 3));
-        return QString::number(value, 'f', value >= 10.0 ? 1 : 2);
+            return trimmed_number(value, value >= 10.0 ? 1 : 2);
+        if (key == QLatin1String("hashrateKh"))
+            return trimmed_number(value, value >= 100.0 ? 0 : 1);
+        if (key == QLatin1String("restartMs") || key == QLatin1String("pingAvgMs"))
+            return trimmed_number(value, value >= 10.0 ? 0 : 1);
+        return trimmed_number(value, 2);
     };
 
     for (const SeriesConfig& chart : charts) {
@@ -17004,7 +17501,8 @@ bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
         painter.setBrush(QColor(QStringLiteral("#101522")));
         painter.drawRoundedRect(chart.rect, 8, 8);
         painter.setPen(QColor(QStringLiteral("#f5f7fb")));
-        QFont chart_font = painter.font();
+        QFont chart_font = body_font;
+        chart_font.setPixelSize(18);
         chart_font.setBold(true);
         painter.setFont(chart_font);
         painter.drawText(
@@ -17012,36 +17510,81 @@ bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
         chart_font.setBold(false);
         painter.setFont(chart_font);
 
-        QRect plot = chart.rect.adjusted(46, 42, -22, -54);
+        QRect plot = chart.rect.adjusted(70, 56, -28, -76);
         painter.setPen(QColor(QStringLiteral("#2f3a51")));
         painter.drawLine(plot.bottomLeft(), plot.bottomRight());
         painter.drawLine(plot.bottomLeft(), plot.topLeft());
 
         double max_value = 0.0;
+        double min_positive_value = std::numeric_limits<double>::max();
         for (const PoolSlot& slot : pool_slots) {
             for (const QVariantMap& row : slot.runs) {
                 const ChartValue chart_value = value_for(row, chart.key);
-                if (chart_value.valid)
+                if (chart_value.valid) {
                     max_value = std::max(max_value, chart_value.value);
+                    if (chart_value.value > 0.0)
+                        min_positive_value = std::min(min_positive_value, chart_value.value);
+                }
             }
         }
         if (max_value <= 0.0)
             max_value = 1.0;
+        if (min_positive_value == std::numeric_limits<double>::max())
+            min_positive_value = max_value;
+        const bool log_scale = max_value > 0.0 && min_positive_value > 0.0 && max_value / min_positive_value >= 20.0;
+        const double log_min = log_scale ? std::log10(std::max(min_positive_value, 0.000001)) : 0.0;
+        const double log_max = log_scale ? std::log10(max_value) : 0.0;
 
+        auto normalized_for_value = [&](double value) {
+            if (value <= 0.0)
+                return 0.0;
+            if (log_scale) {
+                if (log_max <= log_min)
+                    return 1.0;
+                return std::clamp((std::log10(value) - log_min) / (log_max - log_min), 0.0, 1.0);
+            }
+            return std::clamp(value / max_value, 0.0, 1.0);
+        };
+
+        painter.setPen(QColor(QStringLiteral("#2a354b")));
+        for (int grid = 1; grid <= 4; ++grid) {
+            const double fraction = double(grid) / 4.0;
+            const int y = plot.bottom() - int(std::round(fraction * plot.height()));
+            painter.drawLine(plot.left(), y, plot.right(), y);
+        }
+
+        QFont axis_font = body_font;
+        axis_font.setPixelSize(13);
+        painter.setFont(axis_font);
         painter.setPen(QColor(QStringLiteral("#9aa6ba")));
-        painter.drawText(QRect(chart.rect.left() + 10, plot.top() - 8, 70, 18),
-                         Qt::AlignLeft | Qt::AlignVCenter,
-                         axis_label(max_value));
-        painter.drawText(QRect(chart.rect.left() + 10, plot.bottom() - 8, 36, 18),
-                         Qt::AlignLeft | Qt::AlignVCenter,
-                         QStringLiteral("0"));
+        for (int grid = 0; grid <= 4; ++grid) {
+            const double fraction = double(grid) / 4.0;
+            const int y = plot.bottom() - int(std::round(fraction * plot.height()));
+            double label_value = 0.0;
+            if (log_scale)
+                label_value = std::pow(10.0, log_min + fraction * (log_max - log_min));
+            else
+                label_value = max_value * fraction;
+            painter.drawText(QRect(chart.rect.left() + 10, y - 10, 54, 20),
+                             Qt::AlignRight | Qt::AlignVCenter,
+                             grid == 0 && !log_scale ? QStringLiteral("0") : value_label(chart.key, label_value));
+        }
+        if (log_scale) {
+            painter.setPen(QColor(QStringLiteral("#f7b84b")));
+            painter.drawText(QRect(chart.rect.right() - 132, chart.rect.top() + 10, 112, 22),
+                             Qt::AlignRight | Qt::AlignVCenter,
+                             QStringLiteral("log scale"));
+        }
 
         const int pool_count = std::max(1, int(pool_slots.size()));
         const double x_step = double(plot.width()) / double(pool_count);
-        QFont small_font = painter.font();
-        small_font.setPointSize(7);
-        QFont label_font = painter.font();
-        label_font.setPointSize(8);
+        QFont small_font = body_font;
+        small_font.setPixelSize(chart.rect.width() < 900 ? 11 : 12);
+        QFont label_font = body_font;
+        label_font.setPixelSize(chart.rect.width() < 900 ? 12 : 14);
+        QFont average_font = body_font;
+        average_font.setPixelSize(chart.rect.width() < 900 ? 11 : 12);
+        average_font.setBold(true);
         for (int pool_index = 0; pool_index < pool_slots.size(); ++pool_index) {
             const PoolSlot& slot = pool_slots.at(pool_index);
             const QColor color(slot.color);
@@ -17057,8 +17600,7 @@ bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
 
             double valid_total = 0.0;
             int valid_count = 0;
-            QPointF previous;
-            bool have_previous = false;
+            double last_bar_right = slot_center - group_width / 2.0;
             for (int run_index = 0; run_index < slot.runs.size(); ++run_index) {
                 const QVariantMap row = slot.runs.at(run_index);
                 const ChartValue chart_value = value_for(row, chart.key);
@@ -17066,53 +17608,118 @@ bool NuRpcService::renderMiningBenchmarkChart(const QString& path) const
                     continue;
                 valid_total += chart_value.value;
                 ++valid_count;
-                const double normalized = std::clamp(chart_value.value / max_value, 0.0, 1.0);
+                const double normalized = normalized_for_value(chart_value.value);
                 const double x = x_for_run(run_index);
                 const double y = plot.bottom() - normalized * plot.height();
                 const double visible_y = chart_value.value > 0.0 ? y : plot.bottom() - 2.0;
 
-                if (chart.bars) {
-                    const double bar_width = std::max(4.0, std::min(18.0, group_width / double(run_count + 1)));
-                    QRectF bar(x - bar_width / 2.0, visible_y, bar_width, plot.bottom() - visible_y);
-                    painter.setPen(Qt::NoPen);
-                    painter.setBrush(color);
-                    painter.drawRoundedRect(bar, 3, 3);
-                    painter.setFont(small_font);
-                    painter.setPen(QColor(QStringLiteral("#dfe6f4")));
-                    const double label_width = std::max(24.0, group_width / double(run_count));
-                    painter.drawText(QRectF(x - label_width / 2.0, plot.bottom() + 4.0, label_width, 14.0),
-                                     Qt::AlignHCenter | Qt::AlignTop,
-                                     bar_value_label(chart.key, chart_value.value));
-                    painter.setFont(label_font);
-                } else {
-                    painter.setPen(QPen(color, 2.5));
-                    if (have_previous)
-                        painter.drawLine(previous, QPointF(x, y));
-                    painter.setBrush(color);
-                    painter.drawEllipse(QPointF(x, y), 4.5, 4.5);
-                    previous = QPointF(x, y);
-                    have_previous = true;
-                }
+                const double bar_width = std::max(8.0, std::min(28.0, group_width / double(run_count + 1)));
+                QRectF bar(x - bar_width / 2.0, visible_y, bar_width, plot.bottom() - visible_y);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(color);
+                painter.drawRoundedRect(bar, 4, 4);
+                last_bar_right = std::max(last_bar_right, bar.right());
+                painter.setFont(label_font);
+                painter.setPen(QColor(QStringLiteral("#f5f7fb")));
+                const QString bar_label = value_label(chart.key, chart_value.value);
+                const QRectF label_rect(x - 40.0, std::max(double(plot.top()), visible_y - 24.0), 80.0, 20.0);
+                painter.drawText(label_rect, Qt::AlignHCenter | Qt::AlignVCenter, bar_label);
             }
 
             if (valid_count > 1) {
                 const double average = valid_total / double(valid_count);
-                const double average_y = plot.bottom() - std::clamp(average / max_value, 0.0, 1.0) * plot.height();
-                painter.setPen(QPen(QColor(QStringLiteral("#f5f7fb")), chart.bars ? 1.5 : 1.0, Qt::DashLine));
-                painter.drawLine(QPointF(slot_center - group_width * 0.38, average_y),
-                                 QPointF(slot_center + group_width * 0.38, average_y));
+                const double average_y = plot.bottom() - normalized_for_value(average) * plot.height();
+                painter.setFont(average_font);
+                const QString average_text = QStringLiteral("avg %1").arg(value_label(chart.key, average));
+                const QFontMetricsF average_metrics(average_font);
+                const double average_text_width = average_metrics.horizontalAdvance(average_text) + 10.0;
+                const double next_slot_center = plot.left() + x_step * (double(pool_index) + 1.5);
+                const double next_group_left = pool_index + 1 < pool_slots.size() ?
+                                                   next_slot_center - group_width / 2.0 :
+                                                   double(chart.rect.right()) - 12.0;
+                const double desired_text_x = last_bar_right + 12.0;
+                const double max_text_x = std::min(double(chart.rect.right()) - 12.0 - average_text_width,
+                                                   next_group_left - 10.0 - average_text_width);
+                const double avg_text_x =
+                    max_text_x >= desired_text_x ?
+                        desired_text_x :
+                        std::min(desired_text_x, double(chart.rect.right()) - 12.0 - average_text_width);
+                const double avg_line_left = slot_center - group_width * 0.42;
+                const double avg_line_right = std::max(avg_line_left + 18.0, avg_text_x - 6.0);
+                painter.setPen(QPen(QColor(QStringLiteral("#f5f7fb")), 1.5, Qt::DashLine));
+                painter.drawLine(QPointF(avg_line_left, average_y), QPointF(avg_line_right, average_y));
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(QStringLiteral("#101522")));
+                painter.drawRoundedRect(
+                    QRectF(avg_text_x - 2.0, average_y - 12.0, average_text_width + 4.0, 22.0), 3.0, 3.0);
+                painter.setPen(QColor(QStringLiteral("#dfe6f4")));
+                painter.drawText(QRectF(avg_text_x, average_y - 12.0, average_text_width, 22.0),
+                                 Qt::AlignLeft | Qt::AlignVCenter,
+                                 average_text);
             }
 
             painter.setFont(small_font);
             painter.setPen(QColor(QStringLiteral("#8d98ab")));
             const QString pool_label =
-                QFontMetrics(painter.font()).elidedText(slot.name, Qt::ElideRight, int(std::max(34.0, x_step - 8.0)));
-            painter.drawText(QRectF(slot_center - x_step / 2.0 + 2.0, plot.bottom() + 20.0, x_step - 4.0, 16.0),
+                QFontMetrics(painter.font()).elidedText(slot.name, Qt::ElideRight, int(std::max(54.0, x_step - 10.0)));
+            painter.drawText(QRectF(slot_center - x_step / 2.0 + 4.0, plot.bottom() + 32.0, x_step - 8.0, 22.0),
                              Qt::AlignHCenter | Qt::AlignTop,
                              pool_label);
             painter.setFont(label_font);
         }
     }
+
+    auto duration_text = [](qint64 seconds) {
+        seconds = std::max<qint64>(0, seconds);
+        const qint64 hours = seconds / 3600;
+        const qint64 minutes = (seconds % 3600) / 60;
+        const qint64 secs = seconds % 60;
+        if (hours > 0)
+            return QStringLiteral("%1h %2m %3s").arg(hours).arg(minutes).arg(secs);
+        if (minutes > 0)
+            return QStringLiteral("%1m %2s").arg(minutes).arg(secs);
+        return QStringLiteral("%1s").arg(secs);
+    };
+    double actual_duration_seconds = 0.0;
+    for (const QVariant& run_value : m_mining_benchmark_runs) {
+        actual_duration_seconds += run_value.toMap().value(QStringLiteral("durationSeconds")).toDouble();
+    }
+    const QVariantMap summary = miningBenchmarkSummaryObject();
+    const QString summary_text =
+        QStringLiteral("Summary: %1 per pool; %2 total test time; %3 shares accepted; avg work/s x1e6 %4; avg hashrate "
+                       "%5 KH/s; avg HTTPing %6 ms.")
+            .arg(duration_text(summary.value(QStringLiteral("secondsPerPool")).toLongLong()),
+                 duration_text(qint64(std::round(actual_duration_seconds))),
+                 QString::number(summary.value(QStringLiteral("totalAccepted")).toInt()),
+                 trimmed_number(summary.value(QStringLiteral("averageAcceptedWorkScore")).toDouble(), 2),
+                 trimmed_number(summary.value(QStringLiteral("averageHashrateKh")).toDouble(), 2),
+                 summary.value(QStringLiteral("averagePingMs")).toDouble() >= 0.0 ?
+                     trimmed_number(summary.value(QStringLiteral("averagePingMs")).toDouble(), 1) :
+                     QStringLiteral("-"));
+    const QString conducted_text =
+        m_mining_benchmark_started_at_utc.isValid() ?
+            QStringLiteral("Conducted on: %1")
+                .arg(m_mining_benchmark_started_at_utc.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))) :
+            QStringLiteral("Conducted on: not available");
+    const QString fair_note =
+        QStringLiteral("This scoring method attempts fairness by comparing accepted share difficulty instead of raw "
+                       "accepted-share counts. Nu sums accepted Submitted Diff values, divides by elapsed mining "
+                       "seconds, and scales the result by 1,000,000. When an accepted share has no matched Submitted "
+                       "Diff in the miner log, Nu uses the target-equivalent minimum as a conservative fallback.");
+
+    painter.setPen(QColor(QStringLiteral("#dfe6f4")));
+    QFont footer_font = body_font;
+    footer_font.setPixelSize(18);
+    footer_font.setBold(false);
+    painter.setFont(footer_font);
+    painter.drawText(QRect(64, 912, 1792, 26), Qt::AlignHCenter | Qt::AlignVCenter, summary_text);
+    painter.setPen(QColor(QStringLiteral("#aeb7c8")));
+    footer_font.setPixelSize(16);
+    painter.setFont(footer_font);
+    painter.drawText(QRect(64, 944, 1792, 24), Qt::AlignHCenter | Qt::AlignVCenter, conducted_text);
+    footer_font.setPixelSize(15);
+    painter.setFont(footer_font);
+    painter.drawText(QRect(128, 974, 1664, 70), Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap, fair_note);
 
     painter.end();
     return image.save(path, "PNG");
@@ -21646,9 +22253,10 @@ void NuRpcService::backupWallet()
         walletStorageTypeForName(m_data_dir.isEmpty() ? defaultDataDir() : m_data_dir, wallet_name);
     const QString default_file = walletBackupDefaultFileName(wallet_name, storage_type);
     const QString path = QFileDialog::getSaveFileName(
-        nullptr, QStringLiteral("Backup Active Wallet"), QDir(realHomePath()).filePath(default_file));
+        nullptr, QStringLiteral("Backup Active Wallet"), exportDialogInitialPath(default_file));
     if (path.isEmpty())
         return;
+    rememberExportDialogPath(path);
     rpcCall(QStringLiteral("backupwallet"), {path}, true, [this, wallet_name](const QJsonValue&, const QString& error) {
         if (wallet_name != m_wallet_name)
             return;
@@ -23330,10 +23938,11 @@ void NuRpcService::exportTransactionsCsv()
     const QString path =
         QFileDialog::getSaveFileName(nullptr,
                                      QStringLiteral("Export Transactions"),
-                                     QDir(realHomePath()).filePath(QStringLiteral("defcoin-transactions.csv")),
+                                     exportDialogInitialPath(QStringLiteral("defcoin-transactions.csv")),
                                      QStringLiteral("CSV files (*.csv)"));
     if (path.isEmpty())
         return;
+    rememberExportDialogPath(path);
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -23361,10 +23970,11 @@ void NuRpcService::exportTrafficCsv()
     const QString path =
         QFileDialog::getSaveFileName(nullptr,
                                      QStringLiteral("Export Network Traffic"),
-                                     QDir(realHomePath()).filePath(QStringLiteral("defcoin-network-traffic.csv")),
+                                     exportDialogInitialPath(QStringLiteral("defcoin-network-traffic.csv")),
                                      QStringLiteral("CSV files (*.csv)"));
     if (path.isEmpty())
         return;
+    rememberExportDialogPath(path);
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -23582,10 +24192,11 @@ void NuRpcService::saveCurrentPsbt()
     const QString path =
         QFileDialog::getSaveFileName(nullptr,
                                      QStringLiteral("Save PSBT"),
-                                     QDir(realHomePath()).filePath(QStringLiteral("defcoin.psbt")),
+                                     exportDialogInitialPath(QStringLiteral("defcoin.psbt")),
                                      QStringLiteral("PSBT files (*.psbt);;Text files (*.txt);;All files (*)"));
     if (path.isEmpty())
         return;
+    rememberExportDialogPath(path);
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         Q_EMIT userMessage(QStringLiteral("PSBT not saved"), file.errorString());
@@ -23654,7 +24265,7 @@ QVariantList NuRpcService::suggestedTableColumnWidths(const QVariantList& column
     QFontMetrics header_metrics(header_font);
     QFontMetrics mono_header_metrics(mono_header_font);
 
-    const int padding = compact ? 16 : 22;
+    const int padding = compact ? 10 : 20;
 
     QVector<double> widths;
     widths.reserve(columns.size());

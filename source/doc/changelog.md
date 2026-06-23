@@ -1,5 +1,140 @@
 # Defcoin Core Nu Changelog
 
+## 26.6.8l-alpha Core Memories
+
+Defcoin Core Nu `26.6.8l-alpha` is a Tahoe Mining > Pools and Benchmark
+Pools table/report polish build over the active `26.6.8-alpha` line.
+
+- Corrects the `pool.defcoin.fun` preset and auto-detection label from `NOMP`
+  to `UNOMP`, including existing saved `.fun` rows.
+- Fixes reusable table Shift-click range selection so clicking one cell and
+  then Shift-clicking the opposite corner immediately selects the full cell
+  range across tables.
+- Strengthens Mining > Pools drag-to-reorder feedback with open/closed hand
+  cursors, row-target highlighting, and more reliable drag capture from the
+  No. column.
+- Decimal-aligns Benchmark Pools result columns that show decimal values by
+  using fixed precision in the numeric table cells.
+- Reworks the saved benchmark PNG into `Defcoin Core Nu's Pool Benchmark` with
+  a centered title, auto-fitted one-line legend, footer-based run summary,
+  `Conducted on` timestamp, and clearer fairness explanation. The dashed
+  average overlays are restored with labels placed to the right of the averaged
+  bars.
+- For benchmark runs with more than three passes per pool, writes the main PNG
+  as a full-width accepted-work comparison and saves hashrate/HTTPing
+  diagnostics to a separate `*-diagnostics.png` sidecar file.
+
+## 26.6.8k-alpha Core Memories
+
+Defcoin Core Nu `26.6.8k-alpha` is a Tahoe Mining > Benchmark Pools countdown
+correction build over the active `26.6.8-alpha` line.
+
+- Keeps the idle `Time left` display aligned with the current per-pool,
+  cycle, and pool-count fields instead of showing a stale ETA loaded from a
+  previous benchmark artifact.
+- Removes the fixed ten-second-per-pool backend ETA padding so the live
+  countdown starts from configured pool runtime and adds only observed restart
+  overhead once restart samples exist.
+- Moves the live cycle/status text into the Benchmark Pools control row after
+  `Time left`, reserves that row space while idle, removes the thick progress
+  divider, tightens the seconds/cycles fields, and keeps the action buttons
+  right-aligned on the same row.
+- Adds a compact `Diff` result column for total accepted share difficulty,
+  expands Work/s hover/chart notes to explain that the fairer speed score sums
+  accepted `Submitted Diff` values per second, uses a conservative
+  target-equivalent fallback only for accepted shares without a matched
+  difficulty row, and places chart average labels to the right of each averaged
+  bar group so labels do not collide with candles.
+
+## 26.6.8j-alpha Core Memories
+
+Defcoin Core Nu `26.6.8j-alpha` is a Tahoe Mining > Pools and Benchmark
+Pools table/chart polish build over the active `26.6.8-alpha` line.
+
+- Restores Mining > Pools to Nu's reusable selectable/copyable/sortable table
+  component, while preserving drag-to-reorder from the No. column.
+- Tightens table auto-fit padding and shrink-to-content sizing so pool preset
+  and benchmark tables do not leave blank trailing columns or unnecessary
+  scrollbars when the content fits.
+- Lowers the benchmark minimum per-pool runtime to 10 seconds, clamps lower
+  entries to that value, and fixes the estimated runtime math to reflect pool
+  time instead of adding a large fixed overhead per run.
+- Removes the retired `cpu.defcoin.host:13370` preset and shortens unknown
+  backend labels to `Unk. stratum`.
+- Reworks the 1920x1080 benchmark chart: one-line legend, larger/sharper text,
+  accepted work/s chart occupying the full left side, hashrate top-right,
+  endpoint latency bottom-right, and per-bar plus average value labels.
+
+## 26.6.8i-alpha Core Memories
+
+Defcoin Core Nu `26.6.8i-alpha` is a Tahoe Mining > Pools and Benchmark
+Pools polish build over the active `26.6.8-alpha` line.
+
+- Changes the benchmark fair-comparison metric back to accepted work per
+  second and scales the display by 1,000,000 so values are readable while still
+  using accepted share difficulty over elapsed seconds.
+- Enlarges the Benchmark Pools chart preview, removes the restart column, moves
+  hashrate and endpoint-latency units into table headers, and shortens
+  sub-minute durations.
+- Makes Mining > Pools presets reorderable by dragging the No. column and adds
+  optional per-pool payout address/password overrides that inherit the general
+  mining settings when left blank.
+- Stops redacting the miner launch `-p` argument in the Monitor log because
+  Stratum pools usually treat it as a dummy worker password.
+- Replaces the Stratum benchmark probe with a TCP-connect latency check only,
+  avoiding invalid HTTP bytes on Stratum ports such as `pool.defcoin.io:4044`.
+
+## 26.6.8h-alpha Core Memories
+
+Defcoin Core Nu `26.6.8h-alpha` is a Tahoe Mining > Pools and benchmark
+latency polish build over the active `26.6.8-alpha` line.
+
+- Adds an editable Mining > Pools preset table with separate pool name,
+  stratum address, and pool software fields.
+- Persists custom pool presets through Nu settings, with add, update, remove,
+  use-selected, and reset-defaults actions.
+- Migrates the Defcoin Host CPU/USB/ASIC P2Pool presets to IP-based stratum
+  endpoints while keeping the human-readable host:port pool names.
+- Replaces the benchmark subprocess ping call with a built-in Qt HTTPing-style
+  TCP endpoint probe so the packaged app does not depend on command-line ping.
+
+## 26.6.8g-alpha Core Memories
+
+Defcoin Core Nu `26.6.8g-alpha` is a Tahoe mining benchmark polish build over
+the active `26.6.8-alpha` line.
+
+- Removes the restart-time graph from Mining > Benchmark Pools PNG output,
+  leaving accepted work/ms, hashrate, and ping.
+- Changes the benchmark fair-comparison metric display from work/s to work/ms
+  while keeping compatibility fields in saved JSON.
+- Removes pool numbers and per-pool numeric labels from the chart and legend.
+- Places the preview chart to the right of a compact benchmark table, removes
+  the Status display column, and keeps the whole result grid easier to scan.
+- Pings only the bare stratum host name, not the host plus port.
+
+## 26.6.8f-alpha Core Memories
+
+Defcoin Core Nu `26.6.8f-alpha` is a Tahoe mining monitor and benchmark polish
+build over the active `26.6.8-alpha` line.
+
+- Changes Mining Monitor wording from Follow tail to Output focus and Recent
+  Logs to Top to Latest output on top.
+- Keeps the Mining Monitor view anchored where the user is reading unless
+  Output focus is enabled.
+- Adds monotonic miner-output line numbers that continue past the 4K-line
+  rolling buffer limit.
+- Makes Mining Benchmark results selectable, copyable, sortable, and clearer
+  about Pool No., Pool software, ping failures, completion time, and accepted
+  work/s caveats.
+- Regenerates benchmark charts as 1920x1080 bar charts with readable numeric
+  labels, average markers, log-scale fallback for extreme ranges, and no raw
+  accepted-shares comparison chart.
+- Groups the Defcoin Host CPU/USB/ASIC P2Pool presets together and adds the
+  Defcoin.io solo mining preset.
+- Reuses the last export folder across Nu export/save dialogs.
+- Passes the saved Defcoin user-agent filtering preference to the managed
+  backend so non-Defcoin peers are rejected when filtering is enabled.
+
 ## 26.6.8e-alpha Core Memories
 
 Defcoin Core Nu `26.6.8e-alpha` is a wallet, mining, networking, and packaging

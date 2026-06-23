@@ -10,7 +10,7 @@ endif()
 
 project(DefcoinCoreNuQml VERSION 26.6.8 LANGUAGES CXX)
 
-set(DEFCOIN_NU_RELEASE_NAME "26.6.8e-alpha" CACHE STRING "Visible Defcoin Core Nu release label" FORCE)
+set(DEFCOIN_NU_RELEASE_NAME "26.6.8l-alpha" CACHE STRING "Visible Defcoin Core Nu release label" FORCE)
 option(DEFCOIN_NU_ENABLE_HELP "Bundle and expose the Defcoin Core Nu help manual" OFF)
 set(DEFCOIN_NU_VELOPACK_ROOT "" CACHE PATH "Optional Velopack libc root to bundle with Defcoin Core Nu")
 set(DEFCOIN_NU_VELOPACK_UPDATE_URL "https://github.com/defcoincore/Defcoin-Core-Nu/releases/latest/download" CACHE STRING "Velopack update feed URL")

@@ -26,8 +26,9 @@ sending and receiving payments, managing local wallets, inspecting peers, and
 participating in the Defcoin network.
 
 `26.6.8-alpha`, codename `Core Memories`, is the current public alpha release.
-It preserves Defcoin's historical chain rules and wallet data while adding a
-modern Qt Quick desktop experience for macOS Apple Silicon and Windows 11.
+The current Tahoe / Apple Silicon candidate is `26.6.8l-alpha`. It preserves
+Defcoin's historical chain rules and wallet data while adding a modern Qt Quick
+desktop experience for macOS Apple Silicon and Windows 11.
 
 ## Get The Current Alpha
 
@@ -36,7 +37,7 @@ Download packages from
 
 | Platform | Package |
 | --- | --- |
-| macOS Apple Silicon / Tahoe | [Nu DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8e-alpha-macOS-AppleSilicon-Tahoe.dmg) |
+| macOS Apple Silicon / Tahoe | [Nu DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8l-alpha-macOS-AppleSilicon-Tahoe.dmg) |
 | OS X Lion 10.7 | [Nu DMG](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-26.6.8-alpha-osx107.dmg) |
 | Windows 11 x86_64 | [Nu Installer](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8e-alpha-Windows-11-x86_64-Setup.exe) |
 | Windows 11 x86_64 | [Nu Portable ZIP](https://github.com/defcoincore/Defcoin-Core-Nu/releases/download/v26.6.8-alpha/Defcoin-Core-Nu-v26.6.8e-alpha-Windows-11-x86_64-Portable.zip) |

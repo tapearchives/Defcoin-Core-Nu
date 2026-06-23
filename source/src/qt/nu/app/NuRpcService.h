@@ -32,6 +32,7 @@ class QJsonObject;
 class QLockFile;
 class QPainter;
 class QRectF;
+class QTcpSocket;
 class QTimer;
 class QUdpSocket;
 class NuVelopackUpdater;
@@ -165,12 +166,14 @@ class NuRpcService final : public QObject
     Q_PROPERTY(QStringList bip39EnglishWords READ bip39EnglishWords CONSTANT)
     Q_PROPERTY(QString minerExecutable READ minerExecutable NOTIFY minerChanged)
     Q_PROPERTY(QString minerPoolUrl READ minerPoolUrl NOTIFY minerChanged)
+    Q_PROPERTY(QVariantList miningPoolPresets READ miningPoolPresets NOTIFY minerChanged)
     Q_PROPERTY(QString minerPayoutAddress READ minerPayoutAddress NOTIFY minerChanged)
     Q_PROPERTY(QString minerPassword READ minerPassword NOTIFY minerChanged)
     Q_PROPERTY(int minerThreads READ minerThreads NOTIFY minerChanged)
     Q_PROPERTY(int minerNiceLevel READ minerNiceLevel NOTIFY minerChanged)
     Q_PROPERTY(QString minerStatus READ minerStatus NOTIFY minerChanged)
     Q_PROPERTY(QString minerLog READ minerLog NOTIFY minerChanged)
+    Q_PROPERTY(QVariantList minerLogLineNumbers READ minerLogLineNumbers NOTIFY minerChanged)
     Q_PROPERTY(bool minerRunning READ minerRunning NOTIFY minerChanged)
     Q_PROPERTY(QString miningStateText READ miningStateText NOTIFY minerChanged)
     Q_PROPERTY(QString miningMethodText READ miningMethodText NOTIFY minerChanged)
@@ -663,6 +666,10 @@ public:
     {
         return m_miner_pool_url;
     }
+    QVariantList miningPoolPresets() const
+    {
+        return m_mining_pool_presets;
+    }
     QString minerPayoutAddress() const
     {
         return m_miner_payout_address;
@@ -685,7 +692,11 @@ public:
     }
     QString minerLog() const
     {
-        return m_miner_log;
+        return m_miner_log_lines.isEmpty() ? QString() : m_miner_log_lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+    }
+    QVariantList minerLogLineNumbers() const
+    {
+        return m_miner_log_line_numbers;
     }
     bool minerRunning() const;
     QString miningStateText() const;
@@ -1056,6 +1067,7 @@ public:
     Q_INVOKABLE void useWalletReceiveAddressForMining();
     Q_INVOKABLE void saveMinerConfiguration(
         const QString& pool_url, const QString& payout_address, const QString& password, int threads, int nice_level);
+    Q_INVOKABLE void saveMiningPoolPresets(const QVariantList& pools);
     Q_INVOKABLE void startConfiguredMiner();
     Q_INVOKABLE void stopMiner();
     Q_INVOKABLE void clearMinerLog();
@@ -1064,6 +1076,7 @@ public:
     Q_INVOKABLE void loadMiningBenchmarkRun();
     Q_INVOKABLE void exportMiningBenchmarkStats();
     Q_INVOKABLE void exportMiningBenchmarkChart();
+    Q_INVOKABLE void copyMiningBenchmarkChartImage();
     Q_INVOKABLE void openMiningBenchmarkFolder();
 
 public Q_SLOTS:
@@ -1157,18 +1170,22 @@ private:
     void emitPendingMinerChanged();
     bool launchConfiguredMiner(bool clear_log = true, bool show_user_messages = true);
     void loadLatestMiningBenchmarkArtifacts();
+    void loadMiningPoolPresets();
     QString miningBenchmarkDirectory() const;
+    QString exportDialogInitialPath(const QString& default_file_name) const;
+    void rememberExportDialogPath(const QString& path);
     void startNextMiningBenchmarkPool();
     void miningBenchmarkTick();
     void finishCurrentMiningBenchmarkPool();
-    void startMiningBenchmarkPing(const QVariantMap& pool, int restart_ms);
-    void finishMiningBenchmarkPing(int exit_code, QProcess::ExitStatus exit_status);
+    void startMiningBenchmarkHttping(const QVariantMap& pool, int restart_ms);
+    void startNextMiningBenchmarkHttpingAttempt();
+    void finishMiningBenchmarkHttpingAttempt(bool success);
     void beginMiningBenchmarkPool(const QVariantMap& pool, double ping_avg_ms, int restart_ms);
     void finishMiningBenchmark(bool canceled);
     void updateMiningBenchmarkProgress();
     void saveMiningBenchmarkArtifacts();
     bool loadMiningBenchmarkJson(const QString& path);
-    bool renderMiningBenchmarkChart(const QString& path) const;
+    bool renderMiningBenchmarkChart(const QString& path, bool diagnostics_only = false) const;
     QVariantMap miningBenchmarkSummaryObject() const;
     void appendLaunchDiagnostic(const QString& message);
     int appendDebugLogLineFromNu(const QString& message);
@@ -1397,6 +1414,7 @@ private:
     void parseMinerLogChunk(const QString& text);
     void resetMinerRuntimeStats();
     void updateMinerAcceptedShares(int accepted);
+    double effectiveMinerAcceptedShareDifficulty() const;
     void setRecoveryState(bool active, const QString& status, int progress = -1);
     void setRecoveryCurrentMethod(const QString& method);
     void setRecoveryAddressScanProgress(const QString& phase, int completed, int total);
@@ -1486,13 +1504,16 @@ private:
     QProcess* m_backend_process = nullptr;
     QProcess* m_miner_process = nullptr;
     QString m_miner_executable;
-    QString m_miner_pool_url = QStringLiteral("stratum+tcp://defcoin.dc903.org:13372");
+    QString m_miner_pool_url = QStringLiteral("stratum+tcp://135.148.43.188:13371");
+    QVariantList m_mining_pool_presets;
     QString m_miner_payout_address;
     QString m_miner_password = QStringLiteral("x");
     int m_miner_threads = 4;
     int m_miner_nice_level = 20;
     QString m_miner_status = QStringLiteral("Miner not configured.");
-    QString m_miner_log;
+    QStringList m_miner_log_lines;
+    QVariantList m_miner_log_line_numbers;
+    int m_miner_log_next_line_number = 1;
     QString m_miner_parse_buffer;
     QTimer* m_miner_signal_timer = nullptr;
     bool m_miner_signal_pending = false;
@@ -1500,12 +1521,21 @@ private:
     int m_miner_accepted_shares = 0;
     int m_miner_rejected_shares = 0;
     double m_miner_accepted_share_difficulty = 0.0;
+    double m_miner_current_share_target_difficulty = 0.0;
     QHash<int, double> m_miner_submitted_share_difficulty_by_id;
+    QHash<int, double> m_miner_pending_accepted_share_target_difficulty_by_id;
     QSet<int> m_miner_pending_accepted_share_ids;
     qint64 m_miner_started_ms = 0;
     QVector<qint64> m_miner_accepted_share_times_ms;
     QTimer* m_mining_benchmark_timer = nullptr;
-    QProcess* m_mining_benchmark_ping_process = nullptr;
+    QTcpSocket* m_mining_benchmark_httping_socket = nullptr;
+    QTimer* m_mining_benchmark_httping_timer = nullptr;
+    QElapsedTimer m_mining_benchmark_httping_elapsed;
+    QVariantMap m_mining_benchmark_httping_pool;
+    int m_mining_benchmark_httping_restart_ms = 0;
+    int m_mining_benchmark_httping_attempt = 0;
+    int m_mining_benchmark_httping_successes = 0;
+    double m_mining_benchmark_httping_total_ms = 0.0;
     bool m_mining_benchmark_running = false;
     QVariantList m_mining_benchmark_pools;
     QVariantList m_mining_benchmark_runs;
@@ -1518,6 +1548,8 @@ private:
     QString m_mining_benchmark_last_chart_path;
     QString m_mining_benchmark_run_id;
     QString m_mining_benchmark_original_pool_url;
+    QString m_mining_benchmark_original_payout_address;
+    QString m_mining_benchmark_original_password;
     QDateTime m_mining_benchmark_started_at_utc;
     qint64 m_mining_benchmark_started_ms = 0;
     qint64 m_mining_benchmark_pool_started_ms = 0;
