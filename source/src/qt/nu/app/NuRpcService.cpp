@@ -18657,6 +18657,43 @@ bool NuRpcService::ensureExplorerBalanceDeltas(QString* error)
     return ok;
 }
 
+void NuRpcService::cacheExplorerLookup(
+    const QString& type, const QString& id, const QString& title, const QString& summary, const QJsonValue& raw_json)
+{
+    QString error;
+    if (!ensureExplorerDatabase(&error)) {
+        appendLaunchDiagnostic(error);
+        return;
+    }
+    const QString connection_name =
+        QStringLiteral("nu_explorer_write_%1").arg(QUuid::createUuid().toString(QUuid::Id128));
+    bool ok = false;
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name);
+        db.setDatabaseName(explorerDatabasePath());
+        ok = db.open();
+        if (ok) {
+            QSqlQuery query(db);
+            query.prepare(QStringLiteral("INSERT INTO explorer_lookups(type, id, title, summary, raw_json, cached_at) "
+                                         "VALUES(?, ?, ?, ?, ?, ?) "
+                                         "ON CONFLICT(type, id) DO UPDATE SET "
+                                         "title=excluded.title, summary=excluded.summary, raw_json=excluded.raw_json, "
+                                         "cached_at=excluded.cached_at"));
+            query.addBindValue(type);
+            query.addBindValue(id);
+            query.addBindValue(title);
+            query.addBindValue(summary);
+            query.addBindValue(QString::fromUtf8(QJsonDocument(raw_json.toObject()).toJson(QJsonDocument::Compact)));
+            query.addBindValue(QDateTime::currentSecsSinceEpoch());
+            ok = query.exec();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connection_name);
+    if (ok)
+        loadExplorerRecentLookups();
+}
+
 
 void NuRpcService::loadExplorerRecentLookups()
 {
@@ -18872,6 +18909,16 @@ QJsonArray NuRpcService::explorerContactsToJsonArray(const QVariantList& contact
         out.push_back(object);
     }
     return out;
+}
+
+QString NuRpcService::explorerLookupHtml(const QString& title,
+                                         const QString& summary_html,
+                                         const QJsonValue& raw_json) const
+{
+    return QStringLiteral("<h2>%1</h2>%2<h3>Source JSON</h3><pre>%3</pre>")
+        .arg(title.toHtmlEscaped(),
+             summary_html,
+             QString::fromUtf8(QJsonDocument(raw_json.toObject()).toJson(QJsonDocument::Indented)).toHtmlEscaped());
 }
 
 void NuRpcService::emitExplorerError(const QString& title, const QString& detail)

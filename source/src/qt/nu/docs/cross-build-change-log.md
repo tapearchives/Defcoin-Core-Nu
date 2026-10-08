@@ -17,6 +17,23 @@ repository unless explicitly requested for a Nu release.
 
 ## Entries
 
+### 26.6.8l-alpha - 2026-10-08 - Public-source link correction
+
+Big picture:
+- Restore the two explorer helper definitions that were present in the release
+  source but omitted from the public `main` commit.
+
+Changed behavior:
+- Public source builds now resolve `NuRpcService::cacheExplorerLookup` and
+  `NuRpcService::explorerLookupHtml` at the final link step.
+- Runtime behavior is unchanged from the complete release source: explorer
+  lookups can be cached in SQLite and rendered as escaped HTML with source JSON.
+
+Verification targets:
+- Build and link the `DefcoinCoreNu` target from a clean public checkout on
+  Linux and macOS.
+- `git diff --check`.
+
 ### 26.6.8l-alpha - 2026-06-23 - Mining benchmark table and report polish
 
 Big picture:
