@@ -15,7 +15,7 @@ This folder owns the Tahoe Nu frontend, QML views/components, bridge services, N
 ## Local Contracts
 
 - UI text must be concise and user-facing; dense diagnostics belong behind Details or Advanced tools.
-- Follow `docs/writing-style.md` for new prose and changelog entries. Preserve existing release history and dated notes; append corrections or new entries without rewriting prior entries.
+- Follow `docs/writing-style.md` for new prose and changelog entries. Preserve existing release notes and dated notes; append corrections or new entries without rewriting prior entries.
 - Metrics is read-only; controls belong in Settings or a dedicated tool view.
 - Keep chart labels unique and ensure transport counters are not double-counted.
 - Selectable/copyable diagnostic text should support normal clipboard use where practical.
