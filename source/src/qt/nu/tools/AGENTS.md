@@ -22,12 +22,14 @@ This folder contains local launch gates, test helpers, and protocol support tool
 
 ## Verification
 
+- `python3 test_explorer_lookup.py` with Qt 6 Core/Sql and pkg-config installed: compile the actual lookup method bodies, test isolated SQLite writes and HTML escaping, and verify failure cleanup. This is a focused harness; it does not cover full-app integration.
 - `ruff check` for Python tools where the target runtime supports the configured rules.
 - Run the script in dry-run/help mode after argument-parser changes.
 - For Fast Sync tools, verify capability negotiation, allowlist refresh, packet parsing, checksum, and responder logs against a live or mocked backend.
 
 ## Child DOX Index
 
+- `test_explorer_lookup.py` - isolated runtime regression checks for the explorer lookup methods; never reads wallet data.
 - `defcoin_fast_syncd.py` - headless UDP Fast Sync responder for server/LAN testing.
 - `macos_click_visible_button.sh` - OCR fallback for exact visible system-dialog
   button clicks, used by crash-dialog launch gates.
